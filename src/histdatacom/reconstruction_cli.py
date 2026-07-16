@@ -28,6 +28,7 @@ from histdatacom.reconstruction import (
     write_operation_receipt,
 )
 from histdatacom.synthetic.information import InformationMode
+from histdatacom.synthetic.certification import CertificationState
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -63,6 +64,20 @@ def build_parser() -> argparse.ArgumentParser:
         "plan", help="construct and validate a plan from a JSON plan spec"
     )
     plan.add_argument("--spec", required=True, metavar="PATH")
+
+    plan_set = subparsers.add_parser(
+        "plan-set",
+        help="construct a full range as bounded contiguous plan shards",
+    )
+    plan_set.add_argument("--spec", required=True, metavar="PATH")
+    plan_set.add_argument(
+        "--periods-per-shard", type=int, default=12, metavar="COUNT"
+    )
+
+    preflight_set = subparsers.add_parser(
+        "preflight-set", help="verify every shard in a full-range plan set"
+    )
+    preflight_set.add_argument("--plan-set", required=True, metavar="PATH")
 
     request = subparsers.add_parser(
         "request", help="bind explicit operator intent to an immutable plan"
@@ -155,6 +170,13 @@ def build_parser() -> argparse.ArgumentParser:
         "replay", help="integrity-replay a committed reconstruction product"
     )
     replay.add_argument("--manifest", required=True, metavar="PATH")
+
+    certify = subparsers.add_parser(
+        "certify",
+        help="evaluate a hash-verified modern-reference evidence campaign",
+    )
+    certify.add_argument("--spec", required=True, metavar="PATH")
+    certify.add_argument("--output-directory", required=True, metavar="PATH")
     return parser
 
 
@@ -213,6 +235,22 @@ def _run_command(
     if command == "plan":
         ref = client.construct_plan(read_plan_spec(args.spec))
         return ref.to_dict(), ReconstructionExitCode.SUCCESS
+    if command == "plan-set":
+        ref = client.construct_plan_set(
+            read_plan_spec(args.spec),
+            periods_per_shard=args.periods_per_shard,
+        )
+        return ref.to_dict(), ReconstructionExitCode.SUCCESS
+    if command == "preflight-set":
+        set_preflight = client.preflight_plan_set(args.plan_set)
+        return (
+            set_preflight.to_dict(),
+            (
+                ReconstructionExitCode.SUCCESS
+                if set_preflight.executable
+                else ReconstructionExitCode.REFUSED
+            ),
+        )
     if command == "request":
         request = client.create_request(
             args.plan,
@@ -277,6 +315,13 @@ def _run_command(
         )
     if command == "replay":
         return client.replay(args.manifest), ReconstructionExitCode.SUCCESS
+    if command == "certify":
+        dossier, result = client.certify(
+            args.spec, output_directory=args.output_directory
+        )
+        payload = result.to_dict()
+        payload["summary"] = dossier.summary
+        return payload, _certification_exit_code(dossier.state)
     raise ValueError(f"unsupported reconstruction command: {command}")
 
 
@@ -285,6 +330,19 @@ def _receipt_result(receipt: Any, path: Path | None) -> dict[str, Any]:
     if path is not None:
         payload["receipt_path"] = str(path)
     return payload
+
+
+def _certification_exit_code(
+    state: CertificationState,
+) -> ReconstructionExitCode:
+    if state in {
+        CertificationState.CERTIFIED,
+        CertificationState.READY_FOR_PROMOTION,
+    }:
+        return ReconstructionExitCode.SUCCESS
+    if state is CertificationState.INCOMPLETE:
+        return ReconstructionExitCode.REFUSED
+    return ReconstructionExitCode.VALIDATION_FAILURE
 
 
 def _write_result(result: Mapping[str, Any], *, as_json: bool) -> None:

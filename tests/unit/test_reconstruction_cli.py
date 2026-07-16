@@ -16,12 +16,15 @@ from histdatacom.reconstruction import (
     ReconstructionExecutionRequestV1,
     ReconstructionExitCode,
     ReconstructionOperationReceiptV1,
+    ReconstructionPlanSetPreflightV1,
     ReconstructionPreflightV1,
     ReconstructionRefusedError,
     ReconstructionUnsupportedError,
     read_operation_receipt,
 )
+from histdatacom.runtime_contracts import ArtifactRef
 from histdatacom.synthetic.information import InformationMode
+from histdatacom.synthetic.certification import CertificationState
 
 
 def _request(tmp_path: Path) -> ReconstructionExecutionRequestV1:
@@ -55,6 +58,8 @@ def test_installed_help_lists_complete_reconstruction_family(
     output = capsys.readouterr().out
     for command in (
         "plan",
+        "plan-set",
+        "preflight-set",
         "request",
         "preflight",
         "run",
@@ -64,10 +69,78 @@ def test_installed_help_lists_complete_reconstruction_family(
         "outputs",
         "preview",
         "replay",
+        "certify",
     ):
         assert command in output
     assert "not recovered historical truth" in output
     assert "M1/bar inputs" in output
+
+
+def test_cli_constructs_and_preflights_public_plan_set(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The full-range bounded planning surface is available to operators."""
+    spec = object()
+    ref = ArtifactRef(
+        kind="reconstruction_plan_set_v1",
+        path=str(tmp_path / "plan-set.json"),
+        size_bytes=10,
+        sha256="1" * 64,
+        metadata={"plan_set_id": "reconstruction-plan-set:test"},
+    )
+    preflight = ReconstructionPlanSetPreflightV1(
+        plan_set_id="reconstruction-plan-set:test",
+        status="ready_with_refusals",
+        executable=True,
+        shard_count=25,
+        verified_shard_count=25,
+        refusal_count=3,
+        resource_summary={"planned_window_count": 8888},
+        shard_preflights=(),
+    )
+    calls: list[tuple[str, int | str]] = []
+
+    class FakeClient:
+        def construct_plan_set(self, supplied, *, periods_per_shard):
+            assert supplied is spec
+            calls.append(("plan-set", periods_per_shard))
+            return ref
+
+        def preflight_plan_set(self, supplied):
+            calls.append(("preflight-set", supplied))
+            return preflight
+
+    monkeypatch.setattr(reconstruction_cli, "_client", lambda _: FakeClient())
+    monkeypatch.setattr(reconstruction_cli, "read_plan_spec", lambda _: spec)
+
+    assert (
+        reconstruction_cli.main(
+            [
+                "--json",
+                "plan-set",
+                "--spec",
+                "full.json",
+                "--periods-per-shard",
+                "6",
+            ]
+        )
+        == ReconstructionExitCode.SUCCESS
+    )
+    assert json.loads(capsys.readouterr().out)["kind"] == (
+        "reconstruction_plan_set_v1"
+    )
+    assert (
+        reconstruction_cli.main(
+            ["--json", "preflight-set", "--plan-set", "plan-set.json"]
+        )
+        == ReconstructionExitCode.SUCCESS
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["verified_shard_count"] == 25
+    assert payload["refusal_count"] == 3
+    assert calls == [("plan-set", 6), ("preflight-set", "plan-set.json")]
 
 
 def test_histdatacom_main_dispatches_reconstruction_command(
@@ -375,3 +448,67 @@ def test_cli_status_cancel_and_resume_use_receipt_controls(
         == ReconstructionExitCode.SUCCESS
     )
     assert calls == ["status", "cancel", "resume"]
+
+
+@pytest.mark.parametrize(
+    ("state", "expected"),
+    (
+        (
+            CertificationState.READY_FOR_PROMOTION,
+            ReconstructionExitCode.SUCCESS,
+        ),
+        (CertificationState.INCOMPLETE, ReconstructionExitCode.REFUSED),
+        (CertificationState.FAILED, ReconstructionExitCode.VALIDATION_FAILURE),
+    ),
+)
+def test_cli_certify_runs_public_campaign_and_maps_state(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    state: CertificationState,
+    expected: ReconstructionExitCode,
+) -> None:
+    """The installed command publishes its receipt and stable exit category."""
+    captured: dict[str, str] = {}
+
+    class FakeDossier:
+        summary = {"passed_gate_count": 14, "missing_gate_count": 1}
+
+        def __init__(self, selected_state: CertificationState) -> None:
+            self.state = selected_state
+
+    class FakeResult:
+        def to_dict(self) -> dict[str, Any]:
+            return {
+                "schema_version": "campaign-result.v1",
+                "state": state.value,
+                "dossier_id": "dossier:test",
+            }
+
+    class FakeClient:
+        def certify(self, spec: str, *, output_directory: str):
+            captured["spec"] = spec
+            captured["output"] = output_directory
+            return FakeDossier(state), FakeResult()
+
+    monkeypatch.setattr(reconstruction_cli, "_client", lambda _: FakeClient())
+
+    code = reconstruction_cli.main(
+        [
+            "--json",
+            "certify",
+            "--spec",
+            "campaign.json",
+            "--output-directory",
+            str(tmp_path / "dossier"),
+        ]
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert code == expected
+    assert payload["state"] == state.value
+    assert payload["summary"]["passed_gate_count"] == 14
+    assert captured == {
+        "spec": "campaign.json",
+        "output": str(tmp_path / "dossier"),
+    }

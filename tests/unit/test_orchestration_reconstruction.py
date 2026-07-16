@@ -162,6 +162,17 @@ def _stage_handler(
     else:
         text = stage.value
     ref = _file_ref(output, text, phase=phase)
+    ref = replace(
+        ref,
+        metadata={
+            **ref.metadata,
+            "runtime_seconds": 1.0,
+            "peak_rss_bytes": 1_000,
+            "scratch_bytes": 100,
+            "output_bytes": ref.size_bytes,
+            "candidate_amplification": 2.0,
+        },
+    )
     return invocation.completed(
         output_refs=(ref,),
         observed_event_count=10,
@@ -539,6 +550,85 @@ def test_resource_preflight_records_refusal_without_running_handler(
     assert state.outcomes == ()
 
 
+def test_measured_peak_rss_above_policy_fails_before_checkpoint(
+    tmp_path: Path,
+) -> None:
+    policy = ReconstructionStoragePolicyV1(max_memory_bytes=2_000)
+    run = _run(policy=policy)
+    task = _task(tmp_path, run=run, memory_bytes=1_024)
+    request = _request(tmp_path, task, run=run, max_memory=10_000)
+
+    def over_memory_handler(
+        invocation: ReconstructionStageInvocationV1,
+    ) -> ReconstructionStageOutcomeV1:
+        output = _file_ref(tmp_path / "over-memory.json", "output")
+        measured = replace(
+            output,
+            metadata={"peak_rss_bytes": policy.max_memory_bytes + 1},
+        )
+        return invocation.completed(
+            output_refs=(measured,),
+            observed_event_count=10,
+            candidate_event_count=20,
+            accepted_event_count=15,
+            scratch_bytes=100,
+            output_bytes=measured.size_bytes or 0,
+        )
+
+    register_reconstruction_stage_handler("test-handler", over_memory_handler)
+    state = asyncio.run(
+        run_reconstruction_window(
+            request,
+            task,
+            checkpoint_store=ReconstructionCheckpointStore(
+                request.manifest_store_root
+            ),
+            stage_executor=RegisteredReconstructionStageExecutor(),
+        )
+    )
+
+    assert state.checkpoint.phase is ReconstructionCommitPhase.FAILED
+    assert "peak_rss_bytes 2001 exceeds admitted limit 2000" in (
+        state.checkpoint.interruption_reason
+    )
+    assert state.outcomes == ()
+
+
+def test_many_stage_refusal_reasons_persist_as_bounded_summary(
+    tmp_path: Path,
+) -> None:
+    task = _task(tmp_path)
+    request = _request(tmp_path, task)
+    reasons = tuple(
+        f"infeasible_relationship_point:{index:02d}:" + "x" * 180
+        for index in range(32)
+    )
+
+    def refusing_handler(
+        invocation: ReconstructionStageInvocationV1,
+    ) -> ReconstructionStageOutcomeV1:
+        return invocation.refused(*reasons, message="bounded refusal")
+
+    register_reconstruction_stage_handler("test-handler", refusing_handler)
+    state = asyncio.run(
+        run_reconstruction_window(
+            request,
+            task,
+            checkpoint_store=ReconstructionCheckpointStore(
+                request.manifest_store_root
+            ),
+            stage_executor=RegisteredReconstructionStageExecutor(),
+        )
+    )
+
+    summary = state.checkpoint.interruption_reason
+    assert state.checkpoint.phase is ReconstructionCommitPhase.FAILED
+    assert summary.startswith("infeasible_relationship_point:00:")
+    assert "more [sha256:" in summary
+    assert len(summary.encode("utf-8")) <= 2_048
+    assert state.outcomes == ()
+
+
 def test_memory_weighted_waves_enforce_backpressure(tmp_path: Path) -> None:
     run = _run()
     tasks = tuple(
@@ -741,6 +831,13 @@ def test_report_reconciles_checkpoint_scope_and_storage_counts(
     assert report.observed_event_count == 10
     assert report.synthetic_event_count == 15
     assert report.committed_window_count == 1
+    resources = report.window_states[0]["resource_usage"]
+    assert isinstance(resources, dict)
+    assert resources["runtime_seconds"] == 7.0
+    assert resources["peak_rss_bytes"] == 1_000
+    assert resources["peak_scratch_bytes"] == 100
+    assert resources["peak_candidate_amplification"] == 2.0
+    assert resources["basis"] == "sum-stage-runtime-max-stage-resources-v1"
     assert activity_result["report"]["report_id"] == report.report_id
 
 

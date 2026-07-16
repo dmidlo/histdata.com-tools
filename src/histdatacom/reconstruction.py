@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
+from datetime import datetime, timezone
 from enum import IntEnum
 import hashlib
 import json
@@ -29,12 +30,23 @@ from histdatacom.orchestration.queues import OrchestrationWorkerConfig
 from histdatacom.orchestration.reconstruction import (
     ReconstructionRunReportV1,
     ReconstructionWorkflowRequestV1,
+    artifact_ref_for_file,
     reconcile_reconstruction_report,
     run_reconstruction_request,
+    verify_artifact_ref,
     write_reconstruction_report,
 )
 from histdatacom.orchestration.supervisor import OrchestrationSupervisor
 from histdatacom.runtime_contracts import ArtifactRef, JSONValue
+from histdatacom.synthetic.certification import (
+    ReconstructionCertificationDossierV2,
+)
+from histdatacom.synthetic.certification_campaign import (
+    ModernReferenceCertificationCampaignResultV1,
+    ModernReferenceCertificationCampaignSpecV1,
+    read_modern_reference_certification_campaign_spec,
+    run_modern_reference_certification_campaign,
+)
 from histdatacom.synthetic.contracts import canonical_contract_json
 from histdatacom.synthetic.information import InformationMode
 from histdatacom.synthetic.persistence import (
@@ -48,11 +60,14 @@ from histdatacom.synthetic.reconstruction_handlers import (
     register_first_party_reconstruction_handlers,
 )
 from histdatacom.synthetic.reconstruction_plan import (
+    DEFAULT_RECONSTRUCTION_WINDOW_SIZE_NS,
     SCIENTIFIC_NONCLAIM,
     ReconstructionDeliveryMode,
+    ReconstructionPlanResourceSummaryV1,
     SyntheticInfillPlanV1,
     build_synthetic_infill_plan,
     read_reconstruction_plan_execution_manifest,
+    read_reconstruction_source_inventory,
     read_synthetic_infill_plan,
     validate_synthetic_infill_plan_for_execution,
     write_synthetic_infill_plan,
@@ -60,6 +75,15 @@ from histdatacom.synthetic.reconstruction_plan import (
 
 RECONSTRUCTION_PLAN_SPEC_SCHEMA_VERSION = (
     "histdatacom.reconstruction-plan-spec.v1"
+)
+RECONSTRUCTION_PLAN_SET_SCHEMA_VERSION = (
+    "histdatacom.reconstruction-plan-set.v1"
+)
+RECONSTRUCTION_PLAN_SET_PREFLIGHT_SCHEMA_VERSION = (
+    "histdatacom.reconstruction-plan-set-preflight.v1"
+)
+RECONSTRUCTION_PLAN_SHARD_SCHEMA_VERSION = (
+    "histdatacom.reconstruction-plan-shard.v1"
 )
 RECONSTRUCTION_EXECUTION_REQUEST_SCHEMA_VERSION = (
     "histdatacom.reconstruction-execution-request.v1"
@@ -81,6 +105,9 @@ RECONSTRUCTION_SOURCE_FORMAT = "ascii"
 RECONSTRUCTION_TIMEFRAME = "T"
 DEFAULT_PREVIEW_LIMIT = 20
 MAX_PREVIEW_LIMIT = 100
+DEFAULT_PLAN_SET_PERIODS_PER_SHARD = 12
+MAX_PLAN_SET_PERIODS_PER_SHARD = 24
+MAX_RECONSTRUCTION_PLAN_SHARDS = 4096
 
 
 class ReconstructionExitCode(IntEnum):
@@ -149,6 +176,9 @@ class ReconstructionPlanSpecV1:
     information_mode: InformationMode
     start_period: str | None = None
     end_period: str | None = None
+    requested_start_ns: int | None = None
+    requested_end_ns: int | None = None
+    window_size_ns: int = DEFAULT_RECONSTRUCTION_WINDOW_SIZE_NS
     delivery_mode: ReconstructionDeliveryMode = (
         ReconstructionDeliveryMode.MODERN_REFERENCE
     )
@@ -199,6 +229,33 @@ class ReconstructionPlanSpecV1:
         object.__setattr__(self, "source_format", RECONSTRUCTION_SOURCE_FORMAT)
         object.__setattr__(self, "timeframe", RECONSTRUCTION_TIMEFRAME)
         object.__setattr__(self, "symbols", RECONSTRUCTION_SYMBOLS)
+        requested_start = self.requested_start_ns
+        requested_end = self.requested_end_ns
+        exact_bounds = (requested_start, requested_end)
+        if (requested_start is None) != (requested_end is None):
+            raise ReconstructionUnsupportedError(
+                "requested_start_ns and requested_end_ns must be supplied together"
+            )
+        if requested_start is not None and requested_end is not None:
+            if any(
+                isinstance(value, bool) or not isinstance(value, int)
+                for value in exact_bounds
+            ):
+                raise ReconstructionUnsupportedError(
+                    "requested nanosecond bounds must be integers"
+                )
+            if requested_end <= requested_start:
+                raise ReconstructionUnsupportedError(
+                    "requested nanosecond interval must be nonempty"
+                )
+        if (
+            isinstance(self.window_size_ns, bool)
+            or not isinstance(self.window_size_ns, int)
+            or self.window_size_ns <= 0
+        ):
+            raise ReconstructionUnsupportedError(
+                "window_size_ns must be a positive integer"
+            )
         if (
             self.delivery_mode is ReconstructionDeliveryMode.BROKER_CONDITIONED
             and self.broker_delivery_artifact is None
@@ -235,6 +292,9 @@ class ReconstructionPlanSpecV1:
             "information_mode": self.information_mode.value,
             "start_period": self.start_period,
             "end_period": self.end_period,
+            "requested_start_ns": self.requested_start_ns,
+            "requested_end_ns": self.requested_end_ns,
+            "window_size_ns": self.window_size_ns,
             "delivery_mode": self.delivery_mode.value,
             "broker_delivery_artifact": (
                 self.broker_delivery_artifact.to_dict()
@@ -290,6 +350,22 @@ class ReconstructionPlanSpecV1:
             ),
             start_period=_optional_text(data.get("start_period")),
             end_period=_optional_text(data.get("end_period")),
+            requested_start_ns=(
+                cast(int, data["requested_start_ns"])
+                if data.get("requested_start_ns") is not None
+                else None
+            ),
+            requested_end_ns=(
+                cast(int, data["requested_end_ns"])
+                if data.get("requested_end_ns") is not None
+                else None
+            ),
+            window_size_ns=int(
+                data.get(
+                    "window_size_ns",
+                    DEFAULT_RECONSTRUCTION_WINDOW_SIZE_NS,
+                )
+            ),
             delivery_mode=ReconstructionDeliveryMode.from_value(
                 str(data.get("delivery_mode", "modern_reference"))
             ),
@@ -304,6 +380,270 @@ class ReconstructionPlanSpecV1:
             ),
             schema_version=str(data.get("schema_version", "")),
         )
+
+
+@dataclass(frozen=True, slots=True)
+class ReconstructionPlanShardV1:
+    """One bounded executable plan in a contiguous full-range plan set."""
+
+    start_period: str
+    end_period: str
+    requested_start_ns: int
+    requested_end_ns: int
+    plan_id: str
+    plan_ref: ArtifactRef
+    preflight_status: str
+    executable: bool
+    refusal_count: int
+    resource_summary: Mapping[str, JSONValue]
+    shard_id: str = ""
+    schema_version: str = RECONSTRUCTION_PLAN_SHARD_SCHEMA_VERSION
+
+    def __post_init__(self) -> None:
+        if self.schema_version != RECONSTRUCTION_PLAN_SHARD_SCHEMA_VERSION:
+            raise ReconstructionPlanError(
+                "unsupported reconstruction plan shard"
+            )
+        start = _period(self.start_period)
+        end = _period(self.end_period)
+        if start > end:
+            raise ReconstructionPlanError("plan shard period range is reversed")
+        object.__setattr__(self, "start_period", start)
+        object.__setattr__(self, "end_period", end)
+        if (
+            isinstance(self.requested_start_ns, bool)
+            or not isinstance(self.requested_start_ns, int)
+            or isinstance(self.requested_end_ns, bool)
+            or not isinstance(self.requested_end_ns, int)
+            or self.requested_end_ns <= self.requested_start_ns
+        ):
+            raise ReconstructionPlanError(
+                "plan shard nanosecond range is invalid"
+            )
+        object.__setattr__(self, "plan_id", _required_text(self.plan_id))
+        if self.plan_ref.kind != "synthetic_infill_plan_v1":
+            raise ReconstructionPlanError("plan shard artifact kind differs")
+        status = _required_text(self.preflight_status)
+        if status not in {"ready", "ready_with_refusals", "refused"}:
+            raise ReconstructionPlanError("plan shard preflight status differs")
+        object.__setattr__(self, "preflight_status", status)
+        if not isinstance(self.executable, bool):
+            raise ReconstructionPlanError(
+                "plan shard executable must be boolean"
+            )
+        if (
+            isinstance(self.refusal_count, bool)
+            or not isinstance(self.refusal_count, int)
+            or self.refusal_count < 0
+        ):
+            raise ReconstructionPlanError("plan shard refusal count is invalid")
+        resources = {
+            str(key): value
+            for key, value in sorted(self.resource_summary.items())
+        }
+        object.__setattr__(self, "resource_summary", resources)
+        expected = _stable_id(
+            "reconstruction-plan-shard", self.identity_payload()
+        )
+        if self.shard_id and self.shard_id != expected:
+            raise ReconstructionPlanError(
+                "reconstruction plan shard identity differs"
+            )
+        object.__setattr__(self, "shard_id", expected)
+
+    def identity_payload(self) -> dict[str, JSONValue]:
+        """Return stable shard content without the derived identity."""
+        return {
+            "schema_version": self.schema_version,
+            "start_period": self.start_period,
+            "end_period": self.end_period,
+            "requested_start_ns": self.requested_start_ns,
+            "requested_end_ns": self.requested_end_ns,
+            "plan_id": self.plan_id,
+            "plan_ref": self.plan_ref.to_dict(),
+            "preflight_status": self.preflight_status,
+            "executable": self.executable,
+            "refusal_count": self.refusal_count,
+            "resource_summary": dict(self.resource_summary),
+        }
+
+    def to_dict(self) -> dict[str, JSONValue]:
+        """Return bounded machine-readable shard metadata."""
+        return {**self.identity_payload(), "shard_id": self.shard_id}
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> "ReconstructionPlanShardV1":
+        """Restore and identity-check one plan shard."""
+        return cls(
+            start_period=str(data.get("start_period", "")),
+            end_period=str(data.get("end_period", "")),
+            requested_start_ns=_strict_int(
+                data.get("requested_start_ns"), "requested_start_ns"
+            ),
+            requested_end_ns=_strict_int(
+                data.get("requested_end_ns"), "requested_end_ns"
+            ),
+            plan_id=str(data.get("plan_id", "")),
+            plan_ref=ArtifactRef.from_dict(_mapping(data.get("plan_ref"))),
+            preflight_status=str(data.get("preflight_status", "")),
+            executable=_strict_bool(data.get("executable"), "executable"),
+            refusal_count=_strict_int(
+                data.get("refusal_count"), "refusal_count"
+            ),
+            resource_summary=_mapping(data.get("resource_summary")),
+            shard_id=str(data.get("shard_id", "")),
+            schema_version=str(data.get("schema_version", "")),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class ReconstructionPlanSetV1:
+    """Content-addressed full-range plan composed of bounded plan shards."""
+
+    source_spec: ReconstructionPlanSpecV1
+    shards: tuple[ReconstructionPlanShardV1, ...]
+    requested_start_ns: int
+    requested_end_ns: int
+    resource_summary: Mapping[str, JSONValue]
+    status: str
+    plan_set_id: str = ""
+    schema_version: str = RECONSTRUCTION_PLAN_SET_SCHEMA_VERSION
+
+    def __post_init__(self) -> None:
+        if self.schema_version != RECONSTRUCTION_PLAN_SET_SCHEMA_VERSION:
+            raise ReconstructionPlanError("unsupported reconstruction plan set")
+        shards = tuple(
+            sorted(self.shards, key=lambda item: item.requested_start_ns)
+        )
+        if not shards or len(shards) > MAX_RECONSTRUCTION_PLAN_SHARDS:
+            raise ReconstructionPlanError(
+                "plan set shard count is outside limits"
+            )
+        if len({item.shard_id for item in shards}) != len(shards):
+            raise ReconstructionPlanError("plan set contains duplicate shards")
+        for previous, current in zip(shards, shards[1:], strict=False):
+            if previous.requested_end_ns != current.requested_start_ns:
+                raise ReconstructionPlanError(
+                    "plan set shards are not contiguous"
+                )
+        if (
+            self.requested_start_ns != shards[0].requested_start_ns
+            or self.requested_end_ns != shards[-1].requested_end_ns
+        ):
+            raise ReconstructionPlanError(
+                "plan set bounds differ from its shards"
+            )
+        if (
+            self.source_spec.start_period != shards[0].start_period
+            or self.source_spec.end_period != shards[-1].end_period
+        ):
+            raise ReconstructionPlanError(
+                "plan set periods differ from source spec"
+            )
+        object.__setattr__(self, "shards", shards)
+        resources = {
+            str(key): value
+            for key, value in sorted(self.resource_summary.items())
+        }
+        object.__setattr__(self, "resource_summary", resources)
+        expected_status = (
+            "refused"
+            if any(not item.executable for item in shards)
+            else (
+                "ready_with_refusals"
+                if any(item.refusal_count for item in shards)
+                else "ready"
+            )
+        )
+        if self.status != expected_status:
+            raise ReconstructionPlanError("plan set status differs from shards")
+        expected = _stable_id(
+            "reconstruction-plan-set", self.identity_payload()
+        )
+        if self.plan_set_id and self.plan_set_id != expected:
+            raise ReconstructionPlanError(
+                "reconstruction plan-set identity differs"
+            )
+        object.__setattr__(self, "plan_set_id", expected)
+
+    @property
+    def executable(self) -> bool:
+        """Return whether every bounded shard can execute its supported windows."""
+        return all(item.executable for item in self.shards)
+
+    def identity_payload(self) -> dict[str, JSONValue]:
+        """Return stable plan-set content without the derived identity."""
+        return {
+            "schema_version": self.schema_version,
+            "source_spec": self.source_spec.to_dict(),
+            "shards": [item.to_dict() for item in self.shards],
+            "requested_start_ns": self.requested_start_ns,
+            "requested_end_ns": self.requested_end_ns,
+            "resource_summary": dict(self.resource_summary),
+            "status": self.status,
+            "scientific_nonclaim": SCIENTIFIC_NONCLAIM,
+        }
+
+    def to_dict(self) -> dict[str, JSONValue]:
+        """Return bounded machine-readable full-range planning evidence."""
+        return {**self.identity_payload(), "plan_set_id": self.plan_set_id}
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> "ReconstructionPlanSetV1":
+        """Restore and identity-check one full-range plan set."""
+        if data.get("scientific_nonclaim") != SCIENTIFIC_NONCLAIM:
+            raise ReconstructionPlanError(
+                "plan set scientific nonclaim differs"
+            )
+        return cls(
+            source_spec=ReconstructionPlanSpecV1.from_dict(
+                _mapping(data.get("source_spec"))
+            ),
+            shards=tuple(
+                ReconstructionPlanShardV1.from_dict(_mapping(item))
+                for item in _sequence(data.get("shards"))
+            ),
+            requested_start_ns=_strict_int(
+                data.get("requested_start_ns"), "requested_start_ns"
+            ),
+            requested_end_ns=_strict_int(
+                data.get("requested_end_ns"), "requested_end_ns"
+            ),
+            resource_summary=_mapping(data.get("resource_summary")),
+            status=str(data.get("status", "")),
+            plan_set_id=str(data.get("plan_set_id", "")),
+            schema_version=str(data.get("schema_version", "")),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class ReconstructionPlanSetPreflightV1:
+    """Fresh public verification of every shard in a plan set."""
+
+    plan_set_id: str
+    status: str
+    executable: bool
+    shard_count: int
+    verified_shard_count: int
+    refusal_count: int
+    resource_summary: Mapping[str, JSONValue]
+    shard_preflights: tuple[Mapping[str, JSONValue], ...]
+    schema_version: str = RECONSTRUCTION_PLAN_SET_PREFLIGHT_SCHEMA_VERSION
+
+    def to_dict(self) -> dict[str, JSONValue]:
+        """Return bounded public full-range preflight evidence."""
+        return {
+            "schema_version": self.schema_version,
+            "plan_set_id": self.plan_set_id,
+            "status": self.status,
+            "executable": self.executable,
+            "shard_count": self.shard_count,
+            "verified_shard_count": self.verified_shard_count,
+            "refusal_count": self.refusal_count,
+            "resource_summary": dict(self.resource_summary),
+            "shard_preflights": [dict(item) for item in self.shard_preflights],
+            "scientific_nonclaim": SCIENTIFIC_NONCLAIM,
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -566,6 +906,13 @@ class ReconstructionClient:
 
     def construct_plan(self, spec: ReconstructionPlanSpecV1) -> ArtifactRef:
         """Build, execution-validate, and persist one content-addressed plan."""
+        plan = self._construct_plan_model(spec)
+        return write_synthetic_infill_plan(plan, spec.artifact_root)
+
+    def _construct_plan_model(
+        self, spec: ReconstructionPlanSpecV1
+    ) -> SyntheticInfillPlanV1:
+        """Build one validated plan without a redundant persistence readback."""
         try:
             plan = build_synthetic_infill_plan(
                 spec.source_root,
@@ -585,16 +932,257 @@ class ReconstructionClient:
                 symbols=spec.symbols,
                 start_period=spec.start_period,
                 end_period=spec.end_period,
+                requested_start_ns=spec.requested_start_ns,
+                requested_end_ns=spec.requested_end_ns,
+                window_size_ns=spec.window_size_ns,
                 information_mode=spec.information_mode,
                 delivery_mode=spec.delivery_mode,
                 broker_delivery_artifact=spec.broker_delivery_artifact,
             )
             validate_synthetic_infill_plan_for_execution(plan)
-            return write_synthetic_infill_plan(plan, spec.artifact_root)
+            return plan
         except ReconstructionPublicError:
             raise
         except (OSError, TypeError, ValueError) as err:
             raise ReconstructionPlanError(str(err)) from err
+
+    def construct_plan_set(
+        self,
+        spec: ReconstructionPlanSpecV1,
+        *,
+        periods_per_shard: int = DEFAULT_PLAN_SET_PERIODS_PER_SHARD,
+    ) -> ArtifactRef:
+        """Build one full-range plan as bounded contiguous executable shards."""
+        if (
+            spec.requested_start_ns is not None
+            or spec.requested_end_ns is not None
+        ):
+            raise ReconstructionUnsupportedError(
+                "plan sets currently require explicit start_period and end_period"
+            )
+        if spec.start_period is None or spec.end_period is None:
+            raise ReconstructionUnsupportedError(
+                "plan sets require explicit start_period and end_period"
+            )
+        if (
+            isinstance(periods_per_shard, bool)
+            or not isinstance(periods_per_shard, int)
+            or not 1 <= periods_per_shard <= MAX_PLAN_SET_PERIODS_PER_SHARD
+        ):
+            raise ReconstructionUnsupportedError(
+                "periods_per_shard is outside public limits"
+            )
+        ranges = _period_shards(
+            spec.start_period,
+            spec.end_period,
+            periods_per_shard=periods_per_shard,
+        )
+        if len(ranges) > MAX_RECONSTRUCTION_PLAN_SHARDS:
+            raise ReconstructionUnsupportedError(
+                "requested range exceeds the public plan-set shard limit"
+            )
+        shards: list[ReconstructionPlanShardV1] = []
+        resource_summaries: list[ReconstructionPlanResourceSummaryV1] = []
+        source_partitions: dict[str, tuple[str, str, int, int]] = {}
+        root = Path(spec.artifact_root).expanduser().resolve()
+
+        def construct_interval(
+            requested_start_ns: int, requested_end_ns: int
+        ) -> None:
+            start_period = _period_for_ns(requested_start_ns)
+            end_period = _period_for_ns(requested_end_ns - 1)
+            shard_root = (
+                root
+                / "shards"
+                / (
+                    f"{start_period}-{end_period}-"
+                    f"{requested_start_ns}-{requested_end_ns}"
+                )
+            )
+            shard_spec = replace(
+                spec,
+                start_period=start_period,
+                end_period=end_period,
+                requested_start_ns=requested_start_ns,
+                requested_end_ns=requested_end_ns,
+                artifact_root=str(shard_root / "artifacts"),
+                output_root=str(shard_root / "output"),
+                checkpoint_root=str(shard_root / "checkpoints"),
+                scratch_root=str(shard_root / "scratch"),
+            )
+            try:
+                plan = self._construct_plan_model(shard_spec)
+            except ReconstructionPlanError as error:
+                window_count = (
+                    requested_end_ns
+                    - requested_start_ns
+                    + spec.window_size_ns
+                    - 1
+                ) // spec.window_size_ns
+                if not _splittable_plan_error(error) or window_count <= 1:
+                    raise
+                left_window_count = max(1, window_count // 2)
+                split_ns = min(
+                    requested_end_ns,
+                    requested_start_ns
+                    + left_window_count * spec.window_size_ns,
+                )
+                if (
+                    split_ns <= requested_start_ns
+                    or split_ns >= requested_end_ns
+                ):
+                    raise
+                construct_interval(requested_start_ns, split_ns)
+                construct_interval(split_ns, requested_end_ns)
+                return
+            plan_ref = write_synthetic_infill_plan(
+                plan, shard_spec.artifact_root
+            )
+            preflight_status = (
+                "ready_with_refusals" if plan.refusals else "ready"
+            )
+            shards.append(
+                ReconstructionPlanShardV1(
+                    start_period=start_period,
+                    end_period=end_period,
+                    requested_start_ns=plan.requested_start_ns,
+                    requested_end_ns=plan.requested_end_ns,
+                    plan_id=plan.plan_id,
+                    plan_ref=plan_ref,
+                    preflight_status=preflight_status,
+                    executable=True,
+                    refusal_count=len(plan.refusals),
+                    resource_summary=plan.resources.to_dict(),
+                )
+            )
+            _accumulate_plan_set_resources(
+                plan,
+                resource_summaries=resource_summaries,
+                source_partitions=source_partitions,
+            )
+            if len(shards) > MAX_RECONSTRUCTION_PLAN_SHARDS:
+                raise ReconstructionUnsupportedError(
+                    "resource-safe plan set exceeds the public shard limit"
+                )
+
+        for start_period, end_period in ranges:
+            construct_interval(
+                _period_start_ns(start_period),
+                _period_start_ns(_next_period(end_period)),
+            )
+        resources = _aggregate_plan_set_resources(
+            resource_summaries, source_partitions
+        )
+        status = (
+            "refused"
+            if any(not item.executable for item in shards)
+            else (
+                "ready_with_refusals"
+                if any(item.refusal_count for item in shards)
+                else "ready"
+            )
+        )
+        plan_set = ReconstructionPlanSetV1(
+            source_spec=spec,
+            shards=tuple(shards),
+            requested_start_ns=shards[0].requested_start_ns,
+            requested_end_ns=shards[-1].requested_end_ns,
+            resource_summary=resources,
+            status=status,
+        )
+        return write_reconstruction_plan_set(plan_set, root)
+
+    def preflight_plan_set(
+        self, plan_set_path: str | Path
+    ) -> ReconstructionPlanSetPreflightV1:
+        """Re-verify every artifact, identity, resource bound, and refusal."""
+        plan_set = read_reconstruction_plan_set(plan_set_path)
+        shard_preflights: list[Mapping[str, JSONValue]] = []
+        resource_summaries: list[ReconstructionPlanResourceSummaryV1] = []
+        source_partitions: dict[str, tuple[str, str, int, int]] = {}
+        refusal_count = 0
+        all_executable = True
+        verified_refs: set[tuple[str, str, int | None, str]] = set()
+
+        def verify_once(ref: ArtifactRef) -> None:
+            key = (ref.kind, ref.path, ref.size_bytes, ref.sha256)
+            if key not in verified_refs:
+                verify_artifact_ref(ref)
+                verified_refs.add(key)
+
+        for shard in plan_set.shards:
+            try:
+                verify_once(shard.plan_ref)
+            except (OSError, TypeError, ValueError) as error:
+                raise ReconstructionPlanError(
+                    "plan-set shard artifact differs"
+                ) from error
+            plan = read_synthetic_infill_plan(shard.plan_ref.path)
+            if (
+                plan.plan_id != shard.plan_id
+                or plan.requested_start_ns != shard.requested_start_ns
+                or plan.requested_end_ns != shard.requested_end_ns
+                or plan.resources.to_dict() != dict(shard.resource_summary)
+            ):
+                raise ReconstructionPlanError("plan-set shard content differs")
+            for ref in plan.artifact_graph.values():
+                verify_once(ref)
+            for workflow_request in plan.workflow_requests:
+                for task in workflow_request.tasks:
+                    for command in task.commands:
+                        for ref in command.input_manifest_refs:
+                            verify_once(ref)
+            validate_synthetic_infill_plan_for_execution(
+                plan, verify_artifacts=False
+            )
+            request = self.create_request(
+                shard.plan_ref.path,
+                information_mode=plan_set.source_spec.information_mode,
+                acknowledge_scientific_nonclaim=True,
+                allow_refusals=True,
+            )
+            preflight = self.preflight(request, verify_artifacts=False)
+            current_refusals = len(preflight.refusal_reasons)
+            refusal_count += current_refusals
+            all_executable = all_executable and preflight.executable
+            shard_preflights.append(
+                {
+                    "shard_id": shard.shard_id,
+                    "plan_id": shard.plan_id,
+                    "start_period": shard.start_period,
+                    "end_period": shard.end_period,
+                    "status": preflight.status,
+                    "executable": preflight.executable,
+                    "refusal_count": current_refusals,
+                }
+            )
+            _accumulate_plan_set_resources(
+                plan,
+                resource_summaries=resource_summaries,
+                source_partitions=source_partitions,
+            )
+        resources = _aggregate_plan_set_resources(
+            resource_summaries, source_partitions
+        )
+        if resources != dict(plan_set.resource_summary):
+            raise ReconstructionPlanError("plan-set aggregate resources differ")
+        status = (
+            "refused"
+            if not all_executable
+            else ("ready_with_refusals" if refusal_count else "ready")
+        )
+        if status != plan_set.status:
+            raise ReconstructionPlanError("plan-set preflight status differs")
+        return ReconstructionPlanSetPreflightV1(
+            plan_set_id=plan_set.plan_set_id,
+            status=status,
+            executable=all_executable,
+            shard_count=len(plan_set.shards),
+            verified_shard_count=len(shard_preflights),
+            refusal_count=refusal_count,
+            resource_summary=resources,
+            shard_preflights=tuple(shard_preflights),
+        )
 
     def create_request(
         self,
@@ -966,6 +1554,20 @@ class ReconstructionClient:
             "replay_verified": event_count == manifest.event_count,
         }
 
+    def certify(
+        self,
+        spec_path: str | Path,
+        *,
+        output_directory: str | Path,
+    ) -> tuple[
+        ReconstructionCertificationDossierV2,
+        ModernReferenceCertificationCampaignResultV1,
+    ]:
+        """Run the public hash-verified modern-reference evidence campaign."""
+        return run_modern_reference_certification_campaign(
+            spec_path, output_directory=output_directory
+        )
+
     def _executable_plan(
         self, request: ReconstructionExecutionRequestV1
     ) -> SyntheticInfillPlanV1:
@@ -982,6 +1584,32 @@ class ReconstructionClient:
 def read_plan_spec(path: str | Path) -> ReconstructionPlanSpecV1:
     """Read a public plan-spec JSON artifact."""
     return ReconstructionPlanSpecV1.from_dict(_read_json_mapping(path))
+
+
+def write_reconstruction_plan_set(
+    plan_set: ReconstructionPlanSetV1, directory: str | Path
+) -> ArtifactRef:
+    """Atomically persist one content-addressed bounded plan set."""
+    root = Path(directory).expanduser().resolve()
+    path = (
+        root
+        / f"reconstruction-plan-set-{plan_set.plan_set_id.rsplit(':', 1)[-1]}.json"
+    )
+    written = _write_json(path, plan_set.to_dict())
+    return artifact_ref_for_file(
+        written,
+        kind="reconstruction_plan_set_v1",
+        metadata={
+            "plan_set_id": plan_set.plan_set_id,
+            "shard_count": len(plan_set.shards),
+            "status": plan_set.status,
+        },
+    )
+
+
+def read_reconstruction_plan_set(path: str | Path) -> ReconstructionPlanSetV1:
+    """Read and identity-check one bounded plan-set artifact."""
+    return ReconstructionPlanSetV1.from_dict(_read_json_mapping(path))
 
 
 def write_execution_request(
@@ -1087,8 +1715,7 @@ def _attempt_workflow_id(
         return ""
     digest = hashlib.sha256(
         (
-            f"{request.run.run_id}|{request.request_fingerprint}|"
-            f"{execution_attempt_id}"
+            f"{request.run.run_id}|{request.request_fingerprint}|{execution_attempt_id}"
         ).encode("utf-8")
     ).hexdigest()[:24]
     return f"histdatacom-reconstruction-{request.request_id}-{digest}"
@@ -1225,6 +1852,173 @@ def _preview_limit(value: int) -> int:
     return value
 
 
+def _period(value: Any) -> str:
+    selected = str(value or "").strip()
+    if (
+        len(selected) != 6
+        or not selected.isdigit()
+        or not 1 <= int(selected[4:]) <= 12
+    ):
+        raise ReconstructionUnsupportedError(
+            "reconstruction period must use YYYYMM"
+        )
+    return selected
+
+
+def _next_period(value: str) -> str:
+    selected = _period(value)
+    year = int(selected[:4])
+    month = int(selected[4:])
+    if month == 12:
+        return f"{year + 1:04d}01"
+    return f"{year:04d}{month + 1:02d}"
+
+
+def _period_start_ns(value: str) -> int:
+    selected = _period(value)
+    timestamp = datetime(
+        int(selected[:4]), int(selected[4:]), 1, tzinfo=timezone.utc
+    )
+    return int(timestamp.timestamp()) * 1_000_000_000
+
+
+def _period_for_ns(value: int) -> str:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ReconstructionUnsupportedError("event time must be nanoseconds")
+    timestamp = datetime.fromtimestamp(value // 1_000_000_000, tz=timezone.utc)
+    return f"{timestamp.year:04d}{timestamp.month:02d}"
+
+
+def _splittable_plan_error(error: ReconstructionPlanError) -> bool:
+    message = str(error).lower()
+    return any(
+        token in message
+        for token in (
+            "reconstruction persistence preflight failed",
+            "reconstruction resource preflight failed",
+            "synthetic infill plan exceeds bounded artifact size",
+        )
+    )
+
+
+def _period_shards(
+    start_period: str,
+    end_period: str,
+    *,
+    periods_per_shard: int,
+) -> tuple[tuple[str, str], ...]:
+    start = _period(start_period)
+    end = _period(end_period)
+    if start > end:
+        raise ReconstructionUnsupportedError(
+            "plan-set start_period follows end_period"
+        )
+    periods: list[str] = []
+    current = start
+    while current <= end:
+        periods.append(current)
+        current = _next_period(current)
+    return tuple(
+        (selected[0], selected[-1])
+        for offset in range(0, len(periods), periods_per_shard)
+        for selected in (periods[offset : offset + periods_per_shard],)
+    )
+
+
+def _accumulate_plan_set_resources(
+    plan: SyntheticInfillPlanV1,
+    *,
+    resource_summaries: list[ReconstructionPlanResourceSummaryV1],
+    source_partitions: dict[str, tuple[str, str, int, int]],
+) -> None:
+    """Retain only compact shard resources and unique source identities."""
+    inventory = read_reconstruction_source_inventory(
+        plan.artifact_graph["source_inventory"].path
+    )
+    for partition in inventory.partitions:
+        identity = (
+            partition.period,
+            partition.symbol,
+            partition.row_count,
+            cast(int, partition.artifact.size_bytes),
+        )
+        existing = source_partitions.setdefault(
+            partition.partition_id, identity
+        )
+        if existing != identity:
+            raise ReconstructionPlanError(
+                "plan-set source partition identity is inconsistent"
+            )
+    resource_summaries.append(plan.resources)
+
+
+def _aggregate_plan_set_resources(
+    resources: Sequence[ReconstructionPlanResourceSummaryV1],
+    source_partitions: Mapping[str, tuple[str, str, int, int]],
+) -> dict[str, JSONValue]:
+    if not resources:
+        raise ReconstructionPlanError("cannot aggregate an empty plan set")
+    input_events = sum(item.estimated_input_event_count for item in resources)
+    candidate_events = sum(
+        item.estimated_candidate_event_count for item in resources
+    )
+    payload: dict[str, JSONValue] = {
+        "schema_version": "histdatacom.reconstruction-plan-set-resources.v1",
+        "plan_shard_count": len(resources),
+        "source_partition_count": len(source_partitions),
+        "source_event_count": sum(
+            item[2] for item in source_partitions.values()
+        ),
+        "source_size_bytes": sum(
+            item[3] for item in source_partitions.values()
+        ),
+        "planned_window_count": sum(
+            item.planned_window_count for item in resources
+        ),
+        "executable_window_count": sum(
+            item.executable_window_count for item in resources
+        ),
+        "refused_window_count": sum(
+            item.refused_window_count for item in resources
+        ),
+        "ensemble_member_count": max(
+            item.ensemble_member_count for item in resources
+        ),
+        "retained_member_count": max(
+            item.retained_member_count for item in resources
+        ),
+        "workflow_request_count": sum(
+            item.workflow_request_count for item in resources
+        ),
+        "estimated_input_event_count": input_events,
+        "estimated_candidate_event_count": candidate_events,
+        "estimated_candidate_bytes": sum(
+            item.estimated_candidate_bytes for item in resources
+        ),
+        "estimated_peak_memory_bytes": max(
+            item.estimated_peak_memory_bytes for item in resources
+        ),
+        "estimated_peak_scratch_bytes": max(
+            item.estimated_peak_scratch_bytes for item in resources
+        ),
+        "estimated_output_bytes": sum(
+            item.estimated_output_bytes for item in resources
+        ),
+        "estimated_partition_count": sum(
+            item.estimated_partition_count for item in resources
+        ),
+        "candidate_amplification": (
+            candidate_events / input_events if input_events else 0.0
+        ),
+        "output_basis": "sharded-sum-of-retained-member-compressed-upper-bound-v1",
+        "scratch_basis": "maximum-shard-peak-concurrent-window-scratch-v1",
+    }
+    payload["summary_id"] = _stable_id(
+        "reconstruction-plan-set-resources", payload
+    )
+    return payload
+
+
 def _stable_id(prefix: str, payload: Mapping[str, JSONValue]) -> str:
     digest = hashlib.sha256(
         canonical_contract_json(payload).encode("utf-8")
@@ -1273,6 +2067,12 @@ def _strict_bool(value: Any, name: str) -> bool:
     return value
 
 
+def _strict_int(value: Any, name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ReconstructionPlanError(f"{name} must be a JSON integer")
+    return value
+
+
 def _required_text(value: Any) -> str:
     text = str(value or "").strip()
     if not text:
@@ -1288,10 +2088,15 @@ def _optional_text(value: Any) -> str | None:
 
 
 __all__ = [
+    "DEFAULT_PLAN_SET_PERIODS_PER_SHARD",
     "DEFAULT_PREVIEW_LIMIT",
     "MAX_PREVIEW_LIMIT",
+    "MAX_RECONSTRUCTION_PLAN_SHARDS",
     "InformationMode",
     "RECONSTRUCTION_EXECUTION_REQUEST_SCHEMA_VERSION",
+    "RECONSTRUCTION_PLAN_SET_PREFLIGHT_SCHEMA_VERSION",
+    "RECONSTRUCTION_PLAN_SET_SCHEMA_VERSION",
+    "RECONSTRUCTION_PLAN_SHARD_SCHEMA_VERSION",
     "RECONSTRUCTION_PLAN_SPEC_SCHEMA_VERSION",
     "RECONSTRUCTION_PREVIEW_SCHEMA_VERSION",
     "RECONSTRUCTION_RECEIPT_SCHEMA_VERSION",
@@ -1304,16 +2109,26 @@ __all__ = [
     "ReconstructionExitCode",
     "ReconstructionOperationReceiptV1",
     "ReconstructionPlanError",
+    "ReconstructionPlanSetPreflightV1",
+    "ReconstructionPlanSetV1",
+    "ReconstructionPlanShardV1",
     "ReconstructionPlanSpecV1",
     "ReconstructionPreflightV1",
     "ReconstructionPublicError",
     "ReconstructionRefusedError",
     "ReconstructionUnsupportedError",
     "ReconstructionValidationError",
+    "ModernReferenceCertificationCampaignResultV1",
+    "ModernReferenceCertificationCampaignSpecV1",
+    "ReconstructionCertificationDossierV2",
     "read_execution_request",
+    "read_modern_reference_certification_campaign_spec",
     "read_operation_receipt",
     "read_plan_spec",
+    "read_reconstruction_plan_set",
     "reconstruction_exit_code",
+    "run_modern_reference_certification_campaign",
     "write_execution_request",
     "write_operation_receipt",
+    "write_reconstruction_plan_set",
 ]

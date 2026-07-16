@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from datetime import datetime, timezone
 import hashlib
 import json
 from pathlib import Path
@@ -17,11 +18,14 @@ from histdatacom.manifest_store import ManifestStatusStore
 from histdatacom.reconstruction import (
     ReconstructionClient,
     ReconstructionExecutionRequestV1,
+    ReconstructionPlanError,
+    ReconstructionPlanSetV1,
     ReconstructionPlanSpecV1,
     ReconstructionRefusedError,
     ReconstructionUnsupportedError,
     read_execution_request,
     read_operation_receipt,
+    read_reconstruction_plan_set,
     write_execution_request,
     write_operation_receipt,
 )
@@ -287,6 +291,143 @@ def test_typed_public_facade_constructs_requests_and_preflights(
     assert "information_audit" in preflight.evidence_refs
 
 
+def test_public_plan_set_shards_and_revalidates_bounded_full_range(
+    planned_environment: tuple[Path, dict[str, Any]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A range plan remains public and strong without one unbounded payload."""
+    source_root, kwargs = planned_environment
+    spec = replace(
+        _public_spec(source_root, kwargs),
+        window_size_ns=24 * 60 * 60 * 1_000_000_000,
+    )
+    client = ReconstructionClient()
+    ordinary_construct = client._construct_plan_model
+
+    def resource_bounded_construct(
+        shard_spec: ReconstructionPlanSpecV1,
+    ) -> SyntheticInfillPlanV1:
+        assert shard_spec.requested_start_ns is not None
+        assert shard_spec.requested_end_ns is not None
+        if (
+            shard_spec.requested_end_ns - shard_spec.requested_start_ns
+            > 8 * 24 * 60 * 60 * 1_000_000_000
+        ):
+            raise ReconstructionPlanError(
+                "reconstruction persistence preflight failed: fixture bound"
+            )
+        return ordinary_construct(shard_spec)
+
+    monkeypatch.setattr(
+        client, "_construct_plan_model", resource_bounded_construct
+    )
+
+    ref = client.construct_plan_set(spec, periods_per_shard=1)
+    plan_set = read_reconstruction_plan_set(ref.path)
+    preflight = client.preflight_plan_set(ref.path)
+
+    assert isinstance(plan_set, ReconstructionPlanSetV1)
+    assert plan_set.status == "ready"
+    assert plan_set.executable
+    assert len(plan_set.shards) == 4
+    assert all(item.start_period == _PERIOD for item in plan_set.shards)
+    assert all(item.end_period == _PERIOD for item in plan_set.shards)
+    assert plan_set.resource_summary["plan_shard_count"] == 4
+    assert plan_set.resource_summary["planned_window_count"] == 31
+    first_plan = read_synthetic_infill_plan(plan_set.shards[0].plan_ref.path)
+    first_inventory = read_reconstruction_source_inventory(
+        first_plan.artifact_graph["source_inventory"].path
+    )
+    assert plan_set.resource_summary["source_partition_count"] == 3
+    assert plan_set.resource_summary["source_event_count"] == (
+        first_inventory.total_row_count
+    )
+    assert plan_set.resource_summary["source_size_bytes"] == (
+        first_inventory.total_size_bytes
+    )
+    assert preflight.executable
+    assert preflight.verified_shard_count == 4
+    assert preflight.resource_summary == plan_set.resource_summary
+    assert ReconstructionPlanSetV1.from_dict(plan_set.to_dict()) == plan_set
+
+    Path(plan_set.shards[0].plan_ref.path).write_bytes(
+        Path(plan_set.shards[0].plan_ref.path).read_bytes() + b"\n"
+    )
+    with pytest.raises(ReconstructionPlanError, match="shard artifact differs"):
+        client.preflight_plan_set(ref.path)
+
+
+def test_public_plan_set_preserves_a_contiguous_refusal_only_shard(
+    planned_environment: tuple[Path, dict[str, Any]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Full-range planning accounts for unsupported spans without fake work."""
+    source_root, kwargs = planned_environment
+    monkeypatch.setattr(
+        plan_module,
+        "preflight_market_context_corpus",
+        lambda *_, **__: SimpleNamespace(reasons=("context unsupported",)),
+    )
+    client = ReconstructionClient()
+    ref = client.construct_plan_set(
+        replace(
+            _public_spec(source_root, kwargs),
+            window_size_ns=24 * 60 * 60 * 1_000_000_000,
+        ),
+        periods_per_shard=1,
+    )
+
+    plan_set = read_reconstruction_plan_set(ref.path)
+    preflight = client.preflight_plan_set(ref.path)
+
+    assert plan_set.status == "ready_with_refusals"
+    assert plan_set.executable
+    assert len(plan_set.shards) == 1
+    assert plan_set.shards[0].preflight_status == "ready_with_refusals"
+    assert plan_set.resource_summary["executable_window_count"] == 0
+    assert plan_set.resource_summary["refused_window_count"] == 31
+    assert plan_set.resource_summary["estimated_output_bytes"] == 0
+    assert preflight.executable
+    assert preflight.status == "ready_with_refusals"
+    assert preflight.refusal_count == 31
+
+
+def test_public_plan_spec_threads_bounded_window_size_into_resources(
+    planned_environment: tuple[Path, dict[str, Any]],
+) -> None:
+    """Operators can split large monthly inputs before resource preflight."""
+    source_root, kwargs = planned_environment
+    window_size_ns = 6 * 60 * 60 * 1_000_000_000
+    spec = replace(
+        _public_spec(source_root, kwargs),
+        window_size_ns=window_size_ns,
+    )
+
+    restored_spec = ReconstructionPlanSpecV1.from_dict(spec.to_dict())
+    plan_ref = ReconstructionClient().construct_plan(restored_spec)
+    plan = read_synthetic_infill_plan(plan_ref.path)
+    configuration = plan_module.read_reconstruction_plan_configuration(
+        plan.artifact_graph["configuration"].path
+    )
+
+    assert restored_spec.window_size_ns == window_size_ns
+    assert configuration.window_size_ns == window_size_ns
+    estimates = tuple(
+        task.resource_estimate
+        for request in plan.workflow_requests
+        for task in request.tasks
+    )
+    nonempty = tuple(
+        estimate for estimate in estimates if estimate.input_event_count
+    )
+    assert nonempty
+    assert all(estimate.estimated_batch_count >= 3 for estimate in nonempty)
+    assert all(
+        estimate.estimated_memory_bytes >= 512 * 1024 * 1024
+        for estimate in estimates
+    )
+
+
 def test_public_request_requires_ack_and_exact_information_mode(
     planned_environment: tuple[Path, dict[str, Any]],
 ) -> None:
@@ -404,7 +545,9 @@ def test_public_submit_status_resume_and_receipt_round_trip(
         def __init__(self) -> None:
             self.calls: list[tuple[Any, dict[str, Any], dict[str, Any]]] = []
 
-        async def start_workflow(self, workflow, payload, **options):
+        async def start_workflow(
+            self, workflow: Any, payload: Any, **options: Any
+        ) -> Any:
             self.calls.append((workflow, payload, options))
             return SimpleNamespace(id=options["id"], run_id="fake-run")
 
@@ -482,6 +625,58 @@ def _public_spec(
         start_period=kwargs["start_period"],
         end_period=kwargs["end_period"],
     )
+
+
+def test_public_plan_spec_supports_exact_paired_window_bounds(
+    planned_environment: tuple[Path, dict[str, Any]],
+) -> None:
+    source_root, kwargs = planned_environment
+    month_start = datetime(2020, 1, 1, tzinfo=timezone.utc)
+    start_ns = int(month_start.timestamp() * 1_000_000_000) + 60_000_000_000
+    end_ns = start_ns + 600_000_000_000
+    spec = replace(
+        _public_spec(source_root, kwargs),
+        requested_start_ns=start_ns,
+        requested_end_ns=end_ns,
+        window_size_ns=600_000_000_000,
+    )
+
+    restored = ReconstructionPlanSpecV1.from_dict(spec.to_dict())
+    plan_ref = ReconstructionClient().construct_plan(restored)
+    plan = read_synthetic_infill_plan(plan_ref.path)
+
+    assert plan.requested_start_ns == start_ns
+    assert plan.requested_end_ns == end_ns
+    assert plan.resources.planned_window_count == 1
+    assert (
+        plan.resources.candidate_amplification
+        <= plan.run.storage_policy.max_candidate_amplification
+    )
+    assert {
+        task.window.core_start_ns
+        for request in plan.workflow_requests
+        for task in request.tasks
+    } == {start_ns}
+
+    payload = spec.to_dict()
+    payload["requested_end_ns"] = None
+    with pytest.raises(
+        ReconstructionUnsupportedError,
+        match="must be supplied together",
+    ):
+        ReconstructionPlanSpecV1.from_dict(payload)
+
+
+def test_exact_period_resolution_does_not_round_month_boundary_nanoseconds() -> (
+    None
+):
+    """The last nanosecond in a month stays in that source partition."""
+    february_start_ns = int(
+        datetime(2020, 2, 1, tzinfo=timezone.utc).timestamp() * 1_000_000_000
+    )
+
+    assert plan_module._period_for_ns(february_start_ns - 1) == "202001"
+    assert plan_module._period_for_ns(february_start_ns) == "202002"
 
 
 def test_source_inventory_declares_tick_only_ordinal_identity(
@@ -635,6 +830,44 @@ def test_builder_rejects_quota_overflow(
         build_synthetic_infill_plan(
             source_root, storage_policy=policy, **kwargs
         )
+
+
+def test_builder_records_a_fully_refused_interval_without_executable_work(
+    planned_environment: tuple[Path, dict[str, Any]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Unsupported spans remain contiguous, explicit, and safe to skip."""
+    source_root, kwargs = planned_environment
+    monkeypatch.setattr(
+        plan_module,
+        "preflight_market_context_corpus",
+        lambda *_, **__: SimpleNamespace(reasons=("context unsupported",)),
+    )
+
+    plan = build_synthetic_infill_plan(source_root, **kwargs)
+    plan_ref = write_synthetic_infill_plan(plan, kwargs["artifact_root"])
+    restored = read_synthetic_infill_plan(plan_ref.path)
+    execution = read_reconstruction_plan_execution_manifest(
+        restored.artifact_graph["execution_manifest"].path
+    )
+
+    assert restored.status == "ready_with_refusals"
+    assert restored.workflow_requests == ()
+    assert restored.resources.executable_window_count == 0
+    assert restored.resources.refused_window_count == 2
+    assert restored.resources.workflow_request_count == 0
+    assert restored.resources.estimated_output_bytes == 0
+    assert execution.executable_window_count == 0
+    assert len(execution.refusal_ids) == 2
+    validate_synthetic_infill_plan_for_execution(restored)
+    request = ReconstructionClient().create_request(
+        plan_ref.path,
+        information_mode=InformationMode.EX_POST_RECONSTRUCTION,
+        acknowledge_scientific_nonclaim=True,
+    )
+    preflight = ReconstructionClient().preflight(request)
+    assert preflight.status == "refused"
+    assert not preflight.executable
 
 
 def test_broker_only_delivery_requires_the_broker_artifact(

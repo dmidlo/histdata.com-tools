@@ -386,6 +386,95 @@ def test_triangle_reconciliation_is_deterministic_and_preserves_anchors() -> (
     assert CrossCurrencyReconciledGroupV1.from_json(group.to_json()) == group
 
 
+def test_triangle_projection_falls_back_after_negative_spread_target() -> None:
+    """A later synthetic priority leg is tried when the first is infeasible."""
+    config = eurusd_triangle_reconciliation_config()
+    run = _run(config)
+    window = _window(run)
+
+    def requote(
+        stream: SyntheticEventStreamV1,
+        *,
+        bid: float,
+        ask: float,
+    ) -> SyntheticEventStreamV1:
+        return SyntheticEventStreamV1(
+            run_id=stream.run_id,
+            ensemble_member_id=stream.ensemble_member_id,
+            symbol=stream.symbol,
+            events=tuple(
+                (
+                    replace(event, bid=bid, ask=ask, event_id="")
+                    if event.event_time_ns == SYNTHETIC_NS
+                    else event
+                )
+                for event in stream.events
+            ),
+            source_version_ids=stream.source_version_ids,
+        )
+
+    direct = requote(
+        _stream(
+            run,
+            symbol="EURGBP",
+            anchor_midpoint=0.8,
+            synthetic_midpoint=0.86711,
+            middle_origin=SyntheticEventOrigin.OBSERVED,
+        ),
+        bid=0.86699,
+        ask=0.86723,
+    )
+    numerator = requote(
+        _stream(
+            run,
+            symbol="EURUSD",
+            anchor_midpoint=1.2,
+            synthetic_midpoint=1.09413,
+        ),
+        bid=1.09401,
+        ask=1.09425,
+    )
+    denominator = requote(
+        _stream(
+            run,
+            symbol="GBPUSD",
+            anchor_midpoint=1.5,
+            synthetic_midpoint=1.26171,
+        ),
+        bid=1.26152,
+        ask=1.26190,
+    )
+
+    group = reconcile_cross_currency_window(
+        run=run,
+        window=window,
+        streams={
+            "EURGBP": direct,
+            "EURUSD": numerator,
+            "GBPUSD": denominator,
+        },
+        config=config,
+    )
+
+    assert group.status is CrossCurrencyGroupStatus.RECONCILED
+    assert len(group.projection_lineage) == 1
+    assert group.projection_lineage[0].symbol == "gbpusd"
+    preserved = next(
+        event
+        for event in group.stream_for("EURGBP").events
+        if event.event_time_ns == SYNTHETIC_NS
+    )
+    projected = next(
+        event
+        for event in group.stream_for("GBPUSD").events
+        if event.event_time_ns == SYNTHETIC_NS
+    )
+    assert preserved.bid == 0.86699
+    assert preserved.ask == 0.86723
+    assert projected.ask >= projected.bid
+    assert group.generation_validation.anchor_preserved is True
+
+
 def test_observed_conflict_and_missing_leg_refuse_without_projection() -> None:
     """Infeasible anchors and absent legs remain visible refused results."""
     config = eurusd_triangle_reconciliation_config()
@@ -424,6 +513,52 @@ def test_observed_conflict_and_missing_leg_refuse_without_projection() -> None:
     assert missing.missing_symbols == ("eurgbp",)
     assert "missing_symbol:eurgbp" in (
         missing.generation_validation.failure_reasons
+    )
+
+
+def test_many_observed_conflicts_return_bounded_auditable_refusal() -> None:
+    """Large immutable-anchor conflicts refuse instead of overflowing evidence."""
+    config = eurusd_triangle_reconciliation_config()
+    run = _run(config)
+    window = _window(run)
+    midpoints = {"eurgbp": 0.9, "eurusd": 1.2, "gbpusd": 1.5}
+    streams = {
+        symbol: SyntheticEventStreamV1(
+            run_id=run.run_id,
+            ensemble_member_id=MEMBER,
+            symbol=symbol,
+            events=tuple(
+                _observed(
+                    run,
+                    symbol=symbol,
+                    timestamp_ns=START_NS + index * 1_000_000,
+                    sequence=0,
+                    row_id=index + 1,
+                    midpoint=midpoint,
+                )
+                for index in range(130)
+            ),
+        )
+        for symbol, midpoint in midpoints.items()
+    }
+
+    refused = reconcile_cross_currency_window(
+        run=run,
+        window=window,
+        streams=streams,
+        config=config,
+    )
+
+    assert refused.status is CrossCurrencyGroupStatus.REFUSED
+    reasons = refused.generation_validation.failure_reasons
+    assert len(reasons) == 128
+    assert any(
+        reason.startswith("failure_reasons_truncated:total=130:sha256=")
+        for reason in reasons
+    )
+    assert refused.generation_validation.anchor_preserved is True
+    assert (
+        CrossCurrencyReconciledGroupV1.from_json(refused.to_json()) == refused
     )
 
 

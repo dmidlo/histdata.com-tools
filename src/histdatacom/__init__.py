@@ -28,6 +28,9 @@ __all__ = [
     "ReconstructionExecutionRequestV1",
     "ReconstructionExitCode",
     "ReconstructionOperationReceiptV1",
+    "ReconstructionPlanSetPreflightV1",
+    "ReconstructionPlanSetV1",
+    "ReconstructionPlanShardV1",
     "ReconstructionPlanSpecV1",
     "ReconstructionPreflightV1",
 ]
@@ -42,6 +45,9 @@ _RECONSTRUCTION_EXPORTS = frozenset(
         "ReconstructionExecutionRequestV1",
         "ReconstructionExitCode",
         "ReconstructionOperationReceiptV1",
+        "ReconstructionPlanSetPreflightV1",
+        "ReconstructionPlanSetV1",
+        "ReconstructionPlanShardV1",
         "ReconstructionPlanSpecV1",
         "ReconstructionPreflightV1",
     }

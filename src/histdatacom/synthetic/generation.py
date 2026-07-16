@@ -13,6 +13,7 @@ event identities never include a worker, retry, or window identifier.
 
 from __future__ import annotations
 
+from bisect import bisect_left
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from enum import Enum
@@ -816,6 +817,7 @@ def generate_empirical_motif_candidates(
     right_anchor: SyntheticEventV1,
     query_result: ReferenceMotifQueryResultV1,
     config: EmpiricalMotifGeneratorConfigV1,
+    required_event_time_ns: int | None = None,
 ) -> EmpiricalMotifCandidateBatchV1:
     """Generate one deterministic, window-owned candidate anchor interval."""
     _validate_generation_scope(
@@ -830,6 +832,17 @@ def generate_empirical_motif_candidates(
         left_anchor.event_id, right_anchor.event_id
     )
     gap_ns = right_anchor.event_time_ns - left_anchor.event_time_ns
+    required_time = (
+        _strict_int(required_event_time_ns, "required_event_time_ns")
+        if required_event_time_ns is not None
+        else None
+    )
+    if required_time is not None and not (
+        left_anchor.event_time_ns < required_time < right_anchor.event_time_ns
+    ):
+        raise ValueError(
+            "required event time must be inside the anchor interval"
+        )
     zero_estimate = _resource_estimate(0, config)
     if gap_ns == 0:
         return _decision_batch(
@@ -877,6 +890,8 @@ def generate_empirical_motif_candidates(
         )
 
     target_count, cadence_ns = _target_cardinality(condition, gap_ns)
+    if required_time is not None:
+        target_count = max(1, target_count)
     if target_count == 0:
         return _decision_batch(
             run=run,
@@ -993,6 +1008,7 @@ def generate_empirical_motif_candidates(
             config=config,
             event_times=event_times,
             plan=plan,
+            required_event_time_ns=required_time,
         )
         if error is not None:
             quote_error = error
@@ -1318,6 +1334,7 @@ def _motif_warped_event_times(
     right_time_ns: int,
     plan: _PlannedTransform,
     timestamp_precision_ns: int,
+    required_event_time_ns: int | None,
 ) -> tuple[int, ...]:
     """Warp one planned segment with the selected motif's event clock."""
     start = (
@@ -1356,6 +1373,23 @@ def _motif_warped_event_times(
         selected = max(previous, selected)
         values.append(selected)
         previous = selected
+    required = required_event_time_ns
+    if required is None or not start < required < end or not values:
+        return tuple(values)
+    if required in values:
+        return tuple(values)
+    insertion = bisect_left(values, required)
+    if insertion == len(values):
+        selected_index = len(values) - 1
+    elif insertion == 0:
+        selected_index = 0
+    else:
+        selected_index = min(
+            (insertion - 1, insertion),
+            key=lambda index: abs(values[index] - required),
+        )
+    values[selected_index] = required
+    values.sort()
     return tuple(values)
 
 
@@ -1500,6 +1534,7 @@ def _events_for_transform(
     config: EmpiricalMotifGeneratorConfigV1,
     event_times: tuple[int, ...],
     plan: _PlannedTransform,
+    required_event_time_ns: int | None,
 ) -> tuple[
     tuple[SyntheticEventV1, ...],
     tuple[EmpiricalMotifEventLineageV1, ...],
@@ -1527,6 +1562,7 @@ def _events_for_transform(
                 )
             ),
         ),
+        required_event_time_ns=required_event_time_ns,
     )
     midpoint_deltas = tuple(
         (bid_delta + ask_delta) / 2.0

@@ -11,6 +11,7 @@ recovered without referring to a vanished staging path.
 from __future__ import annotations
 
 import asyncio
+from bisect import bisect_left
 import hashlib
 import json
 import math
@@ -92,13 +93,17 @@ from histdatacom.synthetic.generation import (
     MotifGenerationStatus,
     generate_empirical_motif_candidates,
 )
-from histdatacom.synthetic.information import InformationAuditReportV1
+from histdatacom.synthetic.information import (
+    InformationAuditReportV1,
+    InformationMode,
+)
 from histdatacom.synthetic.motif_library import (
     read_modern_reference_motif_artifact,
     read_modern_reference_motif_index,
 )
 from histdatacom.synthetic.motifs import (
     ReferenceMotifConditionV1,
+    ReferenceMotifIndexV1,
     ReferenceMotifQueryResultV1,
     ReferenceMotifQueryV1,
     query_reference_motifs,
@@ -142,9 +147,16 @@ STAGING_DESCRIPTOR_ARTIFACT_KIND = "reconstruction_staging_descriptor_v1"
 _SOURCE_INPUT_STREAM_KIND = "reconstruction_observed_input_stream_v1"
 _SOURCE_CORE_STREAM_KIND = "reconstruction_observed_core_stream_v1"
 _CANDIDATE_STREAM_KIND = "reconstruction_candidate_stream_v1"
+_CANDIDATE_BATCH_LEDGER_KIND = "reconstruction_candidate_batch_ledger_v1"
 _CARVED_STREAM_KIND = "reconstruction_carved_stream_v1"
+_CARVED_BATCH_LEDGER_KIND = "reconstruction_carved_batch_ledger_v1"
 _CROSS_STREAM_KIND = "reconstruction_cross_reconciled_stream_v1"
 _DELIVERED_STREAM_KIND = "reconstruction_delivered_stream_v1"
+_MAX_CANDIDATE_BATCH_LEDGER_LINE_BYTES = 1_048_576
+_MAX_CARVED_BATCH_LEDGER_LINE_BYTES = 1_048_576
+_MAX_SYNCHRONIZATION_TIMESTAMP_PROBES = 4_096
+
+_SourceRow = tuple[int, float, float, str, int, str]
 
 _HANDLERS = {
     ReconstructionStage.SOURCE_ENRICHMENT: "source_enrichment_handler",
@@ -293,6 +305,8 @@ def proposal_handler(
 ) -> ReconstructionStageOutcomeV1:
     """Run deterministic empirical motif retrieval and proposal generation."""
     started = time.perf_counter()
+    ledger_stream: Any | None = None
+    ledger_temporary: Path | None = None
     try:
         _cancel_if_requested(invocation)
         plan = load_reconstruction_stage_plan(invocation.command)
@@ -305,7 +319,30 @@ def proposal_handler(
             symbol: ReferenceMotifConditionV1.from_dict(_mapping(value))
             for symbol, value in _mapping(source["motif_conditions"]).items()
         }
-        batches: list[EmpiricalMotifCandidateBatchV1] = []
+        synchronization_anchor_symbol = _proposal_synchronization_anchor_symbol(
+            streams,
+            conditions=conditions,
+        )
+        synchronization_event_time_ns = _proposal_synchronization_event_time(
+            streams,
+            conditions=conditions,
+            start_ns=invocation.task.window.core_start_ns,
+            end_ns=invocation.task.window.core_end_ns,
+        )
+        ledger_directory = _stage_directory(invocation, "proposal-batches")
+        ledger_directory.mkdir(parents=True, exist_ok=True)
+        descriptor, temporary_name = tempfile.mkstemp(
+            prefix=".candidate-batches-",
+            suffix=".ndjson",
+            dir=ledger_directory,
+        )
+        ledger_temporary = Path(temporary_name)
+        ledger_stream = os.fdopen(descriptor, "wb")
+        ledger_digest = hashlib.sha256()
+        batch_count = 0
+        candidate_events: dict[str, list[SyntheticEventV1]] = {
+            symbol: [] for symbol in invocation.run.symbols
+        }
         generated = 0
         refused = 0
         interval_count = sum(
@@ -344,8 +381,29 @@ def proposal_handler(
                     right_anchor=right,
                     query_result=result,
                     config=plan.configuration.generator_config,
+                    required_event_time_ns=(
+                        synchronization_event_time_ns
+                        if left.event_time_ns
+                        < synchronization_event_time_ns
+                        < right.event_time_ns
+                        else None
+                    ),
                 )
-                batches.append(batch)
+                encoded_evidence = (
+                    canonical_contract_json(_candidate_evidence(batch)).encode(
+                        "utf-8"
+                    )
+                    + b"\n"
+                )
+                if (
+                    len(encoded_evidence)
+                    > _MAX_CANDIDATE_BATCH_LEDGER_LINE_BYTES
+                ):
+                    raise ValueError("candidate batch ledger row exceeds limit")
+                ledger_stream.write(encoded_evidence)
+                ledger_digest.update(encoded_evidence)
+                batch_count += 1
+                candidate_events[symbol].extend(batch.events)
                 generated += len(batch.events)
                 refused += int(batch.status.value == "refused")
                 completed_intervals += 1
@@ -366,15 +424,30 @@ def proposal_handler(
                         ),
                         message="empirical motif proposal",
                     )
-        candidate_events = {
-            symbol: tuple(
-                event
-                for batch in batches
-                if batch.symbol == symbol
-                for event in batch.events
-            )
-            for symbol in invocation.run.symbols
-        }
+        ledger_stream.flush()
+        os.fsync(ledger_stream.fileno())
+        ledger_stream.close()
+        ledger_stream = None
+        ledger_sha256 = ledger_digest.hexdigest()
+        ledger_target = ledger_directory / (
+            f"{_CANDIDATE_BATCH_LEDGER_KIND}-{ledger_sha256}.ndjson"
+        )
+        if ledger_target.exists():
+            if _file_sha256(ledger_target) != ledger_sha256:
+                raise ValueError("content-addressed batch ledger collision")
+            ledger_temporary.unlink()
+        else:
+            os.replace(ledger_temporary, ledger_target)
+        ledger_temporary = None
+        ledger_ref = artifact_ref_for_file(
+            ledger_target,
+            kind=_CANDIDATE_BATCH_LEDGER_KIND,
+            metadata={
+                "batch_count": batch_count,
+                "format": "canonical-json-lines-v1",
+                "large_event_rows_inline": False,
+            },
+        )
         candidate_refs = _write_streams(
             invocation,
             candidate_events,
@@ -383,11 +456,19 @@ def proposal_handler(
         )
         payload: dict[str, JSONValue] = {
             **_stage_scope(invocation),
-            "batches": [_candidate_evidence(batch) for batch in batches],
+            "batch_ledger_ref": ledger_ref.to_dict(),
+            "batches_inline": False,
+            "query_conditions": {
+                symbol: condition.to_dict()
+                for symbol, condition in sorted(conditions.items())
+            },
+            "generator_config": plan.configuration.generator_config.to_dict(),
             "candidate_stream_refs": _refs_dict(candidate_refs),
-            "batch_count": len(batches),
+            "batch_count": batch_count,
             "generated_event_count": generated,
             "refused_interval_count": refused,
+            "synchronization_anchor_symbol": synchronization_anchor_symbol,
+            "synchronization_event_time_ns": synchronization_event_time_ns,
             "motif_index_id": index.index_id,
             "immutable_anchor_content_sha256": source[
                 "immutable_anchor_content_sha256"
@@ -399,7 +480,7 @@ def proposal_handler(
             PROPOSAL_STAGE_ARTIFACT_KIND,
             payload,
             metadata={
-                "batch_count": len(batches),
+                "batch_count": batch_count,
                 "rejected_event_count": refused,
                 "immutable_anchor_content_sha256": source[
                     "immutable_anchor_content_sha256"
@@ -416,6 +497,9 @@ def proposal_handler(
             candidates=generated,
             rejected=refused,
             message="generated empirical motif proposals",
+            output_bytes=(manifest.size_bytes or 0)
+            + (ledger_ref.size_bytes or 0)
+            + sum(ref.size_bytes or 0 for ref in candidate_refs.values()),
         )
     except asyncio.CancelledError:
         raise
@@ -423,6 +507,11 @@ def proposal_handler(
         return invocation.refused(
             "proposal_validation_failed", message=_bounded_error(err)
         )
+    finally:
+        if ledger_stream is not None:
+            ledger_stream.close()
+        if ledger_temporary is not None:
+            ledger_temporary.unlink(missing_ok=True)
 
 
 def carving_handler(
@@ -430,6 +519,8 @@ def carving_handler(
 ) -> ReconstructionStageOutcomeV1:
     """Apply historical carving and materialize accepted narrow streams."""
     started = time.perf_counter()
+    ledger_stream: Any | None = None
+    ledger_temporary: Path | None = None
     try:
         _cancel_if_requested(invocation)
         plan = load_reconstruction_stage_plan(invocation.command)
@@ -440,11 +531,25 @@ def carving_handler(
         context = MarketContextQueryV1.from_dict(
             _mapping(source["market_context"])
         )
-        batches = _restore_candidate_batches(proposal)
+        index = read_modern_reference_motif_index(
+            plan.execution_manifest.artifacts["motif_index"].path
+        )
+        batch_count = int(proposal.get("batch_count", 0))
+        batches = _restore_candidate_batches(proposal, index=index)
+        ledger_directory = _stage_directory(invocation, "carving-batches")
+        ledger_directory.mkdir(parents=True, exist_ok=True)
+        descriptor, temporary_name = tempfile.mkstemp(
+            prefix=".carved-batches-",
+            suffix=".ndjson",
+            dir=ledger_directory,
+        )
+        ledger_temporary = Path(temporary_name)
+        ledger_stream = os.fdopen(descriptor, "wb")
+        ledger_digest = hashlib.sha256()
+        carved_batch_count = 0
         accepted_by_symbol: dict[str, list[SyntheticEventV1]] = {
             symbol: [] for symbol in invocation.run.symbols
         }
-        evidence: list[JSONValue] = []
         candidates = 0
         accepted = 0
         rejected = 0
@@ -463,7 +568,17 @@ def carving_handler(
             candidates += len(batch.events)
             accepted += len(carved.accepted_events)
             rejected += carved.rejection_summary.rejected_count
-            evidence.append(_carved_evidence(carved))
+            encoded_evidence = (
+                canonical_contract_json(_carved_evidence(carved)).encode(
+                    "utf-8"
+                )
+                + b"\n"
+            )
+            if len(encoded_evidence) > _MAX_CARVED_BATCH_LEDGER_LINE_BYTES:
+                raise ValueError("carved batch ledger row exceeds limit")
+            ledger_stream.write(encoded_evidence)
+            ledger_digest.update(encoded_evidence)
+            carved_batch_count += 1
             if (
                 ordinal
                 % max(1, invocation.run.storage_policy.heartbeat_every_batches)
@@ -472,12 +587,38 @@ def carving_handler(
                 invocation.heartbeat(
                     sequence=ordinal,
                     completed_units=ordinal,
-                    total_units=len(batches),
+                    total_units=batch_count,
                     candidate_event_count=candidates,
                     accepted_event_count=accepted,
                     scratch_bytes=_tree_size(invocation.task.scratch_directory),
                     message="historical candidate carving",
                 )
+        if carved_batch_count != batch_count:
+            raise ValueError("carved batch count differs from proposal")
+        ledger_stream.flush()
+        os.fsync(ledger_stream.fileno())
+        ledger_stream.close()
+        ledger_stream = None
+        ledger_sha256 = ledger_digest.hexdigest()
+        ledger_target = ledger_directory / (
+            f"{_CARVED_BATCH_LEDGER_KIND}-{ledger_sha256}.ndjson"
+        )
+        if ledger_target.exists():
+            if _file_sha256(ledger_target) != ledger_sha256:
+                raise ValueError("content-addressed carved ledger collision")
+            ledger_temporary.unlink()
+        else:
+            os.replace(ledger_temporary, ledger_target)
+        ledger_temporary = None
+        ledger_ref = artifact_ref_for_file(
+            ledger_target,
+            kind=_CARVED_BATCH_LEDGER_KIND,
+            metadata={
+                "batch_count": carved_batch_count,
+                "format": "canonical-json-lines-v1",
+                "large_event_rows_inline": False,
+            },
+        )
         merged = {
             symbol: SyntheticEventStreamV1.merge(
                 run_id=invocation.run.run_id,
@@ -498,7 +639,9 @@ def carving_handler(
         payload: dict[str, JSONValue] = {
             **_stage_scope(invocation),
             "stream_refs": _refs_dict(stream_refs),
-            "carved_batches": evidence,
+            "carved_batch_ledger_ref": ledger_ref.to_dict(),
+            "carved_batches_inline": False,
+            "carved_batch_count": carved_batch_count,
             "candidate_event_count": candidates,
             "accepted_event_count": accepted,
             "rejected_event_count": rejected,
@@ -527,6 +670,9 @@ def carving_handler(
             accepted=accepted,
             rejected=rejected,
             message="carved candidate events and materialized core streams",
+            output_bytes=(manifest.size_bytes or 0)
+            + (ledger_ref.size_bytes or 0)
+            + sum(ref.size_bytes or 0 for ref in stream_refs.values()),
         )
     except asyncio.CancelledError:
         raise
@@ -534,6 +680,11 @@ def carving_handler(
         return invocation.refused(
             "carving_validation_failed", message=_bounded_error(err)
         )
+    finally:
+        if ledger_stream is not None:
+            ledger_stream.close()
+        if ledger_temporary is not None:
+            ledger_temporary.unlink(missing_ok=True)
 
 
 def cross_series_reconciliation_handler(
@@ -894,7 +1045,7 @@ def _read_source_events(
             "first-party reconstruction requires pyarrow"
         ) from err
     window = invocation.task.window
-    raw: dict[str, list[tuple[int, float, float, str, int, str]]] = {
+    raw: dict[str, list[_SourceRow]] = {
         symbol: [] for symbol in invocation.run.symbols
     }
     selected = plan.source_inventory.partitions_for_window(window)
@@ -950,7 +1101,9 @@ def _read_source_events(
     for symbol, values in raw.items():
         counters: Counter[int] = Counter()
         events: list[SyntheticEventV1] = []
-        for timestamp, bid, ask, period, ordinal, series_id in sorted(values):
+        for timestamp, bid, ask, period, ordinal, series_id in sorted(
+            values, key=_source_row_order_key
+        ):
             sequence = counters[timestamp]
             counters[timestamp] += 1
             events.append(
@@ -970,6 +1123,127 @@ def _read_source_events(
             )
         result[symbol] = tuple(events)
     return result
+
+
+def _source_row_order_key(row: _SourceRow) -> tuple[int, str, int, str]:
+    """Preserve immutable partition/Arrow order for equal timestamps."""
+    timestamp, _, _, period, ordinal, series_id = row
+    return (timestamp, period, ordinal, series_id)
+
+
+def _proposal_synchronization_event_time(
+    streams: Mapping[str, SyntheticEventStreamV1],
+    *,
+    conditions: Mapping[str, ReferenceMotifConditionV1],
+    start_ns: int,
+    end_ns: int,
+) -> int:
+    if set(streams) != set(conditions):
+        raise ValueError(
+            "proposal synchronization conditions differ from streams"
+        )
+    if any(not stream.events for stream in streams.values()):
+        raise ValueError("triangle stream lacks synchronization anchors")
+    lower = max(
+        start_ns,
+        *(stream.events[0].event_time_ns for stream in streams.values()),
+    )
+    upper = min(
+        end_ns,
+        *(stream.events[-1].event_time_ns for stream in streams.values()),
+    )
+    if lower >= upper:
+        raise ValueError(
+            "triangle streams have no common synchronization interval"
+        )
+    probes: set[int] = set()
+    probes_per_stream = max(
+        1,
+        _MAX_SYNCHRONIZATION_TIMESTAMP_PROBES // len(streams),
+    )
+    anchor_symbol = _proposal_synchronization_anchor_symbol(
+        streams,
+        conditions=conditions,
+    )
+    for stream in (streams[anchor_symbol],):
+        event_count = len(stream.events)
+        sample_count = min(event_count, probes_per_stream)
+        indices: tuple[int, ...]
+        if sample_count == 1:
+            indices = (event_count // 2,)
+        else:
+            indices = tuple(
+                ordinal * (event_count - 1) // (sample_count - 1)
+                for ordinal in range(sample_count)
+            )
+        for index in indices:
+            selected = stream.events[index].event_time_ns
+            if lower <= selected < upper:
+                probes.add(selected)
+
+    center_twice = lower + upper
+    best: tuple[tuple[int, int, int, int, int], int] | None = None
+    for selected in probes:
+        exact_support = 0
+        missing_interval_widths: list[int] = []
+        for stream in streams.values():
+            position = bisect_left(
+                stream.events,
+                selected,
+                key=lambda event: event.event_time_ns,
+            )
+            if (
+                position < len(stream.events)
+                and stream.events[position].event_time_ns == selected
+            ):
+                exact_support += 1
+                continue
+            if position == 0 or position == len(stream.events):
+                break
+            missing_interval_widths.append(
+                stream.events[position].event_time_ns
+                - stream.events[position - 1].event_time_ns
+            )
+        else:
+            if exact_support == len(streams):
+                support_penalty = 2
+            elif exact_support == 1:
+                support_penalty = 0
+            else:
+                support_penalty = 1
+            score = (
+                support_penalty,
+                max(missing_interval_widths, default=0),
+                sum(missing_interval_widths),
+                abs(2 * selected - center_twice),
+                selected,
+            )
+            if best is None or score < best[0]:
+                best = (score, selected)
+    if best is None:
+        raise ValueError(
+            "triangle streams have no bounded synchronization support"
+        )
+    return best[1]
+
+
+def _proposal_synchronization_anchor_symbol(
+    streams: Mapping[str, SyntheticEventStreamV1],
+    *,
+    conditions: Mapping[str, ReferenceMotifConditionV1],
+) -> str:
+    if set(streams) != set(conditions):
+        raise ValueError(
+            "proposal synchronization conditions differ from streams"
+        )
+    return min(
+        streams,
+        key=lambda symbol: (
+            conditions[symbol].metrics.get("tick_intensity", math.inf),
+            len(streams[symbol].events),
+            symbol,
+        ),
+    )
 
 
 def _window_context(
@@ -1225,7 +1499,7 @@ def _carved_evidence(
 def _candidate_evidence(
     batch: EmpiricalMotifCandidateBatchV1,
 ) -> dict[str, JSONValue]:
-    """Serialize bounded batch lineage while candidate rows stay in Parquet."""
+    """Serialize bounded batch lineage while large reusable rows stay external."""
     return {
         "schema_version": batch.schema_version,
         "run_id": batch.run_id,
@@ -1235,8 +1509,8 @@ def _candidate_evidence(
         "anchor_interval_id": batch.anchor_interval_id,
         "left_anchor_event_id": batch.left_anchor_event_id,
         "right_anchor_event_id": batch.right_anchor_event_id,
-        "generator_config": batch.generator_config.to_dict(),
-        "query_result": batch.query_result.to_dict(),
+        "generator_config_id": batch.generator_config.config_id,
+        "query_evidence": _compact_query_evidence(batch.query_result),
         "status": batch.status.value,
         "decision": batch.decision.value,
         "target_event_count": batch.target_event_count,
@@ -1252,7 +1526,10 @@ def _candidate_evidence(
 
 def _restore_candidate_batches(
     manifest: Mapping[str, Any],
-) -> tuple[EmpiricalMotifCandidateBatchV1, ...]:
+    *,
+    index: ReferenceMotifIndexV1,
+) -> Iterable[EmpiricalMotifCandidateBatchV1]:
+    """Yield verified batches without retaining motif fragments per interval."""
     streams = _read_stream_map(manifest, "candidate_stream_refs")
     events_by_interval: dict[str, list[SyntheticEventV1]] = {}
     for stream in streams.values():
@@ -1261,64 +1538,204 @@ def _restore_candidate_batches(
             if interval_id is None:
                 raise ValueError("candidate event lacks anchor interval")
             events_by_interval.setdefault(interval_id, []).append(event)
-    batches: list[EmpiricalMotifCandidateBatchV1] = []
+    available = {
+        event.event_id for stream in streams.values() for event in stream.events
+    }
+    expected_batch_count = int(manifest.get("batch_count", -1))
+    ledger_value = manifest.get("batch_ledger_ref")
+    if ledger_value is not None:
+        if manifest.get("batches_inline") is not False:
+            raise ValueError("proposal batch ledger must remain external")
+        ledger_ref = ArtifactRef.from_dict(_mapping(ledger_value))
+        if ledger_ref.kind != _CANDIDATE_BATCH_LEDGER_KIND:
+            raise ValueError("proposal batch ledger kind differs")
+        verify_artifact_ref(ledger_ref)
+        if ledger_ref.metadata.get("format") != "canonical-json-lines-v1":
+            raise ValueError("proposal batch ledger format differs")
+        if ledger_ref.metadata.get("batch_count") != expected_batch_count:
+            raise ValueError("proposal batch ledger count metadata differs")
+        values: Iterable[Any] = _read_candidate_batch_ledger(ledger_ref)
+    else:
+        inline_values = _sequence(manifest["batches"])
+        if expected_batch_count != len(inline_values):
+            raise ValueError(
+                "candidate batch count differs from proposal manifest"
+            )
+        values = inline_values
+    conditions = {
+        str(symbol): ReferenceMotifConditionV1.from_dict(_mapping(value))
+        for symbol, value in _mapping(
+            manifest.get("query_conditions", {})
+        ).items()
+    }
+    shared_config_value = manifest.get("generator_config")
+    shared_config = (
+        EmpiricalMotifGeneratorConfigV1.from_dict(_mapping(shared_config_value))
+        if shared_config_value is not None
+        else None
+    )
+    if manifest.get("motif_index_id") != index.index_id:
+        raise ValueError("proposal motif index differs from current artifact")
     consumed: set[str] = set()
-    for value in _sequence(manifest["batches"]):
+    restored_batch_count = 0
+    for value in values:
+        restored_batch_count += 1
         data = _mapping(value)
         if data.get("candidate_events_inline") is not False:
             raise ValueError("candidate evidence embeds event rows")
         interval_id = str(data.get("anchor_interval_id", ""))
         events = tuple(events_by_interval.get(interval_id, ()))
         consumed.update(event.event_id for event in events)
-        batches.append(
-            EmpiricalMotifCandidateBatchV1(
-                run_id=str(data.get("run_id", "")),
-                window_id=str(data.get("window_id", "")),
-                ensemble_member_id=str(data.get("ensemble_member_id", "")),
-                symbol=str(data.get("symbol", "")),
-                anchor_interval_id=interval_id,
-                left_anchor_event_id=str(data.get("left_anchor_event_id", "")),
-                right_anchor_event_id=str(
-                    data.get("right_anchor_event_id", "")
-                ),
-                generator_config=EmpiricalMotifGeneratorConfigV1.from_dict(
-                    _mapping(data.get("generator_config"))
-                ),
-                query_result=ReferenceMotifQueryResultV1.from_dict(
-                    _mapping(data.get("query_result"))
-                ),
-                status=MotifGenerationStatus(str(data.get("status", ""))),
-                decision=MotifGenerationDecision(str(data.get("decision", ""))),
-                target_event_count=int(data.get("target_event_count", 0)),
-                events=events,
-                transformations=tuple(
-                    EmpiricalMotifTransformationV1.from_dict(_mapping(item))
-                    for item in _sequence(data.get("transformations"))
-                ),
-                event_lineage=tuple(
-                    EmpiricalMotifEventLineageV1.from_dict(_mapping(item))
-                    for item in _sequence(data.get("event_lineage"))
-                ),
-                resource_estimate=ReconstructionResourceEstimateV1.from_dict(
-                    _mapping(data.get("resource_estimate"))
-                ),
-                carry_state=CarryStateV1.from_dict(
-                    _mapping(data.get("carry_state"))
-                ),
-                decision_details=tuple(
-                    str(item)
-                    for item in _sequence(data.get("decision_details"))
-                ),
-                batch_id=str(data.get("batch_id", "")),
-                schema_version=str(data.get("schema_version", "")),
+        symbol = str(data.get("symbol", ""))
+        config = shared_config
+        if config is None:
+            config = EmpiricalMotifGeneratorConfigV1.from_dict(
+                _mapping(data.get("generator_config"))
             )
+        if (
+            data.get("generator_config_id", config.config_id)
+            != config.config_id
+        ):
+            raise ValueError("candidate generator config identity differs")
+        query_result_value = data.get("query_result")
+        if query_result_value is not None:
+            query_result = ReferenceMotifQueryResultV1.from_dict(
+                _mapping(query_result_value)
+            )
+            if query_result.index_id != index.index_id:
+                raise ValueError("candidate query result index differs")
+        else:
+            condition = conditions.get(symbol)
+            if condition is None:
+                raise ValueError("candidate query condition is absent")
+            query_result = _restore_compact_query_result(
+                _mapping(data.get("query_evidence")),
+                condition=condition,
+                index=index,
+            )
+        yield EmpiricalMotifCandidateBatchV1(
+            run_id=str(data.get("run_id", "")),
+            window_id=str(data.get("window_id", "")),
+            ensemble_member_id=str(data.get("ensemble_member_id", "")),
+            symbol=symbol,
+            anchor_interval_id=interval_id,
+            left_anchor_event_id=str(data.get("left_anchor_event_id", "")),
+            right_anchor_event_id=str(data.get("right_anchor_event_id", "")),
+            generator_config=config,
+            query_result=query_result,
+            status=MotifGenerationStatus(str(data.get("status", ""))),
+            decision=MotifGenerationDecision(str(data.get("decision", ""))),
+            target_event_count=int(data.get("target_event_count", 0)),
+            events=events,
+            transformations=tuple(
+                EmpiricalMotifTransformationV1.from_dict(_mapping(item))
+                for item in _sequence(data.get("transformations"))
+            ),
+            event_lineage=tuple(
+                EmpiricalMotifEventLineageV1.from_dict(_mapping(item))
+                for item in _sequence(data.get("event_lineage"))
+            ),
+            resource_estimate=ReconstructionResourceEstimateV1.from_dict(
+                _mapping(data.get("resource_estimate"))
+            ),
+            carry_state=CarryStateV1.from_dict(
+                _mapping(data.get("carry_state"))
+            ),
+            decision_details=tuple(
+                str(item) for item in _sequence(data.get("decision_details"))
+            ),
+            batch_id=str(data.get("batch_id", "")),
+            schema_version=str(data.get("schema_version", "")),
         )
-    available = {
-        event.event_id for stream in streams.values() for event in stream.events
-    }
     if consumed != available:
         raise ValueError("candidate Parquet rows do not reconcile with batches")
-    return tuple(batches)
+    if restored_batch_count != expected_batch_count:
+        raise ValueError("candidate batch ledger row count differs")
+
+
+def _read_candidate_batch_ledger(
+    ref: ArtifactRef,
+) -> Iterable[Mapping[str, Any]]:
+    with Path(ref.path).open("rb") as stream:
+        for line in stream:
+            if len(line) > _MAX_CANDIDATE_BATCH_LEDGER_LINE_BYTES:
+                raise ValueError("candidate batch ledger row exceeds limit")
+            try:
+                value = json.loads(line)
+            except (UnicodeError, json.JSONDecodeError) as err:
+                raise ValueError(
+                    "candidate batch ledger row is invalid"
+                ) from err
+            yield _mapping(value)
+
+
+def _compact_query_evidence(
+    result: ReferenceMotifQueryResultV1,
+) -> dict[str, JSONValue]:
+    query = result.query
+    return {
+        "query_schema_version": query.schema_version,
+        "information_mode": query.information_mode.value,
+        "used_at_ns": query.used_at_ns,
+        "as_of_ns": query.as_of_ns,
+        "max_results": query.max_results,
+        "min_cell_support": query.min_cell_support,
+        "max_distance": query.max_distance,
+        "excluded_source_window_ids": list(query.excluded_source_window_ids),
+        "query_id": query.query_id,
+        "index_id": result.index_id,
+        "status": result.status.value,
+        "result_id": result.result_id,
+        "result_schema_version": result.schema_version,
+        "retrieval_rows_inline": False,
+    }
+
+
+def _restore_compact_query_result(
+    data: Mapping[str, Any],
+    *,
+    condition: ReferenceMotifConditionV1,
+    index: ReferenceMotifIndexV1,
+) -> ReferenceMotifQueryResultV1:
+    if data.get("retrieval_rows_inline") is not False:
+        raise ValueError("compact query evidence must not embed retrieval rows")
+    if data.get("index_id") != index.index_id:
+        raise ValueError("compact query evidence index differs")
+    query = ReferenceMotifQueryV1(
+        condition=condition,
+        information_mode=InformationMode.from_value(
+            str(data.get("information_mode", ""))
+        ),
+        used_at_ns=int(data.get("used_at_ns", 0)),
+        as_of_ns=(
+            int(data["as_of_ns"]) if data.get("as_of_ns") is not None else None
+        ),
+        max_results=int(data.get("max_results", 0)),
+        min_cell_support=(
+            int(data["min_cell_support"])
+            if data.get("min_cell_support") is not None
+            else None
+        ),
+        max_distance=(
+            float(data["max_distance"])
+            if data.get("max_distance") is not None
+            else None
+        ),
+        excluded_source_window_ids=tuple(
+            str(item)
+            for item in _sequence(data.get("excluded_source_window_ids"))
+        ),
+        query_id=str(data.get("query_id", "")),
+        schema_version=str(data.get("query_schema_version", "")),
+    )
+    result = query_reference_motifs(index, query)
+    if (
+        result.result_id != data.get("result_id")
+        or result.status.value != data.get("status")
+        or result.schema_version != data.get("result_schema_version")
+    ):
+        raise ValueError("replayed compact query evidence differs")
+    return result
 
 
 def _write_streams(

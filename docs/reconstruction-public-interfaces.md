@@ -52,9 +52,23 @@ qualified artifacts; data rows remain in their source artifacts.
   "information_mode": "ex_post_reconstruction",
   "delivery_mode": "modern_reference",
   "start_period": "201101",
-  "end_period": "201101"
+  "end_period": "201101",
+  "requested_start_ns": null,
+  "requested_end_ns": null,
+  "window_size_ns": 86400000000000
 }
 ```
+
+`window_size_ns` is a positive execution bound. Use smaller synchronized
+windows when dense monthly inputs would exceed the declared memory, scratch,
+or output policy; it changes plan and run identity and is never a hidden
+runtime override.
+
+`requested_start_ns` and `requested_end_ns` are an optional paired half-open
+UTC interval for bounded representative-window campaigns. When present, they
+must agree with any supplied `start_period` and `end_period`; the planner still
+inventories and hashes every complete monthly source partition touched by the
+interval. Omitting them preserves whole-month planning.
 
 ```sh
 histdatacom reconstruction --json plan --spec plan-spec.json
@@ -68,6 +82,38 @@ histdatacom reconstruction --json request \
 histdatacom reconstruction --json preflight \
   --request work/execution-request.json
 ```
+
+Ranges whose safe execution window would make one plan exceed the 64 MiB plan
+artifact bound use the public plan-set surface. The source specification keeps
+the exact full range and resource-safe `window_size_ns`; the command starts
+with bounded month groups and deterministically bisects them on execution-plan,
+retention, or artifact-size preflight failures:
+
+```sh
+histdatacom reconstruction --json plan-set \
+  --spec full-range-plan-spec.json \
+  --periods-per-shard 12
+
+histdatacom reconstruction --json preflight-set \
+  --plan-set work/plan-artifacts/reconstruction-plan-set-<sha256>.json
+```
+
+Every resulting shard is an ordinary `SyntheticInfillPlanV1` with its own
+hash-verified inventory, request graph, refusals, and resource limits. A fully
+unsupported span is represented by a refusal-only plan with no workflow
+requests and zero work/output estimates; it preflights only when refusals are
+explicitly allowed and cannot publish a product. Dense months may therefore
+contain multiple exact-bound shards. The parent
+`ReconstructionPlanSetV1` requires contiguous nanosecond bounds, stores strong
+plan references, and aggregates sums only for total work and output while
+retaining maxima for peak memory and scratch. Raw rows, bytes, and partitions
+are de-duplicated by immutable partition identity when dense months split into
+multiple shards. Fresh plan-set preflight hashes each unique stat-identified
+artifact once, execution-validates every shard, and rejects changed, missing,
+overlapping, or gapped content. Construction and preflight retain only compact
+resource summaries and partition identities after each full shard is handled.
+Large qualified context corpora are resolved once per unchanged device, inode,
+size, modification-time, and change-time identity set during the operation.
 
 Preflight hash-verifies the plan and its declared artifacts, validates that the
 operator information mode matches the immutable plan, and emits the bounded
@@ -148,6 +194,29 @@ The preview also carries the product validation and constraint manifests plus
 the replay logical-content hash. `replay` verifies committed files and rebuilds
 the exact streams before reporting the reconciled event count and logical hash.
 
+## Certify modern-reference evidence
+
+The certification campaign is part of the installed command family:
+
+```sh
+histdatacom reconstruction --json certify \
+  --spec evidence/campaign.json \
+  --output-directory evidence/dossier
+```
+
+The campaign fixes the broker-neutral `modern_reference` /
+`unconditioned_reference` release claim. It verifies every JSON evidence file's
+SHA-256, schema version, and subject identity before extracting a scalar through
+the JSON pointer declared by the campaign. Scalar values are not allowed inline
+in the campaign specification. The command publishes the frozen campaign,
+methodology report, canonical dossier JSON, human Markdown, and a bounded result
+receipt.
+
+An incomplete dossier exits as a scientific refusal (`3`), a measured gate
+failure exits as validation failure (`5`), and `ready-for-promotion` or
+`certified` exits successfully. Ordinary `dev` campaigns cannot include the
+promotion-only coverage observation.
+
 ## Typed Python surface
 
 ```python
@@ -155,10 +224,15 @@ from histdatacom import ReconstructionClient
 from histdatacom.reconstruction import (
     InformationMode,
     read_execution_request,
+    read_plan_spec,
     write_operation_receipt,
 )
 
 client = ReconstructionClient()
+plan_set_ref = client.construct_plan_set(
+    read_plan_spec("full-range-plan-spec.json"), periods_per_shard=12
+)
+plan_set_preflight = client.preflight_plan_set(plan_set_ref.path)
 request = client.create_request(
     "work/plan-artifacts/synthetic-infill-plan-<sha256>.json",
     information_mode=InformationMode.EX_POST_RECONSTRUCTION,
@@ -172,6 +246,10 @@ restored = read_execution_request("work/execution-request.json")
 outputs = client.outputs(restored)
 preview = client.preview(outputs["outputs"][0]["manifest_path"], limit=20)
 replay = client.replay(outputs["outputs"][0]["manifest_path"])
+certification, certification_result = client.certify(
+    "evidence/campaign.json",
+    output_directory="evidence/dossier",
+)
 ```
 
 The facade also provides asynchronous `submit_async`, `inspect_async`, and
@@ -181,11 +259,11 @@ The facade also provides asynchronous `submit_async`, `inspect_async`, and
 
 | Code | Name | Meaning |
 | ---: | --- | --- |
-| `0` | success | Plan/request created, preflight executable, submission/control accepted, status inspected, or output verified. |
+| `0` | success | Plan/request created, preflight executable, submission/control accepted, status inspected, output verified, or certification is ready/certified. |
 | `2` | invalid plan | Malformed/changed plan, unsupported schema, M1/bar/partial triangle, broker-only request, or invalid arguments. |
-| `3` | refused | Scientific/resource refusal or missing nonclaim acknowledgement. |
+| `3` | refused | Scientific/resource refusal, missing nonclaim acknowledgement, or incomplete certification evidence. |
 | `4` | runtime failure | Temporal/runtime connectivity or unexpected operational failure. |
-| `5` | validation failure | Execution completed without every selected window reaching a validated committed state. |
+| `5` | validation failure | Execution did not reach validated committed state or a measured certification gate failed. |
 
 Unsupported requests and scientific refusals retain distinct reason codes in
 JSON error/preflight output even when both stop execution before data-plane

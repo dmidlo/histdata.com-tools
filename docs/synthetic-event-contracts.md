@@ -27,6 +27,9 @@ epoch. `event_sequence` is a non-negative signed 64-bit integer assigned
 stably within one timestamp. A symbol stream rejects duplicate
 `(event_time_ns, event_sequence)` pairs and sorts by time, sequence, then event
 ID. Duplicate timestamps therefore remain distinct and deterministic.
+First-party ASCII reconstruction assigns same-timestamp observed sequences in
+immutable `(source_period, Arrow row ordinal)` order. Quote values never act as
+an ordering key.
 
 Observed event IDs are derived from schema, symbol, event position, source
 version, `source_series_id`, `source_period`, and immutable `source_row_id`.

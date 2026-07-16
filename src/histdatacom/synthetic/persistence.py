@@ -192,8 +192,11 @@ class ReconstructionRetentionPlanV1:
                 name,
                 _nonnegative_int(getattr(self, name), name),
             )
-        if self.estimated_partition_count < 1:
-            raise ValueError("estimated_partition_count must be positive")
+        has_estimated_events = any(counts.values())
+        if (self.estimated_partition_count == 0) != (not has_estimated_events):
+            raise ValueError(
+                "zero-event retention plans must have zero partitions"
+            )
         if self.estimated_bytes_per_event < 1:
             raise ValueError("estimated_bytes_per_event must be positive")
         ratio = _finite_float(
@@ -337,7 +340,7 @@ def estimate_reconstruction_retention(
     primary = _required_text(primary_member_id)
     if primary not in counts:
         raise ValueError("primary member is absent from retained estimates")
-    partition_count = _positive_int(
+    partition_count = _nonnegative_int(
         estimated_partition_count, "estimated_partition_count"
     )
     bytes_per_event = _positive_int(

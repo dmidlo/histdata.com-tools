@@ -39,7 +39,7 @@ from histdatacom.synthetic.streaming import (
 )
 
 CROSS_CURRENCY_ENGINE_ID = "histdatacom.cross-currency-reconciliation"
-CROSS_CURRENCY_ENGINE_VERSION = "1.0.0"
+CROSS_CURRENCY_ENGINE_VERSION = "1.0.1"
 CROSS_CURRENCY_SYMBOL_COVERAGE_SCHEMA_VERSION = (
     "histdatacom.cross-currency-symbol-coverage.v1"
 )
@@ -1605,25 +1605,25 @@ def reconcile_cross_currency_window(
             infeasible = False
             post = pre
             if pre > config.residual_tolerance:
-                target_symbol = _projection_symbol(relationship, matched)
-                if target_symbol is None:
+                target_symbols = _projection_symbols(relationship, matched)
+                if not target_symbols:
                     if pre > allowed:
                         infeasible = True
                 else:
-                    target_index = relationship.symbols.index(target_symbol)
-                    original = matched[target_index]
-                    target_bid, target_ask = _required_projection_quote(
-                        relationship,
-                        matched,
-                        target_symbol,
-                    )
-                    projection_relative = max(
-                        abs(target_bid - original.bid) / original.bid,
-                        abs(target_ask - original.ask) / original.ask,
-                    )
-                    if projection_relative > config.max_projection_relative:
-                        infeasible = True
-                    else:
+                    for target_symbol in target_symbols:
+                        target_index = relationship.symbols.index(target_symbol)
+                        original = matched[target_index]
+                        target_bid, target_ask = _required_projection_quote(
+                            relationship,
+                            matched,
+                            target_symbol,
+                        )
+                        projection_relative = max(
+                            abs(target_bid - original.bid) / original.bid,
+                            abs(target_ask - original.ask) / original.ask,
+                        )
+                        if projection_relative > config.max_projection_relative:
+                            continue
                         replacement = _project_quote(
                             original,
                             target_bid=target_bid,
@@ -1631,60 +1631,56 @@ def reconcile_cross_currency_window(
                             rounding_digits=config.rounding_digits,
                         )
                         if replacement is None:
-                            infeasible = True
-                        else:
-                            projected_events = list(matched)
-                            projected_events[target_index] = replacement
-                            projected_tuple = tuple(projected_events)
-                            post = _relationship_residual(
-                                relationship, projected_tuple
+                            continue
+                        projected_events = list(matched)
+                        projected_events[target_index] = replacement
+                        projected_tuple = tuple(projected_events)
+                        candidate_post = _relationship_residual(
+                            relationship, projected_tuple
+                        )
+                        post_allowed = _allowed_residual(
+                            relationship, projected_tuple, config
+                        )
+                        if candidate_post > post_allowed:
+                            continue
+                        events[target_symbol][original.event_id] = replacement
+                        matched = projected_tuple
+                        post = candidate_post
+                        allowed = post_allowed
+                        projected = True
+                        condition_ids = tuple(
+                            item.condition_id
+                            for item in condition_tuple
+                            if item.covers(original.event_time_ns)
+                        )
+                        lineage.append(
+                            CrossCurrencyProjectionLineageV1(
+                                relationship_id=relationship.relationship_id,
+                                symbol=target_symbol,
+                                event_time_ns=original.event_time_ns,
+                                event_sequence=original.event_sequence,
+                                input_event_id=original.event_id,
+                                output_event_id=replacement.event_id,
+                                input_content_sha256=_event_content_sha256(
+                                    original
+                                ),
+                                output_content_sha256=_event_content_sha256(
+                                    replacement
+                                ),
+                                original_bid=original.bid,
+                                original_ask=original.ask,
+                                output_bid=replacement.bid,
+                                output_ask=replacement.ask,
+                                pre_residual=pre,
+                                post_residual=post,
+                                allowed_residual=allowed,
+                                projection_relative=projection_relative,
+                                condition_ids=condition_ids,
                             )
-                            post_allowed = _allowed_residual(
-                                relationship, projected_tuple, config
-                            )
-                            if post > post_allowed:
-                                infeasible = True
-                            else:
-                                events[target_symbol][
-                                    original.event_id
-                                ] = replacement
-                                matched = projected_tuple
-                                allowed = post_allowed
-                                projected = True
-                                condition_ids = tuple(
-                                    item.condition_id
-                                    for item in condition_tuple
-                                    if item.covers(original.event_time_ns)
-                                )
-                                lineage.append(
-                                    CrossCurrencyProjectionLineageV1(
-                                        relationship_id=(
-                                            relationship.relationship_id
-                                        ),
-                                        symbol=target_symbol,
-                                        event_time_ns=original.event_time_ns,
-                                        event_sequence=original.event_sequence,
-                                        input_event_id=original.event_id,
-                                        output_event_id=replacement.event_id,
-                                        input_content_sha256=_event_content_sha256(
-                                            original
-                                        ),
-                                        output_content_sha256=_event_content_sha256(
-                                            replacement
-                                        ),
-                                        original_bid=original.bid,
-                                        original_ask=original.ask,
-                                        output_bid=replacement.bid,
-                                        output_ask=replacement.ask,
-                                        pre_residual=pre,
-                                        post_residual=post,
-                                        allowed_residual=allowed,
-                                        projection_relative=(
-                                            projection_relative
-                                        ),
-                                        condition_ids=condition_ids,
-                                    )
-                                )
+                        )
+                        break
+                    if not projected:
+                        infeasible = True
             if infeasible:
                 failures.append(
                     f"infeasible_relationship_point:"
@@ -1961,7 +1957,7 @@ def _validation_report(
     failures: Iterable[str],
 ) -> CrossCurrencyValidationReportV1:
     topology = _event_time_topology(streams, window)
-    reasons = tuple(sorted(set(failures)))
+    reasons = _bounded_failure_reasons(failures)
     supports = tuple(
         _relationship_support(relationship_id, accumulator)
         for relationship_id, accumulator in sorted(accumulators.items())
@@ -2007,6 +2003,23 @@ def _validation_report(
         anchor_preserved=anchor_preserved,
         output_content_sha256=_streams_content_sha256(streams),
         failure_reasons=reasons,
+    )
+
+
+def _bounded_failure_reasons(failures: Iterable[str]) -> tuple[str, ...]:
+    """Retain deterministic refusal evidence without crashing large windows."""
+    reasons = tuple(sorted(set(failures)))
+    if len(reasons) <= MAX_CROSS_CURRENCY_FAILURE_REASONS:
+        return reasons
+    digest = hashlib.sha256(
+        str(canonical_contract_json(list(reasons))).encode("utf-8")
+    ).hexdigest()
+    summary = (
+        "failure_reasons_truncated:" f"total={len(reasons)}:sha256={digest}"
+    )
+    return (
+        *reasons[: MAX_CROSS_CURRENCY_FAILURE_REASONS - 1],
+        summary,
     )
 
 
@@ -2183,15 +2196,16 @@ def _allowed_residual(
     )
 
 
-def _projection_symbol(
+def _projection_symbols(
     relationship: CrossCurrencyRelationshipV1,
     events: Sequence[SyntheticEventV1],
-) -> str | None:
+) -> tuple[str, ...]:
     by_symbol = {item.symbol: item for item in events}
-    for symbol in relationship.projection_priority:
-        if by_symbol[symbol].origin is SyntheticEventOrigin.SYNTHETIC:
-            return symbol
-    return None
+    return tuple(
+        symbol
+        for symbol in relationship.projection_priority
+        if by_symbol[symbol].origin is SyntheticEventOrigin.SYNTHETIC
+    )
 
 
 def _required_projection_quote(

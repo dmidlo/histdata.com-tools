@@ -163,6 +163,28 @@ def test_real_triangle_is_deterministic_and_recovers_post_rename_crash(
         assert telemetry["scratch_bytes"] >= 0
         assert telemetry["output_bytes"] > 0
         assert "candidate_amplification" in telemetry
+    carving_outcome = next(
+        outcome
+        for outcome in recovered.outcomes
+        if outcome.stage is ReconstructionStage.CARVING
+    )
+    carving_ref = carving_outcome.output_refs[0]
+    carving_manifest = json.loads(
+        Path(carving_ref.path).read_text(encoding="utf-8")
+    )
+    assert carving_ref.size_bytes is not None
+    assert carving_ref.size_bytes < 1_000_000
+    assert carving_manifest["carved_batches_inline"] is False
+    ledger_ref = ArtifactRef.from_dict(
+        carving_manifest["carved_batch_ledger_ref"]
+    )
+    assert ledger_ref.kind == "reconstruction_carved_batch_ledger_v1"
+    assert (
+        ledger_ref.metadata["batch_count"]
+        == carving_manifest["carved_batch_count"]
+    )
+    with Path(ledger_ref.path).open("rb") as stream:
+        assert sum(1 for _ in stream) == carving_manifest["carved_batch_count"]
 
     second = _case(tmp_path / "concurrency-2", max_parallel_windows=2)
     second_state = asyncio.run(
@@ -262,6 +284,7 @@ def test_real_public_cli_and_api_execute_same_one_window_product(
         ensemble_member_count=1,
         retained_member_count=1,
         workflow_request_count=1,
+        estimated_input_event_count=estimate.input_event_count,
         estimated_candidate_event_count=estimate.candidate_event_count,
         estimated_candidate_bytes=estimate.estimated_scratch_bytes,
         estimated_peak_memory_bytes=estimate.estimated_memory_bytes,
@@ -321,11 +344,19 @@ def test_real_public_cli_and_api_execute_same_one_window_product(
         execution_request, window_id=case.task.window.window_id
     )
     manifest_path = cli_receipt.reports[0].committed_manifest_refs[0].path
+    manifest = load_reconstruction_manifest(manifest_path)
+    assert isinstance(manifest, ReconstructionProductManifestV2)
 
     assert cli_run["status"] == "committed"
     assert cli_receipt.reports == api_receipt.reports
-    assert cli_receipt.reports[0].observed_event_count == 81
-    assert cli_receipt.reports[0].synthetic_event_count == 39
+    assert (
+        cli_receipt.reports[0].observed_event_count
+        == manifest.observed_event_count
+    )
+    assert (
+        cli_receipt.reports[0].synthetic_event_count
+        == manifest.synthetic_event_count
+    )
 
     api_preview = client.preview(manifest_path, limit=100)
     assert (
@@ -366,7 +397,7 @@ def test_real_public_cli_and_api_execute_same_one_window_product(
     assert synthetic["constraint_decision"]["constraint_set_id"]
     assert synthetic["lineage"]["left_anchor_event_id"]
     assert synthetic["lineage"]["right_anchor_event_id"]
-    assert api_replay["event_count"] == 120
+    assert api_replay["event_count"] == manifest.event_count
     assert api_replay["replay_verified"]
 
 
@@ -447,11 +478,15 @@ def _case(
                 configuration_refs=(execution_ref,),
             )
         )
+    integration_input_event_estimate = 5_000
     task = ReconstructionWindowTaskV1(
         window=window,
         resource_estimate=ReconstructionResourceEstimateV1(
-            input_event_count=5_000,
-            candidate_event_count=1_000,
+            input_event_count=integration_input_event_estimate,
+            candidate_event_count=int(
+                integration_input_event_estimate
+                * plan.run.storage_policy.max_candidate_amplification
+            ),
             retained_ensemble_members=1,
             inflight_batches=1,
             peak_events_per_batch=1_000,

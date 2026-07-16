@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 import hashlib
+import json
 
 import pytest
 
@@ -18,6 +19,7 @@ from histdatacom.market_context import (
     MarketContextView,
 )
 from histdatacom.runtime_contracts import ArtifactRef
+from histdatacom.orchestration.reconstruction import artifact_ref_for_file
 from histdatacom.synthetic import (
     CANDIDATE_ONLY_CONSTRAINT_SET_ID,
     EMPIRICAL_MOTIF_GENERATOR_ID,
@@ -57,6 +59,7 @@ from histdatacom.synthetic import (
     ReverseDegradationBenchmarkManifestV1,
     ReverseDegradationBenchmarkV1,
     SyntheticEventOrigin,
+    SyntheticEventStreamV1,
     SyntheticEventV1,
     build_benchmark_control_windows,
     build_reference_motif_index,
@@ -64,6 +67,13 @@ from histdatacom.synthetic import (
     generate_benchmark_candidate_window,
     generate_empirical_motif_candidates,
     query_reference_motifs,
+    write_synthetic_event_stream_parquet,
+)
+from histdatacom.synthetic.reconstruction_handlers import (
+    _candidate_evidence,
+    _proposal_synchronization_event_time,
+    _restore_candidate_batches,
+    _source_row_order_key,
 )
 
 BASE_NS = 1_700_000_000_000_000_000
@@ -419,10 +429,221 @@ def test_cardinality_tracks_conditioned_tick_intensity(
         for event in batch.events
     )
     assert all(event.confidence is None for event in batch.events)
+
+
+def test_required_cross_series_time_survives_empirical_motif_warp() -> None:
+    condition = _condition(intensity=8.0)
+    index = _index(condition)
+    config = EmpiricalMotifGeneratorConfigV1()
+    run = _run(config)
+    left = _anchor(run, BASE_NS, sequence=0, row_id=1)
+    right = _anchor(run, BASE_NS + SECOND, sequence=99, row_id=2)
+    required = BASE_NS + 333_000_000
+
+    batch = generate_empirical_motif_candidates(
+        run=run,
+        window=_window(run, BASE_NS, BASE_NS + SECOND + 1),
+        left_anchor=left,
+        right_anchor=right,
+        query_result=_result(index, condition),
+        config=config,
+        required_event_time_ns=required,
+    )
+    replay = generate_empirical_motif_candidates(
+        run=run,
+        window=_window(run, BASE_NS, BASE_NS + SECOND + 1),
+        left_anchor=left,
+        right_anchor=right,
+        query_result=_result(index, condition),
+        config=config,
+        required_event_time_ns=required,
+    )
+
+    assert required in {event.event_time_ns for event in batch.events}
+    assert replay.batch_id == batch.batch_id
+    assert replay.events == batch.events
+
+    with pytest.raises(ValueError, match="inside the anchor interval"):
+        generate_empirical_motif_candidates(
+            run=run,
+            window=_window(run, BASE_NS, BASE_NS + SECOND + 1),
+            left_anchor=left,
+            right_anchor=right,
+            query_result=_result(index, condition),
+            config=config,
+            required_event_time_ns=right.event_time_ns,
+        )
     assert all(0.0 <= item.confidence <= 1.0 for item in batch.transformations)
     assert MOTIF_TRANSFORMATION_CONFIDENCE_QUANTITY == (
         "uncalibrated-motif-match-similarity-v1"
     )
+
+
+def test_proposal_query_evidence_is_compact_and_restores_incrementally(
+    tmp_path,
+) -> None:
+    condition = _condition()
+    index = _index(condition)
+    config = EmpiricalMotifGeneratorConfigV1()
+    run = _run(config)
+    left = _anchor(run, BASE_NS, sequence=0, row_id=1)
+    right = _anchor(run, BASE_NS + SECOND, sequence=99, row_id=2)
+    result = _result(index, condition)
+    batch = generate_empirical_motif_candidates(
+        run=run,
+        window=_window(run, BASE_NS, BASE_NS + SECOND + 1),
+        left_anchor=left,
+        right_anchor=right,
+        query_result=result,
+        config=config,
+    )
+    evidence = _candidate_evidence(batch)
+    candidate_path = tmp_path / "candidates.parquet"
+    write_synthetic_event_stream_parquet(
+        SyntheticEventStreamV1(
+            run_id=run.run_id,
+            ensemble_member_id=MEMBER_ID,
+            symbol=batch.symbol,
+            events=batch.events,
+            source_version_ids=run.source_version_ids,
+        ),
+        candidate_path,
+    )
+    candidate_ref = artifact_ref_for_file(
+        candidate_path, kind="reconstruction_candidate_stream_v1"
+    )
+    ledger_path = tmp_path / "candidate-batches.ndjson"
+    ledger_path.write_text(
+        json.dumps(evidence, sort_keys=True, separators=(",", ":")) + "\n",
+        encoding="utf-8",
+    )
+    ledger_ref = artifact_ref_for_file(
+        ledger_path,
+        kind="reconstruction_candidate_batch_ledger_v1",
+        metadata={
+            "batch_count": 1,
+            "format": "canonical-json-lines-v1",
+        },
+    )
+    manifest = {
+        "batch_ledger_ref": ledger_ref.to_dict(),
+        "batches_inline": False,
+        "batch_count": 1,
+        "candidate_stream_refs": {batch.symbol: candidate_ref.to_dict()},
+        "generator_config": config.to_dict(),
+        "query_conditions": {batch.symbol: condition.to_dict()},
+        "motif_index_id": index.index_id,
+    }
+
+    restored = tuple(_restore_candidate_batches(manifest, index=index))
+
+    assert restored == (batch,)
+    assert "query_result" not in evidence
+    assert evidence["query_evidence"]["retrieval_rows_inline"] is False
+    assert len(json.dumps(evidence["query_evidence"])) < len(result.to_json())
+
+
+def test_source_duplicate_order_uses_partition_row_not_quote_value() -> None:
+    """Equal timestamps retain immutable Arrow order across quote changes."""
+    later_row_with_lower_bid = (
+        BASE_NS,
+        1.10,
+        1.11,
+        "201101",
+        8,
+        "ascii-tick:eurgbp:201101",
+    )
+    earlier_row_with_higher_bid = (
+        BASE_NS,
+        1.20,
+        1.21,
+        "201101",
+        7,
+        "ascii-tick:eurgbp:201101",
+    )
+
+    ordered = sorted(
+        (later_row_with_lower_bid, earlier_row_with_higher_bid),
+        key=_source_row_order_key,
+    )
+
+    assert ordered == [
+        earlier_row_with_higher_bid,
+        later_row_with_lower_bid,
+    ]
+
+
+def test_triangle_synchronization_time_uses_sparsest_aligned_observed_anchor() -> (
+    None
+):
+    config = EmpiricalMotifGeneratorConfigV1()
+    run = ReconstructionRunV1(
+        symbols=("EURUSD", "GBPUSD", "EURGBP"),
+        source_version_ids=(SOURCE_VERSION_ID,),
+        configuration_ids=(config.config_id,),
+        ensemble_member_ids=(MEMBER_ID,),
+        base_seed=7,
+    )
+    precision = 250_000_000
+    feed_phase = 243_000_000
+    streams: dict[str, SyntheticEventStreamV1] = {}
+    conditions: dict[str, ReferenceMotifConditionV1] = {}
+    for symbol, offsets_ns in {
+        "EURUSD": (143_000_000, 643_000_000, 1_143_000_000),
+        "GBPUSD": (193_000_000, 693_000_000, 1_193_000_000),
+        "EURGBP": (feed_phase, 743_000_000, 1_243_000_000),
+    }.items():
+        events = tuple(
+            SyntheticEventV1.observed(
+                symbol=symbol,
+                event_time_ns=BASE_NS + offset_ns,
+                event_sequence=0,
+                bid=1.1,
+                ask=1.1002,
+                run_id=run.run_id,
+                ensemble_member_id=MEMBER_ID,
+                source_version_id=SOURCE_VERSION_ID,
+                source_series_id=f"ascii:T:{symbol}:histdata.com",
+                source_period="202001",
+                source_row_id=row_id,
+            )
+            for row_id, offset_ns in enumerate(offsets_ns, start=1)
+        )
+        streams[symbol] = SyntheticEventStreamV1.merge(
+            run_id=run.run_id,
+            ensemble_member_id=MEMBER_ID,
+            symbol=symbol,
+            observed_events=events,
+            synthetic_events=(),
+            source_version_ids=run.source_version_ids,
+        )
+        conditions[symbol] = replace(
+            _condition(
+                intensity=1.0 if symbol == "EURGBP" else 8.0,
+                timestamp_precision_ns=float(precision),
+            ),
+            symbol=symbol,
+        )
+
+    selected = _proposal_synchronization_event_time(
+        streams,
+        conditions=conditions,
+        start_ns=BASE_NS,
+        end_ns=BASE_NS + 1_500_000_000,
+    )
+
+    assert selected == BASE_NS + 743_000_000
+    assert selected % precision == feed_phase
+    assert (
+        sum(
+            selected in {event.event_time_ns for event in stream.events}
+            for stream in streams.values()
+        )
+        == 1
+    )
+    assert selected in {
+        event.event_time_ns for event in streams["EURGBP"].events
+    }
 
 
 def test_cardinality_falls_back_to_conditioned_interarrival_cadence() -> None:

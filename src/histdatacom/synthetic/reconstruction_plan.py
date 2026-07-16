@@ -14,6 +14,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
+from functools import lru_cache
 import hashlib
 import json
 import math
@@ -133,6 +134,9 @@ DEFAULT_RECONSTRUCTION_WINDOW_SIZE_NS = 30 * 24 * 60 * 60 * 1_000_000_000
 DEFAULT_RECONSTRUCTION_REQUEST_WINDOW_LIMIT = 32
 DEFAULT_RECONSTRUCTION_MAX_PARALLEL_WINDOWS = 2
 DEFAULT_RECONSTRUCTION_BASE_SEED = 20260715
+_RESOURCE_FIXED_OVERHEAD_BYTES = 512 * 1024 * 1024
+_RESOURCE_LEDGER_BYTES_PER_INTERVAL = 8 * 1024
+_SOURCE_ROW_DENSITY_SAFETY_FACTOR = 4
 MAX_RECONSTRUCTION_PLAN_ARTIFACTS = 64
 MAX_RECONSTRUCTION_PLAN_REFUSALS = 4096
 MAX_RECONSTRUCTION_PLAN_REQUESTS = 4096
@@ -154,12 +158,12 @@ TICK_ONLY_INPUT_POLICY = (
 
 FIRST_PARTY_RECONSTRUCTION_HANDLERS: Mapping[ReconstructionStage, str] = {
     ReconstructionStage.SOURCE_ENRICHMENT: (
-        "histdatacom.reconstruction.source-enrichment.v1"
+        "histdatacom.reconstruction.source-enrichment.v2"
     ),
-    ReconstructionStage.PROPOSAL: "histdatacom.reconstruction.proposal.v1",
-    ReconstructionStage.CARVING: "histdatacom.reconstruction.carving.v1",
+    ReconstructionStage.PROPOSAL: "histdatacom.reconstruction.proposal.v6",
+    ReconstructionStage.CARVING: "histdatacom.reconstruction.carving.v3",
     ReconstructionStage.CROSS_SERIES_RECONCILIATION: (
-        "histdatacom.reconstruction.cross-series-reconciliation.v1"
+        "histdatacom.reconstruction.cross-series-reconciliation.v4"
     ),
     ReconstructionStage.BROKER_TRANSFER: (
         "histdatacom.reconstruction.delivery-projection.v1"
@@ -717,6 +721,7 @@ class ReconstructionPlanResourceSummaryV1:
     ensemble_member_count: int
     retained_member_count: int
     workflow_request_count: int
+    estimated_input_event_count: int
     estimated_candidate_event_count: int
     estimated_candidate_bytes: int
     estimated_peak_memory_bytes: int
@@ -743,6 +748,7 @@ class ReconstructionPlanResourceSummaryV1:
             "ensemble_member_count",
             "retained_member_count",
             "workflow_request_count",
+            "estimated_input_event_count",
             "estimated_candidate_event_count",
             "estimated_candidate_bytes",
             "estimated_peak_memory_bytes",
@@ -757,13 +763,35 @@ class ReconstructionPlanResourceSummaryV1:
             self.executable_window_count + self.refused_window_count
         ):
             raise ValueError("planned window counts do not reconcile")
-        if not self.executable_window_count or not self.ensemble_member_count:
-            raise ValueError(
-                "resource summary requires executable ensemble work"
-            )
+        if not self.ensemble_member_count:
+            raise ValueError("resource summary requires an ensemble")
         if not 1 <= self.retained_member_count <= self.ensemble_member_count:
             raise ValueError("retained member count is outside ensemble")
-        if not self.workflow_request_count:
+        if self.executable_window_count == 0:
+            if self.refused_window_count != self.planned_window_count:
+                raise ValueError(
+                    "zero-work resource summary requires every window refused"
+                )
+            if self.workflow_request_count:
+                raise ValueError(
+                    "zero-work resource summary cannot contain workflow requests"
+                )
+            if any(
+                getattr(self, name)
+                for name in (
+                    "estimated_input_event_count",
+                    "estimated_candidate_event_count",
+                    "estimated_candidate_bytes",
+                    "estimated_peak_memory_bytes",
+                    "estimated_peak_scratch_bytes",
+                    "estimated_output_bytes",
+                    "estimated_partition_count",
+                )
+            ):
+                raise ValueError(
+                    "zero-work resource summary must have zero work estimates"
+                )
+        elif not self.workflow_request_count:
             raise ValueError("resource summary requires workflow requests")
         expected = _stable_id(
             "reconstruction-plan-resources", self.identity_payload()
@@ -774,9 +802,12 @@ class ReconstructionPlanResourceSummaryV1:
 
     @property
     def candidate_amplification(self) -> float:
-        if not self.source_event_count:
+        if not self.estimated_input_event_count:
             return 0.0
-        return self.estimated_candidate_event_count / self.source_event_count
+        return (
+            self.estimated_candidate_event_count
+            / self.estimated_input_event_count
+        )
 
     def identity_payload(self) -> dict[str, JSONValue]:
         return {
@@ -789,6 +820,7 @@ class ReconstructionPlanResourceSummaryV1:
             "ensemble_member_count": self.ensemble_member_count,
             "retained_member_count": self.retained_member_count,
             "workflow_request_count": self.workflow_request_count,
+            "estimated_input_event_count": self.estimated_input_event_count,
             "estimated_candidate_event_count": self.estimated_candidate_event_count,
             "estimated_candidate_bytes": self.estimated_candidate_bytes,
             "estimated_peak_memory_bytes": self.estimated_peak_memory_bytes,
@@ -840,6 +872,13 @@ class ReconstructionPlanResourceSummaryV1:
             ),
             workflow_request_count=_strict_int(
                 data.get("workflow_request_count"), "workflow_request_count"
+            ),
+            estimated_input_event_count=_strict_int(
+                data.get(
+                    "estimated_input_event_count",
+                    data.get("source_event_count"),
+                ),
+                "estimated_input_event_count",
             ),
             estimated_candidate_event_count=_strict_int(
                 data.get("estimated_candidate_event_count"),
@@ -966,7 +1005,7 @@ class ReconstructionPlanExecutionManifestV1:
         planned = _positive_int(
             self.planned_window_count, "planned_window_count"
         )
-        executable = _positive_int(
+        executable = _nonnegative_int(
             self.executable_window_count, "executable_window_count"
         )
         if executable > planned:
@@ -1190,7 +1229,7 @@ class SyntheticInfillPlanV1:
         requests = tuple(
             sorted(self.workflow_requests, key=lambda item: item.request_id)
         )
-        if not requests or len(requests) > MAX_RECONSTRUCTION_PLAN_REQUESTS:
+        if len(requests) > MAX_RECONSTRUCTION_PLAN_REQUESTS:
             raise ValueError(
                 "synthetic infill workflow request count is outside limits"
             )
@@ -1414,6 +1453,8 @@ def build_synthetic_infill_plan(
     symbols: Iterable[str] = EURUSD_TRIANGLE_SYMBOLS,
     start_period: str | None = None,
     end_period: str | None = None,
+    requested_start_ns: int | None = None,
+    requested_end_ns: int | None = None,
     information_mode: InformationMode = InformationMode.EX_POST_RECONSTRUCTION,
     delivery_mode: ReconstructionDeliveryMode = (
         ReconstructionDeliveryMode.MODERN_REFERENCE
@@ -1484,8 +1525,32 @@ def build_synthetic_infill_plan(
     all_common_periods = _common_source_periods(
         resolved.feed_epoch_definition, selected_symbols
     )
-    first_period = _period(start_period or all_common_periods[0])
-    last_period = _period(end_period or all_common_periods[-1])
+    if (requested_start_ns is None) != (requested_end_ns is None):
+        raise ReconstructionPlanCompatibilityError(
+            "requested_start_ns and requested_end_ns must be supplied together"
+        )
+    if requested_start_ns is None:
+        first_period = _period(start_period or all_common_periods[0])
+        last_period = _period(end_period or all_common_periods[-1])
+        requested_start = _month_start_ns(first_period)
+        requested_end = _month_start_ns(_next_period(last_period))
+    else:
+        requested_start = _int64(requested_start_ns, "requested_start_ns")
+        requested_end = _int64(requested_end_ns, "requested_end_ns")
+        if requested_end <= requested_start:
+            raise ReconstructionPlanCompatibilityError(
+                "requested nanosecond interval is empty"
+            )
+        first_period = _period_for_ns(requested_start)
+        last_period = _period_for_ns(requested_end - 1)
+        if start_period is not None and _period(start_period) != first_period:
+            raise ReconstructionPlanCompatibilityError(
+                "start_period differs from requested_start_ns"
+            )
+        if end_period is not None and _period(end_period) != last_period:
+            raise ReconstructionPlanCompatibilityError(
+                "end_period differs from requested_end_ns"
+            )
     if first_period > last_period:
         raise ReconstructionPlanCompatibilityError(
             "start_period follows end_period"
@@ -1500,8 +1565,6 @@ def build_synthetic_infill_plan(
         raise ReconstructionPlanCompatibilityError(
             "requested source periods are not a complete common triangle range"
         )
-    requested_start = _month_start_ns(first_period)
-    requested_end = _month_start_ns(_next_period(last_period))
     _reject_ex_ante_artifact_leakage(
         mode=mode,
         requested_start_ns=requested_start,
@@ -1654,10 +1717,6 @@ def build_synthetic_infill_plan(
         positioning=resolved.cftc_positioning,
         mode=mode,
     )
-    if not executable_boundaries:
-        raise ReconstructionPlanCompatibilityError(
-            "every requested window was refused by scientific preflight"
-        )
     executable_keys = {
         (item.core_start_ns, item.core_end_ns) for item in executable_boundaries
     }
@@ -1701,6 +1760,9 @@ def build_synthetic_infill_plan(
     candidate_events_per_member = sum(
         item.candidate_event_count for item in estimates_by_boundary.values()
     )
+    input_events_per_member = sum(
+        item.input_event_count for item in estimates_by_boundary.values()
+    )
     retained_ids = tuple(
         item.member_id
         for item in ensemble_plan.members[
@@ -1709,6 +1771,8 @@ def build_synthetic_infill_plan(
     )
     estimated_partition_count = (
         len(executable_boundaries) * len(retained_ids) * len(selected_symbols)
+        if candidate_events_per_member
+        else 0
     )
     retention_plan = estimate_reconstruction_retention(
         run_id=ensemble_plan.run.run_id,
@@ -1778,6 +1842,7 @@ def build_synthetic_infill_plan(
     maximum_estimate = max(
         estimates_by_boundary.values(),
         key=lambda item: item.estimated_memory_bytes,
+        default=None,
     )
     total_candidate_events = candidate_events_per_member * len(
         ensemble_plan.members
@@ -1791,16 +1856,23 @@ def build_synthetic_infill_plan(
         ensemble_member_count=len(ensemble_plan.members),
         retained_member_count=len(retained_ids),
         workflow_request_count=len(workflows),
+        estimated_input_event_count=(
+            input_events_per_member * len(ensemble_plan.members)
+        ),
         estimated_candidate_event_count=total_candidate_events,
         estimated_candidate_bytes=(
             total_candidate_events * selected_ensemble.estimated_bytes_per_event
         ),
         estimated_peak_memory_bytes=(
-            maximum_estimate.estimated_memory_bytes
+            (maximum_estimate.estimated_memory_bytes if maximum_estimate else 0)
             * configuration.max_parallel_windows
         ),
         estimated_peak_scratch_bytes=(
-            maximum_estimate.estimated_scratch_bytes
+            (
+                maximum_estimate.estimated_scratch_bytes
+                if maximum_estimate
+                else 0
+            )
             * configuration.max_parallel_windows
         ),
         estimated_output_bytes=retention_plan.estimated_total_output_bytes,
@@ -1835,9 +1907,17 @@ def validate_synthetic_infill_plan_for_execution(
     execution_ref = plan.artifact_graph["execution_manifest"]
     configuration_ref = plan.artifact_graph["configuration"]
     inventory_ref = plan.artifact_graph["source_inventory"]
+    verified_refs: set[tuple[str, str, int | None, str]] = set()
+
+    def verify_once(ref: ArtifactRef) -> None:
+        key = (ref.kind, ref.path, ref.size_bytes, ref.sha256)
+        if key not in verified_refs:
+            verify_artifact_ref(ref)
+            verified_refs.add(key)
+
     if verify_artifacts:
         for ref in plan.artifact_graph.values():
-            verify_artifact_ref(ref)
+            verify_once(ref)
     execution = read_reconstruction_plan_execution_manifest(execution_ref.path)
     configuration = read_reconstruction_plan_configuration(
         configuration_ref.path
@@ -1880,7 +1960,7 @@ def validate_synthetic_infill_plan_for_execution(
                             and not verify_source_partitions
                         ):
                             continue
-                        verify_artifact_ref(ref)
+                        verify_once(ref)
     return plan
 
 
@@ -1968,6 +2048,57 @@ def load_reconstruction_stage_plan(
 
 
 def _resolve_plan_inputs(
+    *,
+    feed_epoch_definition_path: str | Path,
+    observation_operator_path: str | Path,
+    market_context_corpus_path: str | Path,
+    cftc_positioning_corpus_path: str | Path,
+    benchmark_manifest_path: str | Path,
+    motif_manifest_path: str | Path,
+    motif_index_path: str | Path,
+    motif_qualification_path: str | Path,
+    motif_leakage_audit_path: str | Path,
+    symbols: tuple[str, ...],
+) -> _ResolvedPlanInputs:
+    """Resolve qualified inputs once per unchanged stat-identity set."""
+    identities = tuple(
+        _file_stat_identity(path)
+        for path in (
+            feed_epoch_definition_path,
+            observation_operator_path,
+            market_context_corpus_path,
+            cftc_positioning_corpus_path,
+            benchmark_manifest_path,
+            motif_manifest_path,
+            motif_index_path,
+            motif_qualification_path,
+            motif_leakage_audit_path,
+        )
+    )
+    return _resolve_plan_inputs_for_identity(identities, symbols)
+
+
+@lru_cache(maxsize=4)
+def _resolve_plan_inputs_for_identity(
+    identities: tuple[tuple[str, int, int, int, int, int], ...],
+    symbols: tuple[str, ...],
+) -> _ResolvedPlanInputs:
+    paths = tuple(item[0] for item in identities)
+    return _resolve_plan_inputs_uncached(
+        feed_epoch_definition_path=paths[0],
+        observation_operator_path=paths[1],
+        market_context_corpus_path=paths[2],
+        cftc_positioning_corpus_path=paths[3],
+        benchmark_manifest_path=paths[4],
+        motif_manifest_path=paths[5],
+        motif_index_path=paths[6],
+        motif_qualification_path=paths[7],
+        motif_leakage_audit_path=paths[8],
+        symbols=symbols,
+    )
+
+
+def _resolve_plan_inputs_uncached(
     *,
     feed_epoch_definition_path: str | Path,
     observation_operator_path: str | Path,
@@ -2161,6 +2292,21 @@ def _resolve_plan_inputs(
         motif_manifest=motif_manifest,
         motif_qualification=qualification,
         motif_leakage_audit=leakage,
+    )
+
+
+def _file_stat_identity(
+    path: str | Path,
+) -> tuple[str, int, int, int, int, int]:
+    target = Path(path).expanduser().resolve()
+    stat = target.stat()
+    return (
+        str(target),
+        stat.st_dev,
+        stat.st_ino,
+        stat.st_size,
+        stat.st_mtime_ns,
+        stat.st_ctime_ns,
     )
 
 
@@ -2443,35 +2589,65 @@ def _window_resource_estimate(
     configuration: ReconstructionPlanConfigurationV1,
 ) -> ReconstructionResourceEstimateV1:
     partitions = inventory.partitions_for_window(window)
-    input_count = sum(item.row_count for item in partitions)
+    input_count = sum(
+        _estimated_window_partition_rows(window, item) for item in partitions
+    )
+    interval_count = max(0, input_count - len(inventory.symbols))
     generator_limit = (
-        configuration.generator_config.max_events_per_interval
-        * len(inventory.symbols)
+        configuration.generator_config.max_events_per_interval * interval_count
     )
     amplification_limit = math.floor(
         input_count * configuration.storage_policy.max_candidate_amplification
     )
     candidates = min(generator_limit, amplification_limit)
     batch_limit = configuration.storage_policy.max_events_per_batch
-    batch_count = math.ceil(candidates / batch_limit) if candidates else 0
+    batch_count = interval_count
     inflight = min(
         batch_count, configuration.storage_policy.max_inflight_batches
     )
     peak = min(candidates, batch_limit)
     bytes_per_event = configuration.generator_config.estimated_bytes_per_event
+    estimated_memory = (
+        _RESOURCE_FIXED_OVERHEAD_BYTES
+        + (input_count * bytes_per_event)
+        + (peak * bytes_per_event * max(1, inflight))
+    )
+    ledger_bytes = batch_count * _RESOURCE_LEDGER_BYTES_PER_INTERVAL
     estimate = ReconstructionResourceEstimateV1(
         input_event_count=input_count,
         candidate_event_count=candidates,
         retained_ensemble_members=1,
         inflight_batches=inflight,
         peak_events_per_batch=peak,
-        estimated_memory_bytes=peak * bytes_per_event * max(1, inflight),
-        estimated_scratch_bytes=candidates * bytes_per_event,
+        estimated_memory_bytes=estimated_memory,
+        estimated_scratch_bytes=(candidates * bytes_per_event) + ledger_bytes,
         estimated_output_bytes=candidates * bytes_per_event,
         estimated_batch_count=batch_count,
     )
     configuration.storage_policy.preflight(estimate)
     return estimate
+
+
+def _estimated_window_partition_rows(
+    window: ReconstructionWindowV1,
+    partition: ReconstructionSourcePartitionV1,
+) -> int:
+    """Conservatively scale monthly rows to a bounded execution window."""
+    first_ns = partition.first_timestamp_ms * 1_000_000
+    last_exclusive_ns = (partition.last_timestamp_ms + 1) * 1_000_000
+    overlap_start = max(window.input_start_ns, first_ns)
+    overlap_end = min(window.input_end_ns, last_exclusive_ns)
+    if overlap_end <= overlap_start:
+        return 0
+    observed_span = max(1, last_exclusive_ns - first_ns)
+    overlap_span = overlap_end - overlap_start
+    proportional = math.ceil(partition.row_count * overlap_span / observed_span)
+    return int(
+        min(
+            partition.row_count,
+            max(2, proportional * _SOURCE_ROW_DENSITY_SAFETY_FACTOR),
+        )
+    )
 
 
 def _build_workflow_requests(
@@ -2898,6 +3074,12 @@ def _month_start_ns(value: str) -> int:
     )
 
 
+def _period_for_ns(value: int) -> str:
+    timestamp = _int64(value, "requested timestamp")
+    selected = datetime.fromtimestamp(timestamp // 1_000_000_000, timezone.utc)
+    return f"{selected.year:04d}{selected.month:02d}"
+
+
 def _period(value: str) -> str:
     normalized = str(value).strip()
     if _PERIOD_RE.fullmatch(normalized) is None:
@@ -2972,9 +3154,36 @@ def _contract_sha256(contract: Any) -> str:
 
 
 def _file_sha256(path: Path) -> str:
+    target = path.resolve()
+    try:
+        stat = target.stat()
+    except OSError as err:
+        raise ReconstructionPlanCompatibilityError(
+            f"source artifact cannot be hashed: {target}"
+        ) from err
+    return _file_sha256_for_identity(
+        str(target),
+        stat.st_dev,
+        stat.st_ino,
+        stat.st_size,
+        stat.st_mtime_ns,
+        stat.st_ctime_ns,
+    )
+
+
+@lru_cache(maxsize=8192)
+def _file_sha256_for_identity(
+    path: str,
+    device: int,
+    inode: int,
+    size: int,
+    modified_ns: int,
+    changed_ns: int,
+) -> str:
+    del device, inode, size, modified_ns, changed_ns
     digest = hashlib.sha256()
     try:
-        with path.open("rb") as stream:
+        with Path(path).open("rb") as stream:
             for chunk in iter(lambda: stream.read(1024 * 1024), b""):
                 digest.update(chunk)
     except OSError as err:

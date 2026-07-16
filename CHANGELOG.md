@@ -2,6 +2,24 @@
 
 ### Added
 
+- **reconstruction**: add a versioned broker-neutral v2.1 certification policy,
+  hash/schema/subject-verified campaign runner, JSON-pointer observation
+  extraction, atomic machine/human dossier publication, and installed
+  `reconstruction certify` command while preserving legacy V1 evidence replay
+  (#449).
+- **reconstruction**: add exact paired nanosecond plan bounds for small
+  representative-window campaigns while retaining complete touched-month
+  source hashing, and report candidate amplification against aggregate
+  estimated inputs instead of mixing all ensemble members with one raw-source
+  denominator (#449).
+- **reconstruction**: add content-addressed full-range plan sets and public
+  `plan-set`/`preflight-set` operations so resource-safe daily windows can span
+  the common history without exceeding the independent 64 MiB plan-artifact
+  bound (#449).
+- **reconstruction**: add atomic content-addressed write/readback verification
+  for compact final-product activity manifests used by certification and
+  downstream bar reconciliation (#449).
+
 - **reconstruction**: expose the first-party reconstruction pipeline through
   an installed CLI family and typed Python facade, with explicit information
   mode/nonclaim requests, preflight resources and refusals, Temporal and local
@@ -16,6 +34,34 @@
 
 ### Fixed
 
+- **reconstruction**: preserve Arrow partition-row order for equal-timestamp
+  source ticks, externalize proposal and carving batch evidence into bounded
+  content-addressed ledgers, enforce live RSS limits, and truncate very large
+  cross-currency refusal lists with a deterministic count and digest; inject
+  one bounded, source-grid-aligned anchor from the sparsest declared leg into
+  missing proposal legs so independently sampled modern streams have genuine
+  exact-time triangle support without replacing immutable observations, and
+  try every declared synthetic projection target before refusing a feasible
+  cross-currency point (#449).
+- **reconstruction**: resolve exact nanosecond plan bounds to source months with
+  integer time conversion so the last nanosecond before a month boundary cannot
+  round into the following partition (#449).
+- **reconstruction**: compact high-cardinality activity provenance into bounded
+  retained IDs plus explicit occurrence counts and ordered SHA-256 evidence
+  instead of refusing ordinary reconstructed products at 256 IDs (#449).
+- **reconstruction**: de-duplicate source partitions and strong artifact
+  verification across adaptive full-range plan shards, with stat-identity hash
+  and qualified-input caching plus compact streaming aggregation, so split
+  months report unique raw rows and neither construction nor public preflight
+  repeatedly materializes immutable corpora or retains every full shard graph
+  in memory (#449).
+- **reconstruction**: retain scientifically unsupported full-range spans as
+  bounded refusal-only plan shards with zero workflow/output estimates, so
+  public planning stays exactly contiguous without converting missing context
+  into executable work (#449).
+- **reconstruction**: reconcile end-to-end window runtime and peak stage
+  resources into run reports instead of exposing atomic-commit runtime as if it
+  represented the whole seven-stage execution (#449).
 - **ci**: reserve coverage for one required `dev`-to-`main` production
   promotion job instead of running it during routine pushes, issue closure,
   and every Python/OS test-matrix job (#420).

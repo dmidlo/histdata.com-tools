@@ -3060,36 +3060,45 @@ stratification, restoration, terminal states, and resource bounds.
 
 #### EURUSD Triangle Reconstruction Certification
 
-`eurusd_triangle_certification_policy()` predeclares the complete v2.1.0
-scientific, operational, reporting, repository, and release contract for the
-EURGBP/EURUSD/GBPUSD product over their common support beginning at `200203`.
-The selected broker fingerprint, common end month, reverse-degradation and
-conditioned evidence, and peak-memory/scratch/runtime/storage budgets all
-participate in the deterministic policy identity.
+`modern_reference_triangle_certification_policy()` predeclares the current
+v2.1.0 scientific, operational, reporting, repository, and release contract for
+the EURGBP/EURUSD/GBPUSD product over common support beginning at `200203`. It
+fixes `modern_reference` delivery with the `unconditioned_reference` claim and
+explicitly excludes broker adaptation. The common end month, source-readiness
+contracts, scientific thresholds, and peak-memory/scratch/runtime/storage and
+candidate-amplification budgets participate in the deterministic policy
+identity. The older broker-bound `eurusd_triangle_certification_policy()` and
+V1 dossiers remain readable for evidence replay but are not the #449 release
+path.
 
 Certification consumes compact, verified report artifacts bound to that exact
 policy identity, so evidence cannot be reused after scope or threshold drift.
 Each scalar observation names the exact artifact identities that support it,
-and every requirement declares the artifact kinds it needs. Missing artifacts
-remain `missing`; measured threshold violations are `failed`; neither can
-become a pass through a summary boolean. A broker fingerprint with an identity
-different from the one frozen in policy fails the post-render cross-currency
-gate.
+and every requirement declares the exact artifact kinds it needs. Missing
+artifacts remain `missing`; measured threshold violations are `failed`; neither
+can become a pass through a summary boolean. V2 rejects every broker-named
+artifact instead of silently turning synthetic reference output into a broker
+claim.
 
-`evaluate_reconstruction_certification()` covers all fifteen #449 gates and
-returns one bounded `ReconstructionCertificationDossierV1`. The dossier can be
+`evaluate_modern_reference_reconstruction_certification()` covers all fifteen
+#449 gate groups plus the individual source-readiness and operations seams and
+returns one bounded `ReconstructionCertificationDossierV2`. The dossier can be
 `incomplete`, `failed`, `ready-for-promotion`, or `certified`.
 `ready-for-promotion` is narrowly reserved for the state where every check has
 passed except the single coverage observation. Coverage is still run exactly
 once, only during the explicit `dev`-to-`main` promotion. The TestPyPI local
 simple-registry preflight and all non-coverage evidence must already pass.
 
-`write_reconstruction_certification_dossier()` atomically publishes canonical
-machine JSON and deterministic human-readable Markdown, then verifies JSON
-readback. Both outputs carry strong content references. The dossier contains no
-tick rows or analytical-frame columns and never claims historical truth,
-selects an automatic winner, makes an investment recommendation, or authorizes
-release before every gate passes.
+`histdatacom reconstruction certify --spec CAMPAIGN.json --output-directory
+DIR` executes the public campaign. It verifies every declared JSON artifact's
+SHA-256, schema, and subject identity, then extracts each observation through a
+declared JSON pointer. Observation values cannot be written inline in the
+campaign spec, and promotion-only coverage is refused on an ordinary `dev`
+campaign. Publication atomically writes canonical machine JSON, deterministic
+Markdown, the frozen campaign manifest, methodology evidence, and a bounded
+campaign receipt. The dossier contains no tick rows or analytical-frame
+columns and never claims historical truth, selects an automatic winner, makes
+an investment recommendation, or authorizes release before every gate passes.
 
 See
 [`docs/reconstruction-certification-contracts.md`](docs/reconstruction-certification-contracts.md)
@@ -3131,6 +3140,20 @@ output-list, bounded-preview, and integrity-replay contracts. The installed
 command requires an explicit ex-post or ex-ante information mode plus the
 machine-readable acknowledgement that reconstructed output is plausible
 counterfactual evidence—not recovered historical truth.
+
+Full-range planning also has a bounded plan-set surface. `plan-set` begins with
+bounded month groups and deterministically bisects any group whose execution,
+retention, or artifact-size preflight refuses it; `preflight-set` freshly
+verifies every resulting shard identity, artifact hash, exact contiguity,
+refusal, and resource bound and reconciles the parent aggregate. This preserves
+both the per-window runtime budget and the 64 MiB plan-artifact limit instead
+of weakening either one for long historical ranges. Shared monthly source
+partitions count once in the parent inventory totals, and repeated strong-ref
+verification is cached only while the file's device, inode, size, modification
+time, and change time remain identical. A span with no scientifically
+supported window is retained as a refusal-only shard with zero workflows and
+zero output estimates; acknowledging refusals makes that no-op safe to skip,
+but never turns the unsupported span into reconstructed output.
 
 Only ASCII/T and the complete EURGBP/EURUSD/GBPUSD triangle are accepted. M1,
 bar, partial-triangle, and broker-only requests fail before execution. Temporal

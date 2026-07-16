@@ -1,152 +1,168 @@
 # Reconstruction Certification Contracts
 
-The version-one certification layer is the final fail-closed boundary for the
-EURUSD/GBPUSD/EURGBP reconstruction product. It aggregates compact evidence
-from the implemented reconstruction modules; it does not rerun those modules
-inside a workflow payload and does not retain tick rows, analytical frames,
-model objects, candidate batches, or rejected events.
+Certification is the fail-closed evidence boundary for the
+EURUSD/GBPUSD/EURGBP reconstruction product. It aggregates compact reports; it
+does not retain tick rows, analytical frames, model objects, candidate batches,
+or rejected events and it does not certify output because it looks plausible.
 
-Certification is evidence aggregation, not a visual judgment that output
-"looks plausible." Every measured claim is evaluated against a requirement
-that was content-addressed before the observation was supplied.
+## Current and legacy policy versions
 
-## Fixed product scope
-
-`ReconstructionCertificationPolicyV1` fixes:
+`ReconstructionCertificationPolicyV2` is the issue #449 release contract. It
+fixes:
 
 - product version `2.1.0`;
-- the exact EURGBP/EURUSD/GBPUSD instrument set;
-- common source support beginning at `200203`;
-- the explicitly selected broker-delivery fingerprint identity;
-- resource ceilings for peak memory, scratch space, runtime, and final
-  storage;
-- all scientific, operational, reporting, repository, and release checks; and
-- the rule that coverage runs once at the `dev`-to-`main` promotion boundary.
+- the exact EURGBP/EURUSD/GBPUSD instrument set and ASCII tick scope;
+- common source support beginning at `200203` and an execution-time end month;
+- delivery mode `modern_reference` and claim `unconditioned_reference`;
+- source-readiness, scientific, operational, reporting, repository, and release
+  checks;
+- explicit resource and candidate-amplification ceilings; and
+- coverage exactly once at the `dev`-to-`main` promotion boundary.
 
-The common end month remains an explicit policy input because the source
-inventory advances over time. Changing the broker identity, support interval,
-threshold, budget, or required artifact changes the deterministic policy ID.
+Broker adaptation is excluded from V2. A V2 policy cannot contain a
+broker-named check or required artifact, the evaluator rejects broker-named
+evidence, and the dossier always records `broker_specific_claim: false`.
+Broker capture, fingerprinting, and transfer remain optional, separately
+qualified extensions.
 
-`eurusd_triangle_certification_policy()` creates the complete policy. A partial
-policy is invalid: every issue #449 gate must have at least one requirement,
-and check identifiers must be globally unique.
-
-## Evidence pipeline
-
-The pipeline has four bounded layers:
-
-1. `CertificationArtifactV1` records the predeclared policy identity plus a
-   verified artifact's kind, subject identity, schema version, content SHA-256,
-   safe relative path, size, and bounded metadata. Evidence produced under a
-   different policy cannot be repurposed after thresholds or scope change.
-2. `CertificationObservationV1` records one scalar measurement and the exact
-   artifact evidence identities that support it.
-3. `CertificationCheckResultV1` applies the policy comparator to the observed
-   and expected values. Required artifact kinds must be present and verified.
-4. `CertificationGateResultV1` and
-   `ReconstructionCertificationDossierV1` aggregate checks without weakening a
-   failure or missing-evidence result.
-
-`CertificationArtifactV1.from_payload()` binds a compact JSON contract to the
-predeclared policy and hashes that contract. It is an adapter for existing
-manifests and reports, not a substitute for their own validation. Callers must
-load and verify the original contract before marking the certification artifact
-as verified.
-
-The selected broker artifact receives an extra identity check. A valid
-fingerprint for another broker, server, account, or version cannot satisfy the
-policy merely because its artifact kind is correct.
+`ReconstructionCertificationPolicyV1` is retained unchanged for replay of
+previously published evidence. It requires a broker fingerprint and must not be
+used for the modern-reference #449 campaign. V2 was introduced rather than
+changing V1 in place because removing a broker field or changing evidence kinds
+would silently change the meaning of old policy identities.
 
 ## Gate mapping
 
-| Gate | Required evidence and outcome |
+The V2 factory `modern_reference_triangle_certification_policy()` binds every
+live #449 seam:
+
+| Gate group | Required evidence and outcome |
 | --- | --- |
-| `identity-and-anchors` | Raw-source inventory and final product manifests report zero source-hash or immutable-anchor mismatches. |
-| `information-safety` | Every claimed use has an accepted information audit with zero leakage violations. |
-| `reverse-degradation` | Thresholds were predeclared and untouched final holdouts have zero failures. |
-| `conditioned-scorecards` | Required epoch/session/event strata are present and cadence, spread, timing, and path tolerances pass. |
-| `cross-currency` | Post-broker triangle, inverse, and stale-join validation has zero failures and is bound to the selected broker fingerprint. |
-| `ensemble-evidence` | Calibration, diversity, refusal, and unsupported-region rates are reported. |
-| `product-reconciliation` | Final events, activity/volume semantics, and derived bars reconcile. |
-| `failure-resume` | Injected mid-run failure resumes with zero duplicate or missing partitions. |
-| `replay` | Clean replay has zero logical-content-hash mismatches. |
-| `resources` | Measured peak memory, scratch, runtime, and final storage remain under predeclared ceilings. |
-| `negative-tests` | Corruption, stale broker profile, unhealthy clock, missing context, and partial synchronized group all refuse. |
-| `strategy-sensitivity` | Uncertainty is reported and automatic-winner selection remains false. |
+| `identity-and-anchors` | Inventory readability, dimensions and hashes reconcile; no duplicate dimension, raw-hash mismatch, observed-anchor change, or missing synthetic lineage exists. |
+| `information-safety` | Market-context and CFTC corpora are valid; every ex-post or supported ex-ante claim has a zero-violation point-in-time audit. |
+| `reverse-degradation` | The benchmark corpus predates candidate results, thresholds are predeclared, blocked holdouts pass, and negative controls fail as expected. |
+| `conditioned-scorecards` | Feed epochs, observation operators, and motifs are valid; all required strata exist and product/benchmark tolerances pass. |
+| `cross-currency` | Triangle, inverse, synchronization, and stale-alignment checks pass before and after identity delivery. |
+| `ensemble-evidence` | Calibration, diversity, refusal, unsupported-region, between-seed, and between-window uncertainty are reported. |
+| `product-reconciliation` | Final ticks, activity, and bars reconcile; the nonclaim is published; full-range preflight, representative windows, a substantial multi-period run, and CLI/API evidence-chain parity pass. |
+| `failure-resume` | Mid-run failure resumes with no missing/duplicate partition and cancellation publishes no partial partition. |
+| `replay` | Logical product hashes agree across clean replay and supported concurrency. |
+| `resources` | Peak memory, scratch, runtime, candidate amplification, storage, and final-row evidence meet frozen bounds. |
+| `negative-tests` | Corruption, stale artifacts, missing context, invalid information mode, quota overflow, and partial groups fail closed. |
+| `strategy-sensitivity` | Uncertainty is reported and no automatic winner is selected. |
 | `dossier-publication` | Human methodology/limitations and the machine evidence manifest are published. |
-| `repository-gates` | Full plain tests and hooks pass; coverage count is exactly one at promotion. |
-| `testpypi-preflight` | The local simple-registry TestPyPI preflight passes before release promotion. |
+| `repository-gates` | Test dependencies are installed, the full plain suite and hooks pass, and promotion coverage runs exactly once. |
+| `testpypi-preflight` | The local simple-registry TestPyPI preflight passes before promotion. |
 
-Comparators are deliberately small and reviewable: exact equality,
-less-than-or-equal, greater-than-or-equal, true, false, and zero. Booleans are
-not accepted as numbers, nonfinite numbers are rejected, and exact equality
-requires matching scalar types.
+Changing the source range, evidence contract, threshold, or resource budget
+changes the deterministic V2 policy ID.
 
-## Overall states
+## Evidence contracts
 
-The dossier has four possible states:
+The bounded evaluator retains four layers:
+
+1. `CertificationArtifactV1` records the frozen policy identity, artifact kind,
+   subject identity and schema, content SHA-256, safe relative path, size,
+   verification state, and bounded metadata.
+2. `CertificationObservationV1` records one scalar measurement and the exact
+   artifact evidence identities that support it.
+3. `CertificationCheckResultV1` applies one small comparator: equality,
+   less-than-or-equal, greater-than-or-equal, true, false, or zero.
+4. `CertificationGateResultV1` and
+   `ReconstructionCertificationDossierV2` aggregate results without weakening a
+   failure or missing observation.
+
+V2 requires the evidence-kind set for a check to match its policy exactly.
+Unverified, foreign-policy, missing, extra, or broker-named evidence cannot
+support a pass. Booleans are not numbers, nonfinite numbers are rejected, and
+exact equality requires matching scalar types.
+
+## Executable campaign
+
+`ModernReferenceCertificationCampaignSpecV1` freezes policy budgets, artifacts,
+scalar-extraction locations, methodology, limitations, and whether execution is
+the explicit promotion boundary. Every artifact declaration supplies:
+
+- a campaign-local evidence key;
+- the producer artifact kind and path;
+- the expected file SHA-256;
+- the expected subject schema version;
+- the expected subject identity and JSON pointer that contains it; and
+- a safe dossier-relative path.
+
+Every observation supplies a measurement evidence key, a JSON pointer, and the
+exact supporting evidence keys. It does not contain an `actual` value.
+`run_modern_reference_certification_campaign()` reads the file, verifies its
+hash, schema and subject identity, resolves the JSON pointer, verifies that the
+result is a scalar, and only then creates a certification observation.
+
+This prevents a handwritten summary boolean from standing in for a producer
+report. Producer-specific contracts still own how reports calculate their
+metrics; the campaign owns identity, extraction, aggregation, and publication.
+
+Run the installed public surface with:
+
+```sh
+histdatacom reconstruction --json certify \
+  --spec evidence/campaign.json \
+  --output-directory evidence/dossier
+```
+
+The campaign automatically publishes and binds its frozen machine manifest and
+methodology report. A normal `dev` campaign rejects
+`coverage_promotion_run_count`; only a spec explicitly marked as a promotion
+boundary can carry that observation.
+
+## States and exit behavior
+
+A V2 dossier has four states:
 
 - `incomplete`: required evidence is missing or a blocking limitation remains;
-- `failed`: a measured value violates its predeclared requirement;
-- `ready-for-promotion`: every check except the single promotion-boundary
-  coverage observation passes;
-- `certified`: every scientific, operational, repository, coverage, and
-  TestPyPI-preflight check passes with no blocking limitation.
+- `failed`: a measured value violates policy;
+- `ready-for-promotion`: every check except promotion-only coverage passes; and
+- `certified`: every scientific, product, repository, coverage, and TestPyPI
+  check passes with no blocking limitation.
 
-Missing evidence is never treated as a measured failure or a pass, and a known
-measured failure outranks a simultaneous blocking limitation. This keeps
-external prerequisites—most importantly a qualified live broker fingerprint
-and actual reconstruction artifacts—visible. An accepted limitation may
-describe scope or uncertainty but cannot replace evidence that is necessary
-for the product claim. Contradictory limitations belong in
-`blocking_limitations` and force `incomplete`.
+A measured failure outranks missing work. A known limitation can narrow a claim
+but cannot replace immutable-anchor, information-safety, benchmark,
+operational, or release evidence.
 
-Coverage does not run during ordinary issue implementation. If all other
-evidence, including the local simple-registry TestPyPI preflight, passes, the
-dossier becomes `ready-for-promotion`. The one coverage observation is added
-only while moving `dev` to `main`; a second coverage run fails the exact-count
-requirement.
+The CLI returns `0` for `ready-for-promotion` or `certified`, `3` for an
+incomplete campaign, and `5` for measured certification failure. Malformed or
+changed campaign inputs return the existing invalid-plan category.
 
 ## Publication and replay
 
-`write_reconstruction_certification_dossier()` atomically writes:
+`write_modern_reference_reconstruction_certification_dossier()` atomically
+writes canonical JSON and deterministic Markdown, immediately reads the JSON
+back through `ReconstructionCertificationDossierV2`, and returns strong
+`ArtifactRef` values. Campaign execution also writes:
 
-- canonical JSON containing the machine-readable evidence manifest; and
-- deterministic Markdown containing product scope, gate status, methodology,
-  accepted limitations, blocking limitations, and the trust boundary.
+- `evidence/campaign-spec.json`;
+- `evidence/methodology.json`; and
+- `campaign-result.json`.
 
-Both outputs receive strong `ArtifactRef` values with size and SHA-256.
-Machine JSON is immediately read back through
-`ReconstructionCertificationDossierV1.from_json()` before publication returns.
-The dossier ID covers the policy, artifacts, results, methodology, limitations,
-state, and fixed trust claims.
+The dossier identity covers policy, artifacts, results, methodology,
+limitations, state, delivery claim, and fixed trust assertions. It always
+states that event rows and analytical-frame columns are not inline, no broker
+claim or historical-truth claim is made, no automatic winner is selected, and
+no investment recommendation is made.
 
-The report always states:
+## Required release sequence
 
-- event rows are not inline;
-- analytical-frame columns are not inline;
-- no automatic winner is selected;
-- no historical-truth claim is made;
-- no investment recommendation is made; and
-- release authorization is true only for `certified`.
-
-## Required execution sequence
-
-The release-grade run should proceed in this order:
-
-1. Freeze the three-symbol source inventory and content hashes.
-2. Select and verify one eligible, versioned broker fingerprint.
-3. Freeze the policy, scientific thresholds, and resource budgets.
+1. Re-inventory and hash the complete three-symbol source scope.
+2. Freeze V2 policy, scientific thresholds, and resource budgets.
+3. Verify all dependency artifacts and point-in-time coverage.
 4. Execute ex-post reconstruction and each separately supported ex-ante view.
-5. Produce final-holdout, conditioned, cross-currency, ensemble, product,
-   activity, bar, strategy, fault-injection, replay, resource, and negative-test
-   artifacts.
+5. Produce real holdout, conditioned, cross-currency, ensemble, product,
+   activity, bar, strategy, fault, replay, resource, negative-test, and public
+   interface reports.
 6. Run the full plain suite and repository hooks without coverage.
-7. Run the TestPyPI preflight through the local simple registry.
-8. Evaluate and publish the `ready-for-promotion` dossier.
-9. During the explicit `dev`-to-`main` promotion, run coverage exactly once and
-   publish the final `certified` dossier.
+7. Publish to TestPyPI from `dev` and pass the local simple-registry preflight.
+8. Execute the campaign and publish a `ready-for-promotion` dossier.
+9. During explicit `dev`-to-`main` promotion, run coverage exactly once,
+   publish the final `certified` dossier, and publish the same artifact to PyPI.
 
-Fixture dossiers prove contract, comparison, serialization, resource-bound,
-and fail-closed behavior. They cannot certify historical output or stand in for
-the qualified broker and actual three-instrument reconstruction evidence.
+Fixture dossiers and campaign tests prove contract, extraction, comparison,
+serialization, and publication semantics. They cannot certify historical
+output or replace a real reconstruction campaign.

@@ -12,13 +12,14 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Any, TypeVar, cast
 
-from histdatacom.runtime_contracts import JSONValue
+from histdatacom.runtime_contracts import ArtifactRef, JSONValue
 from histdatacom.synthetic.benchmark import ReverseDegradationScorecardV1
 from histdatacom.synthetic.contracts import (
     SYNTHETIC_EVENT_SCHEMA_VERSION,
@@ -1171,6 +1172,9 @@ class _ActivitySliceState:
     broker_profile_ids: set[str] = field(default_factory=set)
     constraint_set_ids: set[str] = field(default_factory=set)
     stream_ids: set[str] = field(default_factory=set)
+    provenance_occurrence_counts: dict[str, int] = field(default_factory=dict)
+    provenance_digests: dict[str, Any] = field(default_factory=dict)
+    truncated_provenance: set[str] = field(default_factory=set)
     digest: Any = field(
         default_factory=lambda: hashlib.sha256(b"activity-v1\n")
     )
@@ -1255,10 +1259,27 @@ class _ActivitySliceState:
         self.digest.update(b"\n")
 
     def _add_provenance(self, name: str, value: str) -> None:
+        selected = _required_text(value)
+        self.provenance_occurrence_counts[name] = (
+            self.provenance_occurrence_counts.get(name, 0) + 1
+        )
+        provenance_digest = self.provenance_digests.get(name)
+        if provenance_digest is None:
+            provenance_digest = hashlib.sha256(
+                f"activity-provenance-v1:{name}\n".encode("utf-8")
+            )
+            self.provenance_digests[name] = provenance_digest
+        provenance_digest.update(
+            canonical_contract_json(selected).encode("utf-8")
+        )
+        provenance_digest.update(b"\n")
         values = cast(set[str], getattr(self, name))
-        values.add(_required_text(value))
-        if len(values) > self.policy.max_provenance_values:
-            raise ValueError(f"activity {name} exceeds provenance limit")
+        if selected in values:
+            return
+        if len(values) >= self.policy.max_provenance_values:
+            self.truncated_provenance.add(name)
+            return
+        values.add(selected)
 
     def finalize(self) -> ReconstructionActivitySliceV1:
         """Freeze the online state into a strict bounded slice."""
@@ -1283,6 +1304,14 @@ class _ActivitySliceState:
             limitations.append("event_confidence_partial_or_unavailable")
         if not self.stream_ids:
             limitations.append("stream_identity_unavailable")
+        limitations.extend(
+            (
+                f"{name}_truncated:occurrence_count="
+                f"{self.provenance_occurrence_counts[name]}:sha256="
+                f"{self.provenance_digests[name].hexdigest()}"
+            )
+            for name in sorted(self.truncated_provenance)
+        )
         values: dict[str, tuple[int | float | None, int, tuple[str, ...]]] = {
             "event_count": (self.event_count, self.event_count, ()),
             "quote_update_count": (self.event_count, self.event_count, ()),
@@ -1587,6 +1616,64 @@ def summarize_committed_reconstruction_activity(
         calibration_report_id=calibration_report_id,
         benchmark_evidence=benchmark_evidence,
     )
+
+
+def write_reconstruction_activity_manifest(
+    manifest: ReconstructionActivityManifestV1,
+    directory: str | Path,
+) -> ArtifactRef:
+    """Atomically persist and read back one compact activity manifest."""
+    if not isinstance(manifest, ReconstructionActivityManifestV1):
+        raise TypeError("activity persistence requires a v1 manifest")
+    encoded = manifest.to_json().encode("utf-8") + b"\n"
+    digest = hashlib.sha256(encoded).hexdigest()
+    root = Path(directory).expanduser().resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    path = root / f"reconstruction-activity-manifest-{digest}.json"
+    if path.exists():
+        if path.read_bytes() != encoded:
+            raise ValueError("content-addressed activity manifest collision")
+    else:
+        temporary = root / f".{path.name}.{os.getpid()}.tmp"
+        try:
+            with temporary.open("wb") as stream:
+                stream.write(encoded)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temporary, path)
+        finally:
+            temporary.unlink(missing_ok=True)
+    restored = read_reconstruction_activity_manifest(path)
+    if restored != manifest:
+        raise ValueError("persisted activity manifest differs on readback")
+    return ArtifactRef(
+        kind="activity-manifest",
+        path=str(path),
+        size_bytes=len(encoded),
+        sha256=digest,
+        metadata={
+            "manifest_id": manifest.manifest_id,
+            "product_manifest_id": manifest.product_manifest_id,
+            "event_count": manifest.event_count,
+        },
+    )
+
+
+def read_reconstruction_activity_manifest(
+    path: str | Path,
+) -> ReconstructionActivityManifestV1:
+    """Hash, filename, size, and identity-check one activity manifest."""
+    source = Path(path).expanduser().resolve()
+    encoded = source.read_bytes()
+    if len(encoded) > MAX_ACTIVITY_PAYLOAD_BYTES + 1:
+        raise ValueError("activity manifest exceeds absolute payload limit")
+    prefix = "reconstruction-activity-manifest-"
+    if not source.name.startswith(prefix) or not source.name.endswith(".json"):
+        raise ValueError("activity manifest filename is not content addressed")
+    expected = source.name[len(prefix) : -len(".json")]
+    if hashlib.sha256(encoded).hexdigest() != expected:
+        raise ValueError("activity manifest content hash differs from filename")
+    return ReconstructionActivityManifestV1.from_json(encoded.decode("utf-8"))
 
 
 def reconstruction_activity_benchmark_evidence(
@@ -2017,7 +2104,9 @@ __all__ = [
     "activity_bar_projection_semantics",
     "activity_metric_definitions",
     "reconstruction_activity_benchmark_evidence",
+    "read_reconstruction_activity_manifest",
     "summarize_committed_reconstruction_activity",
     "summarize_reconstruction_activity",
     "summarize_reconstruction_activity_streams",
+    "write_reconstruction_activity_manifest",
 ]

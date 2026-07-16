@@ -48,9 +48,9 @@ idempotently registers the versioned handlers emitted by the first-party plan:
 
 | Stage | First-party action |
 | --- | --- |
-| source/enrichment | Hash-verifies ASCII/T Arrow partitions, maps the zero-based Arrow ordinal to the positive event-contract row ID, rejects invalid quotes, and materializes input/core Parquet plus feed-epoch, calendar, and CFTC sidecars. |
-| proposal | Queries the qualified modern motif index and writes candidate rows to Parquet with bounded batch lineage. |
-| carving | Applies the declared hard/advisory constraints, records bounded rejection evidence, and materializes accepted core streams. |
+| source/enrichment | Hash-verifies ASCII/T Arrow partitions, maps the zero-based Arrow ordinal to the positive event-contract row ID, uses immutable partition/row order for same-timestamp `event_sequence`, rejects invalid quotes, and materializes input/core Parquet plus feed-epoch, calendar, and CFTC sidecars. |
+| proposal | Queries the qualified modern motif index and writes candidate rows to Parquet with a content-addressed canonical-JSON-lines batch ledger outside the compact stage manifest. |
+| carving | Applies the declared hard/advisory constraints, writes a content-addressed rejection/decision ledger outside the compact stage manifest, and materializes accepted core streams. |
 | cross-series reconciliation | Reconciles the complete EURUSD/GBPUSD/EURGBP group using exact event-time support. |
 | delivery projection | Applies explicit modern-reference identity delivery; it never invents a broker fingerprint. |
 | validation | Rechecks cross-instrument output, benchmark qualification, motif leakage, information safety, immutable anchors, retention, and storage before staging. |
@@ -78,7 +78,7 @@ def proposal_handler(invocation):
     )
 
 
-register_reconstruction_stage_handler("proposal-v1", proposal_handler)
+register_reconstruction_stage_handler("proposal-v3", proposal_handler)
 ```
 
 Handler registration remains process-local by design. `handler_name` is
@@ -193,7 +193,10 @@ back into one large Temporal activity payload. For every committed window it:
 2. runs `verify_reconstruction_publication()` over the manifest and Parquet;
 3. matches run, window, synchronization unit, and complete symbol set;
 4. sums observed and synthetic event counts from storage evidence; and
-5. atomically writes one compact run report and records it in the manifest
+5. sums stage runtimes once and retains maxima for RSS, scratch, and candidate
+   amplification instead of mistaking final commit telemetry for the whole
+   window; and
+6. atomically writes one compact run report and records it in the manifest
    store.
 
 The report activity heartbeats between windows. A committed checkpoint without

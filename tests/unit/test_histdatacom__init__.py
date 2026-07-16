@@ -23,6 +23,9 @@ def test_exposed_classes() -> None:
         "ReconstructionExecutionRequestV1",
         "ReconstructionExitCode",
         "ReconstructionOperationReceiptV1",
+        "ReconstructionPlanSetPreflightV1",
+        "ReconstructionPlanSetV1",
+        "ReconstructionPlanShardV1",
         "ReconstructionPlanSpecV1",
         "ReconstructionPreflightV1",
     }

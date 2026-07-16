@@ -17,6 +17,7 @@ import tempfile
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from enum import Enum
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Protocol, cast
 
@@ -1472,7 +1473,7 @@ async def run_reconstruction_window(
         if outcome.status is ReconstructionStageStatus.REFUSED:
             refused = state.interrupted(
                 ReconstructionCommitPhase.FAILED,
-                "; ".join(outcome.refusal_reasons),
+                _bounded_reason_summary(outcome.refusal_reasons),
             )
             state = checkpoint_store.save(
                 refused, expected_state_id=state.state_id
@@ -1610,6 +1611,7 @@ def reconcile_reconstruction_report(
             "phase": state.checkpoint.phase.value,
             "checkpoint_id": state.checkpoint.checkpoint_id,
             "completed_stages": [item.stage.value for item in state.outcomes],
+            "resource_usage": _aggregate_outcome_telemetry(state.outcomes),
         }
         manifest_ref = state.committed_manifest_ref
         if manifest_ref is not None:
@@ -1687,6 +1689,79 @@ def reconcile_reconstruction_report(
         committed_manifest_refs=tuple(refs),
         window_states=tuple(window_summaries),
     )
+
+
+def _aggregate_outcome_telemetry(
+    outcomes: Sequence[ReconstructionStageOutcomeV1],
+) -> dict[str, JSONValue]:
+    """Reconcile stage telemetry without counting duplicate output refs."""
+    runtimes: list[float] = []
+    peak_rss: list[int] = []
+    scratch: list[int] = []
+    output: list[int] = []
+    amplification: list[float] = []
+    for outcome in outcomes:
+        metadata = [ref.metadata for ref in outcome.output_refs]
+        runtimes.append(
+            max(
+                (
+                    _metadata_number(item, "runtime_seconds")
+                    for item in metadata
+                ),
+                default=0.0,
+            )
+        )
+        peak_rss.append(
+            max(
+                (_metadata_int(item, "peak_rss_bytes") for item in metadata),
+                default=0,
+            )
+        )
+        scratch.append(
+            max(
+                (_metadata_int(item, "scratch_bytes") for item in metadata),
+                default=0,
+            )
+        )
+        output.append(
+            max(
+                (_metadata_int(item, "output_bytes") for item in metadata),
+                default=0,
+            )
+        )
+        amplification.append(
+            max(
+                (
+                    _metadata_number(item, "candidate_amplification")
+                    for item in metadata
+                ),
+                default=0.0,
+            )
+        )
+    return {
+        "runtime_seconds": round(sum(runtimes), 6),
+        "peak_rss_bytes": max(peak_rss, default=0),
+        "peak_scratch_bytes": max(scratch, default=0),
+        "stage_output_bytes_total": sum(output),
+        "peak_candidate_amplification": round(
+            max(amplification, default=0.0), 9
+        ),
+        "basis": "sum-stage-runtime-max-stage-resources-v1",
+    }
+
+
+def _metadata_number(metadata: Mapping[str, JSONValue], key: str) -> float:
+    value = metadata.get(key, 0.0)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return 0.0
+    return float(value)
+
+
+def _metadata_int(metadata: Mapping[str, JSONValue], key: str) -> int:
+    value = metadata.get(key, 0)
+    if isinstance(value, bool) or not isinstance(value, int):
+        return 0
+    return max(0, value)
 
 
 def write_reconstruction_report(
@@ -1822,6 +1897,19 @@ def _outcome_resource_violations(
     for name, actual, limit in limits:
         if actual > limit:
             violations.append(f"{name} {actual} exceeds admitted limit {limit}")
+    peak_rss_bytes = max(
+        (
+            value
+            for ref in outcome.output_refs
+            if type(value := ref.metadata.get("peak_rss_bytes")) is int
+        ),
+        default=0,
+    )
+    if peak_rss_bytes > policy.max_memory_bytes:
+        violations.append(
+            f"peak_rss_bytes {peak_rss_bytes} exceeds admitted limit "
+            f"{policy.max_memory_bytes}"
+        )
     if outcome.accepted_event_count > outcome.candidate_event_count:
         violations.append("accepted_event_count exceeds candidate_event_count")
     return tuple(violations)
@@ -2042,6 +2130,25 @@ def _bounded_text(value: Any) -> str:
     return normalized
 
 
+def _bounded_reason_summary(values: Sequence[str]) -> str:
+    reasons = tuple(
+        str(value).strip() for value in values if str(value).strip()
+    )
+    full = "; ".join(reasons)
+    if len(full.encode("utf-8")) <= MAX_STAGE_MESSAGE_LENGTH:
+        return full
+    digest = hashlib.sha256(full.encode("utf-8")).hexdigest()[:16]
+    selected: list[str] = []
+    for index, reason in enumerate(reasons):
+        suffix = f"; +{len(reasons) - index - 1} more [sha256:{digest}]"
+        candidate = "; ".join((*selected, reason)) + suffix
+        if len(candidate.encode("utf-8")) > MAX_STAGE_MESSAGE_LENGTH:
+            break
+        selected.append(reason)
+    suffix = f"; +{len(reasons) - len(selected)} more [sha256:{digest}]"
+    return "; ".join(selected) + suffix
+
+
 def _required_sha256(value: Any, name: str) -> str:
     normalized = str(value).strip().lower()
     if len(normalized) != 64 or any(
@@ -2073,8 +2180,30 @@ def _ensure_payload_size(
 
 
 def _file_sha256(path: Path) -> str:
+    target = path.resolve()
+    stat = target.stat()
+    return _file_sha256_for_identity(
+        str(target),
+        stat.st_dev,
+        stat.st_ino,
+        stat.st_size,
+        stat.st_mtime_ns,
+        stat.st_ctime_ns,
+    )
+
+
+@lru_cache(maxsize=8192)
+def _file_sha256_for_identity(
+    path: str,
+    device: int,
+    inode: int,
+    size: int,
+    modified_ns: int,
+    changed_ns: int,
+) -> str:
+    del device, inode, size, modified_ns, changed_ns
     digest = hashlib.sha256()
-    with path.open("rb") as stream:
+    with Path(path).open("rb") as stream:
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()

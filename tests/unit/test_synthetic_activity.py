@@ -18,10 +18,12 @@ from histdatacom.synthetic import (
     ReconstructionActivityManifestV1,
     ReconstructionActivityPolicyV1,
     activity_bar_projection_semantics,
+    read_reconstruction_activity_manifest,
     reconstruction_activity_benchmark_evidence,
     summarize_committed_reconstruction_activity,
     summarize_reconstruction_activity,
     summarize_reconstruction_activity_streams,
+    write_reconstruction_activity_manifest,
 )
 from histdatacom.synthetic.contracts import SYNTHETIC_EVENT_ARROW_COLUMNS
 from histdatacom.synthetic.persistence import publish_reconstruction_group
@@ -75,6 +77,71 @@ def test_activity_contract_round_trip_separates_origins_and_units() -> None:
     assert synthetic.event_content_sha256
 
 
+def test_activity_manifest_persistence_is_content_addressed(
+    tmp_path: Path,
+) -> None:
+    """Published activity evidence is atomic, compact, and hash verified."""
+    manifest = summarize_reconstruction_activity_streams(
+        (_stream(generated_count=2),),
+        information_mode=InformationMode.EX_POST_RECONSTRUCTION,
+        information_manifest_id="information-manifest:sha256:activity-test",
+    )
+
+    first = write_reconstruction_activity_manifest(manifest, tmp_path)
+    second = write_reconstruction_activity_manifest(manifest, tmp_path)
+
+    assert first == second
+    assert first.kind == "activity-manifest"
+    assert read_reconstruction_activity_manifest(first.path) == manifest
+    Path(first.path).write_bytes(Path(first.path).read_bytes() + b"changed")
+    with pytest.raises(ValueError, match="hash differs"):
+        read_reconstruction_activity_manifest(first.path)
+
+
+def test_activity_manifest_compacts_high_cardinality_provenance() -> None:
+    """Large reference sets retain a bounded prefix plus count and digest."""
+    source = _stream(generated_count=3)
+    events = tuple(
+        replace(
+            event,
+            reference_id=(
+                f"reference:unique-{index}"
+                if event.reference_id is not None
+                else None
+            ),
+            motif_id=(
+                f"motif:unique-{index}" if event.motif_id is not None else None
+            ),
+            event_id="",
+        )
+        for index, event in enumerate(source.events)
+    )
+    stream = replace(source, events=events, stream_id="")
+
+    manifest = summarize_reconstruction_activity_streams(
+        (stream,),
+        information_mode=InformationMode.EX_POST_RECONSTRUCTION,
+        information_manifest_id="information-manifest:sha256:activity-test",
+        policy=ReconstructionActivityPolicyV1(max_provenance_values=1),
+    )
+    synthetic = next(
+        item
+        for item in manifest.slices
+        if item.scope is ActivitySliceScope.SYNTHETIC
+    )
+
+    assert len(synthetic.reference_ids) == 1
+    assert len(synthetic.motif_ids) == 1
+    assert any(
+        value.startswith("reference_ids_truncated:occurrence_count=3:sha256=")
+        for value in synthetic.limitations
+    )
+    assert any(
+        value.startswith("motif_ids_truncated:occurrence_count=3:sha256=")
+        for value in synthetic.limitations
+    )
+
+
 def test_activity_is_deterministic_and_keeps_event_schema_narrow() -> None:
     """Derived evidence never becomes a fabricated final-event column."""
     stream = _stream(generated_count=3)
@@ -98,26 +165,25 @@ def test_activity_is_deterministic_and_keeps_event_schema_narrow() -> None:
 def test_activity_information_modes_fail_closed() -> None:
     """Ex-ante evidence requires an as-of boundary; ex-post forbids one."""
     stream = _stream()
-    common = {
-        "streams": (stream,),
-        "information_manifest_id": "information-manifest:sha256:mode",
-    }
 
     with pytest.raises(ValueError, match="requires as_of_ns"):
         summarize_reconstruction_activity_streams(
-            **common,
+            (stream,),
             information_mode=InformationMode.EX_ANTE_SIMULATION,
+            information_manifest_id="information-manifest:sha256:mode",
         )
     with pytest.raises(ValueError, match="rejects as_of_ns"):
         summarize_reconstruction_activity_streams(
-            **common,
+            (stream,),
             information_mode=InformationMode.EX_POST_RECONSTRUCTION,
+            information_manifest_id="information-manifest:sha256:mode",
             as_of_ns=1_700_000_000_000_000_000,
         )
 
     ex_ante = summarize_reconstruction_activity_streams(
-        **common,
+        (stream,),
         information_mode=InformationMode.EX_ANTE_SIMULATION,
+        information_manifest_id="information-manifest:sha256:mode",
         as_of_ns=1_700_000_000_000_000_000,
     )
     assert ex_ante.information_mode is InformationMode.EX_ANTE_SIMULATION
@@ -150,8 +216,8 @@ def test_activity_rejects_unsupported_size_claims_and_unordered_events() -> (
         )
 
 
-def test_activity_provenance_limits_fail_closed() -> None:
-    """Bounded metadata refuses instead of truncating provenance silently."""
+def test_activity_provenance_limits_publish_count_and_digest() -> None:
+    """Bounded metadata compacts excess provenance without losing evidence."""
     stream = _stream(generated_count=2)
     events = tuple(
         replace(
@@ -163,15 +229,24 @@ def test_activity_provenance_limits_fail_closed() -> None:
     )
     policy = ReconstructionActivityPolicyV1(max_provenance_values=1)
 
-    with pytest.raises(ValueError, match="exceeds provenance limit"):
-        summarize_reconstruction_activity(
-            events,
-            run_id=stream.run_id,
-            ensemble_member_id=stream.ensemble_member_id,
-            information_mode=InformationMode.EX_POST_RECONSTRUCTION,
-            information_manifest_id="information-manifest:sha256:bounded",
-            policy=policy,
+    manifest = summarize_reconstruction_activity(
+        events,
+        run_id=stream.run_id,
+        ensemble_member_id=stream.ensemble_member_id,
+        information_mode=InformationMode.EX_POST_RECONSTRUCTION,
+        information_manifest_id="information-manifest:sha256:bounded",
+        policy=policy,
+    )
+
+    assert all(len(item.source_version_ids) == 1 for item in manifest.slices)
+    assert all(
+        any(
+            value.startswith("source_version_ids_truncated:occurrence_count=")
+            and ":sha256=" in value
+            for value in item.limitations
         )
+        for item in manifest.slices
+    )
 
 
 def test_bar_projection_semantics_are_explicit_and_non_volume() -> None:
