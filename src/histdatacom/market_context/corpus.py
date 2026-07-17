@@ -19,8 +19,6 @@ import io
 import json
 import os
 import re
-import resource
-import sys
 import tempfile
 import time
 from collections import Counter
@@ -46,8 +44,9 @@ from histdatacom.market_context.contracts import (
     normalize_market_context_datetime,
     query_market_context,
 )
-from histdatacom.runtime_contracts import ArtifactRef, JSONValue
 from histdatacom.market_context.contracts import canonical_contract_json
+from histdatacom.resource_usage import peak_rss_bytes
+from histdatacom.runtime_contracts import ArtifactRef, JSONValue
 
 MARKET_CONTEXT_CORPUS_SCHEMA_VERSION = "histdatacom.market-context-corpus.v1"
 MARKET_CONTEXT_SOURCE_EVIDENCE_SCHEMA_VERSION = (
@@ -1695,9 +1694,7 @@ def build_market_context_corpus_from_snapshots(
         retained,
     )
     counts = _event_counts_by_year_currency_kind(retained)
-    peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-    if not sys.platform.startswith("darwin"):
-        peak *= 1024
+    peak = peak_rss_bytes()
     elapsed = time.perf_counter() - started
     if elapsed > profile.max_runtime_seconds:
         raise ValueError("market-context corpus build exceeded runtime limit")
@@ -2784,10 +2781,12 @@ def _normalize_catalog_datetime(
         )
     except ValueError as exc:
         raise ValueError("operator catalog time must be ISO-8601") from exc
-    return normalize_market_context_datetime(
-        text,
-        timezone_name,
-        fold=fold if parsed.tzinfo is None else None,
+    return int(
+        normalize_market_context_datetime(
+            text,
+            timezone_name,
+            fold=fold if parsed.tzinfo is None else None,
+        )
     )
 
 

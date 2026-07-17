@@ -17,7 +17,6 @@ import json
 import math
 import os
 import shutil
-import sys
 import tempfile
 import time
 from collections import Counter
@@ -54,6 +53,7 @@ from histdatacom.orchestration.reconstruction import (
     registered_reconstruction_stage_handlers,
     verify_artifact_ref,
 )
+from histdatacom.resource_usage import peak_rss_bytes
 from histdatacom.runtime_contracts import ArtifactRef, JSONValue
 from histdatacom.synthetic.benchmark_corpus import (
     read_reverse_degradation_benchmark_corpus,
@@ -1936,7 +1936,7 @@ def _completed(
     amplification = candidates / observed if observed else 0.0
     telemetry: dict[str, JSONValue] = {
         "runtime_seconds": round(runtime, 6),
-        "peak_rss_bytes": _peak_rss_bytes(),
+        "peak_rss_bytes": peak_rss_bytes(),
         "scratch_bytes": scratch,
         "output_bytes": actual_output,
         "observed_event_count": observed,
@@ -2023,17 +2023,6 @@ def _tree_size(path: str | Path) -> int:
         for item in root.rglob("*")
         if item.is_file() and not item.is_symlink()
     )
-
-
-def _peak_rss_bytes() -> int:
-    try:
-        from importlib import import_module
-
-        resource = import_module("resource")
-    except ModuleNotFoundError:  # pragma: no cover - Windows compatibility
-        return 0
-    peak = int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss or 0)
-    return peak * 1024 if sys.platform.startswith("linux") else peak
 
 
 def _file_sha256(path: Path) -> str:

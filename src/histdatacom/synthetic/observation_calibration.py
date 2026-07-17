@@ -15,9 +15,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-import resource
 import statistics
-import sys
 import time
 from collections import Counter, defaultdict
 from collections.abc import Callable, Mapping, Sequence
@@ -30,6 +28,7 @@ from histdatacom.data_analytics.feed_epochs_v2 import (
     FeedEpochDefinitionV2,
     FeedEpochEvidenceV2,
 )
+from histdatacom.resource_usage import peak_rss_bytes
 from histdatacom.runtime_contracts import ArtifactRef, JSONValue
 from histdatacom.synthetic.benchmark import BenchmarkSplitKind
 from histdatacom.synthetic.contracts import canonical_contract_json
@@ -956,9 +955,7 @@ def calibrate_historical_observation_operators(
         operator=operator,
         targets=targets,
     )
-    peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-    if not sys.platform.startswith("darwin"):
-        peak *= 1024
+    peak = peak_rss_bytes()
     runtime_seconds = round(time.perf_counter() - started, 6)
     reasons = _readiness_reasons(
         targets,

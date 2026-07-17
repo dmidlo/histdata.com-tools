@@ -11,8 +11,6 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-import resource
-import sys
 import time
 from collections import Counter, defaultdict
 from collections.abc import Iterable, Mapping, Sequence
@@ -31,6 +29,7 @@ from histdatacom.data_quality.calendar import (
 from histdatacom.data_quality.contracts import QualityTargetKind
 from histdatacom.data_quality.discovery import discover_quality_targets
 from histdatacom.histdata_ascii import EST_NO_DST_OFFSET_MS
+from histdatacom.resource_usage import peak_rss_bytes
 from histdatacom.runtime_contracts import ArtifactRef, JSONValue
 
 FEED_EPOCH_EVIDENCE_V2_SCHEMA_VERSION = "histdatacom.feed-epoch-evidence.v2"
@@ -1454,9 +1453,7 @@ def analyze_active_time_feed_epochs(
             )
     fitted_evidence = _augment_cross_symbol_evidence(evidence, selected)
     definition = fit_active_time_feed_epochs(fitted_evidence, config=selected)
-    peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-    if not sys.platform.startswith("darwin"):  # Linux reports KiB.
-        peak *= 1024
+    peak = peak_rss_bytes()
     return FeedEpochCampaignV2(
         definition=definition,
         evidence=fitted_evidence,

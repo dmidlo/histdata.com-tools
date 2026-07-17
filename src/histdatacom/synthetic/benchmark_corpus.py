@@ -14,9 +14,7 @@ import json
 import math
 import os
 import re
-import resource
 import statistics
-import sys
 import time
 from bisect import bisect_left
 from collections import Counter, defaultdict
@@ -29,6 +27,7 @@ from typing import Any, cast
 from histdatacom.data_analytics.feed_epochs_v2 import (
     read_active_time_feed_epoch_definition,
 )
+from histdatacom.resource_usage import peak_rss_bytes
 from histdatacom.runtime_contracts import ArtifactRef, JSONScalar, JSONValue
 from histdatacom.synthetic.benchmark import (
     BenchmarkCandidateKind,
@@ -3336,8 +3335,7 @@ def _read_content_addressed_json(
 
 
 def _peak_memory_bytes() -> int:
-    maximum = int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
-    return maximum if sys.platform == "darwin" else maximum * 1024
+    return peak_rss_bytes()
 
 
 def _enforce_runtime(started: float, maximum: float) -> None:
