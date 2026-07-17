@@ -32,6 +32,7 @@ Works on macOS, Linux, and Windows.
   - [Date Ranges](#date-ranges)
     - ['Start' & 'Now' Keywords](#start-now-keywords)
   - [Multiple Datasets](#multiple-datasets)
+  - [Provider-neutral Dataset Catalog](#provider-neutral-dataset-catalog)
   - [CPU Utilization](#cpu-utilization)
   - [Import to InfluxDB](#import-to-influxdb)
     - [Docker-backed InfluxDB Smoke](#docker-backed-influxdb-smoke)
@@ -108,6 +109,27 @@ The number one rule when using this tool is to be **MORE** specific with your in
 *It is likely the default behavior will be modified from its current state to discourage unnecessarily large requests.*
 
 **please submit feature requests and bug reports using this repository's [issue tracker](https://github.com/dmidlo/histdata.com-tools/issues).*
+
+### Provider-neutral Dataset Catalog
+
+Versioned provider adapters and a local dataset catalog keep historical
+provider, logical dataset, immutable dataset version, observed/synthetic
+origin, and delivery profile as separate identities. Mutable aliases resolve
+once to an immutable version; replay receipts and pagination cursors retain
+that version and query scope even after an alias moves.
+
+```bash
+histdatacom datasets --catalog catalog.json list
+histdatacom datasets --catalog catalog.json resolve latest-qualified \
+  --symbol EURUSD --period 202001 --receipt resolution.json
+histdatacom datasets --catalog catalog.json verify latest-qualified
+histdatacom datasets --catalog catalog.json replay resolution.json
+```
+
+See [Provider-neutral datasets and immutable catalog resolution](docs/provider-neutral-dataset-catalog.md)
+for adapter authoring, manifest and configuration examples, licensing limits,
+row/cursor identity, synthetic lineage, reconstruction preflight, and the
+contract required by the future OANDA-compatible API in issue #77.
 
 ### Show the help and options
 
@@ -339,6 +361,7 @@ Info:
 Commands:
   analytics   Run offline data analytics operations
   cleanup     Remove transient source artifacts
+  datasets    Resolve and verify versioned local datasets
   groups      List instrument groups and major triangles
   jobs        Inspect and control orchestrated work
   quality     Inspect local data quality evidence
@@ -347,6 +370,7 @@ Commands:
 
 Run `histdatacom analytics --help` for analytics commands.
 Run `histdatacom cleanup --help` for cleanup commands.
+Run `histdatacom datasets --help` for dataset commands.
 Run `histdatacom groups --help` for group discovery commands.
 Run `histdatacom jobs --help` for job telemetry commands.
 Run `histdatacom quality --help` for quality commands.

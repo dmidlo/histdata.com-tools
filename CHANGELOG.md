@@ -2,6 +2,12 @@
 
 ### Added
 
+- **datasets**: add provider-neutral HistData and explicit-UTC fixture adapters,
+  immutable observed/derived dataset manifests, qualified aliases, exact
+  resolution/replay receipts, query-bound cursors, strong verification,
+  provider-neutral reconstruction inventory preflight, V2 API lineage, and an
+  installed bounded catalog CLI while preserving V1 HistData identities (#78).
+
 - **reconstruction**: add a versioned broker-neutral v2.1 certification policy,
   hash/schema/subject-verified campaign runner, JSON-pointer observation
   extraction, atomic machine/human dossier publication, and installed
