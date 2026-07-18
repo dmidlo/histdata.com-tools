@@ -8,7 +8,7 @@ import secrets
 import subprocess
 import sys
 from collections.abc import Callable, Mapping, Sequence
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -94,7 +94,10 @@ def build_image(
     run_command: RunCommand = _run,
 ) -> None:
     """Build the native-platform smoke image with explicit OCI metadata."""
-    timestamp = created or datetime.now(tz=UTC).replace(microsecond=0).isoformat()
+    timestamp = (
+        created
+        or datetime.now(tz=timezone.utc).replace(microsecond=0).isoformat()
+    )
     run_command(
         [
             "docker",

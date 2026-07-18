@@ -241,7 +241,10 @@ def test_help_advertises_deterministic_random_windows() -> None:
     parser._set_args()
     help_text = parser.format_help()
 
-    assert "-r, --random-window EXPRESSION" in help_text
+    # argparse renders aliases differently before Python 3.11, but both public
+    # spellings and the expression metavar must remain visible.
+    assert "-r EXPRESSION" in help_text
+    assert "--random-window" in help_text
     assert "--random-seed INTEGER" in help_text
     assert "all matching occurrences" in " ".join(help_text.split())
 

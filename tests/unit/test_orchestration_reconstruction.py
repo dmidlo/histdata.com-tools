@@ -149,7 +149,7 @@ def _stage_handler(
         output_root = (
             Path(invocation.task.scratch_directory).parent
             / "committed"
-            / invocation.task.window.window_id
+            / invocation.task.window.window_id.replace(":", "-")
         )
     output = output_root / f"{stage.value}.json"
     phase = ""

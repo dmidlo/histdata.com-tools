@@ -3580,7 +3580,10 @@ def _atomic_write_bytes(path: Path, payload: bytes) -> None:
 
 
 def _fsync_file(path: Path) -> None:
-    with path.open("rb") as stream:
+    # Windows maps fsync to the writable-handle-only CRT commit operation.
+    # Reopen completed Parquet artifacts without truncation but with write
+    # access so the durability boundary has the same semantics on every OS.
+    with path.open("rb+") as stream:
         os.fsync(stream.fileno())
 
 

@@ -281,6 +281,78 @@ def test_dependency_configuration_resource_and_gap_failures_are_bounded(
     assert unavailable.diagnostics["backend_exception_text_included"] is False
 
 
+def test_failed_fit_with_state_metadata_has_no_state_value_payload() -> None:
+    """Backend failures retain dimensions without indexing absent state values."""
+    specification = StateSpaceSpecification(
+        "structural-seasonal",
+        "structural",
+        seasonal_period=4,
+        seasonal_cycle_ms=240_000,
+    )
+    profile = StateSpaceProfile(
+        enabled=True,
+        specifications=(specification,),
+        projection_specification_id=specification.specification_id,
+    )
+    outcome = state_module._empty_fit(
+        "failed",
+        "non_positive_covariance",
+        observed_count=40,
+        missing_count=0,
+        max_gap=0,
+        state_dimension=5,
+        state_names=("level", "seasonal", "seasonal.L1", "seasonal.L2"),
+    )
+    fold = {
+        "series_id": "ascii:T:EURUSD:histdata.com",
+        "period": "201201",
+        "fold_id": 1,
+        "status": "valid",
+        "origin_row_id": 1,
+        "target_row_id": 2,
+        "origin_bin_end_utc_ms": 60_000,
+        "target_bin_end_utc_ms": 120_000,
+        "target_index": 0,
+        "horizon": 1,
+    }
+
+    sample = state_module._fit_sample(
+        outcome,
+        specification,
+        "sha256:failed-fit",
+        fold,
+        tuple(range(40)),
+        40,
+        profile,
+    )
+    evaluation = state_module._fold_evaluation(
+        ({"cm_input_observed_value": 1.0},),
+        fold,
+        specification,
+        3,
+        "sha256:failed-fit",
+        outcome,
+        (),
+        _input_profile(),
+        profile.rounding_digits,
+        profile.max_retained_states,
+    )
+
+    assert sample["status"] == "failed"
+    assert sample["reason"] == "non_positive_covariance"
+    assert sample["state_dimension"] == 5
+    assert sample["state_names"] == []
+    assert sample["states"] == []
+    assert sample["states_truncated"] is False
+    assert evaluation["status"] == "not_evaluated"
+    assert evaluation["state_names"] == []
+    assert evaluation["filtered_state"] == []
+    assert evaluation["smoothed_state"] == []
+    assert evaluation["filtered_state_available_at_origin"] is False
+    assert evaluation["smoothed_state_retrospective"] is False
+    assert evaluation["states_truncated"] is False
+
+
 def test_projection_preserves_identity_and_serializes_cache_and_influx(
     tmp_path: Path,
 ) -> None:

@@ -1169,6 +1169,18 @@ def _empty_fit(
     )
 
 
+def _retained_state_count(outcome: _FitOutcome, limit: int) -> int:
+    """Return the common bounded prefix with complete state diagnostics."""
+    return min(
+        limit,
+        len(outcome.state_names),
+        len(outcome.filtered_state),
+        len(outcome.filtered_variance),
+        len(outcome.smoothed_state),
+        len(outcome.smoothed_variance),
+    )
+
+
 def _fit_sample(
     outcome: _FitOutcome,
     specification: StateSpaceSpecification,
@@ -1178,7 +1190,7 @@ def _fit_sample(
     grid_observation_count: int,
     profile: StateSpaceProfile,
 ) -> dict[str, JSONValue]:
-    retained = min(profile.max_retained_states, len(outcome.state_names))
+    retained = _retained_state_count(outcome, profile.max_retained_states)
     states = [
         {
             "name": outcome.state_names[index],
@@ -1201,7 +1213,8 @@ def _fit_sample(
         "state_dimension": outcome.state_dimension,
         "state_names": list(outcome.state_names[:retained]),
         "states": cast(JSONValue, states),
-        "states_truncated": len(outcome.state_names) > retained,
+        "states_truncated": retained > 0
+        and len(outcome.state_names) > retained,
         "filtered_calculation_basis": "kalman_filter_origin_training_segment",
         "smoothed_calculation_basis": (
             "kalman_smoother_origin_training_segment_retrospective"
@@ -1280,7 +1293,7 @@ def _fold_evaluation(
         if status == "evaluated" and forecast is not None and actual is not None
         else None
     )
-    retained = min(retained_state_limit, len(outcome.state_names))
+    retained = _retained_state_count(outcome, retained_state_limit)
     return {
         "schema_version": STATE_SPACE_FORECAST_SCHEMA_VERSION,
         "status": status,
@@ -1339,9 +1352,10 @@ def _fold_evaluation(
         "filtered_variance": list(outcome.filtered_variance[:retained]),
         "smoothed_state": list(outcome.smoothed_state[:retained]),
         "smoothed_variance": list(outcome.smoothed_variance[:retained]),
-        "states_truncated": len(outcome.state_names) > retained,
-        "filtered_state_available_at_origin": True,
-        "smoothed_state_retrospective": True,
+        "states_truncated": retained > 0
+        and len(outcome.state_names) > retained,
+        "filtered_state_available_at_origin": retained > 0,
+        "smoothed_state_retrospective": retained > 0,
         "smoothed_state_used_for_forecast": False,
         "full_series_smoothing_used": False,
         "original_scale": True,

@@ -40,9 +40,11 @@
 
 ### Fixed
 
-- **portability**: make peak-RSS measurement import-safe on Windows and ship
-  platform-scoped IANA timezone data so clean wheel installs can load the CLI
-  and full analytics/reconstruction test surface (#78).
+- **portability**: make peak-RSS measurement import-safe on Windows, ship
+  platform-scoped IANA timezone data, use Python 3.10-compatible container
+  timestamps and portable filesystem durability operations, and isolate
+  numerical goldens from optimizer/runtime drift so clean wheel installs can
+  load and verify the full analytics/reconstruction surface (#78).
 - **reconstruction**: preserve Arrow partition-row order for equal-timestamp
   source ticks, externalize proposal and carving batch evidence into bounded
   content-addressed ledgers, enforce live RSS limits, and truncate very large
