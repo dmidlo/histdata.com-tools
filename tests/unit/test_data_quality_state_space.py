@@ -281,6 +281,122 @@ def test_dependency_configuration_resource_and_gap_failures_are_bounded(
     assert unavailable.diagnostics["backend_exception_text_included"] is False
 
 
+def test_state_serialization_aligns_absent_partial_and_ready_vectors() -> None:
+    """State payloads publish only complete named entries without fabrication."""
+    specification = StateSpaceSpecification("local", "local_level")
+    profile = StateSpaceProfile(
+        enabled=True,
+        specifications=(specification,),
+        projection_specification_id="local",
+    )
+    fold = {
+        "series_id": "EURUSD",
+        "period": "201201",
+        "fold_id": 1,
+        "origin_row_id": 1,
+        "target_row_id": 2,
+        "origin_bin_end_utc_ms": 1_000,
+        "target_bin_end_utc_ms": 2_000,
+        "target_index": 0,
+        "horizon": 1,
+        "status": "valid",
+    }
+    failed = _outcome(
+        status="failed",
+        reason="non_positive_covariance",
+        state_names=("level", "trend"),
+    )
+    failed_sample = state_module._fit_sample(
+        failed,
+        specification,
+        "sha256:failed",
+        fold,
+        (0,),
+        1,
+        profile,
+    )
+    assert failed_sample["status"] == "failed"
+    assert failed_sample["reason"] == "non_positive_covariance"
+    assert failed_sample["state_dimension"] == 2
+    assert failed_sample["state_names"] == []
+    assert failed_sample["states"] == []
+    assert failed_sample["states_truncated"] is True
+
+    failed_fold = state_module._fold_evaluation(
+        [{"cm_input_observed_value": 1.0}],
+        fold,
+        specification,
+        1,
+        "sha256:failed",
+        failed,
+        (),
+        _input_profile(),
+        profile.rounding_digits,
+        profile.max_retained_states,
+    )
+    assert failed_fold["status"] == "not_evaluated"
+    assert failed_fold["reason"] == "non_positive_covariance"
+    assert failed_fold["state_names"] == []
+    assert failed_fold["filtered_state"] == []
+    assert failed_fold["smoothed_state"] == []
+    assert failed_fold["filtered_state_available_at_origin"] is False
+    assert failed_fold["smoothed_state_retrospective"] is False
+
+    partial = _outcome(
+        state_names=("level", "trend", "seasonal"),
+        filtered_state=(1.0, 2.0),
+        filtered_variance=(0.1,),
+        smoothed_state=(1.1, 2.1),
+        smoothed_variance=(0.2, 0.3),
+    )
+    partial_sample = state_module._fit_sample(
+        partial,
+        specification,
+        "sha256:partial",
+        fold,
+        (0,),
+        1,
+        profile,
+    )
+    assert partial_sample["state_names"] == ["level"]
+    assert partial_sample["states"] == [
+        {
+            "name": "level",
+            "filtered": 1.0,
+            "filtered_variance": 0.1,
+            "smoothed": 1.1,
+            "smoothed_variance": 0.2,
+        }
+    ]
+    assert partial_sample["states_truncated"] is True
+
+    ready = _outcome(
+        state_names=("level", "trend"),
+        filtered_state=(1.0, 2.0),
+        filtered_variance=(0.1, 0.2),
+        smoothed_state=(1.1, 2.1),
+        smoothed_variance=(0.3, 0.4),
+    )
+    ready_fold = state_module._fold_evaluation(
+        [{"cm_input_observed_value": 1.0}],
+        fold,
+        specification,
+        1,
+        "sha256:ready",
+        ready,
+        (1.0,),
+        _input_profile(),
+        profile.rounding_digits,
+        profile.max_retained_states,
+    )
+    assert ready_fold["state_names"] == ["level", "trend"]
+    assert ready_fold["filtered_state"] == [1.0, 2.0]
+    assert ready_fold["smoothed_state"] == [1.1, 2.1]
+    assert ready_fold["states_truncated"] is False
+    assert ready_fold["filtered_state_available_at_origin"] is True
+    assert ready_fold["smoothed_state_retrospective"] is True
+
+
 def test_projection_preserves_identity_and_serializes_cache_and_influx(
     tmp_path: Path,
 ) -> None:
@@ -635,3 +751,41 @@ def _mapping(value: Any) -> dict[str, Any]:
 
 def _mapping_rows(value: Any) -> list[dict[str, Any]]:
     return [_mapping(row) for row in cast(list[Any], value)]
+
+
+def _outcome(
+    *,
+    status: str = "converged",
+    reason: str = "",
+    state_names: tuple[str, ...],
+    filtered_state: tuple[float | None, ...] = (),
+    filtered_variance: tuple[float | None, ...] = (),
+    smoothed_state: tuple[float | None, ...] = (),
+    smoothed_variance: tuple[float | None, ...] = (),
+) -> Any:
+    return state_module._FitOutcome(
+        status=status,
+        reason=reason,
+        forecasts=(1.0,) if status == "converged" else (),
+        standard_errors=(0.1,) if status == "converged" else (),
+        lower_bounds=(0.8,) if status == "converged" else (),
+        upper_bounds=(1.2,) if status == "converged" else (),
+        parameters={},
+        warning_codes=(),
+        converged=status == "converged",
+        state_dimension=len(state_names),
+        state_names=state_names,
+        filtered_state=filtered_state,
+        filtered_variance=filtered_variance,
+        smoothed_state=smoothed_state,
+        smoothed_variance=smoothed_variance,
+        effective_observation_count=24,
+        missing_observation_count=0,
+        prediction_only_transition_count=0,
+        max_prediction_only_gap=0,
+        log_likelihood=None,
+        aic=None,
+        bic=None,
+        covariance_condition_number=None,
+        innovation_summary={},
+    )

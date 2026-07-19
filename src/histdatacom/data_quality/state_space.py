@@ -1178,7 +1178,7 @@ def _fit_sample(
     grid_observation_count: int,
     profile: StateSpaceProfile,
 ) -> dict[str, JSONValue]:
-    retained = min(profile.max_retained_states, len(outcome.state_names))
+    retained = _retained_state_count(outcome, profile.max_retained_states)
     states = [
         {
             "name": outcome.state_names[index],
@@ -1280,7 +1280,8 @@ def _fold_evaluation(
         if status == "evaluated" and forecast is not None and actual is not None
         else None
     )
-    retained = min(retained_state_limit, len(outcome.state_names))
+    retained = _retained_state_count(outcome, retained_state_limit)
+    states_available = retained > 0
     return {
         "schema_version": STATE_SPACE_FORECAST_SCHEMA_VERSION,
         "status": status,
@@ -1340,8 +1341,8 @@ def _fold_evaluation(
         "smoothed_state": list(outcome.smoothed_state[:retained]),
         "smoothed_variance": list(outcome.smoothed_variance[:retained]),
         "states_truncated": len(outcome.state_names) > retained,
-        "filtered_state_available_at_origin": True,
-        "smoothed_state_retrospective": True,
+        "filtered_state_available_at_origin": states_available,
+        "smoothed_state_retrospective": states_available,
         "smoothed_state_used_for_forecast": False,
         "full_series_smoothing_used": False,
         "original_scale": True,
@@ -1622,6 +1623,16 @@ def _annotation_row(
     smoothed_variance = cast(list[Any], evaluation.get("smoothed_variance", []))
     level_index = _state_index(state_names, "level")
     trend_index = _state_index(state_names, "trend")
+    filtered_state_available = (
+        forecast_available
+        and bool(evaluation.get("filtered_state_available_at_origin"))
+        and bool(filtered)
+    )
+    smoothed_state_available = (
+        diagnostic
+        and bool(evaluation.get("smoothed_state_retrospective"))
+        and bool(smoothed)
+    )
     origin_time = _int(evaluation.get("origin_bin_end_utc_ms"))
     target_time = _int(evaluation.get("target_bin_end_utc_ms"))
     return {
@@ -1714,51 +1725,59 @@ def _annotation_row(
             KALMAN_FILTERED_CALCULATION_BASIS_CODE
         ),
         "cm_kalman_filtered_level": (
-            _vector_value(filtered, level_index) if not diagnostic else None
+            _vector_value(filtered, level_index)
+            if filtered_state_available
+            else None
         ),
         "cm_kalman_filtered_trend": (
-            _vector_value(filtered, trend_index) if not diagnostic else None
+            _vector_value(filtered, trend_index)
+            if filtered_state_available
+            else None
         ),
         "cm_kalman_filtered_level_variance": (
             _vector_value(filtered_variance, level_index)
-            if not diagnostic
+            if filtered_state_available
             else None
         ),
         "cm_kalman_filtered_trend_variance": (
             _vector_value(filtered_variance, trend_index)
-            if not diagnostic
+            if filtered_state_available
             else None
         ),
-        "cm_kalman_filtered_available": forecast_available,
+        "cm_kalman_filtered_available": filtered_state_available,
         "cm_kalman_filtered_available_at_utc_ms": (
-            origin_time if forecast_available else None
+            origin_time if filtered_state_available else None
         ),
-        "cm_kalman_filtered_training_eligible": forecast_available,
+        "cm_kalman_filtered_training_eligible": filtered_state_available,
         "cm_kalman_smoothed_calculation_basis_code": (
             KALMAN_SMOOTHED_CALCULATION_BASIS_CODE
         ),
         "cm_kalman_smoothed_level": (
-            _vector_value(smoothed, level_index) if diagnostic else None
+            _vector_value(smoothed, level_index)
+            if smoothed_state_available
+            else None
         ),
         "cm_kalman_smoothed_trend": (
-            _vector_value(smoothed, trend_index) if diagnostic else None
+            _vector_value(smoothed, trend_index)
+            if smoothed_state_available
+            else None
         ),
         "cm_kalman_smoothed_level_variance": (
             _vector_value(smoothed_variance, level_index)
-            if diagnostic
+            if smoothed_state_available
             else None
         ),
         "cm_kalman_smoothed_trend_variance": (
             _vector_value(smoothed_variance, trend_index)
-            if diagnostic
+            if smoothed_state_available
             else None
         ),
-        "cm_kalman_smoothed_available": diagnostic,
+        "cm_kalman_smoothed_available": smoothed_state_available,
         "cm_kalman_smoothed_available_at_utc_ms": (
-            target_time if diagnostic else None
+            target_time if smoothed_state_available else None
         ),
-        "cm_kalman_smoothed_retrospective": diagnostic,
-        "cm_kalman_smoothed_diagnostic_only": diagnostic,
+        "cm_kalman_smoothed_retrospective": smoothed_state_available,
+        "cm_kalman_smoothed_diagnostic_only": smoothed_state_available,
         "cm_kalman_smoothed_training_eligible": False,
     }
 
@@ -2097,6 +2116,17 @@ def _last_covariance_diagonal(raw: Any) -> tuple[float | None, ...]:
 
 def _states_are_valid(values: Sequence[float | None]) -> bool:
     return all(value is None or math.isfinite(value) for value in values)
+
+
+def _retained_state_count(outcome: _FitOutcome, limit: int) -> int:
+    return min(
+        limit,
+        len(outcome.state_names),
+        len(outcome.filtered_state),
+        len(outcome.filtered_variance),
+        len(outcome.smoothed_state),
+        len(outcome.smoothed_variance),
+    )
 
 
 def _sequence_value(
