@@ -18,14 +18,13 @@ import json
 import os
 from pathlib import Path
 import re
-import resource
-import sys
 import time
 from typing import Any
 
 from histdatacom.data_analytics.feed_epochs_v2 import (
     read_active_time_feed_epoch_definition,
 )
+from histdatacom.resource_usage import peak_rss_bytes
 from histdatacom.runtime_contracts import ArtifactRef, JSONValue
 from histdatacom.synthetic.benchmark_corpus import (
     PREDECLARED_GATE_COMMIT,
@@ -1253,8 +1252,7 @@ def _stable_id(namespace: str, payload: Mapping[str, Any]) -> str:
 
 
 def _peak_memory_bytes() -> int:
-    maximum = int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
-    return maximum if sys.platform == "darwin" else maximum * 1024
+    return peak_rss_bytes()
 
 
 def _enforce_runtime(started: float, maximum: float) -> None:

@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-import sys
 import time
 from dataclasses import dataclass, field, replace
-from importlib import import_module
 from enum import Enum
 from typing import Any, Callable, Mapping
 
 from histdatacom.concurrency import get_pool_cpu_count
+from histdatacom.resource_usage import peak_rss_bytes
 from histdatacom.runtime_contracts import JSONValue, RunRequest, WorkItem
 
 DEFAULT_NETWORK_MULTIPLIER = 3
@@ -290,15 +289,7 @@ def measure_startup(
 
 
 def _peak_rss_bytes() -> int:
-    try:
-        resource = import_module("resource")
-    except ModuleNotFoundError:
-        return 0
-    usage = resource.getrusage(resource.RUSAGE_SELF)
-    peak = int(getattr(usage, "ru_maxrss", 0) or 0)
-    if sys.platform.startswith("linux"):
-        return peak * 1024
-    return peak
+    return peak_rss_bytes()
 
 
 def _normalize_lane(lane: object) -> str:

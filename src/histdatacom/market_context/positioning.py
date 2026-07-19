@@ -20,9 +20,7 @@ import json
 import math
 import os
 import re
-import resource
 import statistics
-import sys
 import time
 import tempfile
 import zipfile
@@ -38,6 +36,7 @@ from zoneinfo import ZoneInfo
 import requests
 
 from histdatacom.market_context.contracts import canonical_contract_json
+from histdatacom.resource_usage import peak_rss_bytes
 from histdatacom.runtime_contracts import ArtifactRef, JSONValue
 from histdatacom.synthetic.information import (
     InformationInputKind,
@@ -3550,10 +3549,7 @@ def _archive_rows(content: bytes) -> Iterable[Mapping[str, str]]:
 
 
 def _peak_memory_bytes() -> int:
-    peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-    if not sys.platform.startswith("darwin"):
-        peak *= 1024
-    return int(peak)
+    return peak_rss_bytes()
 
 
 def _derive_query_values(
