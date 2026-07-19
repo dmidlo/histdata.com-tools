@@ -1093,6 +1093,9 @@ def check_package_metadata(*, expect_temporal_extra: bool) -> dict[str, Any]:
     temporalio_version = metadata.version("temporalio")
     if importlib.util.find_spec("temporalio") is None:
         raise SystemExit("temporalio distribution is installed but missing")
+    tzdata_version = metadata.version("tzdata")
+    if importlib.util.find_spec("tzdata") is None:
+        raise SystemExit("tzdata distribution is installed but missing")
     if RunRequest is not RuntimeRunRequest:
         raise SystemExit(
             "orchestration contract RunRequest does not match runtime contract"
@@ -1104,6 +1107,7 @@ def check_package_metadata(*, expect_temporal_extra: bool) -> dict[str, Any]:
         "console_scripts": sorted(EXPECTED_CONSOLE_SCRIPTS),
         "orchestration_contracts": ["RunRequest"],
         "temporalio_version": temporalio_version,
+        "tzdata_version": tzdata_version,
     }
 
 

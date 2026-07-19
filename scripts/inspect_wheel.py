@@ -468,6 +468,11 @@ def inspect_wheel(
         dependency="temporalio",
     ):
         raise SystemExit("temporalio dependency missing from core metadata")
+    if not _requires_dist_core_contains(
+        requires_dist,
+        dependency="tzdata",
+    ):
+        raise SystemExit("tzdata dependency missing from core metadata")
     if not _requires_dist_contains(
         requires_dist,
         dependency="temporalio",

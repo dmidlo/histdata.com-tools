@@ -150,8 +150,22 @@ def _write_common_assets(
     )
 
 
-def _write_dist_info(wheel: ZipFile, *, tag: str) -> None:
+def _write_dist_info(
+    wheel: ZipFile,
+    *,
+    tag: str,
+    include_tzdata: bool = True,
+) -> None:
     """Write minimal package metadata needed by the wheel inspector."""
+    requirements = [
+        'Requires-Dist: statsmodels>=0.14.6,<0.15; extra == "models"',
+        'Requires-Dist: statsmodels>=0.14.6,<0.15; extra == "all"',
+        "Requires-Dist: temporalio>=1.10,<1.29",
+        'Requires-Dist: temporalio>=1.10,<1.29; extra == "temporal"',
+        'Requires-Dist: temporalio>=1.10,<1.29; extra == "all"',
+    ]
+    if include_tzdata:
+        requirements.append("Requires-Dist: tzdata>=2026.3")
     wheel.writestr(
         "histdatacom-1.0.0.dist-info/METADATA",
         "\n".join(
@@ -167,11 +181,7 @@ def _write_dist_info(wheel: ZipFile, *, tag: str) -> None:
                 "Provides-Extra: models",
                 "Provides-Extra: temporal",
                 "Provides-Extra: all",
-                'Requires-Dist: statsmodels>=0.14.6,<0.15; extra == "models"',
-                'Requires-Dist: statsmodels>=0.14.6,<0.15; extra == "all"',
-                "Requires-Dist: temporalio>=1.10,<1.29",
-                'Requires-Dist: temporalio>=1.10,<1.29; extra == "temporal"',
-                'Requires-Dist: temporalio>=1.10,<1.29; extra == "all"',
+                *requirements,
                 "",
             ]
         ),
@@ -252,6 +262,29 @@ def test_inspect_wheel_accepts_bundled_platform_executable(
         report["classifiers"]
     )
     assert report["wheel_tags"] == ["py3-none-macosx_11_0_arm64"]
+
+
+def test_inspect_wheel_requires_core_tzdata_dependency(
+    tmp_path: Path,
+) -> None:
+    """Cross-platform wheels must carry the ZoneInfo fallback dependency."""
+    module = _load_script()
+    manifest = _base_manifest()
+    wheel_path = tmp_path / "histdatacom-1.0.0-py3-none-any.whl"
+
+    with ZipFile(wheel_path, "w") as wheel:
+        _write_common_assets(wheel, manifest=manifest)
+        _write_dist_info(
+            wheel,
+            tag="py3-none-any",
+            include_tzdata=False,
+        )
+
+    with pytest.raises(
+        SystemExit,
+        match="tzdata dependency missing from core metadata",
+    ):
+        module.inspect_wheel(wheel_path)
 
 
 def test_inspect_wheel_accepts_windows_exe_without_unix_execute_mode(
