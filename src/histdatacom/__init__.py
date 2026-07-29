@@ -24,6 +24,12 @@ __all__ = [
     "Pairs",
     "Timeframe",
     "Format",
+    "DatasetCatalog",
+    "DatasetQueryScopeV1",
+    "DatasetResolutionV1",
+    "DatasetVersionManifestV1",
+    "FixtureProviderAdapter",
+    "HistDataProviderAdapter",
     "ReconstructionClient",
     "ReconstructionExecutionRequestV1",
     "ReconstructionExitCode",
@@ -53,14 +59,30 @@ _RECONSTRUCTION_EXPORTS = frozenset(
     }
 )
 
+_DATASET_EXPORTS = frozenset(
+    {
+        "DatasetCatalog",
+        "DatasetQueryScopeV1",
+        "DatasetResolutionV1",
+        "DatasetVersionManifestV1",
+        "FixtureProviderAdapter",
+        "HistDataProviderAdapter",
+    }
+)
+
 
 def __getattr__(name: str) -> Any:
     """Lazily expose the typed reconstruction facade without import cycles."""
-    if name not in _RECONSTRUCTION_EXPORTS:
+    if name not in _RECONSTRUCTION_EXPORTS | _DATASET_EXPORTS:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
     from importlib import import_module
 
-    value = getattr(import_module("histdatacom.reconstruction"), name)
+    module_name = (
+        "histdatacom.reconstruction"
+        if name in _RECONSTRUCTION_EXPORTS
+        else "histdatacom.datasets"
+    )
+    value = getattr(import_module(module_name), name)
     globals()[name] = value
     return value
 

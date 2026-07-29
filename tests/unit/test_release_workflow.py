@@ -364,6 +364,14 @@ def test_package_metadata_advertises_platform_wheel_support() -> None:
     } <= classifiers
 
 
+def test_package_metadata_supplies_windows_iana_timezone_data() -> None:
+    """Windows base installs need the PEP 615 fallback timezone database."""
+    project = _pyproject_config()["project"]
+    assert isinstance(project, dict)
+
+    assert "tzdata>=2026.3; sys_platform == 'win32'" in project["dependencies"]
+
+
 def test_package_metadata_advertises_optional_models_provider() -> None:
     """Rich fitted models should remain isolated in the models/all extras."""
     optional = _pyproject_config()["project"]["optional-dependencies"]

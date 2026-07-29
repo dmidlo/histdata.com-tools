@@ -166,9 +166,13 @@ def test_help_advertises_orchestration_jobs_not_orchestration() -> None:
     assert "Orchestration:" in help_text
     assert "analytics   Run offline data analytics operations" in help_text
     assert "groups      List instrument groups and major triangles" in help_text
+    assert (
+        "datasets    Resolve and verify versioned local datasets" in help_text
+    )
     assert "quality     Inspect local data quality evidence" in help_text
     assert "histdatacom analytics --help" in help_text
     assert "histdatacom groups --help" in help_text
+    assert "histdatacom datasets --help" in help_text
     assert "histdatacom jobs --help" in help_text
     assert "histdatacom quality --help" in help_text
     assert "--config PATH" in help_text
@@ -237,7 +241,10 @@ def test_help_advertises_deterministic_random_windows() -> None:
     parser._set_args()
     help_text = parser.format_help()
 
-    assert "-r, --random-window EXPRESSION" in help_text
+    # argparse renders aliases differently before Python 3.11, but both public
+    # spellings and the expression metavar must remain visible.
+    assert "-r EXPRESSION" in help_text
+    assert "--random-window" in help_text
     assert "--random-seed INTEGER" in help_text
     assert "all matching occurrences" in " ".join(help_text.split())
 

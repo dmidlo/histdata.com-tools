@@ -19,6 +19,7 @@ Data and reconstruction foundations
    observation-operator-contracts
    market-context-contracts
    cftc-positioning-contracts
+   provider-neutral-dataset-catalog
 
 Empirical reconstruction pipeline
 ---------------------------------

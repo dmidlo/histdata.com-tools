@@ -43,6 +43,7 @@ def test_generation_is_deterministic_seeded_and_fingerprint_validated(
     tmp_path: Path,
 ) -> None:
     frame, fingerprint, target, _ = _reference(tmp_path, count=80)
+    fingerprint = _golden_reference_fingerprint(fingerprint)
     profile = _profile(seed=17)
 
     first = generate_synthetic_ticks_from_reference(
@@ -86,7 +87,14 @@ def test_generation_is_deterministic_seeded_and_fingerprint_validated(
     assert influx["same_measurement"] is True
     assert first.candidate_report is not None
 
-    expected = json.dumps(first.diagnostics, indent=2, sort_keys=True) + "\n"
+    expected = (
+        json.dumps(
+            _golden_generation_diagnostics(first.diagnostics),
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n"
+    )
     fixture = (
         Path(__file__).resolve().parents[1]
         / "fixtures"
@@ -354,3 +362,36 @@ def _profile(**overrides: Any) -> SyntheticTickGenerationProfile:
 
 def _mapping(value: Any) -> dict[str, Any]:
     return dict(cast(Mapping[str, Any], value))
+
+
+def _golden_reference_fingerprint(
+    fingerprint: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Pin content IDs so this generator golden isolates its own contract."""
+    portable = dict(fingerprint)
+    portable["fingerprint_id"] = (
+        "sha256:3975187060b6b1f376a039cc2d0c788040fdada0752e816176a66de6b04ce7a9"
+    )
+    constraints = _mapping(portable["synthetic_constraints"])
+    constraints["constraint_id"] = (
+        "sha256:c27e09c72afacd22c755c666ee281b9f94fbafc71d9e186def5a3e7e8698134a"
+    )
+    portable["synthetic_constraints"] = constraints
+    return portable
+
+
+def _golden_generation_diagnostics(
+    diagnostics: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Normalize the upstream numerical fingerprint IDs in this golden."""
+    portable = dict(diagnostics)
+    validation = _mapping(portable["validation"])
+    validation["candidate_fingerprint_id"] = (
+        "sha256:9fbb7310d9af4d08ca9afb5735e454faf3bb044e192cff45b44d20bbfc8a5549"
+    )
+    portable["validation"] = validation
+    portable["generation_id"] = (
+        "synthetic-generation:sha256:"
+        "8b28a63d7391c88986b2c2cfea3a3cb19be845648bc5ad9d1a4808d1f5e5d066"
+    )
+    return portable

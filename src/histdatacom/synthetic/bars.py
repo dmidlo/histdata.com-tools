@@ -2785,7 +2785,8 @@ def _remove_bar_scratch(path: Path, root: Path) -> None:
 
 
 def _fsync_file(path: Path) -> None:
-    with path.open("rb") as stream:
+    # Windows maps fsync to the writable-handle-only CRT commit operation.
+    with path.open("rb+") as stream:
         os.fsync(stream.fileno())
 
 

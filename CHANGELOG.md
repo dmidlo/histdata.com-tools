@@ -2,6 +2,12 @@
 
 ### Added
 
+- **datasets**: add provider-neutral HistData and explicit-UTC fixture adapters,
+  immutable observed/derived dataset manifests, qualified aliases, exact
+  resolution/replay receipts, query-bound cursors, strong verification,
+  provider-neutral reconstruction inventory preflight, V2 API lineage, and an
+  installed bounded catalog CLI while preserving V1 HistData identities (#78).
+
 - **reconstruction**: add a versioned broker-neutral v2.1 certification policy,
   hash/schema/subject-verified campaign runner, JSON-pointer observation
   extraction, atomic machine/human dossier publication, and installed
@@ -34,6 +40,11 @@
 
 ### Fixed
 
+- **portability**: make peak-RSS measurement import-safe on Windows, ship
+  platform-scoped IANA timezone data, use Python 3.10-compatible container
+  timestamps and portable filesystem durability operations, and isolate
+  numerical goldens from optimizer/runtime drift so clean wheel installs can
+  load and verify the full analytics/reconstruction surface (#78).
 - **reconstruction**: preserve Arrow partition-row order for equal-timestamp
   source ticks, externalize proposal and carving batch evidence into bounded
   content-addressed ledgers, enforce live RSS limits, and truncate very large

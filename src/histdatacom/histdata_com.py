@@ -1416,6 +1416,7 @@ def main(
         {
             "analytics",
             "cleanup",
+            "datasets",
             "groups",
             "jobs",
             "quality",
@@ -1428,6 +1429,12 @@ def main(
 
         return cleanup_main(
             remove_routed_command_from_cli_args(cli_args, "cleanup")
+        )
+    if not options and routed_command == "datasets":
+        from histdatacom.dataset_cli import main as dataset_main
+
+        return dataset_main(
+            remove_routed_command_from_cli_args(cli_args, "datasets")
         )
     if not options and routed_command == "jobs":
         from histdatacom.orchestration.cli import jobs_main

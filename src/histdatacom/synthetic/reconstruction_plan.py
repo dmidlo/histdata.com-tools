@@ -26,6 +26,11 @@ from typing import Any, cast
 from histdatacom.data_analytics.feed_epochs_v2 import (
     read_active_time_feed_epoch_definition,
 )
+from histdatacom.datasets import (
+    DatasetContractError,
+    DatasetFailureCode,
+    HistDataProviderAdapter,
+)
 from histdatacom.market_context import (
     CftcPositioningCorpusV1,
     CftcReportFamily,
@@ -2319,6 +2324,7 @@ def _build_source_inventory(
     requested_start_ns: int,
     requested_end_ns: int,
 ) -> ReconstructionSourceInventoryV1:
+    adapter = HistDataProviderAdapter()
     lineage = {
         (
             _period(str(item.get("period", ""))),
@@ -2334,7 +2340,6 @@ def _build_source_inventory(
                 raise ReconstructionPlanCompatibilityError(
                     f"feed epoch lineage omits {symbol} {period}"
                 )
-            path = source_root / _relative_tick_path(symbol, period)
             expected_hash = str(
                 evidence.get("source_artifact_sha256", "")
             ).removeprefix("sha256:")
@@ -2342,12 +2347,32 @@ def _build_source_inventory(
                 raise ReconstructionPlanCompatibilityError(
                     f"feed epoch lineage hash is invalid for {symbol} {period}"
                 )
-            actual_hash = _file_sha256(path)
-            if actual_hash != expected_hash:
-                raise ReconstructionPlanCompatibilityError(
-                    f"source hash differs for {symbol} {period}"
+            try:
+                provider_partition = adapter.inspect_partition(
+                    source_root,
+                    symbol=symbol,
+                    period=period,
+                    expected_sha256=expected_hash,
                 )
-            rows, first_ms, last_ms = _inspect_tick_cache(path)
+            except DatasetContractError as err:
+                if err.code is DatasetFailureCode.ARTIFACT_HASH_MISMATCH:
+                    message = f"source hash differs for {symbol} {period}"
+                else:
+                    message = (
+                        f"HistData adapter rejected {symbol} {period}: {err}"
+                    )
+                raise ReconstructionPlanCompatibilityError(message) from err
+            path = Path(provider_partition.artifact.path)
+            actual_hash = provider_partition.artifact.sha256
+            rows = provider_partition.row_count
+            first_ms = _strict_int(
+                provider_partition.artifact.metadata.get("first_timestamp_ms"),
+                "first_timestamp_ms",
+            )
+            last_ms = _strict_int(
+                provider_partition.artifact.metadata.get("last_timestamp_ms"),
+                "last_timestamp_ms",
+            )
             ref = ArtifactRef(
                 kind=ASCII_TICK_SOURCE_KIND,
                 path=str(path.resolve()),
