@@ -38,13 +38,20 @@
   resolution across defaults, named profiles, files, YAML, API options, and CLI
   overrides, including previous source/value evidence (#367).
 
+### Changed
+
+- **dependencies**: update the supported GitHub Actions toolchain and Python
+  packaging/lint dependencies while preserving the newer `dev`-only runtime,
+  model, documentation, and timezone requirements (#477, #478, #479).
+
 ### Fixed
 
 - **portability**: make peak-RSS measurement import-safe on Windows, ship
-  platform-scoped IANA timezone data, use Python 3.10-compatible container
+  the required IANA timezone data, use Python 3.10-compatible container
   timestamps and portable filesystem durability operations, and isolate
   numerical goldens from optimizer/runtime drift so clean wheel installs can
-  load and verify the full analytics/reconstruction surface (#78).
+  load and verify the full analytics/reconstruction surface (#473, #474,
+  #479).
 - **reconstruction**: preserve Arrow partition-row order for equal-timestamp
   source ticks, externalize proposal and carving batch evidence into bounded
   content-addressed ledgers, enforce live RSS limits, and truncate very large
