@@ -105,10 +105,10 @@ jobs:
 
     steps:
       - name: Check out source
-        uses: actions/checkout@v7.0.0
+        uses: actions/checkout@v7.0.1
 
       - name: Set up Python
-        uses: actions/setup-python@v6.3.0
+        uses: actions/setup-python@v7.0.0
         with:
           python-version: "3.13"
           cache: pip
@@ -178,10 +178,10 @@ jobs:
 
     steps:
       - name: Check out source
-        uses: actions/checkout@v7.0.0
+        uses: actions/checkout@v7.0.1
 
       - name: Set up Python
-        uses: actions/setup-python@v6.3.0
+        uses: actions/setup-python@v7.0.0
         with:
           python-version: "3.13"
           cache: pip
@@ -225,7 +225,7 @@ jobs:
         shell: bash
 
       - name: Generate bundled wheel provenance attestation
-        uses: actions/attest@v4.1.1
+        uses: actions/attest@v4.2.0
         with:
           subject-path: dist-platform/*.whl
 
@@ -270,10 +270,10 @@ jobs:
 
     steps:
       - name: Check out source
-        uses: actions/checkout@v7.0.0
+        uses: actions/checkout@v7.0.1
 
       - name: Set up Python
-        uses: actions/setup-python@v6.3.0
+        uses: actions/setup-python@v7.0.0
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
@@ -340,10 +340,10 @@ jobs:
 
     steps:
       - name: Check out source
-        uses: actions/checkout@v7.0.0
+        uses: actions/checkout@v7.0.1
 
       - name: Set up Python
-        uses: actions/setup-python@v6.3.0
+        uses: actions/setup-python@v7.0.0
         with:
           python-version: "3.13"
           cache: pip
@@ -381,7 +381,7 @@ jobs:
         shell: bash
 
       - name: Generate release provenance attestation
-        uses: actions/attest@v4.1.1
+        uses: actions/attest@v4.2.0
         with:
           subject-path: dist/*
 
@@ -419,7 +419,7 @@ jobs:
           path: dist
 
       - name: Publish package distributions to TestPyPI
-        uses: pypa/gh-action-pypi-publish@v1.14.0
+        uses: pypa/gh-action-pypi-publish@v1.14.1
         with:
           repository-url: https://test.pypi.org/legacy/
           print-hash: true
@@ -439,7 +439,7 @@ jobs:
 
     steps:
       - name: Check out production source and tags
-        uses: actions/checkout@v7.0.0
+        uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 0
 
@@ -634,7 +634,7 @@ jobs:
         shell: bash
 
       - name: Publish package distributions to PyPI
-        uses: pypa/gh-action-pypi-publish@v1.14.0
+        uses: pypa/gh-action-pypi-publish@v1.14.1
         with:
           print-hash: true
 
