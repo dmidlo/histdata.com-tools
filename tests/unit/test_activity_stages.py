@@ -13,15 +13,22 @@ from urllib.error import URLError
 import pytest
 import requests
 
-from histdatacom.exceptions import HistDataNoDataError, UrlValidationError
+from histdatacom.exceptions import (
+    CacheBuildError,
+    HistDataNoDataError,
+    UrlValidationError,
+)
 from histdatacom.activity_stages import (
     UrlPageData,
     build_cache_work_item,
+    create_cache_file,
     dataset_plan_stage,
     download_archive_work_item,
+    emit_influx_cache_batches,
     extract_csv_work_item,
     fetch_histdata_page_data,
     import_to_influx_work_item,
+    merge_cache_items,
     merge_cache_work_items,
     parse_histdata_form_metadata,
     read_repository_data_file,
@@ -30,16 +37,26 @@ from histdatacom.activity_stages import (
     validate_url_work_item,
     write_repository_data_file,
 )
+from histdatacom.data_quality.training_features import (
+    required_training_feature_columns,
+)
 from histdatacom.histdata_ascii import (
     CACHE_FILENAME,
     LEGACY_CACHE_ERROR,
     convert_polars_datetime_to_utc_ms,
+    read_polars_cache,
     read_ascii_file_to_polars,
     write_polars_cache,
 )
 from histdatacom.manifest_store import ManifestStatusStore
 from histdatacom.records import Record
 from histdatacom.runtime_contracts import WorkItem, WorkStatus, derive_work_id
+from histdatacom.random_windows import (
+    RANDOM_WINDOW_SELECTION_METADATA_KEY,
+    RandomWindowEmptySelectionError,
+    RandomWindowSelectionV1,
+    random_window_planning_yearmonths,
+)
 
 FIXTURES = Path(__file__).parents[1] / "fixtures" / "histdata_ascii"
 ASCII_TICK_URL = (
@@ -97,7 +114,25 @@ def _zip_bytes(filename: str = "DAT_ASCII_EURUSD_T_202201.csv") -> bytes:
     return stream.getvalue()
 
 
-def _form_html(*, token: str = "token") -> str:
+def _live_zip_bytes() -> bytes:
+    """Return the CSV plus same-stem status report used by live HistData."""
+    stream = io.BytesIO()
+    with zipfile.ZipFile(stream, "w") as archive:
+        archive.writestr("DAT_ASCII_EURUSD_T_202201.csv", "rows")
+        archive.writestr(
+            "DAT_ASCII_EURUSD_T_202201.txt",
+            "HistData.com status report",
+        )
+    return stream.getvalue()
+
+
+def _form_html(
+    *,
+    token: str = "token",
+    platform: str = "ASCII",
+    timeframe: str = "T",
+    pair: str = "eurusd",
+) -> str:
     """Return a minimal HistData download form."""
     return f"""
     <html>
@@ -105,9 +140,9 @@ def _form_html(*, token: str = "token") -> str:
         <input id="tk" value="{token}">
         <input id="date" value="2022">
         <input id="datemonth" value="202201">
-        <input id="platform" value="ASCII">
-        <input id="timeframe" value="T">
-        <input id="fxpair" value="eurusd">
+        <input id="platform" value="{platform}">
+        <input id="timeframe" value="{timeframe}">
+        <input id="fxpair" value="{pair}">
       </form>
     </html>
     """
@@ -171,6 +206,91 @@ def test_validate_url_work_item_parses_form_metadata(
     assert output.work_item.encoding == "gzip"
     assert output.work_item.bytes_length == "123"
     assert output.result.metrics["encoding"] == "gzip"
+
+
+@pytest.mark.parametrize(
+    ("platform", "timeframe"),
+    (("NINJATRADER", "T"), ("ASCII", "M1")),
+)
+def test_validate_url_work_item_rejects_unsupported_form_dimensions(
+    tmp_path: Path,
+    platform: str,
+    timeframe: str,
+) -> None:
+    """Server form metadata must not reopen retired raw dimensions."""
+    record = Record(url=ASCII_TICK_URL, status=WorkStatus.URL_NEW.value)
+
+    output = validate_url_work_item(
+        WorkItem.from_record(record),
+        args=_args(tmp_path),
+        fetch_page_data=lambda url, timeout: UrlPageData(
+            html=_form_html(platform=platform, timeframe=timeframe),
+            encoding="gzip",
+            bytes_length="123",
+            headers={},
+        ),
+    )
+
+    assert not output.forward
+    assert output.work_item.status is WorkStatus.FAILED
+    assert output.result.failure is not None
+    assert output.result.failure.code == "UNSUPPORTED_RAW_INPUT"
+    assert output.result.failure.detail["data_format"] == platform
+    assert output.result.failure.detail["timeframe"] == timeframe
+    assert ManifestStatusStore(tmp_path).list_work_items() == ()
+
+
+def test_validate_url_work_item_rejects_form_dimension_mismatch(
+    tmp_path: Path,
+) -> None:
+    """Returned form axes must still identify the planned raw target."""
+    record = Record(
+        url=ASCII_TICK_URL,
+        status=WorkStatus.URL_NEW.value,
+        data_format="ASCII",
+        data_timeframe="T",
+        data_fxpair="eurusd",
+    )
+
+    output = validate_url_work_item(
+        WorkItem.from_record(record),
+        args=_args(tmp_path),
+        fetch_page_data=lambda url, timeout: UrlPageData(
+            html=_form_html(pair="gbpusd"),
+            encoding="gzip",
+            bytes_length="123",
+            headers={},
+        ),
+    )
+
+    assert not output.forward
+    assert output.result.failure is not None
+    assert output.result.failure.code == "FORM_DIMENSION_MISMATCH"
+    assert output.result.failure.detail["mismatched_fields"] == ["fxpair"]
+
+
+def test_validate_url_work_item_rejects_unsupported_legacy_scrape(
+    tmp_path: Path,
+) -> None:
+    """Injected legacy scrapers must pass the same raw-input gate."""
+    record = Record(url=ASCII_TICK_URL, status=WorkStatus.URL_NEW.value)
+
+    def scrape(record_: Record) -> Record:
+        record_.data_tk = "token"
+        record_.data_format = "METATRADER"
+        record_.data_timeframe = "T"
+        return record_
+
+    output = validate_url_work_item(
+        WorkItem.from_record(record),
+        args=_args(tmp_path),
+        scrape_record_info=scrape,
+        check_for_valid_download=lambda record_: None,
+    )
+
+    assert not output.forward
+    assert output.result.failure is not None
+    assert output.result.failure.code == "UNSUPPORTED_RAW_INPUT"
 
 
 def test_parse_form_metadata_ignores_inputs_outside_download_form() -> None:
@@ -349,6 +469,8 @@ def test_download_archive_work_item_returns_zip_artifact(
         url=ASCII_TICK_URL,
         status=WorkStatus.URL_VALID.value,
         data_dir=f"{data_dir}{os.sep}",
+        data_format="ascii",
+        data_timeframe="T",
     )
 
     def download(record_: Record) -> None:
@@ -422,6 +544,41 @@ def test_download_archive_work_item_atomically_writes_valid_zip(
     assert output.result.metrics["decision"] == "downloaded"
 
 
+def test_download_archive_work_item_rejects_retired_response_filename(
+    tmp_path: Path,
+) -> None:
+    """A retired platform filename must fail before the ZIP is persisted."""
+    record = Record(
+        url=ASCII_TICK_URL,
+        status=WorkStatus.URL_VALID.value,
+        data_dir=f"{tmp_path}{os.sep}",
+        data_tk="token",
+        data_date="2022",
+        data_datemonth="2022",
+        data_format="ASCII",
+        data_timeframe="T",
+        data_fxpair="eurusd",
+    )
+    filename = "HISTDATA_COM_NT_EURUSD_T_LAST2022.zip"
+
+    output = download_archive_work_item(
+        WorkItem.from_record(record),
+        args=_args(tmp_path),
+        post_archive=lambda *args, **kwargs: _FakeResponse(
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+            },
+            content=_zip_bytes("DAT_NT_EURUSD_T_LAST_2022.csv"),
+        ),
+    )
+
+    assert not output.forward
+    assert output.result.failure is not None
+    assert output.result.failure.code == "UNSUPPORTED_RAW_INPUT"
+    assert output.result.failure.detail["filename"] == filename
+    assert not (tmp_path / filename).exists()
+
+
 def test_download_archive_work_item_reuses_existing_zip(
     tmp_path: Path,
 ) -> None:
@@ -435,6 +592,8 @@ def test_download_archive_work_item_reuses_existing_zip(
         status=WorkStatus.URL_VALID.value,
         data_dir=f"{data_dir}{os.sep}",
         zip_filename=zip_path.name,
+        data_format="ascii",
+        data_timeframe="T",
     )
 
     output = download_archive_work_item(
@@ -464,6 +623,8 @@ def test_download_archive_work_item_reuses_existing_csv(
         status=WorkStatus.URL_VALID.value,
         data_dir=f"{data_dir}{os.sep}",
         csv_filename=csv_path.name,
+        data_format="ascii",
+        data_timeframe="T",
     )
 
     output = download_archive_work_item(
@@ -490,6 +651,8 @@ def test_download_archive_work_item_reuses_existing_cache(
         status=WorkStatus.URL_VALID.value,
         data_dir=f"{data_dir}{os.sep}",
         cache_filename=cache_path.name,
+        data_format="ascii",
+        data_timeframe="T",
     )
 
     output = download_archive_work_item(
@@ -501,6 +664,35 @@ def test_download_archive_work_item_reuses_existing_cache(
     assert output.result.metrics["decision"] == "reuse_existing"
     assert output.result.metrics["existing_artifact_kind"] == "cache"
     assert output.result.artifacts[0].kind == "cache"
+
+
+def test_download_archive_work_item_rejects_unsupported_before_reuse(
+    tmp_path: Path,
+) -> None:
+    """Retired dimensions must not reuse artifacts or invoke downloaders."""
+    zip_path = tmp_path / "retired.zip"
+    zip_path.write_bytes(_zip_bytes())
+    record = Record(
+        url=ASCII_TICK_URL,
+        status=WorkStatus.URL_VALID.value,
+        data_dir=f"{tmp_path}{os.sep}",
+        zip_filename=zip_path.name,
+        data_format="METATRADER",
+        data_timeframe="T",
+    )
+
+    output = download_archive_work_item(
+        WorkItem.from_record(record),
+        args=_args(tmp_path),
+        download_file=lambda record_: (_ for _ in ()).throw(
+            AssertionError("unsupported input reached downloader")
+        ),
+    )
+
+    assert not output.forward
+    assert output.result.failure is not None
+    assert output.result.failure.code == "UNSUPPORTED_RAW_INPUT"
+    assert zip_path.exists()
 
 
 def test_download_archive_work_item_network_failure_is_retried(
@@ -643,6 +835,8 @@ def test_extract_csv_work_item_extracts_data_member(tmp_path: Path) -> None:
         data_dir=f"{tmp_path}{os.sep}",
         zip_filename=archive_path.name,
         status=WorkStatus.CSV_ZIP.value,
+        data_format="ascii",
+        data_timeframe="T",
     )
 
     output = extract_csv_work_item(
@@ -665,6 +859,71 @@ def test_extract_csv_work_item_extracts_data_member(tmp_path: Path) -> None:
     assert record.status is WorkStatus.CSV_ZIP
 
 
+def test_download_archive_allows_live_status_report_member(
+    tmp_path: Path,
+) -> None:
+    """The vendor's same-stem TXT report is metadata, not a retired axis."""
+    data_dir = tmp_path / "ASCII" / "T" / "eurusd" / "2022" / "1"
+    record = Record(
+        url=ASCII_TICK_URL,
+        status=WorkStatus.URL_VALID.value,
+        data_dir=f"{data_dir}{os.sep}",
+        data_tk="token",
+        data_date="2022",
+        data_datemonth="202201",
+        data_format="ASCII",
+        data_timeframe="T",
+        data_fxpair="eurusd",
+    )
+
+    output = download_archive_work_item(
+        WorkItem.from_record(record),
+        args=_args(tmp_path),
+        post_archive=lambda *args, **kwargs: _FakeResponse(
+            headers={
+                "Content-Disposition": (
+                    "attachment; "
+                    "filename=HISTDATA_COM_ASCII_EURUSD_T202201.zip"
+                ),
+            },
+            content=_live_zip_bytes(),
+        ),
+    )
+
+    assert output.forward
+    assert output.work_item.status is WorkStatus.CSV_ZIP
+    archive_path = data_dir / output.work_item.zip_filename
+    assert archive_path.exists()
+    with zipfile.ZipFile(archive_path) as archive:
+        assert sorted(archive.namelist()) == [
+            "DAT_ASCII_EURUSD_T_202201.csv",
+            "DAT_ASCII_EURUSD_T_202201.txt",
+        ]
+
+
+def test_extract_csv_ignores_live_status_report_member(tmp_path: Path) -> None:
+    """Extraction selects the CSV while leaving vendor metadata in the ZIP."""
+    archive_path = tmp_path / "live.zip"
+    archive_path.write_bytes(_live_zip_bytes())
+    record = Record(
+        data_dir=f"{tmp_path}{os.sep}",
+        zip_filename=archive_path.name,
+        status=WorkStatus.CSV_ZIP.value,
+        data_format="ascii",
+        data_timeframe="T",
+    )
+
+    output = extract_csv_work_item(
+        WorkItem.from_record(record),
+        args={**_args(tmp_path), "zip_persist": True},
+    )
+
+    assert output.forward
+    assert output.work_item.csv_filename == "DAT_ASCII_EURUSD_T_202201.csv"
+    assert (tmp_path / output.work_item.csv_filename).read_bytes() == b"rows"
+    assert archive_path.exists()
+
+
 def test_extract_csv_work_item_preserves_zip_when_configured(
     tmp_path: Path,
 ) -> None:
@@ -676,6 +935,8 @@ def test_extract_csv_work_item_preserves_zip_when_configured(
         data_dir=f"{tmp_path}{os.sep}",
         zip_filename=archive_path.name,
         status=WorkStatus.CSV_ZIP.value,
+        data_format="ascii",
+        data_timeframe="T",
     )
 
     output = extract_csv_work_item(
@@ -702,6 +963,8 @@ def test_extract_csv_work_item_reuses_existing_csv(
         zip_filename=archive_path.name,
         csv_filename=csv_path.name,
         status=WorkStatus.CSV_ZIP.value,
+        data_format="ascii",
+        data_timeframe="T",
     )
 
     output = extract_csv_work_item(
@@ -728,6 +991,8 @@ def test_extract_csv_work_item_malformed_archive_is_failed(
         data_dir=f"{tmp_path}{os.sep}",
         zip_filename=archive_path.name,
         status=WorkStatus.CSV_ZIP.value,
+        data_format="ascii",
+        data_timeframe="T",
     )
 
     output = extract_csv_work_item(
@@ -752,6 +1017,8 @@ def test_extract_csv_work_item_bad_zip_is_failed(tmp_path: Path) -> None:
         data_dir=f"{tmp_path}{os.sep}",
         zip_filename=archive_path.name,
         status=WorkStatus.CSV_ZIP.value,
+        data_format="ascii",
+        data_timeframe="T",
     )
 
     output = extract_csv_work_item(
@@ -763,6 +1030,61 @@ def test_extract_csv_work_item_bad_zip_is_failed(tmp_path: Path) -> None:
     assert output.work_item.status is WorkStatus.FAILED
     assert output.result.failure is not None
     assert output.result.failure.code == "INVALID_ARCHIVE_PAYLOAD"
+
+
+def test_extract_csv_work_item_rejects_unsupported_before_writes(
+    tmp_path: Path,
+) -> None:
+    """Direct extraction must fail before retired raw data reaches disk."""
+    archive_path = tmp_path / "retired.zip"
+    with zipfile.ZipFile(archive_path, "w") as archive:
+        archive.writestr("DAT_ASCII_EURUSD_T_2022.csv", b"rows")
+    record = Record(
+        data_dir=f"{tmp_path}{os.sep}",
+        zip_filename=archive_path.name,
+        status=WorkStatus.CSV_ZIP.value,
+        data_format="NINJATRADER",
+        data_timeframe="T",
+    )
+
+    output = extract_csv_work_item(
+        WorkItem.from_record(record),
+        args=_args(tmp_path),
+    )
+
+    assert not output.forward
+    assert output.result.failure is not None
+    assert output.result.failure.code == "UNSUPPORTED_RAW_INPUT"
+    assert not (tmp_path / "DAT_ASCII_EURUSD_T_2022.csv").exists()
+    assert archive_path.exists()
+
+
+def test_extract_csv_work_item_rejects_retired_archive_member(
+    tmp_path: Path,
+) -> None:
+    """Supported record metadata must not mask a retired ZIP member."""
+    archive_path = tmp_path / "opaque.zip"
+    member = "DAT_NT_EURUSD_T_LAST_2022.csv"
+    with zipfile.ZipFile(archive_path, "w") as archive:
+        archive.writestr(member, b"rows")
+    record = Record(
+        data_dir=f"{tmp_path}{os.sep}",
+        zip_filename=archive_path.name,
+        status=WorkStatus.CSV_ZIP.value,
+        data_format="ascii",
+        data_timeframe="T",
+    )
+
+    output = extract_csv_work_item(
+        WorkItem.from_record(record),
+        args=_args(tmp_path),
+    )
+
+    assert not output.forward
+    assert output.result.failure is not None
+    assert output.result.failure.code == "UNSUPPORTED_RAW_INPUT"
+    assert output.result.failure.detail["filename"] == member
+    assert not (tmp_path / member).exists()
 
 
 def test_build_cache_work_item_writes_cache_from_csv(
@@ -804,12 +1126,14 @@ def test_build_cache_work_item_writes_cache_from_csv(
     assert output.result.metrics["start"] == str(EXPECTED_TICK_DATETIMES[0])
     assert output.result.metrics["end"] == str(EXPECTED_TICK_DATETIMES[-1])
     assert output.result.metrics["timeframe"] == "T"
-    assert output.result.metrics["schema"] == {
+    schema = output.result.metrics["schema"]
+    assert {
         "datetime": "Int64",
         "bid": "Float64",
         "ask": "Float64",
         "vol": "Int32",
-    }
+    }.items() <= schema.items()
+    assert set(required_training_feature_columns()).issubset(schema)
     assert output.result.artifacts[0].path == str(tmp_path / CACHE_FILENAME)
     assert output.result.artifacts[0].sha256
 
@@ -922,6 +1246,75 @@ def test_build_cache_work_item_invalid_source_is_failed(
     assert not (tmp_path / CACHE_FILENAME).exists()
 
 
+def test_build_cache_work_item_noops_unsupported_raw_dimensions(
+    tmp_path: Path,
+) -> None:
+    """Cache planning should clearly no-op retired raw dimensions."""
+    source = tmp_path / "retired.csv"
+    source.write_text("rows", encoding="utf-8")
+    record = Record(
+        data_dir=f"{tmp_path}{os.sep}",
+        csv_filename=source.name,
+        data_format="ascii",
+        data_timeframe="M1",
+        status=WorkStatus.CSV_FILE.value,
+    )
+
+    output = build_cache_work_item(
+        WorkItem.from_record(record),
+        args=_args(tmp_path),
+    )
+
+    assert output.forward
+    assert output.result.status is WorkStatus.SKIPPED
+    assert output.result.metrics["decision"] == "skipped_unsupported"
+    assert not (tmp_path / CACHE_FILENAME).exists()
+
+
+def test_create_cache_file_rejects_unsupported_raw_dimensions(
+    tmp_path: Path,
+) -> None:
+    """The private cache writer must enforce the raw-input contract too."""
+    filename = "DAT_ASCII_EURUSD_T_201202.csv"
+    shutil.copyfile(FIXTURES / filename, tmp_path / filename)
+    record = Record(
+        data_dir=f"{tmp_path}{os.sep}",
+        csv_filename=filename,
+        data_format="metatrader",
+        data_timeframe="T",
+    )
+
+    with pytest.raises(CacheBuildError) as exc_info:
+        create_cache_file(record, _args(tmp_path))
+
+    assert exc_info.value.code == "UNSUPPORTED_RAW_INPUT"
+    assert not (tmp_path / CACHE_FILENAME).exists()
+
+
+def test_create_cache_file_rejects_retired_source_filename(
+    tmp_path: Path,
+) -> None:
+    """Supported record metadata must not mask a retired cache source."""
+    filename = "DAT_NT_EURUSD_T_LAST_201202.csv"
+    shutil.copyfile(
+        FIXTURES / "DAT_ASCII_EURUSD_T_201202.csv",
+        tmp_path / filename,
+    )
+    record = Record(
+        data_dir=f"{tmp_path}{os.sep}",
+        csv_filename=filename,
+        data_format="ascii",
+        data_timeframe="T",
+    )
+
+    with pytest.raises(CacheBuildError) as exc_info:
+        create_cache_file(record, _args(tmp_path))
+
+    assert exc_info.value.code == "UNSUPPORTED_RAW_INPUT"
+    assert exc_info.value.detail["filename"] == filename
+    assert not (tmp_path / CACHE_FILENAME).exists()
+
+
 def test_merge_cache_work_items_uses_explicit_inputs(tmp_path: Path) -> None:
     """Cache merge should not read queue globals."""
     frame = _tick_frame()
@@ -939,6 +1332,7 @@ def test_merge_cache_work_items_uses_explicit_inputs(tmp_path: Path) -> None:
             cache_start=str(EXPECTED_TICK_DATETIMES[0]),
             cache_end=str(EXPECTED_TICK_DATETIMES[0]),
             data_fxpair="eurusd",
+            data_format="ascii",
             data_timeframe="T",
         )
     )
@@ -950,6 +1344,7 @@ def test_merge_cache_work_items_uses_explicit_inputs(tmp_path: Path) -> None:
             cache_start=str(EXPECTED_TICK_DATETIMES[1]),
             cache_end=str(EXPECTED_TICK_DATETIMES[2]),
             data_fxpair="eurusd",
+            data_format="ascii",
             data_timeframe="T",
         )
     )
@@ -988,6 +1383,7 @@ def test_merge_cache_work_items_can_skip_materialization(
             cache_start=str(EXPECTED_TICK_DATETIMES[0]),
             cache_end=str(EXPECTED_TICK_DATETIMES[0]),
             data_fxpair="eurusd",
+            data_format="ascii",
             data_timeframe="T",
         )
     )
@@ -999,6 +1395,7 @@ def test_merge_cache_work_items_can_skip_materialization(
             cache_start=str(EXPECTED_TICK_DATETIMES[1]),
             cache_end=str(EXPECTED_TICK_DATETIMES[2]),
             data_fxpair="eurusd",
+            data_format="ascii",
             data_timeframe="T",
         )
     )
@@ -1015,6 +1412,126 @@ def test_merge_cache_work_items_can_skip_materialization(
     assert output.merge_sets[0].record_count == 2
     assert payload["merge_sets"][0]["line_count"] == 3
     assert "data" not in payload
+
+
+def test_merge_cache_items_filters_projection_without_mutating_cache(
+    tmp_path: Path,
+) -> None:
+    """API projection should honor [start,end) and leave monthly evidence intact."""
+    import polars as pl
+
+    start = 1_704_096_000_000
+    end = start + 90 * 60_000
+    frame = pl.DataFrame(
+        {
+            "datetime": (start - 1, start, end - 1, end),
+            "bid": (1.1, 1.2, 1.3, 1.4),
+            "ask": (1.2, 1.3, 1.4, 1.5),
+            "volume": (0.0, 0.0, 0.0, 0.0),
+        }
+    )
+    cache_path = tmp_path / CACHE_FILENAME
+    write_polars_cache(frame, cache_path)
+    selection = RandomWindowSelectionV1(
+        expression="90m",
+        mode="random",
+        support_start_utc_ms=start - 1,
+        support_end_utc_ms=end + 1,
+        seed=12,
+        selected_start_utc_ms=start,
+        selected_end_utc_ms=end,
+    )
+    item = WorkItem.from_record(
+        Record(
+            data_dir=f"{tmp_path}{os.sep}",
+            cache_filename=CACHE_FILENAME,
+            data_format="ascii",
+            data_timeframe="T",
+            data_fxpair="eurusd",
+        )
+    )
+
+    merged = merge_cache_items(
+        [item],
+        return_type="polars",
+        random_selection=selection,
+    )
+
+    assert merged["datetime"].to_list() == [start, end - 1]
+    assert read_polars_cache(cache_path).height == 4
+
+
+def test_merge_cache_items_fails_on_empty_selected_projection(
+    tmp_path: Path,
+) -> None:
+    """A resolved interval without ticks should fail instead of substituting data."""
+    write_polars_cache(_tick_frame(), tmp_path / CACHE_FILENAME)
+    selection = RandomWindowSelectionV1(
+        expression="1m",
+        mode="random",
+        support_start_utc_ms=1_704_096_000_000,
+        support_end_utc_ms=1_704_096_120_000,
+        seed=9,
+        selected_start_utc_ms=1_704_096_000_000,
+        selected_end_utc_ms=1_704_096_060_000,
+    )
+    item = WorkItem.from_record(
+        Record(
+            data_dir=f"{tmp_path}{os.sep}",
+            cache_filename=CACHE_FILENAME,
+            data_format="ascii",
+            data_timeframe="T",
+            data_fxpair="eurusd",
+        )
+    )
+
+    with pytest.raises(RandomWindowEmptySelectionError, match="no cache rows"):
+        merge_cache_items(
+            [item],
+            return_type="polars",
+            random_selection=selection,
+        )
+
+
+def test_merge_cache_work_items_noops_unsupported_raw_dimensions(
+    tmp_path: Path,
+) -> None:
+    """Existing retired cache metadata must not be materialized by the API."""
+    write_polars_cache(_tick_frame(), tmp_path / CACHE_FILENAME)
+    retired = WorkItem.from_record(
+        Record(
+            data_dir=f"{tmp_path}{os.sep}",
+            cache_filename=CACHE_FILENAME,
+            data_format="ninjatrader",
+            data_timeframe="T",
+            data_fxpair="eurusd",
+        )
+    )
+
+    output = merge_cache_work_items([retired], return_type="polars")
+
+    assert output.result.status is WorkStatus.SKIPPED
+    assert output.result.metrics["record_count"] == 0
+    assert output.result.metrics["unsupported_count"] == 1
+    assert output.data == []
+
+
+def test_merge_cache_items_rejects_unsupported_private_input(
+    tmp_path: Path,
+) -> None:
+    """The private materializer must not bypass the merge-stage filter."""
+    write_polars_cache(_tick_frame(), tmp_path / CACHE_FILENAME)
+    retired = WorkItem.from_record(
+        Record(
+            data_dir=f"{tmp_path}{os.sep}",
+            cache_filename=CACHE_FILENAME,
+            data_format="ascii",
+            data_timeframe="M1",
+        )
+    )
+
+    with pytest.raises(ValueError, match="ASCII tick"):
+        merge_cache_items([retired], return_type="polars")
 
 
 def test_import_to_influx_work_item_emits_batches_without_writer(
@@ -1042,7 +1559,117 @@ def test_import_to_influx_work_item_emits_batches_without_writer(
     assert output.result.status is WorkStatus.INFLUX_UPLOAD
     assert output.result.metrics == {"batch_count": 2, "line_count": 3}
     assert [len(batch) for batch in emitted] == [2, 1]
-    assert emitted[0][0] == EXPECTED_TICK_LINE
+    first_line = emitted[0][0]
+    assert "row_id=1" in first_line.split(" ", maxsplit=1)[0]
+    assert "bidquote=1.3066" in first_line
+    assert "askquote=1.30677" in first_line
+    assert "quality_status_code=0i" in first_line
+    assert "training_usable=true" in first_line
+    assert first_line.endswith(" 1328072403660")
+
+
+def test_influx_projection_filters_before_augmentation_and_preserves_metadata(
+    tmp_path: Path,
+) -> None:
+    """Influx should emit only selected ticks and carry selection through status."""
+    import polars as pl
+
+    start = 1_704_096_000_000
+    end = start + 60_000
+    frame = pl.DataFrame(
+        {
+            "datetime": (start - 1, start, end),
+            "bid": (1.1, 1.2, 1.3),
+            "ask": (1.2, 1.3, 1.4),
+            "volume": (0.0, 0.0, 0.0),
+        }
+    )
+    write_polars_cache(frame, tmp_path / CACHE_FILENAME)
+    selection = RandomWindowSelectionV1(
+        expression="1m",
+        mode="random",
+        support_start_utc_ms=start - 1,
+        support_end_utc_ms=end + 1,
+        seed=2,
+        selected_start_utc_ms=start,
+        selected_end_utc_ms=end,
+    )
+    item = WorkItem.from_record(
+        Record(
+            data_dir=f"{tmp_path}{os.sep}",
+            cache_filename=CACHE_FILENAME,
+            data_format="ascii",
+            data_timeframe="T",
+            data_fxpair="eurusd",
+            status=WorkStatus.CACHE_READY.value,
+        )
+    )
+    item = WorkItem.from_dict(
+        {
+            **item.to_dict(),
+            "metadata": {
+                RANDOM_WINDOW_SELECTION_METADATA_KEY: selection.to_dict()
+            },
+        }
+    )
+    emitted: list[list[str]] = []
+
+    output = import_to_influx_work_item(
+        item,
+        args=_args(tmp_path),
+        emit_lines=emitted.append,
+    )
+
+    assert output.result.metrics["line_count"] == 1
+    assert len(emitted) == 1
+    assert emitted[0][0].endswith(f" {start}")
+    assert output.work_item.metadata == item.metadata
+    assert read_polars_cache(tmp_path / CACHE_FILENAME).height == 3
+
+
+def test_import_to_influx_work_item_noops_unsupported_raw_dimensions(
+    tmp_path: Path,
+) -> None:
+    """Influx projection must not mark retired raw dimensions uploaded."""
+    emitted: list[list[str]] = []
+    record = Record(
+        data_dir=f"{tmp_path}{os.sep}",
+        data_format="metatrader",
+        data_timeframe="T",
+        data_fxpair="eurusd",
+        status=WorkStatus.CACHE_READY.value,
+    )
+
+    output = import_to_influx_work_item(
+        WorkItem.from_record(record),
+        args=_args(tmp_path),
+        emit_lines=emitted.append,
+    )
+
+    assert output.result.status is WorkStatus.SKIPPED
+    assert output.work_item.status is WorkStatus.CACHE_READY
+    assert output.result.metrics["decision"] == "skipped_unsupported"
+    assert emitted == []
+
+
+def test_emit_influx_cache_batches_rejects_unsupported_private_input(
+    tmp_path: Path,
+) -> None:
+    """The private Influx batch emitter must enforce the same contract."""
+    retired = WorkItem.from_record(
+        Record(
+            data_dir=f"{tmp_path}{os.sep}",
+            data_format="ninjatrader",
+            data_timeframe="T",
+        )
+    )
+
+    with pytest.raises(ValueError, match="ASCII tick"):
+        emit_influx_cache_batches(
+            retired,
+            args=_args(tmp_path),
+            emit_lines=lambda lines: None,
+        )
 
 
 def test_dataset_plan_stage_emits_stable_historical_tick_work_items(
@@ -1167,6 +1794,70 @@ def test_dataset_plan_stage_uses_repository_ranges_for_full_scope() -> None:
         "eurusd": ["200005", "200006"],
         "gbpusd": ["200005", "200006"],
     }
+
+
+def test_dataset_plan_stage_plans_only_seeded_window_months_with_metadata() -> (
+    None
+):
+    """Random selection should use common support and only intersecting months."""
+    output = dataset_plan_stage(
+        start_yearmonth="",
+        end_yearmonth="",
+        formats=("ascii",),
+        pairs=("eurusd", "gbpusd"),
+        timeframes=("T",),
+        current_yearmonth="202606",
+        repository_ranges={
+            "eurusd": {"start": "201001", "end": "202412"},
+            "gbpusd": {"start": "201501", "end": "202311"},
+        },
+        random_window="40d",
+        random_seed=8675309,
+    )
+    selection = RandomWindowSelectionV1.from_dict(
+        output.result.metrics["random_window_selection"]  # type: ignore[arg-type]
+    )
+    start, end = random_window_planning_yearmonths(selection)
+
+    assert selection.support_start_utc_ms == 1_420_070_400_000
+    assert selection.support_end_utc_ms == 1_701_388_800_000
+    planned_periods = sorted(
+        {item.data_datemonth for item in output.work_items}
+    )
+    assert planned_periods[0] == start
+    assert planned_periods[-1] == end
+    assert len(output.work_items) == len(planned_periods) * 2
+    assert {item.data_fxpair for item in output.work_items} == {
+        "eurusd",
+        "gbpusd",
+    }
+    assert all(
+        item.metadata[RANDOM_WINDOW_SELECTION_METADATA_KEY]
+        == selection.to_dict()
+        for item in output.work_items
+    )
+
+
+def test_dataset_plan_stage_bounded_sessions_plan_all_occurrences() -> None:
+    """A doubly bounded session expression should plan its whole support month."""
+    output = dataset_plan_stage(
+        start_yearmonth="202401",
+        end_yearmonth="202401",
+        formats=("ascii",),
+        pairs=("eurusd",),
+        timeframes=("T",),
+        current_yearmonth="202606",
+        repository_ranges={"eurusd": {"start": "201001", "end": "202412"}},
+        random_window="ldn",
+        random_seed=None,
+    )
+    selection = RandomWindowSelectionV1.from_dict(
+        output.work_items[0].metadata[RANDOM_WINDOW_SELECTION_METADATA_KEY]  # type: ignore[arg-type]
+    )
+
+    assert [item.data_datemonth for item in output.work_items] == ["202401"]
+    assert selection.mode == "all_sessions"
+    assert selection.occurrence_count == 23
 
 
 def test_dataset_plan_stage_explicit_range_overrides_repository_ranges() -> (

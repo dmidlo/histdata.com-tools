@@ -199,6 +199,117 @@ class QualityTarget:
 
 
 @dataclass(frozen=True, slots=True)
+class QualitySkipEvent:
+    """Publish-safe evidence for one intentionally skipped rule evaluation."""
+
+    reason_code: str
+    rule_id: str
+    target_kind: QualityTargetKind = QualityTargetKind.UNKNOWN
+    data_format: str = ""
+    timeframe: str = ""
+    symbol: str = ""
+    period: str = ""
+
+    def __post_init__(self) -> None:
+        """Normalize stable event vocabulary and target-axis fields."""
+        object.__setattr__(
+            self,
+            "reason_code",
+            str(self.reason_code or "")
+            .strip()
+            .lower()
+            .replace("-", "_")
+            .replace(" ", "_"),
+        )
+        object.__setattr__(self, "rule_id", str(self.rule_id or "").strip())
+        object.__setattr__(
+            self,
+            "target_kind",
+            QualityTargetKind.from_value(self.target_kind),
+        )
+        object.__setattr__(
+            self,
+            "data_format",
+            str(self.data_format or "").strip().lower(),
+        )
+        object.__setattr__(
+            self,
+            "timeframe",
+            str(self.timeframe or "").strip().upper(),
+        )
+        object.__setattr__(
+            self,
+            "symbol",
+            str(self.symbol or "").strip().upper(),
+        )
+        object.__setattr__(self, "period", str(self.period or "").strip())
+
+    @classmethod
+    def from_target(
+        cls,
+        *,
+        reason_code: str,
+        rule_id: str,
+        target: QualityTarget,
+    ) -> "QualitySkipEvent":
+        """Create a skip event from stable, non-path target identity."""
+        return cls(
+            reason_code=reason_code,
+            rule_id=rule_id,
+            target_kind=target.kind,
+            data_format=target.data_format,
+            timeframe=target.timeframe,
+            symbol=target.symbol,
+            period=target.period,
+        )
+
+    @property
+    def sort_key(self) -> tuple[str, str, str, str, str, str, str]:
+        """Return deterministic ordering independent of discovery order."""
+        return (
+            self.reason_code,
+            self.rule_id,
+            self.data_format,
+            self.timeframe,
+            self.symbol,
+            self.period,
+            self.target_kind.value,
+        )
+
+    def to_dict(self) -> dict[str, JSONValue]:
+        """Return the bounded path-free event representation."""
+        return {
+            "reason_code": self.reason_code,
+            "rule_id": self.rule_id,
+            "target_kind": self.target_kind.value,
+            "target_axis": {
+                "data_format": self.data_format,
+                "timeframe": self.timeframe,
+                "symbol": self.symbol,
+                "period": self.period,
+                "kind": self.target_kind.value,
+            },
+        }
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> "QualitySkipEvent":
+        """Restore a skip event from report metadata."""
+        axis = data.get("target_axis")
+        target_axis = axis if isinstance(axis, Mapping) else {}
+        return cls(
+            reason_code=str(data.get("reason_code", "") or ""),
+            rule_id=str(data.get("rule_id", "") or ""),
+            target_kind=QualityTargetKind.from_value(
+                data.get("target_kind") or target_axis.get("kind")
+            ),
+            data_format=str(target_axis.get("data_format", "") or ""),
+            timeframe=str(target_axis.get("timeframe", "") or ""),
+            symbol=str(target_axis.get("symbol", "") or ""),
+            period=str(target_axis.get("period", "") or ""),
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class QualityLocation:
     """Optional record-level context for a quality finding."""
 

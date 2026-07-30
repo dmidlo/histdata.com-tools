@@ -1,0 +1,211 @@
+{
+  "advisory": true,
+  "base_grain": {
+    "data_format": "ascii",
+    "timeframe": "T"
+  },
+  "baseline_id": "d0f808a4a27b83581bcd4b429ebaad2fa641e5bf88ece4f4e702f935bd54a6fd",
+  "configuration": {
+    "enabled": true,
+    "evaluation_fraction": 0.2,
+    "minimum_evaluation_rows": 5,
+    "minimum_training_rows": 10,
+    "rolling_windows": [
+      3
+    ],
+    "rounding_digits": 6,
+    "session_seasonal_enabled": true
+  },
+  "deferred_model_families": [
+    "ets",
+    "arima",
+    "sarima",
+    "state_space",
+    "garch"
+  ],
+  "evaluation": {
+    "best_model": {
+      "coverage_rate": 1.0,
+      "evaluation_row_count": 6,
+      "forecast_count": 6,
+      "mae": 0.01,
+      "mean_error": -0.01,
+      "model": "naive_random_walk",
+      "model_code": 1,
+      "reason": null,
+      "rmse": 0.01,
+      "status": "evaluated"
+    },
+    "calculation_basis": "observed_sequence_walk_forward",
+    "evaluated_model_count": 4,
+    "guard_codes": [],
+    "metric": "mid",
+    "model_count": 4,
+    "models": [
+      {
+        "coverage_rate": 1.0,
+        "evaluation_row_count": 6,
+        "forecast_count": 6,
+        "mae": 0.01,
+        "mean_error": -0.01,
+        "model": "naive_random_walk",
+        "model_code": 1,
+        "reason": null,
+        "rmse": 0.01,
+        "status": "evaluated"
+      },
+      {
+        "coverage_rate": 1.0,
+        "evaluation_row_count": 6,
+        "forecast_count": 6,
+        "mae": 0.02,
+        "mean_error": -0.02,
+        "model": "rolling_mean",
+        "model_code": 2,
+        "reason": null,
+        "rmse": 0.02,
+        "status": "evaluated",
+        "window": 3
+      },
+      {
+        "coverage_rate": 1.0,
+        "evaluation_row_count": 6,
+        "forecast_count": 6,
+        "mae": 0.02,
+        "mean_error": -0.02,
+        "model": "rolling_median",
+        "model_code": 3,
+        "reason": null,
+        "rmse": 0.02,
+        "status": "evaluated",
+        "window": 3
+      },
+      {
+        "coverage_rate": 1.0,
+        "evaluation_row_count": 6,
+        "forecast_count": 6,
+        "mae": 0.03,
+        "mean_error": -0.03,
+        "model": "session_seasonal_naive",
+        "model_code": 4,
+        "reason": null,
+        "rmse": 0.03,
+        "status": "evaluated"
+      }
+    ],
+    "recommended_transforms": [],
+    "skipped_model_count": 0,
+    "status": "evaluated",
+    "transforms_applied": []
+  },
+  "limitations": [],
+  "non_goals": [
+    "forecasting_leaderboard",
+    "automatic_model_selection",
+    "synthetic_generation",
+    "hard_fail_quality_gate"
+  ],
+  "prerequisite_readiness": {
+    "computed_window_count": 1,
+    "distribution_shift_status": "computed",
+    "limited_sections": [],
+    "missing_sections": [],
+    "recommended_transforms": [],
+    "required_sections": [
+      "coverage",
+      "temporal_topology",
+      "calendar_regimes",
+      "tick_distribution",
+      "microstructure_dynamics",
+      "dependence",
+      "stationarity_diagnostics",
+      "decomposition"
+    ],
+    "rolling_drift_status": "available",
+    "skipped_window_count": 0,
+    "stationarity_reason": null,
+    "stationarity_status": "valid",
+    "status": "valid",
+    "unavailable_sections": [],
+    "zero_variance_metrics": []
+  },
+  "reason": null,
+  "reference_fingerprint_id": "fingerprint-eurusd",
+  "schema_version": "histdatacom.classical-baselines.v1",
+  "split_policy": {
+    "evaluation_fraction": 0.2,
+    "evaluation_row_count": 6,
+    "future_values_visible": false,
+    "kind": "chronological_holdout",
+    "metrics_emitted": true,
+    "order_by": [
+      "series_id",
+      "period",
+      "row_id"
+    ],
+    "row_count": 30,
+    "shuffle": false,
+    "split_index": 24,
+    "split_row_id": 25,
+    "timestamp_required": false,
+    "training_row_count": 24,
+    "walk_forward": true
+  },
+  "status": "ready",
+  "target_axis": {
+    "data_format": "ascii",
+    "kind": "cache",
+    "period": "201202",
+    "symbol": "EURUSD",
+    "timeframe": "T"
+  },
+  "training_projection": {
+    "grain": "period",
+    "identity_fields": [
+      "series_id",
+      "period",
+      "row_id"
+    ],
+    "schema_version": "histdatacom.classical-baseline-training-projection.v1",
+    "timestamp_required": false,
+    "values": {
+      "baseline_best_mae": 0.01,
+      "baseline_best_model_code": 1,
+      "baseline_best_model_window": null,
+      "baseline_best_rmse": 0.01,
+      "baseline_evaluation_row_count": 6,
+      "baseline_exclusion_reason_code": 0,
+      "baseline_split_row_id": 25,
+      "baseline_stationarity_status_code": 3,
+      "baseline_status_code": 3,
+      "baseline_training_ready": true,
+      "baseline_training_row_count": 24,
+      "baseline_transform_advisory_code": 0
+    }
+  },
+  "training_substrate": {
+    "identity_fields": [
+      "series_id",
+      "period",
+      "row_id"
+    ],
+    "legacy_cache_enriched_on_read": false,
+    "metric": "mid",
+    "observed_bid_ask_preserved": true,
+    "ordering_fields": [
+      "series_id",
+      "period",
+      "row_id"
+    ],
+    "required_columns": [
+      "series_id",
+      "period",
+      "row_id",
+      "mid",
+      "training_usable"
+    ],
+    "schema_version": "histdatacom.ascii-tick-training-features.v1",
+    "status": "available",
+    "timestamp_required": false
+  }
+}

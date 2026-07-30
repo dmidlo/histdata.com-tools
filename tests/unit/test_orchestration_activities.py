@@ -44,6 +44,10 @@ from histdatacom.data_quality import (
     QualityTargetKind,
 )
 from histdatacom.runtime_contracts import RunRequest, WorkItem, WorkStatus
+from histdatacom.random_windows import (
+    RANDOM_WINDOW_SELECTION_METADATA_KEY,
+    RandomWindowSelectionV1,
+)
 from histdatacom.orchestration.control import OrchestrationJobSnapshot
 from histdatacom.orchestration.activities import (
     build_cache_activity,
@@ -54,6 +58,8 @@ from histdatacom.orchestration.activities import (
     extract_csv_activity,
     import_to_influx_activity,
     merge_cache_activity,
+    reconstruction_report_activity,
+    reconstruction_window_activity,
     repository_refresh_activity,
     validate_urls_activity,
 )
@@ -61,6 +67,7 @@ from tests.fixtures.histdata_ascii.quality_cases import (
     CLEAN_TICK_CASE,
     write_ascii_case,
     write_corrupt_zip,
+    write_zip_case,
 )
 
 FIXTURES = Path(__file__).parents[1] / "fixtures" / "histdata_ascii"
@@ -95,14 +102,14 @@ class FakeInfluxWriter:
         self.batches.append(list(lines))
 
 
-def _form_html(*, token: str = "token") -> str:
+def _form_html(*, token: str = "token", datemonth: str = "2022") -> str:
     """Return a minimal HistData download form."""
     return f"""
     <html>
       <form id="file_down">
         <input id="tk" value="{token}">
         <input id="date" value="2022">
-        <input id="datemonth" value="2022">
+        <input id="datemonth" value="{datemonth}">
         <input id="platform" value="ASCII">
         <input id="timeframe" value="T">
         <input id="fxpair" value="eurusd">
@@ -157,6 +164,8 @@ def _download_payload(tmp_path) -> dict:
             ),
             "data_dir": f"{tmp_path}/",
             "zip_filename": zip_path.name,
+            "data_format": "ASCII",
+            "data_timeframe": "T",
         },
     }
 
@@ -176,6 +185,8 @@ def _extraction_payload(tmp_path) -> dict:
             "status": WorkStatus.CSV_ZIP.value,
             "data_dir": f"{tmp_path}/",
             "zip_filename": zip_path.name,
+            "data_format": "ASCII",
+            "data_timeframe": "T",
         },
     }
 
@@ -408,6 +419,38 @@ def test_dataset_plan_activity_uses_repo_ranges_for_full_scope(
     assert result["result"]["metrics"]["repository_range_count"] == 3
 
 
+def test_dataset_plan_activity_random_window_intersects_repo_and_user_bounds(
+    tmp_path: Path,
+) -> None:
+    """Random planning should load inventory even when user bounds are present."""
+    write_repository_data_file(
+        {"eurusd": {"start": "202001", "end": "202012"}},
+        tmp_path / ".repo",
+    )
+    request = RunRequest(
+        request_id="run-plan-random-common-support",
+        pairs=("eurusd",),
+        formats=("ascii",),
+        timeframes=("T",),
+        start_yearmonth="201001",
+        end_yearmonth="202512",
+        random_window="1M",
+        random_seed=81,
+        data_directory=str(tmp_path),
+    )
+
+    result = dataset_plan_activity({"request": request.to_dict()})
+    selection = RandomWindowSelectionV1.from_dict(
+        result["result"]["metrics"]["random_window_selection"]
+    )
+
+    assert result["result"]["metrics"]["repository_range_count"] == 1
+    assert selection.support_start_utc_ms == 1_577_836_800_000
+    assert selection.support_end_utc_ms == 1_609_459_200_000
+    assert len(result["work_items"]) == 1
+    assert result["work_items"][0]["data_datemonth"].startswith("2020")
+
+
 def test_dataset_plan_activity_spills_large_plan_to_manifest(
     tmp_path: Path,
 ) -> None:
@@ -443,6 +486,76 @@ def test_dataset_plan_activity_spills_large_plan_to_manifest(
     ]
 
 
+def test_random_window_metadata_survives_plan_spill_and_reload(
+    tmp_path: Path,
+) -> None:
+    """SQLite plan batching should retain the exact compact selection contract."""
+    write_repository_data_file(
+        {"eurusd": {"start": "202001", "end": "202412"}},
+        tmp_path / ".repo",
+    )
+    request = RunRequest(
+        request_id="run-plan-random-spill",
+        pairs=("eurusd",),
+        formats=("ascii",),
+        timeframes=("T",),
+        random_window="40d",
+        random_seed=42,
+        data_directory=str(tmp_path),
+        metadata={
+            "temporal_plan_spill": {"inline_work_item_limit": 1},
+            "temporal_batching": {"max_work_items_per_batch": 1},
+        },
+    )
+
+    result = dataset_plan_activity({"request": request.to_dict()})
+    store = ManifestStatusStore(str(tmp_path))
+    loaded = store.get_dataset_plan_work_items(
+        str(result[DATASET_PLAN_REF_KEY]["plan_id"])
+    )
+    selection_payload = result["result"]["metrics"]["random_window_selection"]
+
+    assert "work_items" not in result
+    assert len(loaded) > 1
+    assert all(
+        item.metadata[RANDOM_WINDOW_SELECTION_METADATA_KEY] == selection_payload
+        for item in loaded
+    )
+    assert RandomWindowSelectionV1.from_dict(selection_payload).selection_id
+
+
+def test_random_window_consumer_activity_fails_if_metadata_was_dropped(
+    tmp_path: Path,
+) -> None:
+    """A declared selection may not degrade into unfiltered merge behavior."""
+    request = RunRequest(
+        request_id="run-random-metadata-loss",
+        pairs=("eurusd",),
+        formats=("ascii",),
+        timeframes=("T",),
+        random_window="1d",
+        random_seed=42,
+        data_directory=str(tmp_path),
+        api_return_type="polars",
+    )
+    item = WorkItem(
+        work_id="work-random-metadata-loss",
+        data_format="ascii",
+        data_timeframe="T",
+        data_fxpair="eurusd",
+        data_dir=str(tmp_path),
+        cache_filename=CACHE_FILENAME,
+    )
+
+    with pytest.raises(ValueError, match="missing its resolved"):
+        merge_cache_activity(
+            {
+                "request": request.to_dict(),
+                "work_items": [item.to_dict()],
+            }
+        )
+
+
 def test_validate_urls_activity_loads_work_items_from_plan_ref(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -451,7 +564,7 @@ def test_validate_urls_activity_loads_work_items_from_plan_ref(
     monkeypatch.setattr(
         "histdatacom.activity_stages.fetch_histdata_page_data",
         lambda url, timeout: {
-            "html": _form_html(),
+            "html": _form_html(datemonth="202202"),
             "encoding": "gzip",
             "bytes_length": "123",
         },
@@ -499,6 +612,8 @@ def test_dataset_plan_activity_payload_survives_temporal_converter(
         timeframes=("T",),
         start_yearmonth="202201",
         end_yearmonth="202201",
+        random_window="1d",
+        random_seed=17,
         data_directory=str(tmp_path),
         metadata={
             "requests_timeout": "30",
@@ -518,6 +633,10 @@ def test_dataset_plan_activity_payload_survives_temporal_converter(
     assert result["result"]["metrics"]["work_item_count"] == 1
     assert len(result["work_items"]) == 1
     assert result["work_items"][0]["data_fxpair"] == "eurusd"
+    assert (
+        RANDOM_WINDOW_SELECTION_METADATA_KEY
+        in result["work_items"][0]["metadata"]
+    )
 
 
 def test_validate_urls_activity_returns_form_metadata(
@@ -972,7 +1091,13 @@ def test_import_to_influx_activity_writes_tick_batches(
     [writer] = FakeInfluxWriter.instances
     assert writer.args["batch_size"] == "2"
     assert [len(batch) for batch in writer.batches] == [2, 1]
-    assert writer.batches[0][0] == EXPECTED_T_LINE
+    first_line = writer.batches[0][0]
+    assert "row_id=1" in first_line.split(" ", maxsplit=1)[0]
+    assert "bidquote=1.3066" in first_line
+    assert "askquote=1.30677" in first_line
+    assert "quality_status_code=0i" in first_line
+    assert "training_usable=true" in first_line
+    assert first_line.endswith(" 1328072403660")
     assert writer.closed
     assert result["work_item"]["status"] == WorkStatus.INFLUX_UPLOAD.value
     assert result["result"]["stage"] == "import_to_influx"
@@ -1185,6 +1310,49 @@ def test_data_quality_activity_writes_report_and_bounded_metrics(
     assert detailed_report["metadata"]["quality_profile"]["name"] == (
         "activity-profile"
     )
+
+
+def test_data_quality_activity_projects_structured_skip_events(
+    tmp_path: Path,
+) -> None:
+    """Activity metrics and detailed reports should agree on engine skips."""
+    write_ascii_case(tmp_path, CLEAN_TICK_CASE)
+    write_zip_case(
+        tmp_path,
+        CLEAN_TICK_CASE,
+        zip_filename="DAT_ASCII_EURUSD_T_201202.zip",
+    )
+    report_path = tmp_path / "reports" / "quality-skips.json"
+    request = RunRequest(
+        request_id="run-quality-skips",
+        data_directory=str(tmp_path),
+        data_quality=True,
+        quality_paths=(str(tmp_path),),
+        quality_check_groups=("time",),
+        quality_report_path=str(report_path),
+        quality_fail_on="never",
+    )
+
+    payload = data_quality_activity({"request": request.to_dict()})
+
+    quality = payload["result"]["metrics"]["quality"]
+    engine = quality["quality_engine"]
+    skips = engine["skip_events"]
+    detailed_report = json.loads(report_path.read_text(encoding="utf-8"))
+
+    assert payload["result"]["status"] == WorkStatus.COMPLETED.value
+    assert engine == detailed_report["metadata"]["quality_engine"]
+    assert engine["planned_target_rule_evaluation_count"] == (
+        engine["target_rule_evaluation_count"]
+        + engine["skipped_rule_evaluation_count"]
+    )
+    assert skips["event_count"] == engine["skipped_rule_evaluation_count"]
+    assert skips["event_count"] > 0
+    assert skips["reason_counts"] == {
+        "duplicate_archive_preferred_csv": skips["event_count"]
+    }
+    assert {event["target_kind"] for event in skips["events"]} == {"zip"}
+    assert str(tmp_path) not in json.dumps(engine, sort_keys=True)
 
 
 def test_data_quality_activity_deletes_default_scratch_report_on_success(
@@ -1624,4 +1792,6 @@ def test_default_activities_register_operation_activities() -> None:
         build_cache_activity,
         merge_cache_activity,
         import_to_influx_activity,
+        reconstruction_window_activity,
+        reconstruction_report_activity,
     )

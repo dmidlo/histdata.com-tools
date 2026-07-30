@@ -6,6 +6,9 @@ import json
 from pathlib import Path
 
 from histdatacom.data_quality import (
+    CROSS_SERIES_FINGERPRINT_METADATA_KEY,
+    QUALITY_ENGINE_METADATA_KEY,
+    QUALITY_ENGINE_SCHEMA_VERSION,
     QUALITY_NEXT_ACTIONS_METADATA_KEY,
     QUALITY_NEXT_ACTIONS_SCHEMA_VERSION,
     QUALITY_REMEDIATION_CATALOG_AUDIT_METADATA_KEY,
@@ -13,10 +16,17 @@ from histdatacom.data_quality import (
     QUALITY_REMEDIATION_COVERAGE_SCHEMA_VERSION,
     QUALITY_REPORTING_METADATA_KEY,
     QUALITY_REPORT_SCHEMA_VERSION,
+    QUALITY_SKIP_EVENTS_SCHEMA_VERSION,
+    QUALITY_SKIP_REASON_DUPLICATE_ARCHIVE_PREFERRED_CSV,
     SERIES_FINGERPRINT_RULE_ID,
+    SYNTHETIC_CONSTRAINT_BOUNDED_PAYLOAD_KEY,
+    SYNTHETIC_CONSTRAINT_SUMMARY_METADATA_KEY,
+    SYNTHETIC_CONSTRAINT_SUMMARY_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_COVERAGE_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_DISTRIBUTION_ATTENTION_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_DISTRIBUTION_SUMMARY_METADATA_KEY,
+    TIME_SERIES_FINGERPRINT_PARITY_SUMMARY_METADATA_KEY,
+    TIME_SERIES_FINGERPRINT_PARITY_SUMMARY_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_READINESS_SUMMARY_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_READINESS_SUMMARY_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_READINESS_RISK_METADATA_KEY,
@@ -34,6 +44,9 @@ from histdatacom.data_quality import (
     QualityTarget,
     QualityTargetKind,
     bounded_quality_payload,
+    format_cross_series_fingerprint_lines,
+    format_fingerprint_parity_summary_lines,
+    format_fingerprint_topology_attention_lines,
     format_quality_console_summary,
     format_quality_remediation_catalog_audit_lines,
     format_quality_remediation_coverage_lines,
@@ -44,10 +57,16 @@ from histdatacom.data_quality import (
     quality_remediation_coverage_summary,
     quality_report_payload,
     quality_report_to_json,
+    run_quality_assessment,
     series_fingerprint_readiness_summary,
     series_fingerprint_readiness_risk_summary,
+    series_fingerprint_parity_summary,
     series_fingerprint_regime_summary,
     write_quality_report,
+)
+from histdatacom.data_quality.bounded_payload_contracts import (
+    representative_bounded_quality_payload,
+    representative_quality_report,
 )
 from histdatacom.runtime_contracts import ArtifactRef
 
@@ -84,6 +103,84 @@ def test_quality_json_report_is_deterministic_and_investigable(
     assert str(tmp_path) not in first
 
 
+def test_cross_series_fingerprint_has_report_bounded_and_console_surfaces() -> (
+    None
+):
+    """Cross-series metadata should remain visible on every report surface."""
+    report = representative_quality_report()
+    full = quality_report_payload(report)
+    bounded = representative_bounded_quality_payload()
+    summary = full["metadata"][CROSS_SERIES_FINGERPRINT_METADATA_KEY]
+
+    assert (
+        summary["schema_version"] == "histdatacom.cross-series-fingerprint.v1"
+    )
+    assert bounded["fingerprint_cross_series"] == summary
+    lines = format_cross_series_fingerprint_lines(summary)
+    assert lines[1] == "Cross-series fingerprint"
+    assert "groups=1" in lines[2]
+    console = format_quality_console_summary(
+        report,
+        check_groups=("fingerprint",),
+    )
+    assert "Cross-series fingerprint" in console
+    assert "ascii:T:201202" in console
+
+
+def test_fingerprint_parity_has_report_bounded_and_console_surfaces() -> None:
+    """Opt-in parity should be visible without reading nested findings."""
+    report = representative_quality_report()
+    report_payload = quality_report_payload(report)
+    bounded = representative_bounded_quality_payload()
+    console = format_quality_console_summary(
+        report,
+        check_groups=("fingerprint",),
+    )
+    summary = report_payload["metadata"][
+        TIME_SERIES_FINGERPRINT_PARITY_SUMMARY_METADATA_KEY
+    ]
+
+    assert summary["schema_version"] == (
+        TIME_SERIES_FINGERPRINT_PARITY_SUMMARY_SCHEMA_VERSION
+    )
+    assert summary["target_count"] == 3
+    assert summary["matching_target_count"] == 3
+    assert summary["computed_from_counts"]
+    assert summary["cache_source_counts"] == {"sibling": 3}
+    assert summary["freshness_counts"] == {"fresh": 3}
+    assert bounded["fingerprint_parity"] == summary
+    assert "Fingerprint cache/source parity" in console
+    assert format_fingerprint_parity_summary_lines(summary)[1] == (
+        "Fingerprint cache/source parity"
+    )
+    direct = series_fingerprint_parity_summary(report.findings, target_limit=1)
+    assert direct is not None
+    assert direct["included_target_count"] == 1
+    assert direct["omitted_target_count"] == 2
+    assert direct["truncated"] is True
+
+
+def test_synthetic_constraints_have_report_bounded_and_console_surfaces() -> (
+    None
+):
+    """Generator constraints should be visible without nested findings."""
+    report = representative_quality_report()
+    full = quality_report_payload(report)
+    bounded = representative_bounded_quality_payload()
+    console = format_quality_console_summary(
+        report,
+        check_groups=("fingerprint",),
+    )
+    summary = full["metadata"][SYNTHETIC_CONSTRAINT_SUMMARY_METADATA_KEY]
+
+    assert summary["schema_version"] == (
+        SYNTHETIC_CONSTRAINT_SUMMARY_SCHEMA_VERSION
+    )
+    assert summary["target_count"] == 3
+    assert bounded[SYNTHETIC_CONSTRAINT_BOUNDED_PAYLOAD_KEY] == summary
+    assert "Synthetic fingerprint constraints" in console
+
+
 def test_quality_report_payload_is_publish_safe_by_default(
     tmp_path: Path,
 ) -> None:
@@ -110,6 +207,33 @@ def test_quality_report_payload_can_preserve_raw_local_paths(
     payload = quality_report_payload(report, publish_safe=False)
 
     assert payload["targets"][0]["path"] == str(tmp_path / "clean.csv")
+
+
+def test_quality_report_payload_exposes_publish_safe_skip_events(
+    tmp_path: Path,
+) -> None:
+    """Full report consumers should receive structured path-free skips."""
+    report = _quality_engine_skip_report(tmp_path)
+    payload = quality_report_payload(report)
+    metadata = payload["metadata"]
+    assert isinstance(metadata, dict)
+    engine = metadata[QUALITY_ENGINE_METADATA_KEY]
+    assert isinstance(engine, dict)
+    skips = engine["skip_events"]
+    assert isinstance(skips, dict)
+
+    assert engine["schema_version"] == QUALITY_ENGINE_SCHEMA_VERSION
+    assert engine["planned_target_rule_evaluation_count"] == 2
+    assert engine["target_rule_evaluation_count"] == 1
+    assert engine["skipped_rule_evaluation_count"] == 1
+    assert skips["schema_version"] == QUALITY_SKIP_EVENTS_SCHEMA_VERSION
+    assert skips["reason_counts"] == {
+        QUALITY_SKIP_REASON_DUPLICATE_ARCHIVE_PREFERRED_CSV: 1
+    }
+    assert skips["rule_id_counts"] == {"time.ascii.gaps": 1}
+    encoded = json.dumps(payload, sort_keys=True)
+    assert str(tmp_path) not in encoded
+    assert "/Users/" not in encoded
 
 
 def test_publish_safe_json_value_sanitizes_nested_path_metadata() -> None:
@@ -296,6 +420,22 @@ def test_quality_console_summary_separates_target_statuses(
     assert "Failed files\n- csv:" in output
 
 
+def test_quality_console_summary_reconciles_skipped_evaluations(
+    tmp_path: Path,
+) -> None:
+    """Human output should explain intentional engine-level rule skips."""
+    output = format_quality_console_summary(
+        _quality_engine_skip_report(tmp_path),
+        check_groups=("time",),
+    )
+
+    assert "Quality engine skips" in output
+    assert "- evaluations: planned=2 executed=1 skipped=1" in output
+    assert "- events: included=1 omitted=0" in output
+    assert "- reasons: duplicate_archive_preferred_csv=1" in output
+    assert "- rules: time.ascii.gaps=1" in output
+
+
 def test_quality_report_payload_adds_fingerprint_coverage_metadata(
     tmp_path: Path,
 ) -> None:
@@ -409,6 +549,128 @@ def test_quality_report_payload_adds_fingerprint_topology_attention_metadata(
     ]
     assert target_summaries[0]["status"] == "unavailable"
     assert target_summaries[0]["computed_from"] == "unavailable"
+
+
+def test_topology_attention_cli_lines_render_bounded_inspection_context() -> (
+    None
+):
+    """CLI drill-down should render compact rows, counts, and action links."""
+    lines = format_fingerprint_topology_attention_lines(
+        {
+            "attention_target_count": 1,
+            "included_attention_target_count": 1,
+            "omitted_attention_target_count": 0,
+            "target_summaries": [
+                {
+                    "target_axis": {
+                        "data_format": "ascii",
+                        "timeframe": "T",
+                        "symbol": "EURUSD",
+                        "period": "201202",
+                        "kind": "csv",
+                    },
+                    "attention_level": "structural",
+                    "attention_flags": ["invalid_timestamps"],
+                    "remediation_hints": [],
+                    "invalid_timestamp_count": 2,
+                    "duplicate_timestamp_count": 0,
+                    "non_monotonic_count": 0,
+                    "suspicious_gap_count": 0,
+                    "weekend_activity_count": 0,
+                    "max_gap_ms": 60_000,
+                    "computed_from": "text_scan",
+                    "inspection_context": {
+                        "invalid_timestamps": {
+                            "total_count": 2,
+                            "included_count": 1,
+                            "omitted_count": 1,
+                            "samples": [
+                                {
+                                    "row_number": 7,
+                                    "timestamp_source": "bad-timestamp",
+                                }
+                            ],
+                            "next_action": {
+                                "code": "inspect_invalid_timestamp_rows",
+                            },
+                        }
+                    },
+                }
+            ],
+        }
+    )
+
+    assert lines[-1] == (
+        "  - context invalid_timestamps: samples=1/2 omitted=1 "
+        "action=inspect_invalid_timestamp_rows row 7=bad-timestamp"
+    )
+
+
+def test_topology_attention_cli_renders_compact_allowed_weekend_policy() -> (
+    None
+):
+    """Allowed weekend activity should render as context, not urgent action."""
+    policy_context = {
+        "actionable": False,
+        "weekend_activity_policy": "allowed",
+        "profile_name": "weekend-market",
+    }
+    note = {
+        "code": "verify_weekend_session_policy",
+        "message": "weekend activity is allowed by the active profile",
+        "action_kind": "context",
+        "rule_id": SERIES_FINGERPRINT_RULE_ID,
+        "flag": "weekend_activity",
+        "policy_context": policy_context,
+    }
+    lines = format_fingerprint_topology_attention_lines(
+        {
+            "attention_target_count": 1,
+            "included_attention_target_count": 1,
+            "omitted_attention_target_count": 0,
+            "target_summaries": [
+                {
+                    "target_axis": {
+                        "data_format": "ascii",
+                        "timeframe": "T",
+                        "symbol": "EURUSD",
+                        "period": "201202",
+                        "kind": "csv",
+                    },
+                    "attention_level": "contextual",
+                    "attention_flags": ["weekend_activity"],
+                    "remediation_hints": [note],
+                    "calendar_policy": {
+                        "weekend_activity_policy": "allowed",
+                        "expected_session_closure_policy": "expected",
+                        "calendar_profile": {"name": "weekend-market"},
+                    },
+                    "invalid_timestamp_count": 0,
+                    "duplicate_timestamp_count": 0,
+                    "non_monotonic_count": 0,
+                    "suspicious_gap_count": 0,
+                    "weekend_activity_count": 1,
+                    "max_gap_ms": None,
+                    "computed_from": "text_scan",
+                    "inspection_context": {
+                        "weekend_activity": {
+                            "included_count": 1,
+                            "total_count": 1,
+                            "omitted_count": 0,
+                            "samples": [],
+                            "policy_note": note,
+                        }
+                    },
+                }
+            ],
+        }
+    )
+    output = "\n".join(lines)
+
+    assert "contextual" in output
+    assert "policy weekend=allowed profile=weekend-market" in output
+    assert "policy-note=verify_weekend_session_policy" in output
+    assert "action=verify_weekend_session_policy" not in output
 
 
 def test_quality_report_payload_adds_fingerprint_distribution_metadata(
@@ -641,8 +903,8 @@ def test_fingerprint_readiness_risk_summary_handles_missing_sections(
     assert summary is not None
     assert summary["target_count"] == 2
     assert summary["risk_target_count"] == 2
-    assert summary["reason_counts"]["not_emitted"] == 4
-    assert summary["reason_counts"]["unsupported_target_kind"] == 3
+    assert summary["reason_counts"]["not_emitted"] == 7
+    assert summary["reason_counts"]["unsupported_target_kind"] == 4
     assert summary["target_risks"][0]["target_axis"]["kind"] == "unknown"
     assert (
         "unsupported_target_kind" in summary["target_risks"][0]["reason_codes"]
@@ -672,6 +934,11 @@ def test_fingerprint_console_summary_reports_readiness_lines(
         "acf_basis: observed_sequence=3 computed_lags=15 skipped_lags=3"
     ) in output
     assert (
+        "- decomposition: skipped=3 reasons: not_emitted=3 "
+        "stationarity: unknown=3 structural-breaks: unknown=3 "
+        "computed_windows=0 skipped_windows=0 structural_candidates=0"
+    ) in output
+    assert (
         "- topology limitations: duplicate_timestamps=1, "
         "expected_session_closures=1, invalid_timestamps_skipped=1, "
         "non_monotonic_timestamp_order=1, suspicious_gaps=1"
@@ -697,6 +964,12 @@ def test_fingerprint_console_summary_reports_readiness_lines(
         "skipped_lags=3 skipped_reasons=insufficient_sample_count=3"
     ) in output
     assert "spread_acf:samples=2/computed=1/skipped=1" in output
+    assert (
+        "decomposition=skipped reason=not_emitted basis=unknown metric=unknown "
+        "samples=0/0 windows=[] computed_windows=0 skipped_windows=0 "
+        "stationarity=unknown trend=unknown structural=unknown/0 "
+        "projection=unknown"
+    ) in output
     assert (
         "- ascii EURUSD T 201202 csv: microstructure_dynamics valid"
     ) in output
@@ -840,6 +1113,15 @@ def test_quality_report_payload_adds_remediation_coverage_metadata(
     assert coverage["unmapped_warning_error_group_count"] == 2
     assert coverage["included_unmapped_warning_error_group_count"] == 2
     assert coverage["omitted_unmapped_warning_error_group_count"] == 0
+    assert coverage["actionability_counts"] == {
+        "informational_only": 1,
+        "remediable_defect": 4,
+    }
+    assert coverage["unmapped_actionable_warning_error_finding_count"] == 3
+    assert coverage["unmapped_actionable_warning_error_group_count"] == 2
+    assert (
+        coverage["intentionally_unremediable_warning_error_finding_count"] == 0
+    )
 
     groups = coverage["unmapped_groups"]
     assert [group["max_severity"] for group in groups] == [
@@ -851,6 +1133,64 @@ def test_quality_report_payload_adds_remediation_coverage_metadata(
     assert groups[0]["finding_code"] == "FILE_MISSING"
     assert groups[0]["occurrence_count"] == 2
     assert groups[0]["target_axis_count"] == 2
+    assert groups[0]["actionability"] == "remediable_defect"
+    assert groups[0]["actionability_reason"] == "unmapped_warning_or_error"
+
+
+def test_quality_remediation_coverage_separates_actionable_boundaries(
+    tmp_path: Path,
+) -> None:
+    """Published report coverage should distinguish support boundaries."""
+    target = _target(tmp_path / "unsupported.csv")
+    report = QualityReport(
+        targets=(target,),
+        rule_results=(
+            QualityRuleResult(
+                rule_id="custom.rule",
+                target=target,
+                findings=(
+                    QualityFinding(
+                        severity=QualitySeverity.WARNING,
+                        code="CUSTOM_REPAIRABLE_FAILURE",
+                        message="repairable failure",
+                        rule_id="custom.rule",
+                        target=target,
+                    ),
+                ),
+            ),
+            QualityRuleResult(
+                rule_id="inventory.format_support",
+                target=target,
+                findings=(
+                    QualityFinding(
+                        severity=QualitySeverity.ERROR,
+                        code="HISTDATA_FORMAT_UNSUPPORTED",
+                        message="unsupported format",
+                        rule_id="inventory.format_support",
+                        target=target,
+                    ),
+                ),
+            ),
+        ),
+    )
+
+    coverage = quality_remediation_coverage_summary(report)
+    assert coverage is not None
+    groups = coverage["unmapped_groups"]
+
+    assert coverage["unmapped_warning_error_group_count"] == 2
+    assert coverage["unmapped_actionable_warning_error_group_count"] == 1
+    assert coverage["unmapped_actionable_warning_error_finding_count"] == 1
+    assert (
+        coverage["intentionally_unremediable_warning_error_finding_count"] == 1
+    )
+    assert groups[0]["finding_code"] == "CUSTOM_REPAIRABLE_FAILURE"
+    assert groups[0]["actionability"] == "remediable_defect"
+    assert groups[1]["finding_code"] == "HISTDATA_FORMAT_UNSUPPORTED"
+    assert groups[1]["actionability"] == "unsupported_format_or_capability"
+    output = "\n".join(format_quality_remediation_coverage_lines(coverage))
+    assert "actionability: actionable=1" in output
+    assert "intentional_boundary=1" in output
 
 
 def test_quality_report_payload_adds_all_mapped_remediation_coverage(
@@ -959,11 +1299,23 @@ def test_quality_report_embeds_enabled_remediation_catalog_audit(
     assert audit["summary"]["report_count"] == 1
     assert audit["summary"]["report_finding_count"] == 2
     assert audit["summary"]["report_unmapped_warning_error_group_count"] == 1
+    assert (
+        audit["summary"]["report_unmapped_actionable_warning_error_group_count"]
+        == 1
+    )
     observed_groups = audit["report_coverage"][0]["remediation_coverage"][
         "unmapped_groups"
     ]
     assert observed_groups[0]["finding_code"] == ("CUSTOM_REPORT_ONLY_GAP")
     assert observed_groups[0]["occurrence_count"] == 1
+    assert observed_groups[0]["actionability"] == "remediable_defect"
+    assert audit["remediation_plan"]["schema_version"] == (
+        "histdatacom.quality-remediation-plan.v1"
+    )
+    assert any(
+        item["finding_code"] == "CUSTOM_REPORT_ONLY_GAP"
+        for item in audit["remediation_plan"]["items"]
+    )
     assert str(tmp_path) not in encoded
 
 
@@ -980,7 +1332,16 @@ def test_quality_console_summary_renders_remediation_catalog_audit(
     assert audit is not None
     assert "Remediation catalog audit" in output
     assert "- observed report: reports=1 findings=2" in output
+    assert "- attribution: exact=" in output
+    assert " inferred=" in output
+    assert " unresolved=" in output
+    assert "- actionability: actionable=" in output
+    assert "- plan: candidates=" in output
+    assert "- plan rank=" in output
     assert "- observed error custom.report:CUSTOM_REPORT_ONLY_GAP" in output
+    assert (
+        "actionability=remediable_defect(unmapped_warning_or_error)" in output
+    )
     assert lines[0] == ""
     assert "CUSTOM_REPORT_ONLY_GAP" in "\n".join(lines)
 
@@ -1230,6 +1591,38 @@ def test_bounded_quality_payload_includes_fingerprint_coverage(
     }
 
 
+def test_bounded_quality_payload_includes_structured_skip_events(
+    tmp_path: Path,
+) -> None:
+    """Bounded orchestration consumers should reconcile engine skips."""
+    report = _quality_engine_skip_report(tmp_path)
+    payload = bounded_quality_payload(
+        operation="data-quality",
+        check_groups=("time",),
+        discovery={"roots": [str(tmp_path)], "target_count": 2},
+        report=report,
+        decision=QualityExitPolicy.from_values().evaluate(report.summary()),
+        artifact=None,
+    )
+    engine = payload[QUALITY_ENGINE_METADATA_KEY]
+    assert isinstance(engine, dict)
+    skips = engine["skip_events"]
+    assert isinstance(skips, dict)
+
+    assert engine["planned_target_rule_evaluation_count"] == 2
+    assert engine["target_rule_evaluation_count"] == 1
+    assert engine["skipped_rule_evaluation_count"] == 1
+    assert skips["event_count"] == 1
+    assert skips["events"][0]["target_axis"] == {
+        "data_format": "ascii",
+        "timeframe": "T",
+        "symbol": "EURUSD",
+        "period": "201202",
+        "kind": "zip",
+    }
+    assert str(tmp_path) not in json.dumps(payload, sort_keys=True)
+
+
 def test_bounded_quality_payload_includes_fingerprint_distribution(
     tmp_path: Path,
 ) -> None:
@@ -1317,6 +1710,77 @@ def test_bounded_quality_payload_includes_fingerprint_topology_attention(
             "flag": "unavailable_topology",
         }
     ]
+
+
+def test_bounded_quality_payload_preserves_topology_inspection_context(
+    tmp_path: Path,
+) -> None:
+    """Orchestration payloads should retain bounded, action-linked evidence."""
+    report = _fingerprint_report(tmp_path)
+    fingerprint = (
+        report.rule_results[0].findings[0].metadata["time_series_fingerprint"]
+    )
+    topology = fingerprint["temporal_topology"]
+    topology["duplicate_timestamp_count"] = 1
+    topology["inspection_context"] = {
+        "schema_version": "histdatacom.timestamp-topology-inspection.v1",
+        "duplicate_timestamps": {
+            "total_count": 1,
+            "included_count": 1,
+            "omitted_count": 0,
+            "truncated": False,
+            "limit_metadata": {
+                "samples": {
+                    "limit": 5,
+                    "effective_limit": 5,
+                    "requested_limit": 5,
+                    "default_limit": 5,
+                    "minimum_limit": 0,
+                    "maximum_limit": 5,
+                    "unbounded": False,
+                    "total_count": 1,
+                    "included_count": 1,
+                    "omitted_count": 0,
+                    "truncated": False,
+                }
+            },
+            "duplicate_row_count": 1,
+            "samples": [
+                {
+                    "row_number": 2,
+                    "timestamp_source": "20120201 000000000",
+                    "timestamp_source_truncated": False,
+                    "timestamp_utc_ms": 1328072400000,
+                    "utc_timestamp": "2012-02-01T05:00:00Z",
+                    "occurrence_count": 2,
+                    "exact_row_group_count": 1,
+                }
+            ],
+        },
+    }
+
+    payload = bounded_quality_payload(
+        operation="data-quality",
+        check_groups=("fingerprint",),
+        discovery={"roots": [str(tmp_path)], "target_count": 2},
+        report=report,
+        decision=QualityExitPolicy.from_values().evaluate(report.summary()),
+        artifact=None,
+    )
+    targets = payload["fingerprint_topology_attention"]["target_summaries"]
+    duplicate_target = next(
+        target
+        for target in targets
+        if "duplicate_timestamps" in target["attention_flags"]
+    )
+    context = duplicate_target["inspection_context"]["duplicate_timestamps"]
+
+    assert context["samples"][0]["occurrence_count"] == 2
+    assert context["next_action"]["code"] == (
+        "inspect_duplicate_timestamp_rows"
+    )
+    assert str(tmp_path) not in json.dumps(payload, sort_keys=True)
+    assert "duplicate_row_values" not in json.dumps(context, sort_keys=True)
 
 
 def test_bounded_quality_payload_includes_fingerprint_readiness(
@@ -1535,6 +1999,11 @@ def test_fingerprint_readiness_summary_is_bounded_and_issue_first(
     assert summary["target_summaries"][0]["target_axis"]["symbol"] == "GBPUSD"
     assert summary["target_summaries"][0]["applicable_dynamics_status"] == (
         "limited"
+    )
+    assert summary["decomposition_status_counts"] == {"skipped": 3}
+    assert summary["decomposition_reason_counts"] == {"not_emitted": 3}
+    assert summary["target_summaries"][0]["decomposition"]["status"] == (
+        "skipped"
     )
 
 
@@ -1757,6 +2226,12 @@ def test_bounded_quality_payload_includes_enabled_remediation_catalog_audit(
     assert audit["report_coverage"][0]["remediation_coverage"][
         "unmapped_groups"
     ][0]["finding_code"] == ("CUSTOM_REPORT_ONLY_GAP")
+    assert audit["remediation_plan"]["plan_item_count"] > 0
+    assert audit["remediation_plan"]["items"]
+    assert (
+        audit["payload_limits"]["remediation_plan"]["included_count"]
+        == audit["remediation_plan"]["included_plan_item_count"]
+    )
     assert (
         payload["payload_limits"]["remediation_catalog_audit"][
             "target_axis_limit"
@@ -1792,6 +2267,38 @@ def test_quality_exit_policy_applies_error_warning_and_never_modes(
         .evaluate(summary)
         .exit_code
         == 0
+    )
+
+
+class _QualityEngineSkipRule:
+    rule_id = "time.ascii.gaps"
+    description = "semantic scans prefer extracted CSVs"
+
+    def evaluate(self, target: QualityTarget) -> tuple[QualityFinding, ...]:
+        del target
+        return ()
+
+
+def _quality_engine_skip_report(tmp_path: Path) -> QualityReport:
+    archive = QualityTarget(
+        path=str(tmp_path / "DAT_ASCII_EURUSD_T_201202.zip"),
+        kind=QualityTargetKind.ZIP,
+        data_format="ascii",
+        timeframe="T",
+        symbol="EURUSD",
+        period="201202",
+    )
+    csv = QualityTarget(
+        path=str(tmp_path / "DAT_ASCII_EURUSD_T_201202.csv"),
+        kind=QualityTargetKind.CSV,
+        data_format="ascii",
+        timeframe="T",
+        symbol="EURUSD",
+        period="201202",
+    )
+    return run_quality_assessment(
+        targets=(archive, csv),
+        rules=(_QualityEngineSkipRule(),),
     )
 
 

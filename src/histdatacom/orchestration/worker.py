@@ -67,6 +67,12 @@ def build_temporal_worker(
     """Build a Temporal worker from centralized orchestration configuration."""
     resolved_config = config or build_orchestration_worker_config()
     temporal_worker_class = worker_class or _load_temporal_worker_class()
+    if not activities:
+        from histdatacom.synthetic.reconstruction_handlers import (
+            register_first_party_reconstruction_handlers,
+        )
+
+        register_first_party_reconstruction_handlers()
     workflow_classes = (
         list(workflows) if workflows else list(default_workflows())
     )

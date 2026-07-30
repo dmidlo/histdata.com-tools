@@ -21,7 +21,7 @@ jobs:
 
     steps:
       - name: Check out source
-        uses: actions/checkout@v7.0.0
+        uses: actions/checkout@v7.0.1
 
       - name: Download actionlint
         run: |
@@ -31,6 +31,28 @@ jobs:
       - name: Check workflow files
         run: ./actionlint -color
         shell: bash
+
+  docs:
+    name: Build documentation
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@v7.0.0
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install documentation dependencies
+        run: |
+          python -m pip install --upgrade pip "setuptools>=77" wheel
+          python -m pip install -e ".[docs]"
+
+      - name: Build documentation with warnings as errors
+        run: python -m sphinx -W --keep-going -b html docs docs/_build/html
 
   test:
     name: Python ${{ matrix.python-version }} on ${{ matrix.os }}
@@ -54,10 +76,10 @@ jobs:
 
     steps:
       - name: Check out source
-        uses: actions/checkout@v7.0.0
+        uses: actions/checkout@v7.0.1
 
       - name: Set up Python
-        uses: actions/setup-python@v6.2.0
+        uses: actions/setup-python@v7.0.0
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
@@ -67,21 +89,8 @@ jobs:
           python -m pip install --upgrade pip "setuptools>=77" wheel
           python -m pip install -e ".[test]"
 
-      - name: Run tests with coverage
-        run: python -m pytest --cov=histdatacom --cov-report=term-missing:skip-covered --cov-report=xml --cov-report=html
-
-      - name: Enforce coverage threshold
-        run: python -m coverage report
-
-      - name: Upload coverage reports
-        if: always()
-        uses: actions/upload-artifact@v7.0.1
-        with:
-          name: coverage-${{ matrix.os }}-py${{ matrix.python-version }}
-          path: |
-            coverage.xml
-            htmlcov/
-          if-no-files-found: warn
+      - name: Run tests
+        run: python -m pytest
 
       - name: Compile source and tests
         run: python -m compileall -q src tests scripts samples test.py snippets.py
@@ -110,16 +119,52 @@ jobs:
           PY
         shell: bash
 
+  production-coverage:
+    name: Production coverage
+    if: github.event_name == 'pull_request' && github.base_ref == 'main' && github.head_ref == 'dev'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@v7.0.0
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip "setuptools>=77" wheel
+          python -m pip install -e ".[test]"
+
+      - name: Run production coverage
+        run: python -m pytest --cov=histdatacom --cov-report=term-missing:skip-covered --cov-report=xml --cov-report=html
+
+      - name: Enforce coverage threshold
+        run: python -m coverage report
+
+      - name: Upload production coverage report
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: production-coverage
+          path: |
+            coverage.xml
+            htmlcov/
+          if-no-files-found: warn
+
   build:
     name: Build package artifacts
     runs-on: ubuntu-latest
 
     steps:
       - name: Check out source
-        uses: actions/checkout@v7.0.0
+        uses: actions/checkout@v7.0.1
 
       - name: Set up Python
-        uses: actions/setup-python@v6.2.0
+        uses: actions/setup-python@v7.0.0
         with:
           python-version: "3.13"
           cache: pip
@@ -175,6 +220,8 @@ jobs:
               "jupyter",
               "pandas",
               "pyarrow",
+              "statsmodels",
+              "arch",
               "temporalio",
           ):
               metadata.version(distribution_name)
@@ -184,6 +231,8 @@ jobs:
               "ipywidgets",
               "pandas",
               "pyarrow",
+              "statsmodels",
+              "arch",
               "temporalio",
           ):
               if importlib.util.find_spec(module_name) is None:
@@ -212,10 +261,10 @@ jobs:
 
     steps:
       - name: Check out source
-        uses: actions/checkout@v7.0.0
+        uses: actions/checkout@v7.0.1
 
       - name: Set up Python
-        uses: actions/setup-python@v6.2.0
+        uses: actions/setup-python@v7.0.0
         with:
           python-version: "3.13"
           cache: pip

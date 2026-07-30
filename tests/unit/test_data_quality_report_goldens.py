@@ -11,11 +11,18 @@ from typing import Any
 import pytest
 
 from histdatacom.data_quality import (
+    CROSS_SERIES_FINGERPRINT_METADATA_KEY,
+    CROSS_SERIES_FINGERPRINT_RULE_ID,
+    CROSS_SERIES_FINGERPRINT_SCHEMA_VERSION,
+    QUALITY_ENGINE_METADATA_KEY,
+    QUALITY_ENGINE_SCHEMA_VERSION,
     QUALITY_NEXT_ACTIONS_METADATA_KEY,
     QUALITY_NEXT_ACTIONS_SCHEMA_VERSION,
     QUALITY_REMEDIATION_COVERAGE_METADATA_KEY,
     QUALITY_REMEDIATION_COVERAGE_SCHEMA_VERSION,
     QUALITY_REPORT_SCHEMA_VERSION,
+    QUALITY_SKIP_EVENTS_SCHEMA_VERSION,
+    QUALITY_SKIP_REASON_DUPLICATE_ARCHIVE_PREFERRED_CSV,
     QualityExitPolicy,
     QualityFinding,
     QualityLocation,
@@ -47,6 +54,7 @@ from histdatacom.data_quality import (
     TIME_SERIES_FINGERPRINT_TOPOLOGY_SUMMARY_SCHEMA_VERSION,
     bounded_quality_payload,
     quality_report_payload,
+    run_quality_assessment,
 )
 from histdatacom.runtime_contracts import ArtifactRef, JSONValue
 
@@ -68,6 +76,16 @@ GOLDEN_CASES: tuple[tuple[str, str, str], ...] = (
         "_coverage_manifest_failure_report_payload",
     ),
     ("cache_target_report", "report", "_cache_target_report_payload"),
+    (
+        "quality_engine_skip_report",
+        "report",
+        "_quality_engine_skip_report_payload",
+    ),
+    (
+        "quality_engine_skip_bounded_payload",
+        "bounded",
+        "_quality_engine_skip_bounded_payload",
+    ),
     ("fingerprint_report", "report", "_fingerprint_report_payload"),
     (
         "fingerprint_bounded_payload",
@@ -358,6 +376,69 @@ def _cache_target_report_payload() -> dict[str, JSONValue]:
     )
 
 
+class _GoldenQualityEngineSkipRule:
+    rule_id = "time.ascii.gaps"
+    description = "semantic scans prefer extracted CSVs"
+
+    def evaluate(self, target: QualityTarget) -> tuple[QualityFinding, ...]:
+        del target
+        return ()
+
+
+def _quality_engine_skip_report() -> QualityReport:
+    archive = _target(
+        path="/quality-fixtures/DAT_ASCII_EURUSD_T_201202.zip",
+        kind=QualityTargetKind.ZIP,
+    )
+    csv = _target(
+        path="/quality-fixtures/DAT_ASCII_EURUSD_T_201202.csv",
+        kind=QualityTargetKind.CSV,
+    )
+    return run_quality_assessment(
+        targets=(archive, csv),
+        rules=(_GoldenQualityEngineSkipRule(),),
+        metadata={
+            "operation": "data-quality",
+            "check_groups": ["time"],
+        },
+    )
+
+
+def _quality_engine_skip_report_payload() -> dict[str, JSONValue]:
+    return quality_report_payload(_quality_engine_skip_report())
+
+
+def _quality_engine_skip_bounded_payload() -> dict[str, JSONValue]:
+    report = _quality_engine_skip_report()
+    artifact = ArtifactRef(
+        kind="quality-report",
+        path=("/quality-fixtures/reports/quality-engine-skip-report.json"),
+        size_bytes=2048,
+        sha256="2" * 64,
+        metadata={
+            "schema_version": QUALITY_REPORT_SCHEMA_VERSION,
+            "status": report.status.value,
+            "max_severity": report.max_severity.value,
+            "target_count": report.summary().target_count,
+            "finding_count": report.summary().finding_count,
+            "warning_count": report.summary().warning_count,
+            "error_count": report.summary().error_count,
+        },
+    )
+    return bounded_quality_payload(
+        operation="data-quality",
+        check_groups=("time",),
+        discovery={
+            "roots": ["/quality-fixtures"],
+            "target_count": 2,
+            "metadata": {"supported_kinds": ["zip", "csv", "cache"]},
+        },
+        report=report,
+        decision=QualityExitPolicy.from_values().evaluate(report.summary()),
+        artifact=artifact,
+    )
+
+
 def _fingerprint_report_payload() -> dict[str, JSONValue]:
     return quality_report_payload(_fingerprint_report())
 
@@ -438,11 +519,11 @@ def _fingerprint_report() -> QualityReport:
                 "parsed_row_count": 3,
                 "invalid_timestamp_count": 0,
                 "non_monotonic_count": 0,
-                "duplicate_timestamp_count": 0,
+                "duplicate_timestamp_count": 1,
                 "duplicate_timestamp_source_counts": {
-                    "tick_duplicate_row": 0,
+                    "tick_duplicate_row": 1,
                 },
-                "tick_duplicate_row_count": 0,
+                "tick_duplicate_row_count": 1,
                 "min_interval_ms": 60000,
                 "median_interval_ms": 60000,
                 "interval_count": 2,
@@ -476,6 +557,44 @@ def _fingerprint_report() -> QualityReport:
                     "dynamic_window_max_ms": 3600000,
                     "dynamic_window_growth_factor": 2.0,
                     "dynamic_window_shrink_factor": 0.5,
+                },
+                "inspection_context": {
+                    "schema_version": (
+                        "histdatacom.timestamp-topology-inspection.v1"
+                    ),
+                    "duplicate_timestamps": {
+                        "total_count": 1,
+                        "included_count": 1,
+                        "omitted_count": 0,
+                        "truncated": False,
+                        "limit_metadata": {
+                            "samples": {
+                                "limit": 5,
+                                "effective_limit": 5,
+                                "requested_limit": 5,
+                                "default_limit": 5,
+                                "minimum_limit": 0,
+                                "maximum_limit": 5,
+                                "unbounded": False,
+                                "total_count": 1,
+                                "included_count": 1,
+                                "omitted_count": 0,
+                                "truncated": False,
+                            }
+                        },
+                        "duplicate_row_count": 1,
+                        "samples": [
+                            {
+                                "row_number": 2,
+                                "timestamp_source": "20120201 000000000",
+                                "timestamp_source_truncated": False,
+                                "timestamp_utc_ms": 1328072400000,
+                                "utc_timestamp": "2012-02-01T05:00:00Z",
+                                "occurrence_count": 2,
+                                "exact_row_group_count": 1,
+                            }
+                        ],
+                    },
                 },
             },
             "fingerprint_audit": {
@@ -570,8 +689,186 @@ def _fingerprint_report() -> QualityReport:
         metadata={
             "operation": "data-quality",
             "check_groups": ["fingerprint"],
+            CROSS_SERIES_FINGERPRINT_METADATA_KEY: (
+                _cross_series_golden_payload()
+            ),
         },
     )
+
+
+def _cross_series_golden_payload() -> dict[str, JSONValue]:
+    limit = {
+        "limit": 32,
+        "effective_limit": 32,
+        "requested_limit": 32,
+        "default_limit": 32,
+        "minimum_limit": 0,
+        "maximum_limit": None,
+        "unbounded": False,
+    }
+    return {
+        "schema_version": CROSS_SERIES_FINGERPRINT_SCHEMA_VERSION,
+        "rule_id": CROSS_SERIES_FINGERPRINT_RULE_ID,
+        "status": "limited",
+        "calculation_basis": "shared_cross_instrument_scan",
+        "data_format": "ascii",
+        "timeframe": "T",
+        "target_count": 3,
+        "ascii_tick_target_count": 3,
+        "fx_series_count": 3,
+        "group_count": 1,
+        "incomplete_group_count": 0,
+        "included_group_count": 1,
+        "omitted_group_count": 0,
+        "truncated": False,
+        "limit_metadata": {
+            "groups": limit,
+            "correlations_per_group": limit,
+        },
+        "source_basis_counts": {"text_scan": 3},
+        "cache_source_counts": {},
+        "row_identity": {
+            "columns": [
+                "series_id",
+                "period",
+                "row_id",
+                "source_row_number",
+                "event_seq",
+            ],
+            "timestamp_is_durable_identity": False,
+            "duplicate_timestamp_row_count": 2,
+            "legacy_cache_enrichment_required": True,
+            "training_schema_version": "histdatacom.tick-training-row.v1",
+        },
+        "topology_basis": {
+            "schema_version": TIME_SERIES_FINGERPRINT_TOPOLOGY_SUMMARY_SCHEMA_VERSION,
+            "target_count": 3,
+            "included_target_count": 3,
+            "truncated": False,
+        },
+        "return_correlation_status_counts": {
+            "unavailable": 1,
+            "valid": 2,
+        },
+        "triangular_consistency": {
+            "candidate_count": 1,
+            "compared_timestamp_count": 3,
+            "warning_count": 0,
+            "error_count": 0,
+            "warning_samples": [],
+            "error_samples": [],
+        },
+        "inverse_consistency": {
+            "candidate_count": 0,
+            "compared_timestamp_count": 0,
+            "warning_count": 0,
+            "error_count": 0,
+            "warning_samples": [],
+            "error_samples": [],
+        },
+        "stale_join_risk": {"risk_count": 0, "samples": []},
+        "unavailable": {"count": 1, "samples": []},
+        "panel_coverage": [
+            {
+                "timeframe": "T",
+                "symbols": ["EURGBP", "EURUSD", "GBPUSD"],
+                "union_period_count": 1,
+                "common_period_count": 1,
+                "common_first_period": "201202",
+                "common_last_period": "201202",
+                "unequal_period_ranges": False,
+                "limiting_start_symbols": [
+                    "EURGBP",
+                    "EURUSD",
+                    "GBPUSD",
+                ],
+                "limiting_end_symbols": [
+                    "EURGBP",
+                    "EURUSD",
+                    "GBPUSD",
+                ],
+                "first_period_by_symbol": {
+                    "EURGBP": "201202",
+                    "EURUSD": "201202",
+                    "GBPUSD": "201202",
+                },
+                "last_period_by_symbol": {
+                    "EURGBP": "201202",
+                    "EURUSD": "201202",
+                    "GBPUSD": "201202",
+                },
+                "missing_period_count_by_symbol": {
+                    "EURGBP": 0,
+                    "EURUSD": 0,
+                    "GBPUSD": 0,
+                },
+            }
+        ],
+        "tolerance": {
+            "triangular_warning_relative_tolerance": 0.005,
+            "triangular_error_relative_tolerance": 0.02,
+            "inverse_warning_relative_tolerance": 0.005,
+            "inverse_error_relative_tolerance": 0.02,
+            "minimum_common_timestamp_ratio": 0.8,
+            "stale_forward_fill_min_run": 2,
+        },
+        "groups": [
+            {
+                "group_id": "ascii:T:201202",
+                "target_axis": {
+                    "data_format": "ascii",
+                    "timeframe": "T",
+                    "period": "201202",
+                },
+                "symbols": ["EURGBP", "EURUSD", "GBPUSD"],
+                "expected_symbols": ["EURGBP", "EURUSD", "GBPUSD"],
+                "missing_symbols": [],
+                "complete": True,
+                "series_count": 3,
+                "series": [],
+                "timestamp_grid": {
+                    "union_timestamp_count": 4,
+                    "common_timestamp_count": 3,
+                    "common_timestamp_ratio": 0.75,
+                    "missing_by_symbol": {
+                        "EURGBP": 1,
+                        "EURUSD": 0,
+                        "GBPUSD": 0,
+                    },
+                },
+                "coverage_ranges": {
+                    "common_start_timestamp_utc_ms": 1328072401000,
+                    "common_end_timestamp_utc_ms": 1328072403000,
+                    "unequal_ranges": True,
+                    "limiting_start_symbols": ["EURGBP"],
+                    "limiting_end_symbols": [
+                        "EURGBP",
+                        "EURUSD",
+                        "GBPUSD",
+                    ],
+                },
+                "topology": {
+                    "target_count": 3,
+                    "source_series_count": 3,
+                    "duplicate_timestamp_row_count": 2,
+                    "computed_from_counts": {"text_scan": 3},
+                    "cache_source_counts": {},
+                    "topology_computed_from_counts": {"text_scan": 3},
+                    "topology_cache_source_counts": {},
+                    "mixed_computation_basis": False,
+                    "mixed_cache_source": False,
+                },
+                "return_correlation": {
+                    "pair_count": 3,
+                    "included_pair_count": 3,
+                    "omitted_pair_count": 0,
+                    "truncated": False,
+                    "limit_metadata": {"pairs": limit},
+                    "pairs": [],
+                },
+            }
+        ],
+    }
 
 
 def _run_scoped_report_payload() -> dict[str, JSONValue]:
@@ -778,6 +1075,8 @@ def _assert_report_contract(payload: dict[str, JSONValue]) -> None:
         _assert_quality_remediation_coverage(
             _mapping(metadata[QUALITY_REMEDIATION_COVERAGE_METADATA_KEY])
         )
+    if QUALITY_ENGINE_METADATA_KEY in metadata:
+        _assert_quality_engine(_mapping(metadata[QUALITY_ENGINE_METADATA_KEY]))
     summary = _mapping(payload["summary"])
     _assert_summary(summary)
 
@@ -813,6 +1112,7 @@ def _assert_bounded_payload_contract(payload: dict[str, JSONValue]) -> None:
     }
     optional_keys = {
         "fingerprint_coverage",
+        "fingerprint_cross_series",
         "fingerprint_distribution",
         "fingerprint_distribution_attention",
         "fingerprint_readiness",
@@ -821,6 +1121,7 @@ def _assert_bounded_payload_contract(payload: dict[str, JSONValue]) -> None:
         "fingerprint_topology",
         "fingerprint_topology_attention",
         "next_actions",
+        "quality_engine",
         "remediation_coverage",
     }
     assert expected_keys <= set(payload)
@@ -865,6 +1166,8 @@ def _assert_bounded_payload_contract(payload: dict[str, JSONValue]) -> None:
         _assert_quality_remediation_coverage(
             _mapping(payload["remediation_coverage"])
         )
+    if QUALITY_ENGINE_METADATA_KEY in payload:
+        _assert_quality_engine(_mapping(payload[QUALITY_ENGINE_METADATA_KEY]))
 
     for target_summary in _list(payload["target_summaries"]):
         _assert_target_summary(_mapping(target_summary))
@@ -885,6 +1188,7 @@ def _assert_bounded_payload_contract(payload: dict[str, JSONValue]) -> None:
     assert artifact["kind"] == "quality-report"
     assert artifact["path"] in {
         "quality-fixtures/reports/fingerprint-report.json",
+        "quality-fixtures/reports/quality-engine-skip-report.json",
         "quality-fixtures/reports/run-scoped-report.json",
     }
     assert len(str(artifact["sha256"])) == 64
@@ -896,6 +1200,104 @@ def _assert_bounded_payload_contract(payload: dict[str, JSONValue]) -> None:
     assert set(decision) == {"exit_code", "policy", "reason"}
     policy = _mapping(decision["policy"])
     assert set(policy) == {"fail_on", "max_errors", "max_warnings"}
+
+
+def _assert_quality_engine(payload: dict[str, JSONValue]) -> None:
+    assert set(payload) == {
+        "duplicate_archive_scan_policy",
+        "planned_target_rule_evaluation_count",
+        "rule_count",
+        "run_rule_count",
+        "schema_version",
+        "skip_events",
+        "skipped_duplicate_archive_rule_evaluation_count",
+        "skipped_rule_evaluation_count",
+        "target_count",
+        "target_rule_evaluation_count",
+    }
+    assert payload["schema_version"] == QUALITY_ENGINE_SCHEMA_VERSION
+    for key in (
+        "planned_target_rule_evaluation_count",
+        "rule_count",
+        "run_rule_count",
+        "skipped_duplicate_archive_rule_evaluation_count",
+        "skipped_rule_evaluation_count",
+        "target_count",
+        "target_rule_evaluation_count",
+    ):
+        assert isinstance(payload[key], int)
+        assert payload[key] >= 0
+    assert payload["planned_target_rule_evaluation_count"] == (
+        payload["target_rule_evaluation_count"]
+        + payload["skipped_rule_evaluation_count"]
+    )
+    assert payload["duplicate_archive_scan_policy"] == (
+        "prefer_extracted_csv_for_non_inventory_rules"
+    )
+
+    skips = _mapping(payload["skip_events"])
+    assert set(skips) == {
+        "event_count",
+        "events",
+        "included_event_count",
+        "limit_metadata",
+        "omitted_event_count",
+        "reason_counts",
+        "rule_id_counts",
+        "schema_version",
+        "target_kind_counts",
+        "truncated",
+    }
+    assert skips["schema_version"] == QUALITY_SKIP_EVENTS_SCHEMA_VERSION
+    for key in ("event_count", "included_event_count", "omitted_event_count"):
+        assert isinstance(skips[key], int)
+        assert skips[key] >= 0
+    assert skips["event_count"] == payload["skipped_rule_evaluation_count"]
+    assert skips["included_event_count"] + skips["omitted_event_count"] == (
+        skips["event_count"]
+    )
+    assert skips["truncated"] is (skips["omitted_event_count"] > 0)
+    _assert_limit_metadata_map(
+        skips["limit_metadata"],
+        keys=("events", "reasons", "rules", "target_kinds"),
+    )
+    for count_key in ("reason_counts", "rule_id_counts", "target_kind_counts"):
+        counts = _mapping(skips[count_key])
+        for name, count in counts.items():
+            assert name
+            assert isinstance(count, int)
+            assert count > 0
+    assert (
+        _mapping(skips["reason_counts"])[
+            QUALITY_SKIP_REASON_DUPLICATE_ARCHIVE_PREFERRED_CSV
+        ]
+        == payload["skipped_duplicate_archive_rule_evaluation_count"]
+    )
+
+    events = _list(skips["events"])
+    assert len(events) == skips["included_event_count"]
+    for event_value in events:
+        event = _mapping(event_value)
+        assert set(event) == {
+            "reason_code",
+            "rule_id",
+            "target_axis",
+            "target_kind",
+        }
+        assert isinstance(event["reason_code"], str)
+        assert event["reason_code"]
+        assert isinstance(event["rule_id"], str)
+        assert event["rule_id"]
+        assert event["target_kind"] in TARGET_KIND_VALUES
+        axis = _mapping(event["target_axis"])
+        assert set(axis) == {
+            "data_format",
+            "kind",
+            "period",
+            "symbol",
+            "timeframe",
+        }
+        assert axis["kind"] == event["target_kind"]
 
 
 def _assert_fingerprint_coverage(payload: dict[str, JSONValue]) -> None:
@@ -1367,7 +1769,7 @@ def _assert_fingerprint_topology(payload: dict[str, JSONValue]) -> None:
 def _assert_fingerprint_topology_target(
     payload: dict[str, JSONValue],
 ) -> None:
-    assert set(payload) == {
+    expected_keys = {
         "cache_source",
         "computed_from",
         "duplicate_timestamp_count",
@@ -1384,6 +1786,11 @@ def _assert_fingerprint_topology_target(
         "suspicious_gap_count",
         "target_axis",
         "weekend_activity_count",
+    }
+    assert expected_keys <= set(payload)
+    assert set(payload) <= expected_keys | {
+        "calendar_policy",
+        "inspection_context",
     }
     axis = _mapping(payload["target_axis"])
     assert set(axis) == {
@@ -1405,6 +1812,10 @@ def _assert_fingerprint_topology_target(
         "weekend_activity_count",
     ):
         assert isinstance(payload[key], int)
+    if "inspection_context" in payload:
+        _assert_fingerprint_topology_inspection_context(
+            _mapping(payload["inspection_context"])
+        )
 
 
 def _assert_fingerprint_topology_attention(
@@ -1446,7 +1857,7 @@ def _assert_fingerprint_topology_attention(
 def _assert_fingerprint_topology_attention_target(
     payload: dict[str, JSONValue],
 ) -> None:
-    assert set(payload) == {
+    expected_keys = {
         "attention_flags",
         "attention_level",
         "cache_source",
@@ -1463,6 +1874,8 @@ def _assert_fingerprint_topology_attention_target(
         "target_axis",
         "weekend_activity_count",
     }
+    assert expected_keys <= set(payload)
+    assert set(payload) <= expected_keys | {"inspection_context"}
     axis = _mapping(payload["target_axis"])
     assert set(axis) == {
         "data_format",
@@ -1476,11 +1889,17 @@ def _assert_fingerprint_topology_attention_target(
         "structural",
         "sequence",
         "session",
+        "contextual",
     }
     assert isinstance(payload["attention_flags"], list)
     assert isinstance(payload["flags"], list)
     for hint in _list(payload["remediation_hints"]):
         _assert_fingerprint_remediation_hint(_mapping(hint))
+    if "inspection_context" in payload:
+        _assert_fingerprint_topology_inspection_context(
+            _mapping(payload["inspection_context"]),
+            action_linked=True,
+        )
     assert payload["status"] in {"regular", "irregular", "unavailable"}
     for key in (
         "duplicate_timestamp_count",
@@ -1497,6 +1916,56 @@ def _assert_fingerprint_topology_attention_target(
     )
 
 
+def _assert_fingerprint_topology_inspection_context(
+    payload: dict[str, JSONValue],
+    *,
+    action_linked: bool = False,
+) -> None:
+    assert payload["schema_version"] == (
+        "histdatacom.timestamp-topology-inspection.v1"
+    )
+    section_names = set(payload) - {"schema_version"}
+    assert section_names
+    assert section_names <= {
+        "invalid_timestamps",
+        "non_monotonic_timestamps",
+        "duplicate_timestamps",
+        "suspicious_gaps",
+        "expected_session_closures",
+        "weekend_activity",
+    }
+    for section_name in section_names:
+        section = _mapping(payload[section_name])
+        for key in (
+            "total_count",
+            "included_count",
+            "omitted_count",
+        ):
+            assert isinstance(section[key], int)
+        assert isinstance(section["truncated"], bool)
+        assert isinstance(section["samples"], list)
+        _assert_limit_metadata_map(
+            section["limit_metadata"],
+            keys=("samples",),
+        )
+        if action_linked and (
+            section_name != "expected_session_closures"
+            or section.get("actionable") is True
+        ):
+            assert isinstance(section["actionable"], bool)
+            assert set(_mapping(section["target_axis"])) == {
+                "data_format",
+                "kind",
+                "period",
+                "symbol",
+                "timeframe",
+            }
+            action_key = (
+                "next_action" if section["actionable"] else "policy_note"
+            )
+            _assert_fingerprint_remediation_hint(_mapping(section[action_key]))
+
+
 def _assert_fingerprint_readiness(payload: dict[str, JSONValue]) -> None:
     assert set(payload) == {
         "applicable_dynamics_status_counts",
@@ -1509,6 +1978,16 @@ def _assert_fingerprint_readiness(payload: dict[str, JSONValue]) -> None:
         "dependence_skipped_lag_count",
         "dependence_skipped_lag_reason_counts",
         "dependence_status_counts",
+        "decomposition_basis_counts",
+        "decomposition_computed_window_count",
+        "decomposition_limitation_counts",
+        "decomposition_reason_counts",
+        "decomposition_skipped_window_count",
+        "decomposition_skipped_window_reason_counts",
+        "decomposition_stationarity_status_counts",
+        "decomposition_status_counts",
+        "decomposition_structural_break_candidate_count",
+        "decomposition_structural_break_status_counts",
         "dynamics_limitation_counts",
         "dynamics_reason_counts",
         "dynamics_status_counts",
@@ -1548,6 +2027,9 @@ def _assert_fingerprint_readiness(payload: dict[str, JSONValue]) -> None:
         "dependence_skipped_lag_count",
         "stationarity_computed_window_count",
         "stationarity_skipped_window_count",
+        "decomposition_computed_window_count",
+        "decomposition_skipped_window_count",
+        "decomposition_structural_break_candidate_count",
     ):
         assert isinstance(payload[key], int)
         assert payload[key] >= 0
@@ -1561,6 +2043,13 @@ def _assert_fingerprint_readiness(payload: dict[str, JSONValue]) -> None:
         "dependence_reason_counts",
         "dependence_skipped_lag_reason_counts",
         "dependence_status_counts",
+        "decomposition_basis_counts",
+        "decomposition_limitation_counts",
+        "decomposition_reason_counts",
+        "decomposition_skipped_window_reason_counts",
+        "decomposition_stationarity_status_counts",
+        "decomposition_status_counts",
+        "decomposition_structural_break_status_counts",
         "dynamics_limitation_counts",
         "dynamics_reason_counts",
         "dynamics_status_counts",
@@ -1732,6 +2221,7 @@ def _assert_fingerprint_readiness_target(
         "applicable_dynamics_section",
         "applicable_dynamics_status",
         "dependence",
+        "decomposition",
         "microstructure_dynamics",
         "profile_completeness",
         "section_skip_reasons",
@@ -1787,6 +2277,9 @@ def _assert_fingerprint_readiness_target(
     _assert_fingerprint_readiness_dependence(_mapping(payload["dependence"]))
     _assert_fingerprint_readiness_stationarity(
         _mapping(payload["stationarity_diagnostics"])
+    )
+    _assert_fingerprint_readiness_decomposition(
+        _mapping(payload["decomposition"])
     )
 
 
@@ -2043,6 +2536,63 @@ def _assert_fingerprint_readiness_stationarity_window(
         assert isinstance(payload["required_sample_count"], int)
 
 
+def _assert_fingerprint_readiness_decomposition(
+    payload: dict[str, JSONValue],
+) -> None:
+    assert set(payload) == {
+        "basis",
+        "cache_source",
+        "calculation_basis",
+        "computed_from",
+        "computed_window_count",
+        "invalid_row_count",
+        "level_sample_count",
+        "limitations",
+        "metric",
+        "partial_row_count",
+        "reason",
+        "regular_grid",
+        "return_sample_count",
+        "rounding_digits",
+        "row_count",
+        "row_order",
+        "sampled_row_count",
+        "skipped_window_count",
+        "skipped_window_reason_counts",
+        "stationarity",
+        "status",
+        "structural_break",
+        "training_projection",
+        "trend",
+        "truncated",
+        "usable_row_count",
+        "windows",
+    }
+    assert payload["status"] in {"limited", "skipped", "unavailable", "valid"}
+    assert isinstance(payload["limitations"], list)
+    assert isinstance(payload["regular_grid"], bool)
+    assert isinstance(payload["truncated"], bool)
+    assert isinstance(payload["windows"], list)
+    assert isinstance(payload["skipped_window_reason_counts"], dict)
+    assert isinstance(payload["stationarity"], dict)
+    assert isinstance(payload["structural_break"], dict)
+    assert isinstance(payload["training_projection"], dict)
+    assert isinstance(payload["trend"], dict)
+    for key in (
+        "computed_window_count",
+        "invalid_row_count",
+        "level_sample_count",
+        "partial_row_count",
+        "return_sample_count",
+        "rounding_digits",
+        "row_count",
+        "sampled_row_count",
+        "skipped_window_count",
+        "usable_row_count",
+    ):
+        assert isinstance(payload[key], int)
+
+
 def _assert_fingerprint_readiness_stationarity_change(
     payload: dict[str, JSONValue],
 ) -> None:
@@ -2086,7 +2636,15 @@ def _assert_compact_numeric_summary(payload: dict[str, JSONValue]) -> None:
 def _assert_fingerprint_remediation_hint(
     payload: dict[str, JSONValue],
 ) -> None:
-    assert set(payload) == {"action_kind", "code", "flag", "message", "rule_id"}
+    assert {"action_kind", "code", "flag", "message", "rule_id"} <= set(payload)
+    assert set(payload) <= {
+        "action_kind",
+        "code",
+        "flag",
+        "message",
+        "policy_context",
+        "rule_id",
+    }
     assert isinstance(payload["action_kind"], str)
     assert payload["action_kind"] in {
         "configure",
@@ -2094,6 +2652,7 @@ def _assert_fingerprint_remediation_hint(
         "rebuild",
         "repair",
         "verify",
+        "context",
     }
     assert isinstance(payload["code"], str)
     assert payload["code"]
@@ -2103,6 +2662,12 @@ def _assert_fingerprint_remediation_hint(
     assert payload["message"]
     assert isinstance(payload["rule_id"], str)
     assert payload["rule_id"]
+    if "policy_context" in payload:
+        context = _mapping(payload["policy_context"])
+        assert context["schema_version"] == (
+            "histdatacom.calendar-policy-remediation-context.v1"
+        )
+        assert isinstance(context["actionable"], bool)
 
 
 def _assert_quality_next_actions(payload: dict[str, JSONValue]) -> None:
@@ -2131,7 +2696,7 @@ def _assert_quality_next_actions(payload: dict[str, JSONValue]) -> None:
 
 
 def _assert_quality_next_action(payload: dict[str, JSONValue]) -> None:
-    assert set(payload) == {
+    expected_keys = {
         "action_kind",
         "affected_target_count",
         "attention_level_counts",
@@ -2153,6 +2718,8 @@ def _assert_quality_next_action(payload: dict[str, JSONValue]) -> None:
         "target_axis_truncated",
         "urgency",
     }
+    assert expected_keys <= set(payload)
+    assert set(payload) <= expected_keys | {"policy_context"}
     assert payload["urgency"] in {"high", "medium", "low"}
     _assert_limit_metadata_map(payload["limit_metadata"], keys=("target_axes",))
     assert payload["action_kind"] in {
@@ -2162,6 +2729,8 @@ def _assert_quality_next_action(payload: dict[str, JSONValue]) -> None:
         "repair",
         "verify",
     }
+    if "policy_context" in payload:
+        assert isinstance(payload["policy_context"], dict)
     assert isinstance(payload["code"], str)
     assert payload["code"]
     assert isinstance(payload["message"], str)
@@ -2213,22 +2782,30 @@ def _assert_quality_remediation_coverage(
     payload: dict[str, JSONValue],
 ) -> None:
     assert set(payload) == {
+        "actionability_counts",
+        "blocked_by_attribution_warning_error_finding_count",
+        "blocked_by_missing_diagnostics_warning_error_finding_count",
         "count_limits",
         "finding_code_counts",
         "finding_count",
         "included_unmapped_group_count",
+        "included_unmapped_actionable_warning_error_group_count",
         "included_unmapped_warning_error_group_count",
         "limit_metadata",
         "mapped_finding_code_counts",
         "mapped_finding_count",
         "mapped_rule_id_counts",
         "mapped_severity_counts",
+        "intentionally_unremediable_warning_error_finding_count",
         "omitted_unmapped_group_count",
+        "omitted_unmapped_actionable_warning_error_group_count",
         "omitted_unmapped_warning_error_group_count",
         "rule_id_counts",
         "schema_version",
         "severity_counts",
         "unmapped_finding_code_counts",
+        "unmapped_actionable_warning_error_finding_count",
+        "unmapped_actionable_warning_error_group_count",
         "unmapped_finding_count",
         "unmapped_group_count",
         "unmapped_groups",
@@ -2246,13 +2823,20 @@ def _assert_quality_remediation_coverage(
         keys=("groups", "target_axes"),
     )
     for key in (
+        "blocked_by_attribution_warning_error_finding_count",
+        "blocked_by_missing_diagnostics_warning_error_finding_count",
         "finding_count",
+        "included_unmapped_actionable_warning_error_group_count",
         "included_unmapped_group_count",
         "included_unmapped_warning_error_group_count",
         "mapped_finding_count",
+        "intentionally_unremediable_warning_error_finding_count",
+        "omitted_unmapped_actionable_warning_error_group_count",
         "omitted_unmapped_group_count",
         "omitted_unmapped_warning_error_group_count",
         "unmapped_finding_count",
+        "unmapped_actionable_warning_error_finding_count",
+        "unmapped_actionable_warning_error_group_count",
         "unmapped_group_count",
         "unmapped_warning_error_finding_count",
         "unmapped_warning_error_group_count",
@@ -2261,6 +2845,7 @@ def _assert_quality_remediation_coverage(
         assert payload[key] >= 0
     assert isinstance(payload["unmapped_truncated"], bool)
     for key in (
+        "actionability_counts",
         "mapped_severity_counts",
         "severity_counts",
         "unmapped_severity_counts",
@@ -2298,6 +2883,8 @@ def _assert_quality_remediation_coverage_group(
     payload: dict[str, JSONValue],
 ) -> None:
     assert set(payload) == {
+        "actionability",
+        "actionability_reason",
         "finding_code",
         "included_target_axis_count",
         "limit_metadata",
@@ -2312,6 +2899,18 @@ def _assert_quality_remediation_coverage_group(
         "target_axis_truncated",
     }
     assert payload["mapped"] is False
+    assert payload["actionability"] in {
+        "remediable_defect",
+        "policy_or_profile_decision",
+        "unsupported_format_or_capability",
+        "expected_artifact_or_context",
+        "needs_rule_attribution",
+        "needs_diagnostic_context",
+        "unsafe_to_automate",
+        "informational_only",
+    }
+    assert isinstance(payload["actionability_reason"], str)
+    assert payload["actionability_reason"]
     _assert_limit_metadata_map(payload["limit_metadata"], keys=("target_axes",))
     assert payload["max_severity"] in SEVERITY_VALUES
     assert isinstance(payload["finding_code"], str)

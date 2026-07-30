@@ -12,15 +12,25 @@ from histdatacom.data_quality import (
     QUALITY_PROFILE_SCHEMA_VERSION,
     QUALITY_REPORTING_METADATA_KEY,
     SERIES_FINGERPRINT_RULE_ID,
+    AutoregressiveProfile,
+    ClassicalModelComparisonProfile,
+    ClassicalModelInputProfile,
+    ExponentialSmoothingProfile,
     HistDataSeriesFingerprintRule,
     QualityFinding,
     QualityProfileError,
     QualityReport,
     QualityStatus,
+    SeasonalExogenousProfile,
+    StateSpaceProfile,
+    VolatilityProfile,
+    apply_quality_profile_overrides,
     discover_quality_targets,
     load_quality_profile_file,
+    load_quality_profile_file_resolution,
     quality_profile_report_metadata,
     quality_rules_for_groups,
+    resolve_quality_profile,
     run_quality_assessment,
 )
 from histdatacom.histdata_ascii import TICK
@@ -169,6 +179,7 @@ def test_profile_fingerprint_knobs_flow_to_rule_surface() -> None:
                     "histogram_bins": 16,
                     "max_rows": 1000,
                     "rounding_digits": 8,
+                    "topology_inspection_sample_limit": 2,
                     "distribution_attention": {
                         "invalid_row_min_count": 2,
                         "invalid_row_min_rate": 0.5,
@@ -178,6 +189,19 @@ def test_profile_fingerprint_knobs_flow_to_rule_surface() -> None:
                         "negative_spread_min_rate": 0.1,
                         "flag_truncated_distribution": False,
                         "flag_cache_float_precision": False,
+                    },
+                    "cache_source_parity": {
+                        "enabled": True,
+                        "mismatch_limit": 7,
+                    },
+                    "classical_baselines": {
+                        "enabled": True,
+                        "evaluation_fraction": 0.25,
+                        "minimum_training_rows": 12,
+                        "minimum_evaluation_rows": 4,
+                        "rolling_windows": [3, 9],
+                        "session_seasonal_enabled": False,
+                        "rounding_digits": 6,
                     },
                 }
             },
@@ -193,6 +217,7 @@ def test_profile_fingerprint_knobs_flow_to_rule_surface() -> None:
         "histogram_bins": 16,
         "max_rows": 1000,
         "rounding_digits": 8,
+        "topology_inspection_sample_limit": 2,
         "distribution_attention": {
             "invalid_row_min_count": 2,
             "invalid_row_min_rate": 0.5,
@@ -203,7 +228,113 @@ def test_profile_fingerprint_knobs_flow_to_rule_surface() -> None:
             "flag_truncated_distribution": False,
             "flag_cache_float_precision": False,
         },
+        "cache_source_parity": {
+            "enabled": True,
+            "mismatch_limit": 7,
+        },
+        "classical_baselines": {
+            "enabled": True,
+            "evaluation_fraction": 0.25,
+            "minimum_training_rows": 12,
+            "minimum_evaluation_rows": 4,
+            "rolling_windows": [3, 9],
+            "session_seasonal_enabled": False,
+            "rounding_digits": 6,
+        },
+        "classical_model_input": ClassicalModelInputProfile().to_metadata(),
+        "exponential_smoothing": ExponentialSmoothingProfile().to_metadata(),
+        "autoregressive": AutoregressiveProfile().to_metadata(),
+        "seasonal_exogenous": SeasonalExogenousProfile().to_metadata(),
+        "state_space": StateSpaceProfile().to_metadata(),
+        "volatility": VolatilityProfile().to_metadata(),
+        "classical_model_comparison": (
+            ClassicalModelComparisonProfile().to_metadata()
+        ),
     }
+
+
+def test_classical_model_input_profile_flows_to_rule_surface() -> None:
+    """Regularization, fold, transform, and resource controls should parse."""
+    rules = quality_rules_for_groups(
+        ("fingerprint",),
+        profile={
+            "rules": {
+                SERIES_FINGERPRINT_RULE_ID: {
+                    "classical_model_input": {
+                        "enabled": True,
+                        "frequency_ms": 1_000,
+                        "midpoint_aggregation": "median",
+                        "spread_aggregation": "mean",
+                        "transform": "log_return",
+                        "horizons": [1, 3],
+                        "fold_kind": "rolling",
+                        "minimum_training_observations": 10,
+                        "minimum_evaluation_observations": 2,
+                        "rolling_window": 12,
+                        "resources": {"max_folds": 8},
+                    }
+                }
+            }
+        },
+    )
+
+    model_input = rules[0].profile.classical_model_input
+    assert model_input.enabled is True
+    assert model_input.frequency_ms == 1_000
+    assert model_input.midpoint_aggregation == "median"
+    assert model_input.spread_aggregation == "mean"
+    assert model_input.transform == "log_return"
+    assert model_input.horizons == (1, 3)
+    assert model_input.fold_kind == "rolling"
+    assert model_input.rolling_window == 12
+    assert model_input.resources.max_folds == 8
+
+
+def test_exponential_smoothing_profile_flows_to_rule_surface() -> None:
+    """Explicit fitted-family configurations should parse without search."""
+    rules = quality_rules_for_groups(
+        ("fingerprint",),
+        profile={
+            "rules": {
+                SERIES_FINGERPRINT_RULE_ID: {
+                    "exponential_smoothing": {
+                        "enabled": True,
+                        "projection_specification_id": "hw",
+                        "projection_horizon": 3,
+                        "baseline_rolling_windows": [3, 9],
+                        "specifications": [
+                            {
+                                "specification_id": "hw",
+                                "family": "holt_winters",
+                                "trend": "add",
+                                "seasonal": "mul",
+                                "seasonal_periods": 12,
+                                "initialization_method": "estimated",
+                                "parameter_bounds": [
+                                    {
+                                        "parameter": "smoothing_level",
+                                        "lower": 0.01,
+                                        "upper": 0.99,
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                }
+            }
+        },
+    )
+
+    profile = rules[0].profile.exponential_smoothing
+    assert profile.enabled is True
+    assert profile.projection_specification_id == "hw"
+    assert profile.projection_horizon == 3
+    assert profile.baseline_rolling_windows == (3, 9)
+    assert profile.specifications[0].family == "holt_winters"
+    assert profile.specifications[0].seasonal == "mul"
+    assert profile.specifications[0].parameter_bounds == (
+        ("smoothing_level", 0.01, 0.99),
+    )
 
 
 @pytest.mark.parametrize(
@@ -225,6 +356,13 @@ def test_profile_fingerprint_knobs_flow_to_rule_surface() -> None:
         {"rules": {SERIES_FINGERPRINT_RULE_ID: {"quantiles": [0.5, 0.1]}}},
         {"rules": {SERIES_FINGERPRINT_RULE_ID: {"lags": [1, 1]}}},
         {"rules": {SERIES_FINGERPRINT_RULE_ID: {"histogram_bins": 0}}},
+        {
+            "rules": {
+                SERIES_FINGERPRINT_RULE_ID: {
+                    "topology_inspection_sample_limit": 6
+                }
+            }
+        },
         {
             "rules": {
                 SERIES_FINGERPRINT_RULE_ID: {"distribution_attention": "loose"}
@@ -249,6 +387,72 @@ def test_profile_fingerprint_knobs_flow_to_rule_surface() -> None:
                 SERIES_FINGERPRINT_RULE_ID: {
                     "distribution_attention": {
                         "flag_truncated_distribution": "yes"
+                    }
+                }
+            }
+        },
+        {"rules": {SERIES_FINGERPRINT_RULE_ID: {"cache_source_parity": True}}},
+        {
+            "rules": {
+                SERIES_FINGERPRINT_RULE_ID: {
+                    "cache_source_parity": {"mismatch_limit": -1}
+                }
+            }
+        },
+        {"rules": {SERIES_FINGERPRINT_RULE_ID: {"classical_baselines": True}}},
+        {
+            "rules": {
+                SERIES_FINGERPRINT_RULE_ID: {
+                    "classical_baselines": {"evaluation_fraction": 1.0}
+                }
+            }
+        },
+        {
+            "rules": {
+                SERIES_FINGERPRINT_RULE_ID: {
+                    "classical_baselines": {"minimum_training_rows": 0}
+                }
+            }
+        },
+        {
+            "rules": {
+                SERIES_FINGERPRINT_RULE_ID: {"classical_model_input": True}
+            }
+        },
+        {
+            "rules": {
+                SERIES_FINGERPRINT_RULE_ID: {
+                    "classical_model_input": {"horizons": [3, 1]}
+                }
+            }
+        },
+        {
+            "rules": {
+                SERIES_FINGERPRINT_RULE_ID: {
+                    "classical_model_input": {
+                        "fold_kind": "rolling",
+                        "rolling_window": 1,
+                    }
+                }
+            }
+        },
+        {
+            "rules": {
+                SERIES_FINGERPRINT_RULE_ID: {
+                    "exponential_smoothing": {"specifications": []}
+                }
+            }
+        },
+        {
+            "rules": {
+                SERIES_FINGERPRINT_RULE_ID: {
+                    "exponential_smoothing": {
+                        "specifications": [
+                            {
+                                "specification_id": "bad",
+                                "family": "holt_winters",
+                            }
+                        ]
                     }
                 }
             }
@@ -291,6 +495,102 @@ def test_quality_profile_file_loads_json_payload(tmp_path: Path) -> None:
     assert profile.source == "file"
     assert profile.source_path == str(profile_path)
     assert profile.row_count_profile().min_row_count == 10
+
+
+def test_default_profile_resolution_attributes_every_value_to_builtin() -> None:
+    """Default resolution should expose deterministic built-in provenance."""
+    resolution = resolve_quality_profile()
+    payload = resolution.to_payload()
+
+    assert resolution.profile.is_default
+    assert [channel["kind"] for channel in payload["input_channels"]] == [
+        "built_in_default"
+    ]
+    assert {item["source"] for item in payload["effective_value_sources"]} == {
+        "built_in_default"
+    }
+
+
+def test_profile_file_resolution_preserves_nested_and_yaml_selection_sources(
+    tmp_path: Path,
+) -> None:
+    """Nested thresholds should retain file, name, and YAML selection facts."""
+    profile_path = tmp_path / "quality-profile.json"
+    config_path = tmp_path / "histdatacom.yaml"
+    profile_path.write_text(
+        json.dumps(
+            {
+                "name": "nested-file-profile",
+                "rules": {
+                    "ingestion.ascii.row_count": {
+                        "min_row_count": 25,
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    resolution = load_quality_profile_file_resolution(
+        profile_path,
+        config_path=str(config_path),
+        selected_by="yaml_config",
+    )
+    payload = resolution.to_payload()
+    sources = {
+        item["path"]: item for item in payload["effective_value_sources"]
+    }
+
+    assert [channel["kind"] for channel in payload["input_channels"]] == [
+        "built_in_default",
+        "yaml_config",
+        "named_profile",
+        "profile_file",
+    ]
+    assert sources["/name"]["source"] == "named_profile"
+    assert sources["/rules/ingestion.ascii.row_count/min_row_count"] == {
+        "path": "/rules/ingestion.ascii.row_count/min_row_count",
+        "value": 25,
+        "source": "profile_file",
+        "profile_name": "nested-file-profile",
+        "source_path": str(profile_path),
+        "selected_by": "yaml_config",
+    }
+
+
+def test_profile_resolution_override_records_previous_source_and_value() -> (
+    None
+):
+    """Overrides should preserve what source and value they replaced."""
+    resolution = resolve_quality_profile(
+        {
+            "name": "override-profile",
+            "reporting": {"remediation_catalog_audit": {"enabled": False}},
+        },
+        source="file",
+        source_path="quality-profile.json",
+    )
+
+    overridden = apply_quality_profile_overrides(
+        resolution,
+        {"reporting.remediation_catalog_audit.enabled": True},
+        source="cli_override",
+    )
+    sources = {
+        item["path"]: item
+        for item in overridden.to_payload()["effective_value_sources"]
+    }
+
+    assert sources["/reporting/remediation_catalog_audit/enabled"] == {
+        "path": "/reporting/remediation_catalog_audit/enabled",
+        "value": True,
+        "source": "cli_override",
+        "profile_name": "override-profile",
+        "override": True,
+        "previous_source": "profile_file",
+        "overridden_source": "profile_file",
+        "previous_value": False,
+    }
 
 
 def _report_for_path(

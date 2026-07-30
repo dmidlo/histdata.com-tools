@@ -1,0 +1,281 @@
+{
+  "check_groups": [
+    "time"
+  ],
+  "cross_target_summaries": [],
+  "discovery": {
+    "metadata": {
+      "supported_kinds": [
+        "zip",
+        "csv",
+        "cache"
+      ]
+    },
+    "roots": [
+      "quality-fixtures"
+    ],
+    "target_count": 2
+  },
+  "exit_decision": {
+    "exit_code": 0,
+    "policy": {
+      "fail_on": "error",
+      "max_errors": 0,
+      "max_warnings": 0
+    },
+    "reason": "quality report is within configured exit policy"
+  },
+  "operation": "data-quality",
+  "payload_limits": {
+    "cross_target_summaries": {
+      "default_limit": 128,
+      "effective_limit": 128,
+      "included_count": 0,
+      "limit": 128,
+      "maximum_limit": null,
+      "minimum_limit": 0,
+      "omitted_count": 0,
+      "requested_limit": 128,
+      "total_count": 0,
+      "truncated": false,
+      "unbounded": false
+    },
+    "discovery_targets": {
+      "default_limit": 128,
+      "effective_limit": 128,
+      "included_count": 0,
+      "limit": 128,
+      "maximum_limit": null,
+      "minimum_limit": 0,
+      "omitted_count": 0,
+      "requested_limit": 128,
+      "total_count": 0,
+      "truncated": false,
+      "unbounded": false
+    },
+    "next_actions": {
+      "default_limit": 16,
+      "effective_limit": 16,
+      "included_count": 0,
+      "limit": 16,
+      "maximum_limit": null,
+      "minimum_limit": 0,
+      "omitted_count": 0,
+      "requested_limit": 16,
+      "target_axes": {
+        "default_limit": 8,
+        "effective_limit": 8,
+        "limit": 8,
+        "maximum_limit": null,
+        "minimum_limit": 0,
+        "requested_limit": 8,
+        "unbounded": false
+      },
+      "target_axis_limit": 8,
+      "total_count": 0,
+      "truncated": false,
+      "unbounded": false
+    },
+    "remediation_coverage": {
+      "default_limit": 16,
+      "effective_limit": 16,
+      "included_count": 0,
+      "limit": 16,
+      "maximum_limit": null,
+      "minimum_limit": 0,
+      "omitted_count": 0,
+      "requested_limit": 16,
+      "target_axes": {
+        "default_limit": 8,
+        "effective_limit": 8,
+        "limit": 8,
+        "maximum_limit": null,
+        "minimum_limit": 0,
+        "requested_limit": 8,
+        "unbounded": false
+      },
+      "target_axis_limit": 8,
+      "total_count": 0,
+      "truncated": false,
+      "unbounded": false
+    },
+    "target_summaries": {
+      "default_limit": 128,
+      "effective_limit": 128,
+      "included_count": 2,
+      "limit": 128,
+      "maximum_limit": null,
+      "minimum_limit": 0,
+      "omitted_count": 0,
+      "requested_limit": 128,
+      "total_count": 2,
+      "truncated": false,
+      "unbounded": false
+    }
+  },
+  "quality_engine": {
+    "duplicate_archive_scan_policy": "prefer_extracted_csv_for_non_inventory_rules",
+    "planned_target_rule_evaluation_count": 2,
+    "rule_count": 1,
+    "run_rule_count": 0,
+    "schema_version": "histdatacom.quality-engine.v1",
+    "skip_events": {
+      "event_count": 1,
+      "events": [
+        {
+          "reason_code": "duplicate_archive_preferred_csv",
+          "rule_id": "time.ascii.gaps",
+          "target_axis": {
+            "data_format": "ascii",
+            "kind": "zip",
+            "period": "201202",
+            "symbol": "EURUSD",
+            "timeframe": "T"
+          },
+          "target_kind": "zip"
+        }
+      ],
+      "included_event_count": 1,
+      "limit_metadata": {
+        "events": {
+          "default_limit": 128,
+          "effective_limit": 128,
+          "included_count": 1,
+          "limit": 128,
+          "maximum_limit": 128,
+          "minimum_limit": 0,
+          "omitted_count": 0,
+          "requested_limit": null,
+          "total_count": 1,
+          "truncated": false,
+          "unbounded": false
+        },
+        "reasons": {
+          "default_limit": 64,
+          "effective_limit": 64,
+          "included_count": 1,
+          "limit": 64,
+          "maximum_limit": 64,
+          "minimum_limit": 0,
+          "omitted_count": 0,
+          "requested_limit": null,
+          "total_count": 1,
+          "truncated": false,
+          "unbounded": false
+        },
+        "rules": {
+          "default_limit": 64,
+          "effective_limit": 64,
+          "included_count": 1,
+          "limit": 64,
+          "maximum_limit": 64,
+          "minimum_limit": 0,
+          "omitted_count": 0,
+          "requested_limit": null,
+          "total_count": 1,
+          "truncated": false,
+          "unbounded": false
+        },
+        "target_kinds": {
+          "default_limit": 64,
+          "effective_limit": 64,
+          "included_count": 1,
+          "limit": 64,
+          "maximum_limit": 64,
+          "minimum_limit": 0,
+          "omitted_count": 0,
+          "requested_limit": null,
+          "total_count": 1,
+          "truncated": false,
+          "unbounded": false
+        }
+      },
+      "omitted_event_count": 0,
+      "reason_counts": {
+        "duplicate_archive_preferred_csv": 1
+      },
+      "rule_id_counts": {
+        "time.ascii.gaps": 1
+      },
+      "schema_version": "histdatacom.quality-skip-events.v1",
+      "target_kind_counts": {
+        "zip": 1
+      },
+      "truncated": false
+    },
+    "skipped_duplicate_archive_rule_evaluation_count": 1,
+    "skipped_rule_evaluation_count": 1,
+    "target_count": 2,
+    "target_rule_evaluation_count": 1
+  },
+  "quality_profile": {},
+  "report_artifact": {
+    "kind": "quality-report",
+    "metadata": {
+      "error_count": 0,
+      "finding_count": 0,
+      "max_severity": "info",
+      "schema_version": "histdatacom.quality-report.v1",
+      "status": "clean",
+      "target_count": 2,
+      "warning_count": 0
+    },
+    "path": "quality-fixtures/reports/quality-engine-skip-report.json",
+    "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+    "size_bytes": 2048
+  },
+  "report_schema_version": "histdatacom.quality-report.v1",
+  "summary": {
+    "error_count": 0,
+    "finding_count": 0,
+    "info_count": 0,
+    "max_severity": "info",
+    "rule_count": 1,
+    "status": "clean",
+    "target_count": 2,
+    "warning_count": 0
+  },
+  "target_status_counts": {
+    "clean": 2,
+    "failed": 0,
+    "warning": 0
+  },
+  "target_summaries": [
+    {
+      "error_count": 0,
+      "finding_count": 0,
+      "info_count": 0,
+      "max_severity": "info",
+      "rule_count": 1,
+      "status": "clean",
+      "target": {
+        "data_format": "ascii",
+        "kind": "csv",
+        "metadata": {},
+        "path": "quality-fixtures/DAT_ASCII_EURUSD_T_201202.csv",
+        "period": "201202",
+        "symbol": "EURUSD",
+        "timeframe": "T"
+      },
+      "warning_count": 0
+    },
+    {
+      "error_count": 0,
+      "finding_count": 0,
+      "info_count": 0,
+      "max_severity": "info",
+      "rule_count": 0,
+      "status": "clean",
+      "target": {
+        "data_format": "ascii",
+        "kind": "zip",
+        "metadata": {},
+        "path": "quality-fixtures/DAT_ASCII_EURUSD_T_201202.zip",
+        "period": "201202",
+        "symbol": "EURUSD",
+        "timeframe": "T"
+      },
+      "warning_count": 0
+    }
+  ]
+}

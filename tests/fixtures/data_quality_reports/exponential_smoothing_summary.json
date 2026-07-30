@@ -1,0 +1,39 @@
+{
+  "advisory": true,
+  "included_target_count": 1,
+  "limit_metadata": {
+    "targets": {
+      "default_limit": 16,
+      "effective_limit": 1,
+      "limit": 1,
+      "maximum_limit": null,
+      "minimum_limit": 0,
+      "requested_limit": 1,
+      "unbounded": false
+    }
+  },
+  "omitted_target_count": 2,
+  "schema_version": "histdatacom.exponential-smoothing-summary.v1",
+  "status_counts": {
+    "ready": 3
+  },
+  "target_count": 3,
+  "target_summaries": [
+    {
+      "evaluated_fold_count": 2,
+      "failed_fit_count": 0,
+      "fit_attempt_count": 1,
+      "model_count": 1,
+      "reason": null,
+      "status": "ready",
+      "target_axis": {
+        "data_format": "ascii",
+        "kind": "cache",
+        "period": "201202",
+        "symbol": "AUDUSD",
+        "timeframe": "T"
+      }
+    }
+  ],
+  "truncated": true
+}

@@ -6,7 +6,10 @@ import argparse
 import json
 import sys
 from collections.abc import Mapping, Sequence
+from pathlib import Path
 from typing import cast
+
+from polars.exceptions import PolarsError
 
 from histdatacom.cli_config import (
     CliConfigError,
@@ -23,6 +26,11 @@ from histdatacom.data_quality.fingerprint_discovery import (
     fingerprint_schema_discovery,
     format_fingerprint_contract_audit,
     format_fingerprint_schema_discovery,
+)
+from histdatacom.data_quality.fingerprint_next_work import (
+    DEFAULT_FINGERPRINT_NEXT_WORK_ALTERNATE_LIMIT,
+    fingerprint_next_work_recommendation,
+    format_fingerprint_next_work,
 )
 from histdatacom.data_quality.reporting import (
     fingerprint_readiness_risk_summary,
@@ -48,6 +56,40 @@ from histdatacom.data_quality.remediation_audit import (
     remediation_catalog_audit_has_warning_error_gaps,
     remediation_catalog_audit_to_json,
 )
+from histdatacom.data_quality.contracts import (
+    QualityTarget,
+    QualityTargetKind,
+)
+from histdatacom.data_quality.discovery import quality_target_from_path
+from histdatacom.data_quality.repair_plan import (
+    DEFAULT_QUALITY_REPAIR_PLAN_EVIDENCE_LIMIT,
+    DEFAULT_QUALITY_REPAIR_PLAN_ITEM_LIMIT,
+    format_quality_repair_plan,
+    quality_repair_plan,
+    quality_repair_plan_to_json,
+)
+from histdatacom.data_quality.synthetic_constraints import (
+    DEFAULT_SYNTHETIC_VALIDATION_MISMATCH_LIMIT,
+    DEFAULT_SYNTHETIC_VALIDATION_TARGET_LIMIT,
+    format_synthetic_validation,
+    validate_synthetic_constraint_reports,
+)
+from histdatacom.data_quality.synthetic_generation import (
+    DEFAULT_SYNTHETIC_TICK_BLOCK_SIZE,
+    DEFAULT_SYNTHETIC_TICK_DIAGNOSTIC_SAMPLE_LIMIT,
+    DEFAULT_SYNTHETIC_TICK_MAX_ABS_LOG_RETURN,
+    DEFAULT_SYNTHETIC_TICK_MAX_GENERATED_ROWS,
+    DEFAULT_SYNTHETIC_TICK_MAX_REFERENCE_ROWS,
+    DEFAULT_SYNTHETIC_TICK_MINIMUM_REFERENCE_ROWS,
+    DEFAULT_SYNTHETIC_TICK_ROUNDING_DIGITS,
+    DEFAULT_SYNTHETIC_TICK_SEED,
+    SyntheticTickGenerationProfile,
+    format_synthetic_tick_generation,
+    generate_synthetic_ticks_from_reference,
+    reference_fingerprint_from_report,
+    validate_synthetic_tick_cache,
+)
+from histdatacom.data_quality.reporting import write_quality_report
 from histdatacom.fx_enums import (
     Format,
     Pairs,
@@ -58,6 +100,11 @@ from histdatacom.fx_enums import (
 from histdatacom.publication_safety import publish_safe_path
 from histdatacom.runtime_contracts import JSONValue
 from histdatacom.verbosity import configure_logging
+from histdatacom.histdata_ascii import (
+    TICK,
+    read_polars_cache,
+    write_polars_cache,
+)
 
 FINGERPRINT_READINESS_RISK_COMMAND_SCHEMA_VERSION = (
     "histdatacom.fingerprint-readiness-risk-command.v1"
@@ -233,6 +280,43 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="emit the machine-readable audit payload",
     )
+    repair_plan = subparsers.add_parser(
+        "repair-plan",
+        aliases=("remediation-repair-plan",),
+        help="derive a non-mutating repair plan from a saved quality report",
+    )
+    repair_plan.add_argument(
+        "--report",
+        dest="report_path",
+        required=True,
+        metavar="PATH",
+        help="saved quality JSON report to translate into a repair plan",
+    )
+    repair_plan.add_argument(
+        "--item-limit",
+        type=_non_negative_int,
+        default=DEFAULT_QUALITY_REPAIR_PLAN_ITEM_LIMIT,
+        metavar="N",
+        help=(
+            "maximum repair-plan items to include; defaults to "
+            f"{DEFAULT_QUALITY_REPAIR_PLAN_ITEM_LIMIT}"
+        ),
+    )
+    repair_plan.add_argument(
+        "--evidence-limit",
+        type=_non_negative_int,
+        default=DEFAULT_QUALITY_REPAIR_PLAN_EVIDENCE_LIMIT,
+        metavar="N",
+        help=(
+            "maximum evidence values per item; defaults to "
+            f"{DEFAULT_QUALITY_REPAIR_PLAN_EVIDENCE_LIMIT}"
+        ),
+    )
+    repair_plan.add_argument(
+        "--json",
+        action="store_true",
+        help="emit the machine-readable non-mutating repair plan",
+    )
     fingerprint_schema = subparsers.add_parser(
         "fingerprint-schema",
         aliases=("fingerprint-contract", "fingerprint-discovery"),
@@ -299,9 +383,168 @@ def build_parser() -> argparse.ArgumentParser:
         help="maximum reason codes to include; use -1 for all",
     )
     fingerprint_readiness.add_argument(
+        "--next-work",
+        action="store_true",
+        help=(
+            "recommend the next fingerprint product work from the saved "
+            "report evidence"
+        ),
+    )
+    fingerprint_readiness.add_argument(
+        "--alternate-limit",
+        dest="alternate_limit",
+        type=_integer_limit,
+        default=DEFAULT_FINGERPRINT_NEXT_WORK_ALTERNATE_LIMIT,
+        metavar="N",
+        help=(
+            "maximum alternate next-work recommendations to include; "
+            "use -1 for all"
+        ),
+    )
+    fingerprint_readiness.add_argument(
         "--json",
         action="store_true",
         help="emit the machine-readable readiness risk ranking payload",
+    )
+    synthetic_generate = subparsers.add_parser(
+        "synthetic-generate",
+        aliases=("synthetic-tick-generate",),
+        help="generate deterministic synthetic tick columns from a reference set",
+    )
+    synthetic_generate.add_argument(
+        "--reference-cache",
+        required=True,
+        metavar="PATH",
+        help="enriched or legacy ASCII tick .data reference cache",
+    )
+    synthetic_generate.add_argument(
+        "--reference-report",
+        required=True,
+        metavar="PATH",
+        help="saved quality report containing the reference fingerprint",
+    )
+    synthetic_generate.add_argument(
+        "--output-cache",
+        required=True,
+        metavar="PATH",
+        help="destination enriched .data cache with populated synth_* columns",
+    )
+    synthetic_generate.add_argument(
+        "--candidate-report",
+        metavar="PATH",
+        help="optional saved ordinary fingerprint report for the candidate",
+    )
+    synthetic_generate.add_argument(
+        "--seed",
+        type=int,
+        default=DEFAULT_SYNTHETIC_TICK_SEED,
+        help="deterministic bootstrap seed",
+    )
+    synthetic_generate.add_argument(
+        "--block-size",
+        type=int,
+        default=DEFAULT_SYNTHETIC_TICK_BLOCK_SIZE,
+        metavar="N",
+        help="contiguous empirical transition block size",
+    )
+    synthetic_generate.add_argument(
+        "--minimum-reference-rows",
+        type=int,
+        default=DEFAULT_SYNTHETIC_TICK_MINIMUM_REFERENCE_ROWS,
+        metavar="N",
+        help="minimum usable reference rows with an adjacent transition",
+    )
+    synthetic_generate.add_argument(
+        "--max-reference-rows",
+        type=int,
+        default=DEFAULT_SYNTHETIC_TICK_MAX_REFERENCE_ROWS,
+        metavar="N",
+        help="maximum reference rows inspected",
+    )
+    synthetic_generate.add_argument(
+        "--max-generated-rows",
+        type=int,
+        default=DEFAULT_SYNTHETIC_TICK_MAX_GENERATED_ROWS,
+        metavar="N",
+        help="maximum rows populated with synthetic values",
+    )
+    synthetic_generate.add_argument(
+        "--max-abs-log-return",
+        type=float,
+        default=DEFAULT_SYNTHETIC_TICK_MAX_ABS_LOG_RETURN,
+        metavar="FLOAT",
+        help="absolute sampled log-return safety bound",
+    )
+    synthetic_generate.add_argument(
+        "--rounding-digits",
+        type=int,
+        default=DEFAULT_SYNTHETIC_TICK_ROUNDING_DIGITS,
+        metavar="N",
+        help="synthetic quote rounding digits",
+    )
+    synthetic_generate.add_argument(
+        "--diagnostic-sample-limit",
+        type=int,
+        default=DEFAULT_SYNTHETIC_TICK_DIAGNOSTIC_SAMPLE_LIMIT,
+        metavar="N",
+        help="bounded reference-transition evidence sample count",
+    )
+    synthetic_generate.add_argument(
+        "--anchor-mode",
+        choices=("first_valid_mid", "median_valid_mid"),
+        default="first_valid_mid",
+        help="starting midpoint selection policy",
+    )
+    synthetic_generate.add_argument(
+        "--overwrite-output",
+        action="store_true",
+        help="replace an existing output cache",
+    )
+    synthetic_generate.add_argument(
+        "--overwrite-synthetic",
+        action="store_true",
+        help="replace populated synth_* values in the reference cache",
+    )
+    synthetic_generate.add_argument(
+        "--json",
+        action="store_true",
+        help="emit machine-readable bounded generation diagnostics",
+    )
+    synthetic_validate = subparsers.add_parser(
+        "synthetic-validate",
+        aliases=("synthetic-fingerprint-validate",),
+        help="compare candidate and reference synthetic fingerprint constraints",
+    )
+    synthetic_validate.add_argument(
+        "--reference-report",
+        required=True,
+        metavar="PATH",
+        help="saved reference quality report containing fingerprint constraints",
+    )
+    synthetic_validate.add_argument(
+        "--candidate-report",
+        required=True,
+        metavar="PATH",
+        help="saved candidate quality report containing fingerprint constraints",
+    )
+    synthetic_validate.add_argument(
+        "--target-limit",
+        type=_integer_limit,
+        default=DEFAULT_SYNTHETIC_VALIDATION_TARGET_LIMIT,
+        metavar="N",
+        help="maximum target comparisons to include; use -1 for all",
+    )
+    synthetic_validate.add_argument(
+        "--mismatch-limit",
+        type=_integer_limit,
+        default=DEFAULT_SYNTHETIC_VALIDATION_MISMATCH_LIMIT,
+        metavar="N",
+        help="maximum mismatch details per target; use -1 for all",
+    )
+    synthetic_validate.add_argument(
+        "--json",
+        action="store_true",
+        help="emit the machine-readable advisory validation payload",
     )
     bounded_payload = subparsers.add_parser(
         "bounded-payload-contract",
@@ -326,6 +569,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"config error: {exc}", file=sys.stderr)  # noqa:T201
         return 1
     configure_logging(args.verbosity)
+    if args.quality_command in {
+        "synthetic-generate",
+        "synthetic-tick-generate",
+    }:
+        return _run_synthetic_generation(args)
+
     if args.quality_command in {
         "evidence",
         "inspect-evidence",
@@ -376,6 +625,29 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
 
     if args.quality_command in {
+        "repair-plan",
+        "remediation-repair-plan",
+    }:
+        try:
+            report = load_quality_report(args.report_path)
+            repair_payload = quality_repair_plan(
+                report,
+                report_path=args.report_path,
+                item_limit=args.item_limit,
+                evidence_limit=args.evidence_limit,
+            )
+        except (OSError, ValueError, TypeError) as exc:
+            print(f"quality report error: {exc}", file=sys.stderr)  # noqa:T201
+            return 1
+        if args.json:
+            print(
+                quality_repair_plan_to_json(repair_payload), end=""
+            )  # noqa:T201
+        else:
+            print(format_quality_repair_plan(repair_payload))  # noqa:T201
+        return 0
+
+    if args.quality_command in {
         "fingerprint-schema",
         "fingerprint-contract",
         "fingerprint-discovery",
@@ -419,6 +691,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 target_limit=args.target_limit,
                 section_limit=args.section_limit,
                 reason_limit=args.reason_limit,
+                next_work=args.next_work,
+                alternate_limit=args.alternate_limit,
             )
         except (OSError, ValueError, TypeError) as exc:
             print(f"quality report error: {exc}", file=sys.stderr)  # noqa:T201
@@ -431,6 +705,28 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(
                 _format_fingerprint_readiness_risk_command(risk_payload)
             )  # noqa:T201
+        return 0
+
+    if args.quality_command in {
+        "synthetic-validate",
+        "synthetic-fingerprint-validate",
+    }:
+        try:
+            reference = load_quality_report(args.reference_report)
+            candidate = load_quality_report(args.candidate_report)
+            validation = validate_synthetic_constraint_reports(
+                reference,
+                candidate,
+                target_limit=args.target_limit,
+                mismatch_limit=args.mismatch_limit,
+            )
+        except (OSError, ValueError, TypeError) as exc:
+            print(f"quality report error: {exc}", file=sys.stderr)  # noqa:T201
+            return 1
+        if args.json:
+            print(json.dumps(validation, indent=2, sort_keys=True))  # noqa:T201
+        else:
+            print(format_synthetic_validation(validation))  # noqa:T201
         return 0
 
     if args.quality_command in {
@@ -452,17 +748,149 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.error(f"unsupported quality command: {args.quality_command}")
 
 
+def _run_synthetic_generation(args: argparse.Namespace) -> int:
+    reference_path = Path(args.reference_cache).expanduser()
+    output_path = Path(args.output_cache).expanduser()
+    try:
+        reference_report_path = Path(args.reference_report).expanduser()
+        candidate_report_path = (
+            Path(args.candidate_report).expanduser()
+            if args.candidate_report
+            else None
+        )
+        output_resolved = output_path.resolve()
+        protected_paths = {
+            reference_path.resolve(): "reference cache",
+            reference_report_path.resolve(): "reference report",
+        }
+        if candidate_report_path is not None:
+            protected_paths[candidate_report_path.resolve()] = (
+                "candidate report"
+            )
+        if output_resolved in protected_paths:
+            raise ValueError(
+                "output cache path conflicts with "
+                f"{protected_paths[output_resolved]}"
+            )
+        if (
+            candidate_report_path is not None
+            and candidate_report_path.resolve()
+            in {reference_path.resolve(), reference_report_path.resolve()}
+        ):
+            raise ValueError(
+                "candidate report path conflicts with a reference input"
+            )
+        if output_path.exists() and not args.overwrite_output:
+            raise ValueError(
+                "output cache already exists: "
+                f"{publish_safe_path(str(output_path))}"
+            )
+        if (
+            candidate_report_path is not None
+            and candidate_report_path.exists()
+            and not args.overwrite_output
+        ):
+            raise ValueError(
+                "candidate report already exists: "
+                f"{publish_safe_path(str(candidate_report_path))}"
+            )
+        reference_report = load_quality_report(reference_report_path)
+        parsed_target = quality_target_from_path(reference_path)
+        reference_fingerprint = reference_fingerprint_from_report(
+            reference_report,
+            target=parsed_target,
+        )
+        axis_value = reference_fingerprint.get("target_axis")
+        axis = (
+            cast(Mapping[str, JSONValue], axis_value)
+            if isinstance(axis_value, Mapping)
+            else {}
+        )
+        reference_target = QualityTarget(
+            path=str(reference_path.resolve()),
+            kind=QualityTargetKind.CACHE,
+            data_format=str(axis.get("data_format") or "ascii"),
+            timeframe=str(axis.get("timeframe") or TICK),
+            symbol=str(axis.get("symbol") or ""),
+            period=str(axis.get("period") or ""),
+        )
+        profile = SyntheticTickGenerationProfile(
+            seed=args.seed,
+            block_size=args.block_size,
+            minimum_reference_rows=args.minimum_reference_rows,
+            max_reference_rows=args.max_reference_rows,
+            max_generated_rows=args.max_generated_rows,
+            max_abs_log_return=args.max_abs_log_return,
+            rounding_digits=args.rounding_digits,
+            diagnostic_sample_limit=args.diagnostic_sample_limit,
+            anchor_mode=args.anchor_mode,
+            overwrite_existing=args.overwrite_synthetic,
+        )
+        result = generate_synthetic_ticks_from_reference(
+            read_polars_cache(reference_path),
+            reference_fingerprint,
+            profile=profile,
+            target=reference_target,
+        )
+        diagnostics = dict(result.diagnostics)
+        if diagnostics.get("status") == "unavailable":
+            raise ValueError(
+                "synthetic generation unavailable: "
+                f"{diagnostics.get('reason', 'unknown')}"
+            )
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        write_polars_cache(result.frame, output_path)
+        candidate_target = QualityTarget(
+            path=str(output_path.resolve()),
+            kind=QualityTargetKind.CACHE,
+            data_format=reference_target.data_format,
+            timeframe=reference_target.timeframe,
+            symbol=reference_target.symbol,
+            period=reference_target.period,
+        )
+        candidate_report, validation = validate_synthetic_tick_cache(
+            output_path,
+            reference_fingerprint,
+            target=candidate_target,
+        )
+        diagnostics["validation"] = validation
+        if candidate_report_path is not None:
+            write_quality_report(candidate_report, candidate_report_path)
+    except (OSError, ValueError, TypeError, PolarsError) as exc:
+        print(
+            f"synthetic generation error: {exc}", file=sys.stderr
+        )  # noqa:T201
+        return 1
+    if args.json:
+        print(json.dumps(diagnostics, indent=2, sort_keys=True))  # noqa:T201
+    else:
+        print(format_synthetic_tick_generation(diagnostics))  # noqa:T201
+        print(  # noqa:T201
+            f"output cache: {publish_safe_path(str(output_path))}"
+        )
+        if candidate_report_path is not None:
+            print(  # noqa:T201
+                "candidate report: "
+                f"{publish_safe_path(str(candidate_report_path))}"
+            )
+    return 0
+
+
 def _fingerprint_readiness_risk_command_payload(
     report_paths: Sequence[str],
     *,
     target_limit: int | None,
     section_limit: int | None,
     reason_limit: int | None,
+    next_work: bool = False,
+    alternate_limit: int | None = None,
 ) -> dict[str, JSONValue]:
     reports: list[dict[str, JSONValue]] = []
+    loaded_reports = []
     risk_report_count = 0
     for path in report_paths:
         report = load_quality_report(path)
+        loaded_reports.append((path, report))
         summary = fingerprint_readiness_risk_summary(
             report,
             target_limit=target_limit,
@@ -480,12 +908,19 @@ def _fingerprint_readiness_risk_command_payload(
                 "summary": summary or {},
             }
         )
-    return {
+    payload: dict[str, JSONValue] = {
         "schema_version": FINGERPRINT_READINESS_RISK_COMMAND_SCHEMA_VERSION,
         "report_count": len(reports),
         "risk_report_count": risk_report_count,
         "reports": cast(JSONValue, reports),
     }
+    if next_work:
+        payload["next_work"] = fingerprint_next_work_recommendation(
+            loaded_reports,
+            alternate_limit=alternate_limit,
+            target_axis_limit=target_limit,
+        )
+    return payload
 
 
 def _format_fingerprint_readiness_risk_command(
@@ -510,6 +945,10 @@ def _format_fingerprint_readiness_risk_command(
         else:
             lines.append("Fingerprint readiness risk")
             lines.append("- no fingerprint readiness data")
+    next_work = payload.get("next_work")
+    if isinstance(next_work, dict):
+        lines.append("")
+        lines.append(format_fingerprint_next_work(next_work))
     return "\n".join(lines)
 
 

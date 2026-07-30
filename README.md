@@ -32,6 +32,7 @@ Works on macOS, Linux, and Windows.
   - [Date Ranges](#date-ranges)
     - ['Start' & 'Now' Keywords](#start-now-keywords)
   - [Multiple Datasets](#multiple-datasets)
+  - [Provider-neutral Dataset Catalog](#provider-neutral-dataset-catalog)
   - [CPU Utilization](#cpu-utilization)
   - [Import to InfluxDB](#import-to-influxdb)
     - [Docker-backed InfluxDB Smoke](#docker-backed-influxdb-smoke)
@@ -41,7 +42,26 @@ Works on macOS, Linux, and Windows.
     - [Clean and Failing Examples](#clean-and-failing-examples)
     - [Warning, Error, and Exit Policy](#warning-error-and-exit-policy)
   - [Data Analytics](#data-analytics)
+    - [Point-in-Time Market Context](#point-in-time-market-context)
     - [Feed-Regime Detection](#feed-regime-detection)
+    - [Historical Feed-Observation Operators](#historical-feed-observation-operators)
+    - [Reverse-Degradation Benchmark](#reverse-degradation-benchmark)
+    - [Empirical Reference-Motif Index](#empirical-reference-motif-index)
+    - [Real Modern Reference-Motif Library](#real-modern-reference-motif-library)
+    - [Empirical Motif Candidate Generation](#empirical-motif-candidate-generation)
+    - [Historical Candidate Carving](#historical-candidate-carving)
+    - [Cross-Currency Reconciliation](#cross-currency-reconciliation)
+    - [Calibrated Reconstruction Ensembles](#calibrated-reconstruction-ensembles)
+    - [Live Broker Delivery Capture](#live-broker-delivery-capture)
+    - [Broker Delivery Fingerprints](#broker-delivery-fingerprints)
+    - [Broker-Conditioned Reconstruction](#broker-conditioned-reconstruction)
+    - [Atomic Reconstruction Persistence](#atomic-reconstruction-persistence)
+    - [Reconstruction Activity Semantics](#reconstruction-activity-semantics)
+    - [Derived Reconstruction Candlesticks](#derived-reconstruction-candlesticks)
+    - [Reconstructed-History Strategy Sensitivity](#reconstructed-history-strategy-sensitivity)
+    - [EURUSD Triangle Reconstruction Certification](#eurusd-triangle-reconstruction-certification)
+    - [Temporal Reconstruction Orchestration](#temporal-reconstruction-orchestration)
+    - [Public Reconstruction CLI and API](#public-reconstruction-cli-and-api)
   - [Orchestration Runtime](#orchestration-runtime)
     - [Runtime Model and Install Surface](#runtime-model-and-install-surface)
     - [Binary Provisioning and PyPI Packaging](#binary-provisioning-and-pypi-packaging)
@@ -56,6 +76,7 @@ Works on macOS, Linux, and Windows.
     - [Full Script Example](#full-script-example)
 - [Setup](#setup)
   - [TLDR for all platforms](#tldr-for-all-platforms)
+  - [Container Image](#container-image)
   - [Developer Setup](#developer-setup)
   - [Vanilla Python Setup](#vanilla-python-setup)
     - [Vanilla MacOS and Linux](#vanilla-macos-and-linux)
@@ -89,6 +110,27 @@ The number one rule when using this tool is to be **MORE** specific with your in
 
 **please submit feature requests and bug reports using this repository's [issue tracker](https://github.com/dmidlo/histdata.com-tools/issues).*
 
+### Provider-neutral Dataset Catalog
+
+Versioned provider adapters and a local dataset catalog keep historical
+provider, logical dataset, immutable dataset version, observed/synthetic
+origin, and delivery profile as separate identities. Mutable aliases resolve
+once to an immutable version; replay receipts and pagination cursors retain
+that version and query scope even after an alias moves.
+
+```bash
+histdatacom datasets --catalog catalog.json list
+histdatacom datasets --catalog catalog.json resolve latest-qualified \
+  --symbol EURUSD --period 202001 --receipt resolution.json
+histdatacom datasets --catalog catalog.json verify latest-qualified
+histdatacom datasets --catalog catalog.json replay resolution.json
+```
+
+See [Provider-neutral datasets and immutable catalog resolution](docs/provider-neutral-dataset-catalog.md)
+for adapter authoring, manifest and configuration examples, licensing limits,
+row/cursor identity, synthetic lineage, reconstruction preflight, and the
+contract required by the future OANDA-compatible API in issue #77.
+
 ### Show the help and options
 
 ```txt
@@ -100,7 +142,8 @@ usage: histdatacom [-h] [-A] [-U] [--by BY] [--version] [-V] [-D] [-X] [-C]
                    [--config PATH] [-p PAIR [PAIR ...]]
                    [--pair-groups GROUP [GROUP ...]] [-f FORMAT [FORMAT ...]]
                    [-t TIMEFRAME [TIMEFRAME ...]] [-s START_YEARMONTH]
-                   [-e END_YEARMONTH] [-I] [-d] [-b BATCH_SIZE]
+                   [-e END_YEARMONTH] [-r EXPRESSION] [--random-seed INTEGER]
+                   [-z IANA_ZONE] [-I] [-d] [-b BATCH_SIZE]
                    [-c CPU_UTILIZATION] [--data-directory DATA_DIRECTORY] [-v]
                    [--orchestration-start] [--no-orchestration-start]
                    [--submit-only] [--no-overlap]
@@ -117,6 +160,7 @@ usage: histdatacom [-h] [-A] [-U] [--by BY] [--version] [-V] [-D] [-X] [-C]
                    [--quality-preflight-profile-preview-format {json,text,markdown}]
                    [--quality-preflight-validation-report PATH]
                    [--quality-preflight-run-validation]
+                   [--quality-preflight-validation-evidence PATH]
                    [--quality-preflight-evidence PATH]
                    [--quality-preflight-evidence-max-age-seconds SECONDS]
                    [--quality-preflight-evidence-stale-ok]
@@ -163,6 +207,17 @@ Config:
   -e, --end_yearmonth END_YEARMONTH
                         set an end year and month for data. e.g. -e 2020-00 or
                         -e 2022-04
+  -r, --random-window EXPRESSION
+                        select deterministic duration/session tick windows;
+                        random selection requires --random-seed, while session
+                        expressions with both -s and -e return all matching
+                        occurrences
+  --random-seed INTEGER
+                        seed required for reproducible random-window selection
+  -z, --timezone, --output-timezone IANA_ZONE
+                        append datetime_local to API results in an IANA
+                        timezone; canonical cache and Influx timestamps remain
+                        UTC
 
 Influxdb:
   -I, --import_to_influxdb
@@ -249,6 +304,9 @@ Data quality:
   --quality-preflight-run-validation
                         run bounded quality preflight validation commands
                         before rendering evidence
+  --quality-preflight-validation-evidence PATH
+                        write bounded machine-readable validation evidence to
+                        PATH and reference it from quality preflight evidence
   --quality-preflight-evidence PATH
                         use a saved quality preflight JSON report as evidence
                         before a large cache-backed --quality run
@@ -303,16 +361,20 @@ Info:
 Commands:
   analytics   Run offline data analytics operations
   cleanup     Remove transient source artifacts
+  datasets    Resolve and verify versioned local datasets
   groups      List instrument groups and major triangles
   jobs        Inspect and control orchestrated work
   quality     Inspect local data quality evidence
+  reconstruction  Plan, run, and inspect reconstruction
   runtime     Inspect and manage the orchestration runtime
 
 Run `histdatacom analytics --help` for analytics commands.
 Run `histdatacom cleanup --help` for cleanup commands.
+Run `histdatacom datasets --help` for dataset commands.
 Run `histdatacom groups --help` for group discovery commands.
 Run `histdatacom jobs --help` for job telemetry commands.
 Run `histdatacom quality --help` for quality commands.
+Run `histdatacom reconstruction --help` for reconstruction.
 ```
 
 Maintainers: this help excerpt is generated from `ArgParser.format_help()` at a
@@ -457,6 +519,15 @@ canonical `.data` cache files, and removes transient ZIP/CSV sources after each
 cache is ready. It is intentionally limited to cache-capable ASCII tick quote
 datasets, and it does not merge the caches into memory.
 
+The `.data` cache is also the canonical training substrate. Cache builds
+materialize one flat row-aligned ASCII tick table with observed bid/ask data,
+explicit row identity, timestamp features, data-quality issue columns,
+classification codes, training controls, and nullable `synth_*` placeholders.
+The durable training row key is `series_id`, `period`, and `row_id`;
+`datetime`/`timestamp_utc_ms` remains an observed time-axis feature and is not
+the only identity value. This lets later training stages mask or bucket
+timestamps without losing deterministic row identity.
+
 #### clean up transient source artifacts without removing internal caches
 
 ```sh
@@ -496,6 +567,9 @@ histdatacom:
     - tick-data-quotes
   start_yearmonth: 2022-01
   end_yearmonth: 2022-03
+  # Optional deterministic tick projection:
+  # random_window: 2d
+  # random_seed: 1729
   data_directory: /data/histdata
   request_bundle_out: requests/eurusd-cache-bundle.json
   request_json_out: requests/eurusd-cache.json
@@ -535,6 +609,10 @@ histdatacom:
     target: data/ASCII/T/eurusd
     bucket: month
     report: reports/eurusd-feed-regimes.json
+    epoch_artifact: reports/eurusd-feed-epochs.v1.json
+    min_evidence_periods: 12
+    min_segment_periods: 3
+    min_boundary_support: 0.75
     json: true
   jobs:
     command: submit
@@ -604,6 +682,64 @@ date ranges are for year and month and can be specified in the following ways:
 |"2202 04"|
 |2202.04|
 |2202_04|
+
+##### Deterministic random and session windows
+
+Use `-r/--random-window EXPRESSION` to project a bounded subset of ASCII tick
+data. Random selection always requires an explicit non-negative
+`--random-seed`; the expression, seed, requested symbols, repository inventory,
+and optional `-s`/`-e` bounds reproduce the same half-open `[start, end)`
+selection regardless of input order or worker parallelism.
+
+```sh
+# One reproducible 90-minute interval inside common EURUSD/GBPUSD support.
+histdatacom -C -I -p eurusd gbpusd -f ascii -t tick-data-quotes \
+  -r 90m --random-seed 1729
+
+# Every London sampling window in January 2024; no seed is needed when a
+# session expression has both bounds. Equal start/end months are valid here.
+histdatacom -I -p eurusd -f ascii -t tick-data-quotes \
+  -s 2024-01 -e 2024-01 -r ldn
+```
+
+Duration units are case-sensitive: `y` is a calendar year, `q` a calendar
+quarter, `M` a calendar month, `w` a week, `d` a day, `h` an hour, and `m` a
+minute. Year, quarter, and month selections are calendar-aligned; fixed
+durations are UTC-minute-aligned. Supported forms include `1y`, `1q`, `1M`,
+`2w`, `2d`, `6h`, `90m`, `ldn`, `ldn-ny`, `syd-syd`, `hk-3d`, `hk-3d-hk`,
+`45m-auk`, `1h-auk-1h`, and `30m-ldn-1w-syd-1h`. Unsupported mixtures fail
+closed.
+
+Session codes use explicit 08:00–17:00 local-clock profiles and IANA timezone
+rules:
+
+| Code | Sampling location | IANA timezone |
+|---|---|---|
+| `fra` | Frankfurt/Paris | `Europe/Paris` |
+| `ldn` | London | `Europe/London` |
+| `ny` | New York | `America/New_York` |
+| `chi` | Chicago | `America/Chicago` |
+| `la` | San Francisco/Los Angeles | `America/Los_Angeles` |
+| `auk` | Auckland/Wellington | `Pacific/Auckland` |
+| `syd` | Sydney | `Australia/Sydney` |
+| `tyo` | Tokyo | `Asia/Tokyo` |
+| `hk` | Hong Kong/Singapore | `Asia/Hong_Kong` |
+
+These profiles are reproducible sampling windows, not claims about centralized
+FX exchange hours. DST follows each IANA zone. A single session selects its
+open through close; ordered session pairs span from the first open through the
+second close, wrapping to the next local day when needed. Equal session anchors
+such as `syd-syd` end at the following session close. Hour/minute tokens outside
+anchors add padding; day/week/month/quarter/year tokens between anchors add the
+bridge duration.
+
+HistData archives and canonical `.data` caches remain complete monthly evidence.
+The planner resolves one compact, versioned selection against the common
+repository coverage of all requested symbols and schedules only intersecting
+months. It never truncates or rewrites ZIP, CSV, or cache artifacts. Exact
+filtering happens only while materializing API results or streaming rows to
+InfluxDB; empty or off-support selections fail instead of silently substituting
+another interval.
 
 ##### to fetch a single year's data, leave out the month
 
@@ -737,8 +873,16 @@ pip install "histdatacom[influx]"
 
 - ascii is the only format accepted for influxdb import.
 - all histdata.com datetime data is in EST (Eastern Standard Time) with no adjustments for daylight savings.
-- Influxdb does not adjust for timezone and all datetime data is recorded as UTC epoch timestamps (nano-seconds since midnight 00:00, January, 1st, 1970)
+- InfluxDB does not attach a display timezone; all datetime data is written as UTC
+  epoch timestamps with millisecond precision.
 - this tool converts histdata.com ESTnoDST to UTC Epoch milli-second timestamps as part of the import-to-influx process
+- `-z/--timezone` never changes Influx timestamps. Select a display timezone in
+  the Influx query or UI instead.
+- enriched ASCII tick `.data` columns are projected onto the same tick point:
+  observed quote fields, quality issue flags, quality/classification codes,
+  training controls, and populated synthetic fields when present. Duplicate
+  tick timestamps keep distinct Influx point identity with deterministic
+  `row_id` tags; the `.data` row key remains the source of truth.
 
 ```txt
 histdatacom -I -p eurusd -f ascii -t tick-data-quotes -s start -e now
@@ -798,6 +942,26 @@ the configured data directory. Targets can be plain HistData CSV files, HistData
 ZIP archives, directories containing those files, or the canonical `.data`
 cache file.
 
+Quality reports remain audit artifacts. Training-facing quality semantics are
+row columns on enriched ASCII tick `.data` caches, including explicit
+`dq_issue_*` indicators, quality counts, classification labels, training
+usability/weight, and synthetic placeholders. Report and bounded summary
+surfaces should derive from or stay consistent with those row-level columns, so
+downstream training code does not need to parse report JSON or join separate
+quality tables to assemble a training row.
+
+When the engine intentionally skips a target-rule evaluation—for example, a
+semantic scan of a ZIP whose matching extracted CSV is preferred—the report
+adds optional `metadata.quality_engine` reconciliation metadata. Its
+`histdatacom.quality-skip-events.v1` event list records a stable reason code,
+rule ID, target kind, and publish-safe format/timeframe/symbol/period axis; it
+never records local paths or row samples. Events and aggregate reason/rule
+counts are deterministically bounded with explicit omission metadata. The same
+contract is projected into bounded runtime payloads as `quality_engine`, and
+the human summary reports planned, executed, and skipped evaluation totals.
+The existing `skipped_duplicate_archive_rule_evaluation_count` remains for
+compatible consumers.
+
 Use `--repo-quality` when the same quality run should also update the local
 repo helper file with bounded per-instrument quality summaries:
 
@@ -831,6 +995,7 @@ histdatacom --quality-preflight \
   --quality-checks ticks \
   --quality-preflight-report reports/major-triangles-tick-preflight.json \
   --quality-preflight-markdown-report reports/major-triangles-tick-preflight.md \
+  --quality-preflight-validation-evidence reports/major-triangles-validation.json \
   --quality-preflight-profile-preview-output reports/major-triangles-quality-profile.md \
   --quality-preflight-profile-preview-format markdown
 ```
@@ -873,11 +1038,30 @@ run repository gates. For release notes or GitHub issue evidence, pass
 `--quality-preflight-validation-report PATH` to merge command status from a
 closure/readiness JSON report. Use
 `--quality-preflight-validation-report latest` to resolve the newest compatible
-JSON report under `.histdatacom/closure-readiness` without running gates. Pass
+JSON report under `.histdatacom/closure-readiness` without running gates. The
+closure report's release-independent `full-tests` result is recognized as
+full-pytest evidence; importing it never starts tests or coverage. Pass
 `--quality-preflight-run-validation` to run only the bounded local validation
-bundle: focused quality-preflight tests and `git diff --check`. Full pytest,
-pre-commit, publishing, and GitHub issue closure remain explicit
-closure/release workflow responsibilities.
+bundle: focused quality-preflight tests, the README help-sync check, and
+`git diff --check`. It does not run full pytest/coverage or pre-commit.
+
+Pass `--quality-preflight-validation-evidence PATH` to write the validation
+rows as a dedicated bounded JSON artifact and register it under
+`evidence.artifacts.validation_evidence`. The artifact includes its schema and
+generated timestamp plus each configured command's status, exit code, duration,
+summary, and publish-safe output-artifact path when available. Its registry
+entry records the publish-safe path, SHA-256, and byte size. Using the artifact
+option alone is the dry inspection path: commands remain planned/`not-run` and
+no repository gates execute. Combine it with an imported report to serialize
+existing closure receipts, or with `--quality-preflight-run-validation` for the
+bounded checks. Output summaries are truncated and publish-safe; full logs stay
+in separately referenced artifacts.
+
+This application evidence supplements normal issue/PR validation notes and can
+be consumed by CI, but it does not replace CI or automate GitHub issues, pull
+requests, comments, or labels. Full repository gates, publishing, TestPyPI,
+PyPI, and GitHub issue closure remain explicit closure/release workflow
+responsibilities.
 
 When launching a large cache-backed `--quality` run, pass the saved report with
 `--quality-preflight-evidence PATH`. If no matching evidence is available, the
@@ -963,7 +1147,7 @@ Supported groups:
 | `domain` | symbol metadata, quote conventions, calendar/session tags, cross-instrument consistency |
 | `modeling` | advisory modeling-readiness checks for leakage risk, spread-cost assumptions, and target horizon feasibility |
 | `provenance` | optional orchestration manifest/status lineage checks for artifact paths, sizes, checksums, cache metadata, stale caches, and orphan files |
-| `fingerprint` | deterministic INFO-only time-series fingerprints for target axis, coverage, timestamp topology, tick distributions, calendar regimes, microstructure dynamics, lag dependence, stationarity/drift diagnostics, and bounded tick spread conditioning |
+| `fingerprint` | deterministic INFO-only target and run-scoped time-series fingerprints for coverage, topology, distributions, regimes, dynamics, dependence, stationarity, decomposition, and cross-series FX relationships |
 
 `fingerprint.series` payloads include a `calendar_regimes` section for readable
 ASCII tick targets. It counts session states, active/clock sessions,
@@ -973,6 +1157,30 @@ profile metadata used for classification, so incomplete/static calendar
 profiles remain advisory and visible rather than becoming hidden failures. Tick
 fingerprints also include bounded `conditional_distributions` for spread by
 active session and special tag when spread data is available.
+
+Calendar profiles can set `weekend_activity_policy` to `strict`, `advisory`, or
+`allowed`, and `expected_session_closure_policy` to `expected` or `unexpected`.
+Topology remediation keeps the stable `verify_weekend_session_policy` code but
+adds bounded policy context with the profile name/source/version, EST-no-DST to
+UTC basis, completeness, and the active treatment. Strict profiles produce an
+inspection action, advisory profiles request assumption review, and allowed
+weekend activity is rendered as a contextual note rather than a run-level next
+action. Expected session closures remain contextual unless the profile
+explicitly marks them `unexpected`.
+
+```json
+{
+  "rules": {
+    "domain.calendar_sessions": {
+      "calendar_profile": {
+        "weekend_activity_policy": "strict",
+        "expected_session_closure_policy": "expected"
+      }
+    }
+  }
+}
+```
+
 Tick fingerprints include `microstructure_dynamics` for interarrival times,
 spread changes, spread jumps, stale quote runs, bursts, and one-sided movement.
 These sections record their calculation basis and topology limitations, so
@@ -989,12 +1197,753 @@ reasons, sample counts, configured windows, rounding policy, zero-variance
 markers, and deterministic transform recommendations such as `log_return`,
 `differencing`, and `session_conditioning`. These diagnostics are descriptive
 fingerprint facts only; nonstationarity does not fail a quality run.
+Readable ASCII tick fingerprints also include a tick-only `decomposition`
+section. It reuses the stationarity result, source-calendar hour/day/session
+classification, and profile-configured rolling windows to emit deterministic
+linear-trend, seasonal-bucket, residual, smoothing-window, and two-segment
+structural-break proxies. Buckets and structural candidates are bounded by the
+profile histogram limit; insufficient samples, skipped windows, zero variance,
+and stationarity limitations remain explicit advisory metadata. These are
+descriptive proxies, not fitted forecasting models, and no retired bar or M1
+schema is emitted.
+
+The decomposition section embeds a `period`-grain training projection with the
+stable identity fields `series_id`, `period`, and `row_id`. API consumers can
+call `decomposition_training_projection(...)` for its flat scalar values and
+`project_decomposition_onto_training_frame(...)` to repeat those period facts
+onto an already enriched ASCII tick frame without parsing a report or performing
+a side join. Row count and identity columns are preserved.
+
+Fingerprint runs also emit `cross_series_fingerprint` metadata using
+`histdatacom.cross-series-fingerprint.v1`. It groups related ASCII tick series
+by timeframe and period, then reports bounded symbol membership, full timestamp
+grid overlap, missing counts, unequal coverage ranges and limiting legs,
+pairwise return correlations, inverse and triangular consistency, and stale
+forward-fill risk. Panel coverage also reports union/common periods, missing
+period counts, unequal symbol ranges, and the legs that limit the common start
+or end. The group topology rollup includes row/parsed counts,
+duplicate and non-monotonic timestamps, suspicious and expected-session gaps,
+weekend activity, and source/cache provenance. Legacy raw `.data` caches are
+enriched in memory before this projection, and any row-level evidence uses
+`series_id`, `period`, and `row_id`; timestamp alone is never treated as durable
+identity. Full reports expose `metadata.cross_series_fingerprint`, bounded
+runtime payloads expose `fingerprint_cross_series`, and the CLI renders a
+concise `Cross-series fingerprint` section.
+
+Before trusting cache-backed fingerprints after a cache migration, enrichment
+change, manual cache copy, or unexpected source/cache timestamp change, run an
+opt-in cache/source parity assessment. Parity is disabled by default, so normal
+fingerprints retain their cache-first selection and cost. Enable it in a quality
+profile and run the ordinary fingerprint check against the source CSV or ZIP:
+
+```json
+{
+  "schema_version": "histdatacom.quality-profile.v1",
+  "name": "fingerprint-cache-source-parity",
+  "rules": {
+    "fingerprint.series": {
+      "cache_source_parity": {
+        "enabled": true,
+        "mismatch_limit": 16
+      }
+    }
+  }
+}
+```
+
+```sh
+histdatacom --quality \
+  --quality-target data/DAT_ASCII_EURUSD_T_201202.csv \
+  --quality-checks fingerprint \
+  --quality-profile fingerprint-cache-source-parity.json \
+  --quality-report reports/eurusd-fingerprint-parity.json
+```
+
+The advisory `cache_source_parity` target section compares bounded coverage,
+topology, calendar-regime, conditioned-spread, row-identity,
+duplicate-timestamp, quality-report, and Influx-projection evidence. It keeps
+raw source, raw legacy cache, enriched training cache, quality report, and
+Influx projection as separate bases; legacy caches are enriched in memory and
+are never rewritten. Stable mismatch codes and basis metadata roll up into
+`metadata.time_series_fingerprint_cache_source_parity_summary`, bounded payload
+key `fingerprint_parity`, and the CLI `Fingerprint cache/source parity` section.
+Source paths and ZIP members remain publication-safe, mismatch fields and target
+summaries are bounded, and no raw rows or full duplicate payloads are emitted.
+Missing sources or caches are reported as `not_compared`; stale caches are
+compared and marked advisory rather than accepted by the normal freshness path.
+
+Every supported ASCII tick fingerprint also emits bounded
+`synthetic_constraints` for the deterministic reference-set generator. The protocol separates
+`defects_to_avoid`, `stylized_facts_to_preserve`, and
+`source_artifacts_to_parameterize`; records stable comparison modes and
+tolerances; and exposes advisory hints for session mix, spread regimes, gap
+topology, expected closures, stationarity transforms, cache provenance, and
+durable row identity. Its canonical generator input is the enriched `.data`
+frame, not nested report JSON. Legacy raw caches are enriched in memory before
+row issue columns are counted.
+
+Python consumers can call `synthetic_constraints_from_training_frame(...)`
+with an enriched Polars frame and its fingerprint, then call
+`generate_synthetic_ticks_from_reference(...)`. The generator applies a seeded,
+contiguous empirical block bootstrap to paired midpoint log returns and spreads,
+filters rows marked by `dq_issue_*`, and enforces explicit inspection and output
+row limits for very large periods. It refuses a missing fingerprint or
+pre-populated synthetic columns unless replacement is explicitly requested.
+
+Generated values augment the same rows only in `synth_bid`, `synth_ask`,
+`synth_spread`, `synth_mid`, `synth_method_code`, `synth_confidence`, and
+`synth_usable`. Observed `bid`/`ask`, timestamp features, duplicate-timestamp
+rows, and durable `series_id`/`period`/`row_id` identity remain unchanged. Every
+successful generation is automatically projected into a market-only candidate
+cache, run through the ordinary `fingerprint.series` rule, and compared with
+the reference through the synthetic constraint validator. Statistical mismatch
+remains advisory rather than a hard data-quality gate.
+
+Generate an enriched synthetic cache and optionally retain its ordinary
+candidate fingerprint report:
+
+```sh
+histdatacom quality synthetic-generate \
+  --reference-cache data/ASCII/T/EURUSD/2012/01/.data \
+  --reference-report reports/reference-quality.json \
+  --output-cache generated/ASCII/T/EURUSD/2012/01/.data \
+  --candidate-report reports/generated-quality.json \
+  --seed 17 \
+  --json
+```
+
+The command will not overwrite observed columns or an existing output cache by
+default. `--max-reference-rows` and `--max-generated-rows` bound work; rows
+beyond the generation limit remain present with null synthetic values and
+`synth_usable=false`. Volume synthesis, raw M1/OHLC generation, and derived
+candlestick output remain outside this ASCII tick feature and follow later
+issues #80 and #18.
+
+Validate an exported candidate tick dataset by running the normal fingerprint
+quality path for both reference and candidate, then comparing their saved
+reports:
+
+```sh
+histdatacom quality synthetic-validate \
+  --reference-report reports/reference-quality.json \
+  --candidate-report reports/candidate-quality.json \
+  --json
+```
+
+The advisory `histdatacom.synthetic-fingerprint-validation.v1` result reports
+matched, mismatched, and missing target axes; candidate defect violations;
+bounded stylized-fact mismatches; output/identity contract drift; and stable
+mismatch codes. The validator itself does not mutate data or turn statistical
+drift into a hard quality gate. Full reports expose
+`metadata.time_series_fingerprint_synthetic_constraint_summary`, bounded
+payloads expose `fingerprint_synthetic_constraints`, and the ordinary
+fingerprint CLI summary renders `Synthetic fingerprint constraints`.
+
+Classical baseline diagnostics are a separate, opt-in layer after the
+fingerprint substrate. They are disabled by default and do not change quality
+status. Enable the low-dependency baseline families through the ordinary
+fingerprint profile:
+
+```json
+{
+  "schema_version": "histdatacom.quality-profile.v1",
+  "name": "classical-baselines",
+  "rules": {
+    "fingerprint.series": {
+      "classical_baselines": {
+        "enabled": true,
+        "evaluation_fraction": 0.2,
+        "minimum_training_rows": 20,
+        "minimum_evaluation_rows": 5,
+        "rolling_windows": [5, 20],
+        "session_seasonal_enabled": true,
+        "rounding_digits": 12
+      }
+    }
+  }
+}
+```
+
+The `histdatacom.classical-baselines.v1` section evaluates observed midpoint
+values with a chronological holdout ordered by `series_id`, `period`, and
+`row_id`. It never shuffles, never requires timestamp as durable identity, and
+uses walk-forward forecasts where prior observed values become available only
+after their row. Initial models are naive/random-walk, rolling mean, rolling
+median, and session-conditioned seasonal-naive when the enriched session class
+and calendar fingerprint support it. Metrics are emitted only after the
+configured training and evaluation minima produce a valid split.
+
+Stationarity status, rolling drift, distribution shift, skipped windows,
+zero-variance markers, and the `log_return`, `differencing`, and
+`session_conditioning` recommendations remain explicit evaluation guards.
+Recommended transforms are reported but are not silently applied, and
+nonstationarity never becomes a hard quality failure. The fitted curriculum now
+includes exponential smoothing, explicit-order AR/ARMA/ARIMA,
+SARIMA/ARIMAX/SARIMAX, structural state-space and Kalman diagnostics, symmetric
+ARCH/GARCH, and family-neutral comparison. Automatic model selection and
+forecasting leaderboards remain deliberately deferred.
+
+Python consumers can call
+`classical_baseline_diagnostics_from_training_frame(...)`, then
+`project_classical_baseline_onto_training_frame(...)` to repeat the bounded
+period-level readiness, split, best-model, and error scalars onto the same
+enriched rows. The projection preserves observed bid/ask and duplicate
+timestamp rows, requires only `series_id`/`period`/`row_id` identity, and flows
+through the existing same-point Influx projection. Full reports expose
+`metadata.time_series_fingerprint_classical_baseline_summary`, bounded payloads
+use `fingerprint_classical_baselines`, and the fingerprint CLI renders
+`Classical fingerprint baselines`.
+
+The broader fitted-model curriculum begins with a separate opt-in input and
+evaluation contract. It regularizes the enriched ASCII tick frame without
+restoring raw M1 as an independent input or fitting ETS/ARIMA/state-space/GARCH
+models prematurely:
+
+```json
+{
+  "schema_version": "histdatacom.quality-profile.v1",
+  "name": "classical-model-input",
+  "rules": {
+    "fingerprint.series": {
+      "classical_model_input": {
+        "enabled": true,
+        "frequency_ms": 60000,
+        "alignment_epoch_ms": 0,
+        "closed_side": "left",
+        "label_side": "left",
+        "midpoint_aggregation": "last",
+        "spread_aggregation": "last",
+        "minimum_observations_per_bin": 1,
+        "expected_closure_policy": "mark",
+        "unexpected_missing_policy": "mark",
+        "transform": "level",
+        "differencing_order": 0,
+        "seasonal_differencing_order": 0,
+        "seasonal_period": 0,
+        "horizons": [1],
+        "fold_kind": "expanding",
+        "minimum_training_observations": 20,
+        "minimum_evaluation_observations": 5,
+        "step_size": 5,
+        "rolling_window": 0,
+        "embargo_observations": 0,
+        "rounding_digits": 12,
+        "resources": {
+          "max_source_rows": 1000000,
+          "max_regularized_observations": 100000,
+          "max_folds": 64,
+          "max_horizons": 16,
+          "max_candidate_orders": 32,
+          "max_fit_attempts": 64,
+          "max_wall_time_seconds": 300,
+          "max_memory_bytes": 536870912,
+          "max_retained_diagnostics": 64
+        }
+      }
+    }
+  }
+}
+```
+
+`build_classical_model_input(...)` produces a bounded regular-grid derived
+view and the `histdatacom.classical-model-input.v1` contract. UTC bins are
+left-closed and left-labeled (`[start,end)`), aligned to an explicit epoch, and
+never cross a source period. Midpoint and spread support explicit
+first/last/mean/median aggregation. Derived midpoint open/high/low/close values
+are descriptive fields in the regularized view; they do not make raw bar data
+canonical again. Multiple ticks, duplicate timestamps, minimum bin support,
+source-row bounds, truncation, and rounding all remain explicit.
+
+Empty bins are never forward-filled. Calendar classification separates expected
+weekend/session closures from unexpected missing observations; both remain null
+on the canonical grid. The `omit` closure policy suppresses closure-target
+evaluation folds without compressing elapsed grid time or forecast horizons. Level, log-level,
+return, log-return, first differencing, and seasonal differencing are applied
+only when configured. The contract records invalid domains, warm-up loss,
+inverse-transform requirements, and the requirement to report forecast errors
+on the original requested scale.
+
+Expanding and rolling folds are chronological, never shuffled, and record
+training/evaluation boundaries, configured horizons, step size, embargo, and
+incomplete targets through `histdatacom.classical-model-fold.v1`. Shared
+`histdatacom.classical-model-fit-result.v1` and
+`histdatacom.classical-model-evaluation-result.v1` schemas define bounded
+fitted/converged/limited/skipped/timeout/numerical/dependency/failure metadata
+for later model families without including backend exception text, full
+forecasts, residual histories, or fitted objects.
+
+`project_classical_model_input_onto_training_frame(...)` augments the same
+enriched tick rows with registered nullable `cm_input_*`, `cm_fold_*`, and
+`cm_evaluation_*` scalar columns. Projection uses `series_id`, `period`, and
+`row_id` as durable identity and repeats a completed-bin value only on rows at
+or after its UTC close. Masked timestamps remain identifiable, duplicate
+timestamps remain distinct, observed bid/ask and `synth_*` fields are preserved,
+and post-observation evaluation values are marked diagnostic-only. The same
+columns flow through the ordinary Polars cache and same-point Influx projection;
+consumers do not need report parsing or model side-table joins.
+
+No rich numerical dependency is added to the core package by this contract.
+Statsmodels and ARCH providers belong in the optional `models` extra; the
+low-dependency fingerprint and baseline paths remain usable when those
+providers are absent. Full reports use
+`time_series_fingerprint_classical_model_input_summary`, bounded payloads use
+`fingerprint_classical_model_input`, and console output renders
+`Classical model input contracts`.
+
+The first fitted family is also opt-in and requires the `models` extra:
+
+```sh
+pip install "histdatacom[models]"
+```
+
+```json
+{
+  "schema_version": "histdatacom.quality-profile.v1",
+  "name": "exponential-smoothing",
+  "rules": {
+    "fingerprint.series": {
+      "classical_model_input": {
+        "enabled": true,
+        "frequency_ms": 60000,
+        "transform": "level",
+        "horizons": [1, 5, 20],
+        "fold_kind": "expanding",
+        "minimum_training_observations": 40,
+        "minimum_evaluation_observations": 5,
+        "step_size": 20
+      },
+      "exponential_smoothing": {
+        "enabled": true,
+        "projection_specification_id": "hw-add",
+        "projection_horizon": 1,
+        "baseline_rolling_windows": [5, 20],
+        "specifications": [
+          {
+            "specification_id": "ses",
+            "family": "ses",
+            "error": "add"
+          },
+          {
+            "specification_id": "holt-damped",
+            "family": "holt",
+            "error": "add",
+            "trend": "add",
+            "damped_trend": true
+          },
+          {
+            "specification_id": "hw-add",
+            "family": "holt_winters",
+            "error": "add",
+            "trend": "add",
+            "seasonal": "add",
+            "seasonal_periods": 24,
+            "initialization_method": "estimated",
+            "optimized": true,
+            "max_iterations": 200
+          },
+          {
+            "specification_id": "ets-aaa",
+            "family": "ets",
+            "error": "add",
+            "trend": "add",
+            "seasonal": "add",
+            "seasonal_periods": 24
+          }
+        ]
+      }
+    }
+  }
+}
+```
+
+`histdatacom.exponential-smoothing.v1` consumes only the regular grid and
+rolling-origin folds produced by the model-input contract. Explicit
+specifications cover simple exponential smoothing, Holt trend, damped Holt,
+additive or multiplicative Holt-Winters, and Statsmodels ETS error/trend/
+seasonal combinations. Initialization, smoothing parameters, optimizer method,
+iteration limit, and parameter bounds are configurable; multiplicative forms
+reject non-positive transformed training segments. There is no automatic
+configuration search or automatic winner.
+
+Expected closures and unexpected missing bins stay distinct and null. A fit
+uses only the trailing contiguous observed grid segment at an origin; neither
+kind of gap is forward-filled or removed from elapsed horizon time. Configured
+level, log-level, return, log-return, ordinary differencing, and seasonal
+differencing policies come from the input contract. Forecasts and metrics are
+inverted to the original scale, while warm-up, invalid-domain, insufficient
+seasonal-cycle, skipped-target, convergence-warning, timeout, numerical, and
+dependency limitations remain bounded advisory metadata.
+
+Each explicit model is evaluated on the same configured folds and horizons as
+the naive/random-walk, rolling mean, rolling median, and session-seasonal
+references. Reports expose per-fold forecasts and errors, per-horizon aggregate
+metrics, convergence and failure counts, deterministic model IDs, backend
+version, fitted scalar parameters, and enforced fit-attempt/time/memory/
+retention limits. Fitted objects, residual vectors, backend exception text, and
+wall-clock measurements are never serialized.
+
+`project_exponential_smoothing_onto_training_frame(...)` adds registered
+nullable scalar `cm_ets_*` columns to the same enriched rows using
+`series_id`/`period`/`row_id`. Forecasts appear only when the origin bin has
+closed. Actuals and realized errors appear only at their later diagnostic
+availability row and carry explicit diagnostic-only and training-eligibility
+flags. The configured projection has bounded width, preserves observed and
+`synth_*` namespaces, survives duplicate or masked timestamps, and flows through
+the same Polars cache and Influx point. Full reports use
+`time_series_fingerprint_exponential_smoothing_summary`, bounded payloads use
+`fingerprint_exponential_smoothing`, and console output renders
+`Exponential-smoothing models`.
+
+The second fitted family adds explicit-order AR, ARMA, and ARIMA models:
+
+```json
+{
+  "rules": {
+    "fingerprint.series": {
+      "classical_model_input": {
+        "enabled": true,
+        "frequency_ms": 60000,
+        "transform": "level",
+        "horizons": [1, 5],
+        "minimum_training_observations": 40,
+        "step_size": 20
+      },
+      "autoregressive": {
+        "enabled": true,
+        "projection_specification_ids": ["ar-2", "arma-1-1", "arima-1-1-1"],
+        "projection_horizon": 1,
+        "compare_exponential_smoothing": true,
+        "specifications": [
+          {"specification_id": "ar-2", "family": "ar", "p": 2, "trend": "c"},
+          {"specification_id": "arma-1-1", "family": "arma", "p": 1, "q": 1, "trend": "c"},
+          {"specification_id": "arima-1-1-1", "family": "arima", "p": 1, "d": 1, "q": 1}
+        ]
+      }
+    }
+  }
+}
+```
+
+AR and ARMA are first-class configured families even though Statsmodels uses a
+shared ARIMA backend. Orders, trend policy, initialization, estimation method,
+stationarity/invertibility enforcement, fixed scalar parameters, and iteration
+limits are explicit. Integrated model differencing (`d`) is distinct from the
+input contract's configured transform/differencing; fingerprint stationarity
+recommendations are advisory and are never applied automatically. Missing bins
+reset fitting to the trailing contiguous observed segment and are never filled.
+
+Every model is refit independently at each rolling origin, preventing residual,
+state, fitted-value, or future-value leakage. Forecasts and errors are returned
+on the original requested scale. Per-horizon MAE/RMSE/bias, forecast coverage,
+convergence/failure rates, fitted-parameter stability, roots, conditioning, and
+comparisons with lightweight and available exponential-smoothing references are
+bounded report diagnostics. There is no automatic order search or winner.
+
+`project_autoregressive_onto_training_frame(...)` adds fixed-width nullable
+scalar columns under `cm_ar_*`, `cm_arma_*`, and `cm_arima_*`, joined only by
+`series_id`/`period`/`row_id`. Forecast availability, realized diagnostic
+availability, fit/reason codes, orders, roots, and training eligibility remain
+point-in-time explicit. Full reports use
+`time_series_fingerprint_autoregressive_summary`, bounded payloads use
+`fingerprint_autoregressive`, and console output renders `Autoregressive
+models`. Computational cost is proportional to configured specifications times
+rolling origins; #421 candidate, fit-attempt, observation, time, memory, and
+diagnostic limits bound that work.
+
+The third fitted family adds explicit seasonal and exogenous autoregressive
+models. It uses the same regular grid, transforms, chronological folds,
+original-scale inversion, and resource policy as the earlier families:
+
+```json
+{
+  "rules": {
+    "fingerprint.series": {
+      "classical_model_input": {
+        "enabled": true,
+        "frequency_ms": 60000,
+        "horizons": [1, 5],
+        "minimum_training_observations": 80,
+        "step_size": 20
+      },
+      "seasonal_exogenous": {
+        "enabled": true,
+        "projection_specification_ids": ["sarima-hour", "arimax-clock", "sarimax-hour-clock"],
+        "projection_horizon": 1,
+        "regressor_profile": {
+          "allow_partial_calendar": true,
+          "require_complete_calendar_for": [],
+          "max_regressors": 16
+        },
+        "specifications": [
+          {
+            "specification_id": "sarima-hour",
+            "family": "sarima",
+            "p": 1,
+            "seasonal_p": 1,
+            "seasonal_period": 60,
+            "seasonal_cycle_ms": 3600000
+          },
+          {
+            "specification_id": "arimax-clock",
+            "family": "arimax",
+            "p": 1,
+            "regressor_names": ["source_hour_sin", "source_hour_cos"]
+          },
+          {
+            "specification_id": "sarimax-hour-clock",
+            "family": "sarimax",
+            "p": 1,
+            "seasonal_p": 1,
+            "seasonal_period": 60,
+            "seasonal_cycle_ms": 3600000,
+            "regressor_names": ["source_hour_sin", "source_hour_cos"]
+          }
+        ]
+      }
+    }
+  }
+}
+```
+
+SARIMA, ARIMAX, and SARIMAX remain separate configured families even though
+they share Statsmodels' state-space SARIMAX backend. Nonseasonal and seasonal
+orders, the seasonal period and its elapsed-millisecond cycle, trend,
+initialization, optimizer, stationarity/invertibility enforcement, fixed scalar
+parameters, and iteration limits are explicit. A runtime cycle check prevents a
+configuration written for one sampling frequency from being silently reused at
+another frequency. There is no automatic order, regressor, or winner selection.
+
+Exogenous columns come only from the deterministic calendar classifier. The
+stable vocabulary covers source-hour and weekday cycles, market/session states,
+session overlaps, rollover, Sunday open, Friday close, London fix, month/quarter/
+year end, holiday/event presence, and explicitly registered `tag:*` values.
+Column order, vocabulary, forecast-time availability, missingness, calendar
+profile completeness, and provenance are recorded. Unknown regressors and
+observed or future-derived market values are rejected. Holiday/event regressors
+may be marked partial under the bundled advisory calendar, or required to have
+a complete operator-supplied calendar profile.
+
+Each model is refit independently at every #421 rolling origin. Future calendar
+values are classified from future grid timestamps without reading future quote
+values; missing bins and expected closures remain null and reset fitting to a
+trailing contiguous segment. Reports contain bounded parameters, residual
+summaries, roots, conditioning, convergence/failure rates, horizon metrics,
+regime-conditioned errors, lightweight baseline references, and optional #422/
+#423 references using descriptive shared-fold semantics only.
+
+`project_seasonal_exogenous_onto_training_frame(...)` augments the same enriched
+tick frame with 123 registered nullable scalar columns under `cm_sarima_*`,
+`cm_arimax_*`, and `cm_sarimax_*`. These include order and regressor codes,
+origin/target/fold/horizon identity, forecast availability, convergence and
+reason codes, and separately gated realized diagnostics. They preserve observed
+and `synth_*` namespaces and flow through the existing Polars cache and Influx
+projection. Full reports use
+`time_series_fingerprint_seasonal_exogenous_summary`, bounded payloads use
+`fingerprint_seasonal_exogenous`, and console output renders `Seasonal and
+exogenous models`.
+
+The fourth fitted family adds explicit structural state-space models and
+leakage-safe Kalman state diagnostics. It consumes the same #421 regular grid,
+aggregation, transform, rolling-origin folds, horizons, and resource policy:
+
+```json
+{
+  "rules": {
+    "fingerprint.series": {
+      "classical_model_input": {
+        "enabled": true,
+        "frequency_ms": 60000,
+        "horizons": [1, 5],
+        "minimum_training_observations": 80,
+        "step_size": 20
+      },
+      "state_space": {
+        "enabled": true,
+        "projection_specification_id": "local-level",
+        "projection_horizon": 1,
+        "max_state_dimension": 64,
+        "max_component_count": 8,
+        "max_prediction_only_gap": 240,
+        "max_retained_states": 16,
+        "specifications": [
+          {
+            "specification_id": "local-level",
+            "family": "local_level"
+          },
+          {
+            "specification_id": "local-linear-trend",
+            "family": "local_linear_trend",
+            "stochastic_trend": true
+          },
+          {
+            "specification_id": "structural-hourly",
+            "family": "structural",
+            "seasonal_period": 60,
+            "seasonal_cycle_ms": 3600000
+          }
+        ]
+      }
+    }
+  }
+}
+```
+
+Local level, local linear trend, and configurable structural models remain
+first-class specifications. Level/trend/irregular, seasonal, cycle, and
+autoregressive components; stochastic flags; initialization; optimizer; fixed
+parameters; and iteration limits are explicit. There is no automatic component
+search or winner. Seasonal periods carry an elapsed-millisecond cycle so a
+configuration cannot silently move to a different sampling frequency.
+
+Missing regular-grid observations are passed to the Statsmodels
+`UnobservedComponents` backend as missing observations. The Kalman system
+performs one prediction-only transition per grid step: expected closures and
+true missing observations remain distinct in the #421 input contract, neither
+is forward-filled, and long prediction-only runs are bounded and reported.
+Each model is independently refit at every forecast origin. Filtered states use
+only that origin's training segment. Smoothed states are retrospective
+diagnostics for the same bounded segment, are never used to forecast, and are
+never training-eligible.
+
+Reports include bounded likelihood/AIC/BIC, innovations, state uncertainty,
+parameters, convergence/failure rates, prediction-only transition counts,
+horizon metrics, lightweight baselines, and optional #422/#423/#424 references.
+Comparisons are descriptive shared-fold references only. Full reports use
+`time_series_fingerprint_state_space_summary`, bounded payloads use
+`fingerprint_state_space`, and console output renders `State-space and Kalman
+models`.
+
+`project_state_space_onto_training_frame(...)` augments the same enriched tick
+rows with 52 registered nullable scalar columns: 32 under `cm_state_space_*`
+and 20 under `cm_kalman_*`. Forecast, actual/error, fit/reason, fold, horizon,
+filtered-state, smoothed-state, uncertainty, availability, retrospective, and
+training-eligibility fields join only by `series_id`/`period`/`row_id`. They
+preserve observed and `synth_*` namespaces and serialize through the existing
+Polars cache and Influx projection.
+
+The fifth fitted family provides explicit symmetric ARCH(q) and GARCH(p,q)
+conditional-variance models through the optional `arch` backend. It requires a
+return-bearing #421 input contract (`transform: return` or `log_return`) and
+keeps input definition, mean model, innovation and variance orders,
+distribution, scaling, variance initialization, covariance type, parameter
+bounds, and iteration limits explicit:
+
+```json
+{
+  "rules": {
+    "fingerprint.series": {
+      "classical_model_input": {
+        "enabled": true,
+        "transform": "return",
+        "horizons": [1, 5],
+        "minimum_training_observations": 80
+      },
+      "volatility": {
+        "enabled": true,
+        "projection_specification_ids": ["arch-5", "garch-1-1"],
+        "projection_horizon": 1,
+        "realized_variance_proxy": "squared_return",
+        "annualization_periods": 252,
+        "specifications": [
+          {
+            "specification_id": "arch-5",
+            "family": "arch",
+            "input_definition": "raw_return",
+            "mean_model": "zero",
+            "distribution": "normal",
+            "innovation_order": 5
+          },
+          {
+            "specification_id": "garch-1-1",
+            "family": "garch",
+            "input_definition": "raw_return",
+            "mean_model": "constant",
+            "distribution": "students_t",
+            "innovation_order": 1,
+            "variance_order": 1
+          }
+        ]
+      }
+    }
+  }
+}
+```
+
+Raw returns, log returns, per-origin demeaned returns, and explicitly referenced
+preceding mean-model residuals are separate contracts. Missing grid bins are
+never filled: fitting uses only the trailing contiguous segment and records the
+reset count. Fits guard finite inputs, minimum history, scaling, positive
+variance, parameter bounds, persistence, unconditional variance, optimizer
+status, and numerical failures with stable reason codes and without backend
+exception text.
+
+Forecast evaluation keeps return-mean, conditional-variance, and volatility
+errors separate. Realized variance currently uses the explicit deterministic
+`squared_return` proxy; rolling-variance and EWMA references use the same folds.
+Multiple horizons, rolling stability, convergence/failure rates, bounded
+standardized-residual diagnostics, and preceding-model references are reported,
+but there is no automatic winner. GJR-GARCH and EGARCH have registry entries for
+future extension and are not silently fitted by this family.
+
+`project_volatility_onto_training_frame(...)` augments the same enriched tick
+rows with 78 registered nullable scalar columns under `cm_arch_*` and
+`cm_garch_*`. Forecasts are attached at origin availability; actual returns and
+realized diagnostics are attached only after target availability. Durable
+`series_id`/`period`/`row_id` joins preserve observed and `synth_*` fields and
+round-trip through the existing Polars cache and Influx projection. Full reports
+use `time_series_fingerprint_volatility_summary`, bounded payloads use
+`fingerprint_volatility`, and console output renders `ARCH and GARCH volatility
+models`.
+
+The opt-in family-neutral comparison layer consumes those saved bounded
+evaluation artifacts; it does not refit models. Enable it with
+`fingerprint.series.classical_model_comparison.enabled: true` after enabling the
+model-input contract and the families to compare. Each record carries the
+dataset/fingerprint, regularization contract, fold set, target metric, scale,
+horizon, period, specification, and explicit reference baseline. A comparison
+is ineligible when any compatible-identity requirement differs or when bounded
+fold evidence is incomplete. Mean/level, return-mean, conditional-variance, and
+absolute-return-volatility metrics remain separate.
+
+Skill is descriptive and reference-relative: ratio reduction for MAE/RMSE/bias
+and baseline-minus-model for QLIKE. Negative skill is preserved. Missing or
+near-zero references produce stable reason codes instead of silently changing
+the baseline. Rolling error and parameter drift, convergence and failure rates,
+regime context, resource-limit terminations, and representative reason counts
+are bounded. Failed fits remain in accounting denominators. No `winner`,
+`best_model`, production recommendation, automatic order search, or
+hyperparameter search is emitted.
+
+`project_classical_model_comparison_onto_training_frame(...)` adds 43 nullable
+diagnostic scalars under `cm_comparison_*`, `cm_skill_*`, and `cm_stability_*`.
+They join by `series_id`/`period`/`row_id`, remain null before target-time
+availability, preserve duplicate timestamps and observed/`synth_*` columns, and
+are explicitly retrospective and not training-eligible. Full reports use
+`time_series_fingerprint_classical_model_comparison_summary`, bounded payloads
+use `fingerprint_classical_model_comparison`, and console output renders
+`Classical model comparison`.
+
 Every series fingerprint also includes a bounded `fingerprint_audit` section.
 It records expected, emitted, and intentionally skipped fingerprint sections,
 stable skip/eligibility reason codes, calendar-profile completeness, tick-spread
-conditioning eligibility, dynamics readiness, and stationarity readiness. This
-is machine-readable contract metadata for report consumers; the full fingerprint
-sections remain the source of the detailed statistics.
+conditioning eligibility, dynamics readiness, stationarity readiness, and
+decomposition readiness. This is machine-readable contract metadata for report
+consumers; the full fingerprint sections remain the source of the detailed
+statistics.
+
+Topology attention targets include bounded `inspection_context` when a mapped
+remediation action has focused evidence. Invalid timestamps expose row positions
+and parse-failure counts; non-monotonic timestamps expose offending transitions;
+exact duplicate rows expose their timestamp values and occurrence counts;
+suspicious gaps expose largest boundaries, durations, and expected-session
+classification; and weekend activity exposes timestamp/session buckets. These
+records do not include raw quote rows or absolute paths. Each context section
+reports included, omitted, and truncated counts with full `limit_metadata`.
+Expected session closures remain non-actionable context and only accompany a
+suspicious-gap drill-down. Set
+`fingerprint.series.topology_inspection_sample_limit` in a quality profile from
+`0` through `5` to control the per-section sample count.
+
 Quality JSON reports and CLI summaries also include bounded regime and
 readiness summaries when fingerprint findings are present. Use
 `time_series_fingerprint_regime_summary` to scan dominant session states, active
@@ -1009,7 +1958,10 @@ status, ACF basis, configured lag coverage, computed/skipped lag counts,
 skipped-lag reason counts, and per-series sample counts. It also includes
 stationarity status, calculation basis, sample counts, configured rolling
 windows, computed/skipped window counts, skipped-window reasons, rounding
-policy, zero-variance markers, and recommended transforms. Use
+policy, zero-variance markers, and recommended transforms. The readiness surface
+also carries decomposition basis, sample/window coverage,
+stationarity dependency status, trend direction, structural-break candidate
+counts, limitations, and its training-projection contract. Use
 `time_series_fingerprint_readiness_risk` when you need a bounded, deterministic
 triage list of targets and sections most likely to block downstream fingerprint
 use. It ranks existing readiness, topology, dependence, regime, cache-source,
@@ -1032,6 +1984,38 @@ The command reads report JSON only; it does not rescan market data. Use
 `--target-limit`, `--section-limit`, and `--reason-limit` to control the bounded
 machine JSON and matching human output.
 
+Add `--next-work` when the question is which fingerprint product gap to address
+next rather than which targets are risky:
+
+```sh
+histdatacom quality fingerprint-readiness \
+  --report reports/quality.json \
+  --next-work \
+  --alternate-limit 2 \
+  --json
+```
+
+The `histdatacom.fingerprint-next-work.v1` result combines already-saved
+readiness-risk evidence with the current implemented/planned fingerprint
+registry. It emits one recommendation, bounded alternates, publish-safe input
+report identities, representative target axes, reason codes, known
+prerequisites and downstream consumers, confidence/basis metadata, and
+issue-ready acceptance-criteria suggestions. Existing section-readiness and
+report-surface gaps rank ahead of later planned capabilities. Use the ordinary
+readiness-risk output for target-level diagnosis; use `--next-work` for the
+bounded cross-report product recommendation.
+
+The recommendation basis also records whether the saved evidence confirms the
+enriched single-row ASCII tick training substrate, legacy-cache projections,
+durable row-identity columns, duplicate timestamps, unequal cross-series ranges,
+and triangle comparisons. `ascii/T` remains the only base grain; legacy M1
+targets are counted as ignored non-base evidence and cannot become a platform
+or M1 implementation recommendation. The command never rescans market data,
+changes quality status, or creates, edits, closes, or ranks GitHub issues. Issue
+references are static capability metadata only. `--target-limit` also bounds
+representative recommendation axes, while `--alternate-limit` bounds alternate
+recommendations; both emit explicit truncation metadata.
+
 Bounded report and fingerprint summary payloads include `limit_metadata` and
 expanded `payload_limits` entries with requested, default, effective, minimum,
 maximum, and unbounded limit fields. The legacy `limit` field remains present
@@ -1046,7 +2030,8 @@ histdatacom quality fingerprint-schema --json
 Use `histdatacom quality fingerprint-schema` for a concise human-readable
 summary, or add `--quality-profile profiles/strict-ci.json` to reflect
 profile-overridden fingerprint knobs such as quantiles, lags, rolling windows,
-histogram bins, max rows, rounding, and distribution-attention thresholds. This
+histogram bins, max rows, rounding, topology-inspection samples, and
+distribution-attention thresholds. This
 discovery command is for downstream parsers, validators, and schema review: it
 lists schema versions, metadata keys, target capabilities, implemented/planned
 sections, basis/status/reason vocabularies, and publish-safe example fragments.
@@ -1184,6 +2169,73 @@ payloads, and quality preflight sample evidence, opt in with:
 The embedded audit reuses the standalone remediation-catalog audit schema,
 keeps known source-code coverage separate from observed report coverage, and
 remains advisory; it does not change finding severities or quality exit policy.
+The audit also records how each static finding was attributed to a rule:
+`exact` for an explicit literal, constant, or class rule; `inferred` for a
+single-rule helper chain, local rule object, module rule, or unambiguous
+finding-code prefix; and `unresolved` when multiple rule callers remain
+possible. Unresolved entries retain the source-family fallback and include a
+stable `attribution_reason` such as `ambiguous_helper_rules`. Bounded source
+family, helper, and finding-prefix counts make the remaining ambiguity
+auditable without executing quality rules or reading market data.
+
+Inspect that attribution directly through the standalone command:
+
+```sh
+histdatacom quality remediation-catalog --json
+```
+
+The concise renderer includes exact, inferred, and unresolved occurrence
+counts plus attribution status and reason on ranked gaps. These fields improve
+catalog planning evidence only; they do not add remediation mappings or change
+gap severity. Ranked gaps also include `actionability` and
+`actionability_reason`. Actionable defects sort ahead of policy/profile
+decisions, unsupported formats or capabilities, expected context, attribution
+or diagnostic blockers, and unsafe-to-automate cases. The summary preserves the
+ordinary mapped/unmapped counts and adds boundary-aware actionable, intentional,
+attribution-blocked, and diagnostic-blocked counts. Unknown warning/error gaps
+remain actionable by default, so boundary classification cannot silently hide a
+new defect.
+
+Every audit also derives a bounded `remediation_plan` from the complete ranked
+gap set. Plan items are re-ranked by deterministic fixability rather than raw
+severity alone and include the original catalog-gap rank, actionability,
+severity counts, exact-or-family selector proposal, draft hint-code slug,
+suggested action kind, fixability score/level/confidence with a reason trail,
+fields still requiring maintainer judgment, and bounded source/report evidence.
+Observed report-only gaps use their reported rule/finding identity and remain
+first-class plan candidates. Attribution and diagnostic blockers are explicitly
+marked `blocked`; policy, support, expected-context, unsafe, and informational
+boundaries remain visible with low fixability instead of being presented as
+automatic catalog edits. The `histdatacom.quality-remediation-plan.v1` artifact
+is advisory: it never edits the remediation catalog, creates GitHub work, or
+changes finding severity and exit policy.
+
+To translate findings in a saved quality report into concrete user-data repair
+steps, use the separate non-mutating repair-plan command:
+
+```sh
+histdatacom quality repair-plan \
+  --report reports/quality.json
+```
+
+Add `--json` for the bounded `histdatacom.quality-repair-plan.v1` artifact.
+`--item-limit` controls included findings and `--evidence-limit` controls the
+publish-safe diagnostic values retained per item; both surfaces include total,
+included, omitted, and truncation metadata. The initial operation vocabulary
+covers invalid archive/member renames, missing or unexpected member rebuilds,
+extra-member inspection, CRC/corrupt archive replacement, and read-access
+restoration. Exact report evidence produces an exact proposal, incomplete
+evidence produces `needs_context`, and unmapped or out-of-scope findings remain
+explicitly `unsupported`.
+
+The repair plan is advisory and manual-only. It does not expose an `--apply`
+mode and never renames files, rewrites ZIPs, removes members, changes
+permissions, downloads replacements, or changes report severity and exit
+policy. This is distinct from remediation-catalog `remediation_plan` output:
+the catalog plan helps maintainers add missing hint mappings, while
+`quality repair-plan` helps users interpret already observed findings and
+mapped hints without changing their data.
+
 The same reporting surface can be enabled without a profile file by passing
 `--quality-remediation-catalog-audit` with `--quality`, `--repo-quality`, or
 `--quality-preflight`. When the flag is combined with `--quality-profile`, the
@@ -1249,10 +2301,21 @@ deterministic and includes the active profile source, source path, configured
 rule IDs, configured modeling assumptions, reporting keys, and the resolved
 `reporting.remediation_catalog_audit.enabled` value after CLI overrides. It
 also includes a `profile_explanation` section with input channels such as
-built-in defaults, YAML config, profile file, API options, and CLI overrides;
-per-value source rows; and a bounded effective diff from the built-in default
-profile. The `text` and `markdown` renderers are presentation layers over that
-same explanation data.
+built-in defaults, named profiles, YAML config, profile files, API options, and
+CLI overrides; per-value source rows; and a bounded effective diff from the
+built-in default profile. Resolution preserves those facts before the profile
+is normalized, so an override row records its previous source and value instead
+of reconstructing them from the final JSON. The `text` and `markdown` renderers
+are presentation layers over that same explanation data.
+
+Python callers that need the same first-class contract can use
+`resolve_quality_profile()`, `load_quality_profile_file_resolution()`, and
+`apply_quality_profile_overrides()` from `histdatacom.data_quality`. The
+returned `QualityProfileResolution.profile` remains the normal validated
+`QualityProfile`; `value_sources`, `input_channels`, and `to_payload()` expose
+the deterministic provenance contract. Existing `quality_profile_from_*()` and
+`load_quality_profile_file()` callers continue to receive `QualityProfile`
+directly.
 
 ```sh
 histdatacom --quality \
@@ -1447,19 +2510,88 @@ engineering, dashboards, and modeling decisions. They are separate from
 `histdatacom --quality`: analytics reports do not produce clean/warning/failed
 statuses and do not downgrade repository quality metadata.
 
+#### Point-in-Time Market Context
+
+The `histdatacom.market_context` domain stores approved macro, central-bank,
+news, and shock evidence as immutable versioned timelines rather than repeated
+tick columns. Every event vintage retains source/version and retrieval
+metadata, content hashes, licensing and redistribution constraints, affected
+currencies/symbols, confidence, limitations, normalized source time, explicit
+pre/post windows, and revision lineage.
+
+Ex-ante queries require an as-of time and cannot expose schedules, actuals, or
+revisions before the exact vintage was available. Ex-post queries retain all
+vintages. Bounded window joins return compact context/calendar sidecars over
+`ReconstructionWindowV1`; they never persist the full analytical enrichment
+frame. Missing, incomplete, and out-of-coverage context remain explicit rather
+than becoming invented event labels.
+
+Calendar sidecars reuse the existing session, holiday, rollover, fix, and
+month/quarter/year-end classifier. The shared source-adapter seam retains
+provenance and licensing but does not authorize or scrape a paid news corpus.
+The production corpus uses documented official ONS, ECB, Bank of England, and
+Federal Reserve sources plus a small cited operator shock catalog:
+
+```bash
+histdatacom analytics market-context-corpus \
+  --artifact-dir .histdatacom/market-context \
+  --start-date 2002-03-01 \
+  --end-date 2026-06-30
+```
+
+The command writes immutable content-addressed raw snapshots, a directly
+loadable timeline, and a self-contained corpus with source hashes, licenses,
+coverage/missingness, duplicate counts, runtime, and peak memory. Installed
+helpers replay the raw snapshots, refuse unsupported reconstruction context,
+return the carving query contract, and project bounded benchmark event state.
+
+See [`docs/market-context-contracts.md`](docs/market-context-contracts.md) for
+the source selection, licenses, artifacts, replay, coverage/preflight,
+timezone and revision rules, information-audit integration, streaming limits,
+and trust gates.
+
+#### CFTC positioning state
+
+CFTC Commitments of Traders is a separate persistent weekly positioning
+sidecar, not a `MarketContextEventV1` window and not a repeated tick column.
+The installed campaign retains Legacy and TFF, futures-only and combined,
+EUR/GBP/EURGBP contract identities, official release/correction evidence,
+compressed-history consistency, immutable refresh diffs, and fail-closed
+ex-ante semantics:
+
+```bash
+histdatacom analytics cftc-positioning-corpus \
+  --artifact-dir data/.histdatacom/analytics/cftc-positioning \
+  --start-date 2002-03-01 \
+  --end-date 2026-06-30
+```
+
+Window queries expose bounded latest-known snapshots, age, mapping status, and
+point-in-time-safe net/open-interest/change/rolling features. Current PRE rows
+cannot masquerade as original vintages; nominal publication estimates fail
+strict ex-ante use. Companion receipts bind the query into the information
+audit, benchmark, motif selection, planning, and carving without changing
+their immutable v1 schemas.
+
+See [`docs/cftc-positioning-contracts.md`](docs/cftc-positioning-contracts.md)
+for source selection and acknowledgement, field/family/scope mappings, quote
+direction, publication/restatement rules, artifact replay/diff behavior,
+coverage, resource limits, consumer seams, and explicit nonclaims.
+
 #### Feed-Regime Detection
 
-`histdatacom analytics feed-regimes` profiles local ASCII tick artifacts by
-month or year, then segments long histories into feed-behavior eras such as
-sparse, transitional, and dense periods. The report includes tick density,
-inter-arrival intervals, quote update cadence, zero-change runs, spread
-statistics, quiet-gap counts, regime boundaries, and summary metadata.
+`histdatacom analytics feed-regimes` projects canonical ASCII tick fingerprints
+into a versioned feed-epoch definition. Epochs represent evidence-backed
+changes in the technological observation process, not calendar eras or market
+regimes. Boundaries include uncertainty intervals and deterministic stability
+evidence under sampling, missing-period, and feature-removal perturbations.
 
 ```sh
 histdatacom analytics feed-regimes \
   --target data/ASCII/T/eurusd \
   --bucket month \
-  --report reports/eurusd-feed-regimes.json
+  --report reports/eurusd-feed-regimes.json \
+  --epoch-artifact reports/eurusd-feed-epochs.v1.json
 ```
 
 Use `--json` to print the full machine-readable payload to stdout:
@@ -1468,10 +2600,602 @@ Use `--json` to print the full machine-readable payload to stdout:
 histdatacom analytics feed-regimes --target data/ --json
 ```
 
-Use these outputs to choose modeling windows, session filters, feature
-normalization strategies, or dashboard annotations. Treat surprising regimes as
-research signals; run `histdatacom --quality` separately when you need
-readability, timestamp consistency, ZIP integrity, or pass/fail validation.
+Only stability-passing definitions are valid downstream observation-model
+inputs. Periods inside a boundary uncertainty interval are assigned to an
+explicit transition instead of being forced into either neighboring epoch. The
+artifact records every fingerprint, source, feature-provenance, conditioning,
+quality, and config hash needed for replay.
+
+Feed-epoch fitting is a bounded control-plane operation. Streaming
+reconstruction references the definition ID and carries only compact epoch or
+transition assignments; it does not persist fingerprint panels or the wide
+analytical frame per tick. See
+[`docs/feed-epoch-contracts.md`](docs/feed-epoch-contracts.md) for the schema,
+trust gate, resource limits, and streaming integration.
+
+For the real three-symbol technology-epoch fit, v2 scans monthly Arrow caches
+column-wise, uses explicit calendar/open/active-time denominators, and applies
+robust multivariate PELT plus family-specific holdouts:
+
+```sh
+histdatacom analytics feed-epochs-v2 \
+  --target data/ASCII/T/eurusd data/ASCII/T/gbpusd data/ASCII/T/eurgbp \
+  --artifact-dir data/.histdatacom/feed-epochs-v2
+```
+
+The command writes separate compact definition, bounded evidence, and runtime
+artifacts. It does not create an augmented cache or claim that a detected
+boundary is a market regime, recovered quote, vendor cause, or broker profile.
+
+#### Historical Feed-Observation Operators
+
+`ObservationOperatorV1` turns a bounded market-event surface into a sparse,
+quantized delivery-observation surface using stability-passing feed epochs.
+The operator supports conditioned thinning, unchanged-quote filtering,
+timestamp and price quantization, batching, duplicates, burst/rate caps,
+outages, and reconnect behavior through versioned parameters with explicit
+support and uncertainty.
+
+The bare fitting boundary consumes canonical feed-epoch projections or paired
+controlled-calibration evidence. Canonical sparse history does not identify a
+true dense-event denominator, so unsupported thinning parameters remain
+visibly unsupported and use a neutral identity behavior rather than being
+presented as direct observations. Sparse conditioned strata follow a fixed
+state/session/event-to-global fallback hierarchy or fail closed.
+
+`ObservationCalibrationCampaignV2` adds the real-evidence trust boundary. It
+fits relative active-time retention and supported delivery mechanisms by
+symbol, technology epoch, update type, and session, then applies the operator
+to dense reference caches in chronological calibration, validation, and final
+holdout blocks. Every parameter carries support, uncertainty, source hashes,
+and an identifiability or refusal reason. Calendar closure, archive gaps,
+unchanged filtering, batching, quantization, duplicates, outages, and reconnect
+behavior remain distinct diagnostics.
+
+```sh
+histdatacom analytics observation-calibrate-v2 \
+  --definition data/.histdatacom/feed-epochs-v2/feed-epochs-v2-definition.json \
+  --evidence data/.histdatacom/feed-epochs-v2/feed-epochs-v2-evidence.json \
+  --artifact-dir data/.histdatacom/observation-calibration-v2
+```
+
+The campaign cannot become application-ready when retention is merely identity
+because the dense denominator is unknown, when a default required mechanism is
+unsupported, or when a final holdout fails. Requesting an optional unsupported
+mechanism also fails closed. Dense and degraded window rows stay process-local;
+the persisted campaign contains aggregate evidence and the compact replayable
+operator only.
+
+Observation rendering does not mutate `SyntheticEventV1`. Inputs retain their
+market-event IDs and produce separate operator-lineaged delivery observations.
+Forward application preserves protected historical anchors exactly; the
+separate `degrade()` interface lets #436 degrade modern holdouts while
+protecting only explicitly selected controls.
+
+Application uses `ReconstructionWindowV1`, aligned timestamp/batch quanta,
+declared halo metadata, required bounded carry state after the source window,
+deterministic hash decisions, and input/output amplification limits. The
+compact operator JSON is durable and hash-replayable; fit panels and window
+output observations remain bounded intermediates rather than augmented
+permanent cache columns. See
+[`docs/observation-operator-contracts.md`](docs/observation-operator-contracts.md)
+for the contracts, trust gates, fallback semantics, and streaming boundary.
+
+#### Reverse-Degradation Benchmark
+
+`ReverseDegradationBenchmarkV1` is the generator-neutral validation harness for
+reconstruction work. It streams dense modern reference events through a
+versioned historical observation operator, evaluates transparent no-fill,
+interpolation, resampling, and existing empirical-overlay controls alongside
+candidate generators, and retains only bounded online aggregates.
+
+The immutable benchmark manifest subdivides the existing withheld validation
+boundary into ordered validation and final-holdout periods without changing the
+upstream information-mode v1 schema. A valid experiment covers multiple feed
+epochs and degradation severities, reports symbol/epoch/session/event/sparsity
+slices, records uncertainty and ensemble support, and carries cross-series,
+strategy, convergence, failure, memory, scratch, and output-cost hooks.
+
+Hard historical-constraint or protected-anchor violations always block
+promotion regardless of soft statistical fit. Scorecards compare every method
+with no fill but explicitly set `automatic_winner` to false and never emit a
+winner candidate. Dense, degraded, reconstructed, and rejected intermediates
+remain process-local; only the compact manifest and scorecard are intended to
+persist. See
+[`docs/reverse-degradation-benchmark-contracts.md`](docs/reverse-degradation-benchmark-contracts.md)
+for the complete interfaces, metric semantics, resource bounds, and trust
+gates.
+
+The real-data promotion policy is separately frozen and packaged before any
+promotable candidate campaign. It distinguishes hard campaign/candidate gates
+from visible advisory evidence, fails closed when hard observations are
+missing, and never selects an automatic winner. See
+[`docs/reverse-degradation-benchmark-corpus.md`](docs/reverse-degradation-benchmark-corpus.md)
+for the predeclared thresholds, evidence ordering, provisional motif boundary,
+and scientific nonclaims.
+
+The installed `histdatacom analytics reverse-degradation-benchmark-corpus`
+command now builds the real EURUSD/GBPUSD/EURGBP Arrow partitions, replays
+source and selected-window hashes, executes all declared degradation families,
+runs dense/no-fill/interpolation/motif/negative controls, and writes a compact
+content-addressed manifest, motif index, leakage audit, resource audit, and
+scorecard. Required fitted-operator or replay failures abort the campaign;
+dense and holdout event rows remain process-local.
+
+#### Empirical Reference-Motif Index
+
+`ReferenceMotifIndexV1` projects bounded windows from the augmented ASCII tick
+surface into compact event-time offsets, bid/ask deltas, quote-transition
+marks, conditioning coordinates, transformation limits, and complete source
+lineage. It consumes the enriched evidence without copying the full 521-column
+row into every motif event.
+
+Only eligible training windows may enter the artifact. Chronological
+calibration, validation, and final-holdout windows are excluded, while
+cross-split source overlap and normalized near-duplicate shapes fail closed.
+Index selection is stable under input reordering, retrieval follows an explicit
+exact-to-global support hierarchy, and matches expose distance, cell support,
+fallback level, and deterministic fragment-ID tie-breaking.
+
+Ex-ante queries require an as-of timestamp and hide motifs whose observations
+or artifacts were not yet available. Selected motifs bind directly into the
+existing reconstruction information audit as training-split empirical-motif
+inputs. Index persistence is atomic and content-addressed through an
+`ArtifactRef`; augmented panels remain intermediates. See
+[`docs/reference-motif-index-contracts.md`](docs/reference-motif-index-contracts.md)
+for split, leakage, compact-layout, retrieval, resource, and trust semantics.
+
+#### Real Modern Reference-Motif Library
+
+The installed `histdatacom analytics modern-reference-motif-library` command
+builds the first production index from 24 hash-verified monthly EURUSD,
+GBPUSD, and EURGBP Arrow caches in stable `technology_epoch_04`. Its fixed
+chronological profile keeps 201901--202301 for training and blocks 202307,
+202401, and 202510 as calibration, validation, and final holdout.
+
+The builder prefilters normalized cross-split near duplicates, reruns the
+fail-closed leakage audit, retains a deterministic compact 256-fragment train
+index, aggregates support/backoff coverage, exercises explicit unsupported
+refusal, and runs the unchanged #463 real benchmark twice. The installed
+readers verify the content-addressed index, manifest, leakage, coverage,
+qualification, and resource artifacts. Dense source and holdout rows never
+enter those files. See
+[`docs/modern-reference-motif-library.md`](docs/modern-reference-motif-library.md)
+for the source profile, feature schema, corrected event-clock/transition
+semantics, qualification gates, CLI, and nonclaims.
+
+#### Empirical Motif Candidate Generation
+
+`generate_empirical_motif_candidates()` proposes zero, one, or many narrow
+`SyntheticEventV1` rows between immutable historical anchors. Cardinality and
+cadence come from the conditioned delivery regime; selected empirical paths
+are transformed only inside their declared time/price support and detrended
+onto an anchor-to-anchor bridge so fragment seams cannot accumulate jumps.
+
+Seeds and event identity depend on semantic run, member, anchor, motif, and
+configuration inputs—not retries, workers, windows, or storage estimates.
+Each event maps to a recoverable transform containing its source motif,
+support/backoff, scale, seed, condition query, and source artifact lineage.
+Sparse evidence, closed sessions, zero-width intervals, unsafe quotes, and
+resource overruns produce explicit empty/refused decisions.
+
+Candidate rows remain bounded, process-local streaming intermediates. Batch
+metadata states that hard carving, broker conditioning, and final persistence
+have not run. The included benchmark adapter lets the existing
+reverse-degradation harness compare this generator with all controls without
+selecting an automatic winner. See
+[`docs/empirical-motif-generation-contracts.md`](docs/empirical-motif-generation-contracts.md)
+for determinism, seam, lineage, resource, and stage-boundary details.
+
+#### Historical Candidate Carving
+
+`carve_empirical_motif_candidates()` is the first stage allowed to accept
+candidate-only motif rows. A versioned constraint set applies immutable-anchor,
+resource, fingerprint-validation, context-support, quarantine, and session
+closure rules before conditioned motif eligibility, intensity thinning, or
+spread projection. Missing support refuses rather than inventing liquidity.
+
+News, rollover, crisis, and other explicit state tags can change acceptance
+rates, eligible motifs, and spread envelopes. Incompatible motifs may use a
+same-position candidate from an explicitly supplied substitution batch;
+otherwise they are rejected. Deterministic scores exclude retry, worker, and
+window identity, so adjacent window outputs union to the single-window result.
+
+Accepted rows carry the final constraint-set ID and compact lineage back to the
+candidate event, batch, and motif transform. Projected lineage retains original
+quotes and candidate/output content hashes. Rejected rows are discarded; only
+reconciling reason counts and bounded examples remain. See
+[`docs/historical-carving-contracts.md`](docs/historical-carving-contracts.md)
+for precedence, evidence binding, refusal, identity, and streaming semantics.
+
+#### Cross-Currency Reconciliation
+
+`plan_cross_currency_windows()` intersects explicit per-symbol coverage and
+plans only complete synchronized windows. Missing legs, unequal leading or
+trailing periods, and spans without common support remain recorded exclusions;
+they are never filled or silently shortened.
+
+`reconcile_cross_currency_window()` applies versioned triangle and inverse
+relationships at exact nanosecond event times. It never forward-fills another
+instrument. Duplicate timestamps pair by deterministic event ordinal, while
+asynchronous support and stale-join risk remain measured. Only synthetic
+quotes may be projected; immutable observations are content-hashed and must
+remain unchanged. The first certified relationship is `EURUSD / GBPUSD ~=
+EURGBP`.
+
+Residuals, support, projections, and infeasibility are stratified by session,
+event, and feed epoch. Every passing generation group still requires the same
+content-bound validation after broker conditioning. A partition manifest can
+commit only when that final validation covers the complete all-symbol
+synchronization unit and exact output content. The existing #331 diagnostic
+also consumes reconciled streams directly without a permanent cache
+roundtrip. See
+[`docs/cross-currency-reconciliation-contracts.md`](docs/cross-currency-reconciliation-contracts.md)
+for projection, refusal, validation, compatibility, and atomic-commit details.
+
+#### Calibrated Reconstruction Ensembles
+
+`plan_reconstruction_ensemble()` derives stable member IDs and semantic seeds
+from exact source/configuration hashes, not workers, retries, row order, or
+retention rank. Reverse-degradation windows then measure member intervals by
+feed epoch, session, event state, symbol, horizon, and sparsity. Validation
+cells fit bounded adjustments; final-holdout cells alone report achieved
+coverage, failures, refusals, and substantive diversity.
+
+Logical-content hashes exclude member/seed/lineage identity, so identical
+market paths are diagnosed as collapsed and ID-only or metric-free differences
+cannot count as useful diversity. The primary member is explicitly a compact
+validation-medoid representative, not historical truth, an automatic winner,
+or a default generator.
+
+Storage estimates cover all-member computation and scratch while durable
+output is limited to a configured retained subset. Omitted members can be
+regenerated only from the frozen plan after every source and configuration
+SHA-256 matches. Reports contain bounded summaries rather than event rows.
+Motif-match similarity remains uncalibrated transformation evidence; generated
+tick confidence stays null. See
+[`docs/reconstruction-ensemble-calibration-contracts.md`](docs/reconstruction-ensemble-calibration-contracts.md)
+for calibration, confidence, diversity, retention, and replay semantics.
+
+#### Live Broker Delivery Capture
+
+`histdatacom.broker_capture` records a broker feed as versioned measurement
+evidence rather than guessing modern delivery style from historical vendor
+data. Adapter messages retain optional broker/exchange timestamps with explicit
+precision, exact price lexemes, batch/message identity, honest size/activity
+semantics, quote and lifecycle events, and raw-message hashes where permitted.
+The collector adds adjacent UTC wall and monotonic receive clocks plus explicit
+clock-correction events.
+
+Canonical JSONL partitions are appended, fsynced, rotated, hashed, and exposed
+only after atomic compact-manifest publication. Quota, immutable retention, and
+high-watermark backpressure refuse predictably. Partial/orphan artifacts remain
+detectable but undiscoverable as completed data, while verified replay checks
+sidecars, bytes, hashes, rows, counts, and sequence before sending events
+through the same consumer interface used during live collection.
+
+The core adapter protocol never inspects private broker configuration and the
+public contracts reject credential-shaped metadata. A real adapter still
+requires an explicit broker/protocol/licensing decision; no redesign is needed.
+See [`docs/broker-capture-contracts.md`](docs/broker-capture-contracts.md) for
+clock, security, storage, replay, fixture, and fingerprint eligibility gates.
+
+#### Broker Delivery Fingerprints
+
+Qualified broker captures are converted into compact immutable delivery
+profiles with `fit_broker_delivery_fingerprint()`. Fitting verifies capture
+health and hashes in a first streaming pass, then performs bounded deterministic
+aggregation in a second pass and rechecks the logical content hash. It does not
+persist augmented capture rows or materialize tick-sized intermediates.
+
+Profiles describe cadence, quote intensity, spread and spread changes,
+duplicate/stale/burst behavior, source timestamp and price precision, batching,
+outage/reconnect/clock behavior, and conditional behavior by symbol, session,
+overlap, special window, holiday, market event, and lifecycle state. Every cell
+records observed support plus an explicit supported, ordered-backoff, or
+unsupported decision. Every metric has support, bounded samples, uncertainty,
+extrema, quantiles, units, and limitations.
+
+`compare_broker_delivery_fingerprints()` produces bounded, stratified drift
+evidence without a global similarity score or automatic winner. Successors are
+new effective-dated artifacts that reference—but never mutate—the old profile,
+so prior synthetic lineage remains reproducible. See
+[`docs/broker-delivery-fingerprint-contracts.md`](docs/broker-delivery-fingerprint-contracts.md)
+for eligibility, streaming, condition, drift, persistence, and #445 handoff
+semantics.
+
+#### Broker-Conditioned Reconstruction
+
+`condition_broker_proposal()` applies a versioned, bounded broker-delivery
+strength to cadence, burst/quiet/outage, spread, and precision coordinates before
+motif retrieval. Exact profile cells and recorded backoff are honored; missing,
+unsupported, ineffective, or mismatched-drift selections refuse without issuing
+a conditioned query.
+
+After historical carving and cross-currency reconciliation,
+`render_broker_delivery()` applies deterministic precision, rounding, batching,
+stale-quote, exact-duplicate, timestamp, and spread presentation to synthetic
+rows only. Observed anchors remain unchanged. The entire group is withheld until
+local constraints, post-broker cross-currency validation, and the #331
+cross-instrument quality path pass. Compact manifests retain content hashes,
+event lineage, profile/effective-period/drift evidence, action counts, config,
+and optional paired benchmark comparison IDs; augmented tick intermediates are
+not made durable.
+
+See
+[`docs/broker-delivery-transfer-contracts.md`](docs/broker-delivery-transfer-contracts.md)
+for proposal, renderer, refusal, validation, benchmark, and streaming/persistence
+semantics.
+
+#### Atomic Reconstruction Persistence
+
+`publish_reconstruction_group()` turns one fully validated broker-rendered
+symbol group into the final narrow archive. It requires an independent exact
+set of immutable observed anchors plus a primary/retained-member storage
+preflight. Only the 26-column `SyntheticEventV1` schema is written; the
+521-column analytical frame and rejected candidates remain scratch data.
+
+Zstandard Parquet files are partitioned by schema, run, broker fingerprint,
+ensemble member, symbol group, symbol, and UTC event date. Files and compact
+source/constraint/quality/replay/retention manifests are validated below a
+hidden transaction directory, then the complete synchronized unit is promoted
+with one atomic same-filesystem rename. Discovery sees only committed
+directories. Repeating an identical publication is idempotent, while anchor
+drift, truncation, checksum/schema/count mismatches, or different physical
+writer settings fail closed.
+
+Arrow batches and lazy Polars scans support symbol/time file pruning, column
+projection, and event-time predicate pushdown. The optional `query` extra adds
+DuckDB for direct Parquet inspection:
+
+```sh
+pip install "histdatacom[arrow,query]"
+```
+
+See
+[`docs/reconstruction-persistence-contracts.md`](docs/reconstruction-persistence-contracts.md)
+for layout, atomic commit, replay, preflight, query, cleanup, and #447 Temporal
+handoff semantics.
+
+#### Reconstruction Activity Semantics
+
+Final reconstructed rows are quote deliveries, not centralized FX trades.
+`summarize_reconstruction_activity_streams()` and
+`summarize_committed_reconstruction_activity()` derive deterministic activity
+metadata without widening the immutable 26-column `SyntheticEventV1` schema or
+persisting the 521-column analytical frame. The committed reader projects only
+the 19 event, price, origin, confidence, and lineage columns needed by the
+online accumulator and processes configurable bounded Arrow batches.
+
+Every symbol can emit separate observed-only, synthetic-only, and merged
+slices. Each slice records quote-event/update counts, exposure duration, tick
+intensity, interarrival cadence, price-change and stale-quote transitions,
+spread-based liquidity proxies, optional event-confidence support, exact units,
+aggregation rules, bounded provenance, and a content hash. Volume handling is
+explicitly `unavailable`, `omitted`, source/broker supplied, or a synthetic
+activity proxy; the contracts always set `centralized_traded_volume_claim` to
+false and refuse source-size states when the final event schema has no such
+fields.
+
+Activity evidence is bound to an information manifest and either ex-post or
+ex-ante mode. Ex-ante summaries require an as-of timestamp, while ex-post
+summaries reject one. Validation reuses the existing reverse-degradation
+scorecard's event-count, intensity, interarrival, burst/quiet, and spread
+metrics plus calibration support; it never selects an automatic winner.
+Explicit sum, boundary-carry, recomputation, and support-weighted-mean rules
+form the derived-bar handoff for #18, with volume remaining unavailable unless
+separately sourced.
+
+See
+[`docs/reconstruction-activity-semantics.md`](docs/reconstruction-activity-semantics.md)
+for metric definitions, information and volume policy, provenance, streaming,
+benchmark, and derived-bar contracts.
+
+#### Derived Reconstruction Candlesticks
+
+`publish_derived_bars()` creates an optional export product from a verified
+committed reconstruction manifest. It never reads raw HistData M1 rows or the
+521-column analytical frame. The immutable 26-column event product remains the
+source of truth, while derived bars use a separate versioned 64-column schema
+and compact manifest. Each row carries the derivation policy ID and rounding
+precision; the manifest records any requested time-window bounds.
+
+Version one supports UTC Unix-epoch-aligned `1m`, `5m`, `15m`, `30m`, `1h`,
+`4h`, and `1d` half-open bins. Bid, ask, midpoint, and spread OHLC values follow
+canonical `(event_time_ns, event_sequence, event_id)` order. Observed-only,
+synthetic-only diagnostic, and merged-product scopes are explicit. Empty bins
+and market closures emit no rows, query-cut edge bins are flagged partial, and
+no price, liquidity, or volume is forward-filled.
+
+The streaming accumulator carries the previous quote into the next non-empty
+bar for price-change/stale transition accounting, then projects #80 counts,
+duration, intensity, stale rate, mean spread, and confidence support. Volume is
+always null with state `unavailable`. Each row retains event bounds, origin
+support, bounded generator/broker/constraint lineage, and an event-content
+hash.
+
+```python
+from histdatacom.synthetic import (
+    ActivitySliceScope,
+    DerivedBarPolicyV1,
+    publish_derived_bars,
+    scan_derived_bars_polars,
+)
+
+published = publish_derived_bars(
+    "data/exports",
+    "data/reconstruction-products/.../commits/.../manifest.json",
+    policy=DerivedBarPolicyV1(
+        intervals=("1m", "5m", "1h"),
+        scopes=(ActivitySliceScope.MERGED,),
+    ),
+)
+bars = scan_derived_bars_polars(
+    published.manifest_path,
+    columns=("symbol", "bar_start_ns", "mid_close", "event_count"),
+)
+```
+
+Monthly Parquet partitions are written below hidden scratch, replay-verified,
+and promoted with one same-filesystem rename. Column/time/symbol/scope/interval
+projection and pruning are available through Arrow batches and lazy Polars
+scans. Raw M1 download/import remains rejected.
+
+See [`docs/derived-bar-contracts.md`](docs/derived-bar-contracts.md) for the
+complete interval, OHLC, activity, lineage, partial/empty-bin, storage,
+verification, and downstream reconciliation contract.
+
+#### Reconstructed-History Strategy Sensitivity
+
+`evaluate_strategy_sensitivity()` applies one content-addressed strategy,
+execution, cost, latency, horizon, and resource policy to multiple exact
+time-aligned source cases. Supported cases include untouched observed history,
+degraded modern holdouts, reconstructed ensemble members,
+broker-conditioned/unconditioned streams, and verified derived bars. Case
+identity includes the source artifact, symbol, half-open window, information
+audit, ensemble member, broker profile, and—when applicable—bar scope and
+interval.
+
+The evaluator is streaming and bounded. It retains only strategy state,
+pending signals, and online aggregates; quotes, individual outcomes, the
+521-column analytical frame, and strategy columns are not persisted. Results
+are stratified by feed epoch, session, event state, sparsity, broker profile,
+ensemble member, and horizon. Reports include failure, no-trade,
+missing-support, and refusal rates, member/window dispersion, and explicit
+reverse-degradation evidence showing whether reconstructed execution response
+moves toward the dense reference relative to the degraded input.
+
+`ReferenceMomentumStrategyV1` is a transparent lagged-midpoint fixture for
+alignment and accounting tests. It is not a recommended strategy. Version one
+uses normalized exposure, crosses bid/ask, and makes latency, quote-wait,
+slippage, and per-side fixed costs explicit. Reports are compact derived
+metadata and always set profit claims, investment recommendations, event-schema
+augmentation, and automatic winner selection to false.
+
+Ex-post cases require an explicit `invalid-for-backtest` reason. Mixed ex-ante
+and ex-post plans require a plan-level reason as well; the label permits only a
+descriptive historical counterfactual and never converts it into point-in-time
+strategy evidence.
+
+See
+[`docs/strategy-sensitivity-contracts.md`](docs/strategy-sensitivity-contracts.md)
+for input identities, information-mode gates, source adapters, accounting,
+stratification, restoration, terminal states, and resource bounds.
+
+#### EURUSD Triangle Reconstruction Certification
+
+`modern_reference_triangle_certification_policy()` predeclares the current
+v2.1.0 scientific, operational, reporting, repository, and release contract for
+the EURGBP/EURUSD/GBPUSD product over common support beginning at `200203`. It
+fixes `modern_reference` delivery with the `unconditioned_reference` claim and
+explicitly excludes broker adaptation. The common end month, source-readiness
+contracts, scientific thresholds, and peak-memory/scratch/runtime/storage and
+candidate-amplification budgets participate in the deterministic policy
+identity. The older broker-bound `eurusd_triangle_certification_policy()` and
+V1 dossiers remain readable for evidence replay but are not the #449 release
+path.
+
+Certification consumes compact, verified report artifacts bound to that exact
+policy identity, so evidence cannot be reused after scope or threshold drift.
+Each scalar observation names the exact artifact identities that support it,
+and every requirement declares the exact artifact kinds it needs. Missing
+artifacts remain `missing`; measured threshold violations are `failed`; neither
+can become a pass through a summary boolean. V2 rejects every broker-named
+artifact instead of silently turning synthetic reference output into a broker
+claim.
+
+`evaluate_modern_reference_reconstruction_certification()` covers all fifteen
+#449 gate groups plus the individual source-readiness and operations seams and
+returns one bounded `ReconstructionCertificationDossierV2`. The dossier can be
+`incomplete`, `failed`, `ready-for-promotion`, or `certified`.
+`ready-for-promotion` is narrowly reserved for the state where every check has
+passed except the single coverage observation. Coverage is still run exactly
+once, only during the explicit `dev`-to-`main` promotion. The TestPyPI local
+simple-registry preflight and all non-coverage evidence must already pass.
+
+`histdatacom reconstruction certify --spec CAMPAIGN.json --output-directory
+DIR` executes the public campaign. It verifies every declared JSON artifact's
+SHA-256, schema, and subject identity, then extracts each observation through a
+declared JSON pointer. Observation values cannot be written inline in the
+campaign spec, and promotion-only coverage is refused on an ordinary `dev`
+campaign. Publication atomically writes canonical machine JSON, deterministic
+Markdown, the frozen campaign manifest, methodology evidence, and a bounded
+campaign receipt. The dossier contains no tick rows or analytical-frame
+columns and never claims historical truth, selects an automatic winner, makes
+an investment recommendation, or authorizes release before every gate passes.
+
+See
+[`docs/reconstruction-certification-contracts.md`](docs/reconstruction-certification-contracts.md)
+for the gate mapping, artifact binding, state machine, publication semantics,
+and required real-data execution sequence.
+
+#### Temporal Reconstruction Orchestration
+
+`ReconstructionRunWorkflow` plans deterministic memory-weighted waves of
+all-symbol `ReconstructionWindowWorkflow` children. Each window executes the
+source/enrichment, proposal, carving, cross-series, delivery-projection,
+validation, and atomic-commit boundaries sequentially through activity-side
+stage handlers. Workflow history carries only bounded commands, counters,
+checkpoints, and strong artifact references.
+
+Stage receipts and manifest-store compare-and-swap snapshots make worker loss,
+activity retry, duplicate completion, and process restart resumable without
+duplicating committed rows. Cancellation removes only disposable window
+scratch. The final report independently verifies every committed publication
+and reconciles storage counts and scope with workflow checkpoints.
+
+Default workers install the seven versioned first-party handlers. The reference
+path uses explicit modern-reference identity delivery and generic v2
+persistence, so no application registration or fake broker fingerprint is
+needed. Validation keeps a byte-identical staged-manifest mirror and a separate
+transaction descriptor, allowing a retry after the atomic rename but before
+the commit receipt to recover the already committed publication safely.
+
+See
+[`docs/reconstruction-temporal-orchestration.md`](docs/reconstruction-temporal-orchestration.md)
+for adapter registration, queue/resource policy, backpressure, recovery,
+cancellation, report reconciliation, and fault-injection guarantees.
+
+#### Public Reconstruction CLI and API
+
+`histdatacom reconstruction` and `ReconstructionClient` expose the same typed
+plan, operator-request, preflight, submission, receipt, status, cancel, resume,
+output-list, bounded-preview, and integrity-replay contracts. The installed
+command requires an explicit ex-post or ex-ante information mode plus the
+machine-readable acknowledgement that reconstructed output is plausible
+counterfactual evidence—not recovered historical truth.
+
+Full-range planning also has a bounded plan-set surface. `plan-set` begins with
+bounded month groups and deterministically bisects any group whose execution,
+retention, or artifact-size preflight refuses it; `preflight-set` freshly
+verifies every resulting shard identity, artifact hash, exact contiguity,
+refusal, and resource bound and reconciles the parent aggregate. This preserves
+both the per-window runtime budget and the 64 MiB plan-artifact limit instead
+of weakening either one for long historical ranges. Shared monthly source
+partitions count once in the parent inventory totals, and repeated strong-ref
+verification is cached only while the file's device, inode, size, modification
+time, and change time remain identical. A span with no scientifically
+supported window is retained as a refusal-only shard with zero workflows and
+zero output estimates; acknowledging refusals makes that no-op safe to skip,
+but never turns the unsupported span into reconstructed output.
+
+Only ASCII/T and the complete EURGBP/EURUSD/GBPUSD triangle are accepted. M1,
+bar, partial-triangle, and broker-only requests fail before execution. Temporal
+is the production path; `--local` is an explicit first-party handler smoke and
+checkpoint-recovery mode, never an automatic fallback. Operation receipts bind
+each workflow handle to its actual reconstruction status store, and resumed
+attempts preserve scientific/checkpoint identity while using fresh parent and
+child Temporal IDs.
+
+Committed outputs can be listed, previewed with bounded origin/anchor/generator/
+confidence/constraint-decision lineage, and replay-verified from either public
+surface. The CLI returns distinct invalid-plan, refusal, runtime, validation,
+and success exit codes.
+
+See
+[`docs/reconstruction-public-interfaces.md`](docs/reconstruction-public-interfaces.md)
+for exact JSON contracts, commands, Python examples, recovery semantics, and
+the exit-code table.
 
 ---
 
@@ -1664,6 +3388,10 @@ available.
 - Waited orchestration `-A` / `-U` repository requests keep the output contract: API calls return the available-data dictionary, and CLI calls render the repository table.
 - `--build-cache` / `options.build_cache` builds canonical `.data` cache files for cache-capable ASCII datasets, removes transient ZIP/CSV sources after each cache is ready, and does not merge caches into memory.
 - API calls with `options.api_return_type` return the requested `polars`, `pandas`, or `arrow` object after a completed orchestration job by materializing cache artifacts on disk.
+- API calls with `options.output_timezone` append a timezone-aware
+  `datetime_local` view after cache materialization. Canonical `datetime` and
+  `timestamp_utc_ms` values remain UTC epoch milliseconds, and no localized
+  value is persisted.
 - If orchestration is unavailable, CLI calls exit nonzero with a clear error and API calls raise `OrchestrationUnavailableError`.
 - `-v` emits high-level orchestration lifecycle logs; `-vv` adds worker,
   workflow, and activity detail; `-vvv` enables trace-level package logging and
@@ -1678,7 +3406,15 @@ defaults:
 ```python
 options.orchestration_wait_result = True
 options.api_return_type = "polars"
+options.output_timezone = "America/New_York"  # optional IANA output view
 ```
+
+The equivalent command/config option is `-z/--timezone IANA_ZONE`; YAML accepts
+either `timezone` or `output_timezone`. Unknown timezone names fail before the
+orchestration job is submitted. The returned `datetime_local` datatype carries
+the selected timezone in Polars, pandas, and Arrow. Daylight-saving transitions
+follow that output zone, but HistData source timestamps remain interpreted as
+fixed EST without daylight-saving adjustments.
 
 Set `options.orchestration_wait_result = False` to submit a job and receive
 job metadata instead of a materialized API return object. Set
@@ -1888,6 +3624,8 @@ artifacts and returns a dataframe or table.
 - *to use InfluxDB imports or notebook tooling, install the corresponding extras*
   - `pip install "histdatacom[influx]"`
   - `pip install "histdatacom[jupyter]"`
+- *to fit optional Statsmodels classical-model families*
+  - `pip install "histdatacom[models]"`
 
 - ***All datetime is returned as milliseconds since January 1, 1970 (midnight UTC/GMT)***
 
@@ -1908,6 +3646,7 @@ options = Options()
 
 ```python
 options.api_return_type = "polars"  # "polars", "pandas", or "arrow"
+options.output_timezone = "America/New_York"  # optional datetime_local column
 options.formats = {"ascii"}  # Must be {"ascii"}
 options.timeframes = {"tick-data-quotes"}  # can be tick-data-quotes or tick-data-quotes
 options.pairs = {"eurusd"}
@@ -2123,6 +3862,8 @@ InfluxDB import and notebook support are optional:
 ```sh
 pip install "histdatacom[influx]"
 pip install "histdatacom[jupyter]"
+pip install "histdatacom[models]"
+pip install "histdatacom[query]"
 pip install "histdatacom[all]"
 ```
 
@@ -2135,6 +3876,24 @@ to install latest development version
 ```sh
 pip install git+https://github.com/dmidlo/histdata.com-tools.git
 ```
+
+### Container Image
+
+Version tags publish a non-root Linux AMD64/ARM64 image to GHCR. Keep data,
+runtime state, and the verified Temporal cache in one named workspace volume:
+
+```sh
+docker volume create histdatacom-workspace
+docker run --rm \
+  --mount type=volume,source=histdatacom-workspace,target=/workspace \
+  ghcr.io/dmidlo/histdata.com-tools:2.1.0 \
+  --version
+```
+
+The image is a one-shot CLI, not a persistent service. See the maintained
+[container guide](docs/container.md) for builds, data operations, fixed
+UID/GID ownership, first-run Temporal provisioning, lifecycle constraints,
+verification, publication policy, and cleanup.
 
 ### Developer Setup
 
@@ -2168,19 +3927,31 @@ hooks; do not rely on user-local Python packages to satisfy `histdatacom`,
 
 The dependency surfaces are split by purpose:
 
-- `.[test]` installs pytest, coverage, pandas, pyarrow, InfluxDB support,
-  notebook execution support, and test-only support around the base Temporal SDK
-  dependency.
+- `.[docs]` installs the pinned Sphinx, MyST, and Read the Docs theme
+  toolchain.
+- `.[test]` installs pytest, coverage, pandas, pyarrow, DuckDB, InfluxDB
+  support, notebook execution support, and test-only support around the base
+  Temporal SDK dependency.
 - `.[lint]` installs pre-commit and direct lint/type/doc hygiene tools.
 - `.[release]` installs build and publish tooling.
 - `.[dev]` is the aggregate local contributor environment with test, lint,
   release, and optional integration dependencies.
 
-The `dev`, `lint`, `test`, and `release` extras pin direct developer tools
-where reproducibility matters. Runtime dependencies keep compatibility lower
-bounds rather than lock-file pins because `histdatacom` is a published PyPI
-library. The active lint baseline is Black, Ruff, mypy, generic file checks,
-Pyroma, ShellCheck, Commitizen, and the local CLI/coverage smoke hooks. The
+Build the same warning-as-error documentation tree used by CI and Read the
+Docs with:
+
+```sh
+python -m pip install -e ".[docs]"
+python -m sphinx -W --keep-going -b html docs docs/_build/html
+```
+
+Open `docs/_build/html/index.html` to inspect the generated site locally.
+
+The `dev`, `docs`, `lint`, `test`, and `release` extras pin direct developer
+tools where reproducibility matters. Runtime dependencies keep compatibility
+lower bounds rather than lock-file pins because `histdatacom` is a published
+PyPI library. The active lint baseline is Black, Ruff, mypy, generic file checks,
+Pyroma, ShellCheck, Commitizen, and the local CLI smoke hook. The
 previous flake8 plugin stack was intentionally replaced with Ruff so local
 installs and hook behavior do not drift independently.
 
@@ -2231,10 +4002,15 @@ modules. Future test work should raise `fail_under` when the baseline improves;
 do not lower it unless a PR explains the production risk and links the follow-up
 issue.
 
-CI runs pytest through `pytest-cov`, enforces the `.coveragerc` threshold, and
-uploads `coverage.xml` plus the `htmlcov/` report for every Python and OS matrix
-leg. The first-pass gate is total-only. Per-package or domain thresholds belong
-with the broader testing work tracked in issues #9 and #68.
+Routine development and the Python/OS CI matrix run the full test suite without
+coverage. Coverage runs once, in the dedicated `Production coverage` job, only
+when a pull request promotes `dev` into `main`. That required production gate
+runs pytest through `pytest-cov`, enforces the `.coveragerc` threshold, and
+uploads one `coverage.xml` plus `htmlcov/` artifact. Ordinary commits, pushes,
+issue closure, non-production pull requests, workflow dispatches, and pushes to
+`main` do not execute coverage. The first-pass gate is total-only. Per-package
+or domain thresholds belong with the broader testing work tracked in issues #9
+and #68.
 
 The live Temporal runtime smoke is not collected by default pytest because it
 requires a real Temporal executable and starts local worker processes. Bundled

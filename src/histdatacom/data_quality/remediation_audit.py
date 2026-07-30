@@ -19,6 +19,9 @@ from histdatacom.data_quality.limits import (
     bounded_report_limit,
 )
 from histdatacom.data_quality.remediation import (
+    RemediationActionability,
+    RemediationActionabilityDecision,
+    classify_remediation_actionability,
     remediation_hints_for_finding_code,
 )
 from histdatacom.data_quality.reporting import (
@@ -32,6 +35,9 @@ from histdatacom.runtime_contracts import JSONValue
 QUALITY_REMEDIATION_CATALOG_AUDIT_SCHEMA_VERSION = (
     "histdatacom.quality-remediation-catalog-audit.v1"
 )
+QUALITY_REMEDIATION_PLAN_SCHEMA_VERSION = (
+    "histdatacom.quality-remediation-plan.v1"
+)
 DEFAULT_REMEDIATION_CATALOG_AUDIT_CODE_LIMIT = (
     QUALITY_PAYLOAD_REMEDIATION_COVERAGE_GROUP_LIMIT
 )
@@ -43,6 +49,89 @@ DEFAULT_REMEDIATION_CATALOG_AUDIT_TARGET_AXIS_LIMIT = (
 
 _SEVERITY_RANK = {"info": 1, "warning": 2, "error": 3}
 _SEVERITY_SORT = {"error": 0, "warning": 1, "info": 2}
+_ATTRIBUTION_STATUS_SORT = {"unresolved": 0, "inferred": 1, "exact": 2}
+_ACTIONABILITY_SORT = {
+    RemediationActionability.REMEDIABLE_DEFECT.value: 0,
+    RemediationActionability.NEEDS_DIAGNOSTIC_CONTEXT.value: 1,
+    RemediationActionability.NEEDS_RULE_ATTRIBUTION.value: 2,
+    RemediationActionability.UNSAFE_TO_AUTOMATE.value: 3,
+    RemediationActionability.POLICY_OR_PROFILE_DECISION.value: 4,
+    RemediationActionability.UNSUPPORTED_FORMAT_OR_CAPABILITY.value: 5,
+    RemediationActionability.EXPECTED_ARTIFACT_OR_CONTEXT.value: 6,
+    RemediationActionability.INFORMATIONAL_ONLY.value: 7,
+}
+_ACTIONABILITY_FIXABILITY_SCORE = {
+    RemediationActionability.REMEDIABLE_DEFECT.value: 45,
+    RemediationActionability.NEEDS_DIAGNOSTIC_CONTEXT.value: 15,
+    RemediationActionability.NEEDS_RULE_ATTRIBUTION.value: 10,
+    RemediationActionability.UNSAFE_TO_AUTOMATE.value: 8,
+    RemediationActionability.POLICY_OR_PROFILE_DECISION.value: 8,
+    RemediationActionability.UNSUPPORTED_FORMAT_OR_CAPABILITY.value: 5,
+    RemediationActionability.EXPECTED_ARTIFACT_OR_CONTEXT.value: 5,
+    RemediationActionability.INFORMATIONAL_ONLY.value: 3,
+}
+_BLOCKED_PLAN_ACTIONABILITIES = frozenset(
+    {
+        RemediationActionability.NEEDS_DIAGNOSTIC_CONTEXT.value,
+        RemediationActionability.NEEDS_RULE_ATTRIBUTION.value,
+    }
+)
+_BOUNDARY_PLAN_ACTIONABILITIES = frozenset(
+    {
+        RemediationActionability.POLICY_OR_PROFILE_DECISION.value,
+        RemediationActionability.UNSUPPORTED_FORMAT_OR_CAPABILITY.value,
+        RemediationActionability.EXPECTED_ARTIFACT_OR_CONTEXT.value,
+        RemediationActionability.UNSAFE_TO_AUTOMATE.value,
+        RemediationActionability.INFORMATIONAL_ONLY.value,
+    }
+)
+_REBUILD_ACTION_MARKERS = (
+    "CACHE_SCHEMA",
+    "CORRUPT",
+    "CRC",
+    "MISSING",
+    "UNAVAILABLE",
+)
+_REPAIR_ACTION_MARKERS = (
+    "DUPLICATE",
+    "INVALID",
+    "MISMATCH",
+    "NEGATIVE",
+    "NON_MONOTONIC",
+    "PRECISION",
+    "UNREADABLE",
+)
+_VERIFY_ACTION_MARKERS = (
+    "EXPECTED",
+    "POLICY",
+    "UNSUPPORTED",
+)
+_REMEDIATION_PLAN_DISPLAY_LIMIT = 5
+_FINDING_CODE_RULE_PREFIXES = (
+    ("ASCII_TICK_SPREAD_REGIME_", "ticks.ascii.spread_regimes"),
+    ("ASCII_TICK_MICROSTRUCTURE_", "ticks.ascii.microstructure"),
+    ("ASCII_TICK_ONE_SIDED_", "ticks.ascii.microstructure"),
+    ("ASCII_TICK_STALE_", "ticks.ascii.microstructure"),
+    ("ASCII_TICK_BURST_", "ticks.ascii.microstructure"),
+    ("ASCII_TICK_BID_ASK_", "ticks.ascii.spread"),
+    ("ASCII_TICK_NEGATIVE_SPREAD", "ticks.ascii.spread"),
+    ("ASCII_TICK_ZERO_SPREAD", "ticks.ascii.spread"),
+    ("ASCII_TICK_SPREAD_", "ticks.ascii.spread"),
+    ("DOMAIN_CALENDAR_", "domain.calendar_sessions"),
+    ("DOMAIN_CROSS_INSTRUMENT_", "domain.cross_instrument_consistency"),
+    ("PROVENANCE_", "provenance.manifest.lineage"),
+    ("ASCII_TIMESTAMP_CONTINUITY_", "time.ascii.continuity"),
+    ("ASCII_TIMESTAMP_EXPECTED_SESSION_CLOSURE_GAP", "time.ascii.gaps"),
+    ("ASCII_TIMESTAMP_SUSPICIOUS_GAP", "time.ascii.gaps"),
+    ("ASCII_TIMESTAMP_WEEKEND_ACTIVITY", "time.ascii.gaps"),
+    ("ASCII_TIMESTAMP_GAP_", "time.ascii.gaps"),
+    ("ASCII_TIMESTAMP_SOURCE_", "time.ascii.est_no_dst"),
+    ("ASCII_TIMESTAMP_EST_NO_DST_", "time.ascii.est_no_dst"),
+    ("ASCII_TIMESTAMP_UTC_", "time.ascii.est_no_dst"),
+    ("HISTDATA_FORMAT_", "inventory.format_support"),
+    ("COVERAGE_", "inventory.coverage.manifest"),
+    ("FINGERPRINT_", "fingerprint.series"),
+)
 _T = TypeVar("_T")
 
 
@@ -56,6 +145,17 @@ class KnownQualityFindingCode:
     source: str = ""
     severity_source: str = ""
     source_family: str = ""
+    source_helper: str = ""
+    finding_code_prefix: str = ""
+    attribution_status: str = "exact"
+    attribution_reason: str = "provided_rule_id"
+
+
+@dataclass(frozen=True, slots=True)
+class _RuleAttribution:
+    rule_id: str
+    status: str
+    reason: str
 
 
 @dataclass(slots=True)
@@ -67,6 +167,10 @@ class _CodeAggregate:
     severity_counts: Counter[str] = field(default_factory=Counter)
     source_counts: Counter[str] = field(default_factory=Counter)
     source_family_counts: Counter[str] = field(default_factory=Counter)
+    source_helper_counts: Counter[str] = field(default_factory=Counter)
+    finding_code_prefix_counts: Counter[str] = field(default_factory=Counter)
+    attribution_status_counts: Counter[str] = field(default_factory=Counter)
+    attribution_reason_counts: Counter[str] = field(default_factory=Counter)
 
     @property
     def max_severity(self) -> str:
@@ -192,6 +296,10 @@ def audit_remediation_catalog(
         report_gap_evidence=report_gap_evidence,
         source_limit=source_limit_state.effective_limit,
     )
+    remediation_plan = _remediation_plan_payload(
+        ranked_gaps,
+        limit=code_limit_state,
+    )
     included_ranked_gaps = list(code_limit_state.slice(ranked_gaps))
     included_unmapped_known = code_limit_state.slice(unmapped_known)
     report_summary = _report_coverage_summary(report_payloads)
@@ -220,9 +328,14 @@ def audit_remediation_catalog(
             for aggregate in included_unmapped_known
         ],
         "ranked_gaps": cast(JSONValue, included_ranked_gaps),
+        "remediation_plan": remediation_plan,
         "report_coverage": cast(JSONValue, report_payloads),
         "payload_limits": {
             "ranked_gaps": _payload_limit_metadata(
+                len(ranked_gaps),
+                code_limit_state,
+            ),
+            "remediation_plan": _payload_limit_metadata(
                 len(ranked_gaps),
                 code_limit_state,
             ),
@@ -254,6 +367,34 @@ def audit_remediation_catalog(
                     for aggregate in known_aggregates.values()
                 ),
                 code_limit_state,
+            ),
+            "attribution_reason_counts": _payload_limit_metadata(
+                _counter_distinct_count(
+                    reason
+                    for aggregate in known_aggregates.values()
+                    for reason in aggregate.attribution_reason_counts
+                ),
+                rule_limit_state,
+            ),
+            "unresolved_source_helper_counts": _payload_limit_metadata(
+                _counter_distinct_count(
+                    helper
+                    for aggregate in known_aggregates.values()
+                    if aggregate.attribution_status_counts["unresolved"]
+                    for helper in aggregate.source_helper_counts
+                ),
+                rule_limit_state,
+            ),
+            "unresolved_finding_code_prefix_counts": (
+                _payload_limit_metadata(
+                    _counter_distinct_count(
+                        prefix
+                        for aggregate in known_aggregates.values()
+                        if aggregate.attribution_status_counts["unresolved"]
+                        for prefix in aggregate.finding_code_prefix_counts
+                    ),
+                    rule_limit_state,
+                )
             ),
             "report_unmapped_groups": {
                 **code_limit_state.limit_payload(),
@@ -326,7 +467,39 @@ def format_remediation_catalog_audit(
             "warning/error gaps: "
             f"{_int_value(summary, 'unmapped_warning_error_gap_count')}"
         ),
+        (
+            "attribution occurrences: "
+            f"exact={_int_value(summary, 'exact_attribution_occurrence_count')} "
+            "inferred="
+            f"{_int_value(summary, 'inferred_attribution_occurrence_count')} "
+            "unresolved="
+            f"{_int_value(summary, 'unresolved_attribution_occurrence_count')}"
+        ),
+        (
+            "actionability gaps: "
+            "actionable="
+            f"{_int_value(summary, 'unmapped_actionable_warning_error_gap_count')} "
+            "blocked_attribution="
+            f"{_int_value(summary, 'blocked_by_attribution_warning_error_code_count')} "
+            "blocked_diagnostics="
+            f"{_int_value(summary, 'blocked_by_missing_diagnostics_warning_error_code_count')} "
+            "intentional_boundary="
+            f"{_int_value(summary, 'intentionally_unremediable_warning_error_code_count')}"
+        ),
     ]
+    code_counts = _mapping_payload(payload.get("known_code_counts"))
+    unresolved_families = _format_named_counts(
+        code_counts.get("unresolved_source_family_counts"),
+        name_key="source_family",
+    )
+    if unresolved_families:
+        lines.append(f"unresolved families: {unresolved_families}")
+    unresolved_helpers = _format_named_counts(
+        code_counts.get("unresolved_source_helper_counts"),
+        name_key="source_helper",
+    )
+    if unresolved_helpers:
+        lines.append(f"unresolved helpers: {unresolved_helpers}")
     report_count = _int_value(summary, "report_count")
     if report_count:
         lines.append(
@@ -336,6 +509,23 @@ def format_remediation_catalog_audit(
             "unmapped warning/error groups: "
             f"{_int_value(summary, 'report_unmapped_warning_error_group_count')}"
         )
+    remediation_plan = _mapping_payload(payload.get("remediation_plan"))
+    plan_items = _list_payload(remediation_plan.get("items"))
+    lines.extend(("", "Remediation plan"))
+    if not plan_items:
+        lines.append("- none")
+    else:
+        lines.extend(
+            f"- {_format_remediation_plan_item(item)}"
+            for item in plan_items[:_REMEDIATION_PLAN_DISPLAY_LIMIT]
+        )
+        hidden_plan_items = max(
+            0,
+            _int_value(remediation_plan, "plan_item_count")
+            - min(len(plan_items), _REMEDIATION_PLAN_DISPLAY_LIMIT),
+        )
+        if hidden_plan_items:
+            lines.append(f"- additional plan items: {hidden_plan_items}")
     ranked_groups = [
         item
         for item in _list_payload(payload.get("ranked_gaps"))
@@ -403,22 +593,29 @@ def _known_findings_from_source(
         if not code or not _looks_like_finding_code(code):
             continue
         severity, severity_source = _severity_from_call(node)
-        rule_id = _rule_id_from_call(
+        attribution = _rule_attribution_from_call(
             node,
+            code,
+            tree,
             constants,
             class_rule_ids=class_rule_ids,
             parents=parents,
             source_family=source_family,
         )
+        source_helper = _nearest_function_name(node, parents)
         source = _relative_source(path, root=root, line_number=node.lineno)
         findings.append(
             KnownQualityFindingCode(
-                rule_id=rule_id,
+                rule_id=attribution.rule_id,
                 finding_code=code,
                 severity=severity,
                 source=source,
                 severity_source=severity_source,
                 source_family=source_family,
+                source_helper=source_helper,
+                finding_code_prefix=_finding_code_prefix(code),
+                attribution_status=attribution.status,
+                attribution_reason=attribution.reason,
             )
         )
     return tuple(findings)
@@ -445,6 +642,19 @@ def _known_code_aggregates(
         family = known.source_family or _source_family_from_source(known.source)
         if family:
             aggregate.source_family_counts[family] += 1
+        if known.source_helper:
+            aggregate.source_helper_counts[known.source_helper] += 1
+        prefix = known.finding_code_prefix or _finding_code_prefix(
+            known.finding_code
+        )
+        if prefix:
+            aggregate.finding_code_prefix_counts[prefix] += 1
+        aggregate.attribution_status_counts[
+            known.attribution_status or "unresolved"
+        ] += 1
+        aggregate.attribution_reason_counts[
+            known.attribution_reason or "no_rule_context"
+        ] += 1
         aggregate.mapped = aggregate.mapped or _known_code_is_mapped(known)
     return aggregates
 
@@ -486,6 +696,10 @@ def _report_coverage_summary(
     mapped_finding_count = 0
     unmapped_finding_count = 0
     unmapped_warning_error_group_count = 0
+    unmapped_actionable_warning_error_group_count = 0
+    intentionally_unremediable_warning_error_finding_count = 0
+    blocked_by_attribution_warning_error_finding_count = 0
+    blocked_by_missing_diagnostics_warning_error_finding_count = 0
     for payload in report_payloads:
         coverage = _mapping_payload(payload.get("remediation_coverage"))
         finding_count += _int_value(coverage, "finding_count")
@@ -498,6 +712,24 @@ def _report_coverage_summary(
             coverage,
             "unmapped_warning_error_group_count",
         )
+        unmapped_actionable_warning_error_group_count += _int_value(
+            coverage,
+            "unmapped_actionable_warning_error_group_count",
+        )
+        intentionally_unremediable_warning_error_finding_count += _int_value(
+            coverage,
+            "intentionally_unremediable_warning_error_finding_count",
+        )
+        blocked_by_attribution_warning_error_finding_count += _int_value(
+            coverage,
+            "blocked_by_attribution_warning_error_finding_count",
+        )
+        blocked_by_missing_diagnostics_warning_error_finding_count += (
+            _int_value(
+                coverage,
+                "blocked_by_missing_diagnostics_warning_error_finding_count",
+            )
+        )
     return {
         "report_count": report_count,
         "report_finding_count": finding_count,
@@ -505,6 +737,18 @@ def _report_coverage_summary(
         "report_unmapped_finding_count": unmapped_finding_count,
         "report_unmapped_warning_error_group_count": (
             unmapped_warning_error_group_count
+        ),
+        "report_unmapped_actionable_warning_error_group_count": (
+            unmapped_actionable_warning_error_group_count
+        ),
+        "report_intentionally_unremediable_warning_error_finding_count": (
+            intentionally_unremediable_warning_error_finding_count
+        ),
+        "report_blocked_by_attribution_warning_error_finding_count": (
+            blocked_by_attribution_warning_error_finding_count
+        ),
+        "report_blocked_by_missing_diagnostics_warning_error_finding_count": (
+            blocked_by_missing_diagnostics_warning_error_finding_count
         ),
     }
 
@@ -584,6 +828,39 @@ def _audit_summary(
         report_summary,
         "report_unmapped_warning_error_group_count",
     )
+    attribution_status_counts: Counter[str] = Counter()
+    actionability_counts: Counter[str] = Counter()
+    unmapped_actionable_warning_error_code_count = 0
+    intentionally_unremediable_warning_error_code_count = 0
+    blocked_by_attribution_warning_error_code_count = 0
+    blocked_by_missing_diagnostics_warning_error_code_count = 0
+    for aggregate in aggregates.values():
+        attribution_status_counts.update(aggregate.attribution_status_counts)
+        decision = _code_aggregate_actionability(aggregate)
+        actionability_counts[decision.actionability.value] += 1
+        if aggregate.mapped or aggregate.max_severity not in {
+            "error",
+            "warning",
+        }:
+            continue
+        if decision.actionability is RemediationActionability.REMEDIABLE_DEFECT:
+            unmapped_actionable_warning_error_code_count += 1
+        elif (
+            decision.actionability
+            is RemediationActionability.NEEDS_RULE_ATTRIBUTION
+        ):
+            blocked_by_attribution_warning_error_code_count += 1
+        elif (
+            decision.actionability
+            is RemediationActionability.NEEDS_DIAGNOSTIC_CONTEXT
+        ):
+            blocked_by_missing_diagnostics_warning_error_code_count += 1
+        else:
+            intentionally_unremediable_warning_error_code_count += 1
+    report_actionable_gap_count = _int_value(
+        report_summary,
+        "report_unmapped_actionable_warning_error_group_count",
+    )
     return {
         "known_code_count": known_code_count,
         "known_finding_occurrence_count": sum(
@@ -598,6 +875,32 @@ def _audit_summary(
         "unmapped_info_only_code_count": unmapped_info_code_count,
         "unmapped_warning_error_gap_count": (
             unmapped_warning_error_code_count + report_gap_count
+        ),
+        "exact_attribution_occurrence_count": attribution_status_counts[
+            "exact"
+        ],
+        "inferred_attribution_occurrence_count": attribution_status_counts[
+            "inferred"
+        ],
+        "unresolved_attribution_occurrence_count": attribution_status_counts[
+            "unresolved"
+        ],
+        "actionability_counts": _counter_payload(actionability_counts),
+        "unmapped_actionable_warning_error_code_count": (
+            unmapped_actionable_warning_error_code_count
+        ),
+        "unmapped_actionable_warning_error_gap_count": (
+            unmapped_actionable_warning_error_code_count
+            + report_actionable_gap_count
+        ),
+        "intentionally_unremediable_warning_error_code_count": (
+            intentionally_unremediable_warning_error_code_count
+        ),
+        "blocked_by_attribution_warning_error_code_count": (
+            blocked_by_attribution_warning_error_code_count
+        ),
+        "blocked_by_missing_diagnostics_warning_error_code_count": (
+            blocked_by_missing_diagnostics_warning_error_code_count
         ),
         **dict(report_summary),
     }
@@ -634,6 +937,291 @@ def _ranked_gap_payloads(
     return [{**gap, "rank": index} for index, gap in enumerate(ranked, start=1)]
 
 
+def _remediation_plan_payload(
+    ranked_gaps: Sequence[JSONValue],
+    *,
+    limit: BoundedReportLimit,
+) -> dict[str, JSONValue]:
+    """Turn ranked catalog gaps into bounded catalog-edit plan inputs."""
+    plan_items = sorted(
+        (
+            _remediation_plan_item(gap)
+            for gap in ranked_gaps
+            if isinstance(gap, Mapping)
+        ),
+        key=_remediation_plan_item_sort_key,
+    )
+    ranked_items = [
+        {**item, "rank": index}
+        for index, item in enumerate(plan_items, start=1)
+    ]
+    included_items = list(limit.slice(ranked_items))
+    actionability_counts = Counter(
+        _optional_string(item, "actionability") or "unknown"
+        for item in plan_items
+    )
+    fixability_counts = Counter(
+        _optional_string(_mapping_payload(item.get("fixability")), "level")
+        or "unknown"
+        for item in plan_items
+    )
+    return {
+        "schema_version": QUALITY_REMEDIATION_PLAN_SCHEMA_VERSION,
+        "plan_item_count": len(plan_items),
+        "included_plan_item_count": len(included_items),
+        "omitted_plan_item_count": max(
+            0,
+            len(plan_items) - len(included_items),
+        ),
+        "truncated": len(included_items) < len(plan_items),
+        "actionability_counts": _counter_payload(actionability_counts),
+        "fixability_counts": _counter_payload(fixability_counts),
+        "items": cast(JSONValue, included_items),
+    }
+
+
+def _remediation_plan_item(
+    gap: Mapping[str, JSONValue],
+) -> dict[str, JSONValue]:
+    selector = _suggested_remediation_selector(gap)
+    action = _suggested_remediation_action(gap)
+    fixability = _remediation_fixability(
+        gap,
+        selector=selector,
+        action=action,
+    )
+    missing_fields = _remediation_plan_missing_fields(
+        gap,
+        selector=selector,
+        action=action,
+    )
+    finding_code = _optional_string(gap, "finding_code")
+    action_kind = _optional_string(action, "action_kind") or "inspect"
+    prefix = _optional_string(selector, "finding_code_prefix")
+    return {
+        "catalog_gap_rank": _int_value(gap, "rank"),
+        "finding_code": finding_code,
+        "rule_id": _optional_string(gap, "rule_id") or "unknown",
+        "source_family": _optional_string(gap, "source_family"),
+        "mapped": bool(gap.get("mapped")),
+        "max_severity": _optional_string(gap, "max_severity") or "info",
+        "severity_counts": _mapping_payload(gap.get("severity_counts")),
+        "actionability": _optional_string(gap, "actionability"),
+        "actionability_reason": _optional_string(
+            gap,
+            "actionability_reason",
+        ),
+        "attribution_status": _optional_string(gap, "attribution_status"),
+        "attribution_reason": _optional_string(gap, "attribution_reason"),
+        "suggested_selector": selector,
+        "suggested_hint_code_prefix": (
+            f"{action_kind}_{prefix.lower()}" if prefix else action_kind
+        ),
+        "draft_hint_code": (
+            f"{action_kind}_{finding_code.lower()}"
+            if finding_code
+            else f"{action_kind}_finding"
+        ),
+        "suggested_action": action,
+        "fixability": fixability,
+        "missing_fields": cast(JSONValue, missing_fields),
+        "evidence": {
+            "known_source_occurrence_count": _int_value(
+                gap,
+                "known_source_occurrence_count",
+            ),
+            "report_occurrence_count": _int_value(
+                gap,
+                "report_occurrence_count",
+            ),
+            "report_group_count": _int_value(gap, "report_group_count"),
+            "sources": gap.get("sources", []),
+            "reports": gap.get("reports", []),
+            "omitted_source_count": _int_value(
+                gap,
+                "omitted_source_count",
+            ),
+            "omitted_report_source_count": _int_value(
+                gap,
+                "omitted_report_source_count",
+            ),
+        },
+        "rank_reasons": gap.get("rank_reasons", []),
+    }
+
+
+def _suggested_remediation_selector(
+    gap: Mapping[str, JSONValue],
+) -> dict[str, JSONValue]:
+    finding_code = _optional_string(gap, "finding_code")
+    rule_id = _optional_string(gap, "rule_id")
+    attribution = _optional_string(gap, "attribution_status")
+    rule_is_specific = bool(
+        rule_id and rule_id != "unknown" and not rule_id.endswith(".unresolved")
+    )
+    prefix_counts = _list_payload(gap.get("finding_code_prefix_counts"))
+    prefix = (
+        _optional_string(prefix_counts[0], "finding_code_prefix")
+        if prefix_counts
+        else _finding_code_prefix(finding_code)
+    )
+    if rule_is_specific and finding_code:
+        confidence = (
+            "high" if attribution in {"exact", "runtime_report"} else "medium"
+        )
+        basis = (
+            "reported_rule_and_finding"
+            if attribution == "runtime_report"
+            else f"{attribution or 'unknown'}_rule_attribution"
+        )
+        return {
+            "shape": "exact_rule_and_finding",
+            "rule_id": rule_id,
+            "finding_code": finding_code,
+            "finding_code_prefix": prefix,
+            "confidence": confidence,
+            "basis": basis,
+        }
+    return {
+        "shape": "finding_family",
+        "rule_id": rule_id or "unknown",
+        "finding_code": finding_code,
+        "finding_code_prefix": prefix,
+        "confidence": "low",
+        "basis": "rule_attribution_required",
+    }
+
+
+def _suggested_remediation_action(
+    gap: Mapping[str, JSONValue],
+) -> dict[str, JSONValue]:
+    finding_code = _optional_string(gap, "finding_code").upper()
+    actionability = _optional_string(gap, "actionability")
+    marker = _first_marker(finding_code, _REBUILD_ACTION_MARKERS)
+    action_kind = "rebuild"
+    if not marker:
+        marker = _first_marker(finding_code, _REPAIR_ACTION_MARKERS)
+        action_kind = "repair"
+    if not marker:
+        marker = _first_marker(finding_code, _VERIFY_ACTION_MARKERS)
+        action_kind = "verify"
+    if not marker:
+        action_kind = "inspect"
+    confidence = "high" if marker else "low"
+    basis = (
+        f"finding_code_marker={marker.lower()}"
+        if marker
+        else "no_concrete_action_marker"
+    )
+    if actionability in _BOUNDARY_PLAN_ACTIONABILITIES:
+        confidence = "low"
+        basis = f"actionability_boundary={actionability}"
+    if actionability in _BLOCKED_PLAN_ACTIONABILITIES:
+        confidence = "low"
+        basis = f"actionability_blocker={actionability}"
+    return {
+        "action_kind": action_kind,
+        "confidence": confidence,
+        "basis": basis,
+        "concrete": confidence == "high",
+    }
+
+
+def _remediation_fixability(
+    gap: Mapping[str, JSONValue],
+    *,
+    selector: Mapping[str, JSONValue],
+    action: Mapping[str, JSONValue],
+) -> dict[str, JSONValue]:
+    actionability = _optional_string(gap, "actionability")
+    attribution = _optional_string(gap, "attribution_status")
+    severity = _optional_string(gap, "max_severity")
+    selector_shape = _optional_string(selector, "shape")
+    concrete = bool(action.get("concrete"))
+    known_sources = _int_value(gap, "known_source_occurrence_count")
+    report_occurrences = _int_value(gap, "report_occurrence_count")
+    score = _ACTIONABILITY_FIXABILITY_SCORE.get(actionability, 0)
+    score += 20 if selector_shape == "exact_rule_and_finding" else 5
+    if attribution in {"exact", "runtime_report"}:
+        score += 10
+    elif attribution == "inferred":
+        score += 6
+    score += {"error": 10, "warning": 7, "info": 2}.get(severity, 0)
+    score += min(5, known_sources)
+    if report_occurrences:
+        score += min(20, 10 + report_occurrences * 2)
+    if concrete:
+        score += 10
+    score = min(100, score)
+    if actionability in _BLOCKED_PLAN_ACTIONABILITIES:
+        score = min(score, 24)
+        level = "blocked"
+    elif actionability in _BOUNDARY_PLAN_ACTIONABILITIES:
+        score = min(score, 49)
+        level = "low"
+    elif score >= 75:
+        level = "high"
+    elif score >= 50:
+        level = "medium"
+    elif score >= 25:
+        level = "low"
+    else:
+        level = "blocked"
+    confidence = "high" if score >= 75 else "medium" if score >= 50 else "low"
+    basis: list[JSONValue] = [
+        f"actionability={actionability or 'unknown'}",
+        f"selector={selector_shape or 'unknown'}",
+        f"attribution={attribution or 'unknown'}",
+        f"severity={severity or 'unknown'}",
+        f"concrete_action={str(concrete).lower()}",
+        f"known_sources={known_sources}",
+        f"report_occurrences={report_occurrences}",
+    ]
+    return {
+        "score": score,
+        "level": level,
+        "confidence": confidence,
+        "basis": basis,
+    }
+
+
+def _remediation_plan_missing_fields(
+    gap: Mapping[str, JSONValue],
+    *,
+    selector: Mapping[str, JSONValue],
+    action: Mapping[str, JSONValue],
+) -> list[JSONValue]:
+    missing: list[JSONValue] = ["message"]
+    if _optional_string(selector, "shape") != "exact_rule_and_finding":
+        missing.append("exact_rule_id")
+    if _optional_string(action, "confidence") != "high":
+        missing.append("action_kind_confirmation")
+    actionability = _optional_string(gap, "actionability")
+    if actionability in _BLOCKED_PLAN_ACTIONABILITIES:
+        missing.append("blocking_evidence")
+    elif actionability in _BOUNDARY_PLAN_ACTIONABILITIES:
+        missing.append("boundary_decision")
+    return missing
+
+
+def _remediation_plan_item_sort_key(
+    item: Mapping[str, JSONValue],
+) -> tuple[int, int, int, str, str]:
+    fixability = _mapping_payload(item.get("fixability"))
+    level = _optional_string(fixability, "level")
+    return (
+        1 if level == "blocked" else 0,
+        -_int_value(fixability, "score"),
+        _int_value(item, "catalog_gap_rank"),
+        _optional_string(item, "finding_code"),
+        _optional_string(item, "rule_id"),
+    )
+
+
+def _first_marker(value: str, markers: Sequence[str]) -> str:
+    return next((marker for marker in markers if marker in value), "")
+
+
 def _ranked_gap_payload(
     aggregate: _CodeAggregate,
     *,
@@ -658,6 +1246,7 @@ def _ranked_gap_payload(
         limit=source_limit,
     )
     source_family = _primary_source_family(aggregate.source_family_counts)
+    actionability = _code_aggregate_actionability(aggregate)
     payload: dict[str, JSONValue] = {
         "finding_code": aggregate.finding_code,
         "rule_id": aggregate.rule_id,
@@ -666,6 +1255,27 @@ def _ranked_gap_payload(
         "severity_counts": severity_counts,
         "source_family": source_family,
         "source_family_counts": source_family_counts,
+        "source_helper_counts": _named_counter_payloads(
+            aggregate.source_helper_counts,
+            key_name="source_helper",
+            limit=source_limit,
+        ),
+        "finding_code_prefix_counts": _named_counter_payloads(
+            aggregate.finding_code_prefix_counts,
+            key_name="finding_code_prefix",
+            limit=source_limit,
+        ),
+        "attribution_status": _primary_attribution_status(aggregate),
+        "attribution_reason": _primary_counter_key(
+            aggregate.attribution_reason_counts
+        ),
+        "attribution_status_counts": _counter_payload(
+            aggregate.attribution_status_counts
+        ),
+        "attribution_reason_counts": _counter_payload(
+            aggregate.attribution_reason_counts
+        ),
+        **actionability.to_payload(),
         "known_source_occurrence_count": aggregate.occurrence_count,
         "source_count": len(aggregate.source_counts),
         "included_source_count": len(sources),
@@ -682,6 +1292,7 @@ def _ranked_gap_payload(
             aggregate,
             report_occurrence_count=report_occurrence_count,
             source_family=source_family,
+            actionability=actionability.actionability.value,
         ),
     }
     return payload
@@ -698,6 +1309,13 @@ def _report_gap_payload(
         limit=source_limit,
     )
     source_family = _source_family_from_rule_id(aggregate.rule_id)
+    actionability = classify_remediation_actionability(
+        rule_id=aggregate.rule_id,
+        finding_code=aggregate.finding_code,
+        severity=aggregate.max_severity,
+        mapped=False,
+        attribution_status="runtime_report",
+    )
     return {
         "finding_code": aggregate.finding_code,
         "rule_id": aggregate.rule_id,
@@ -706,6 +1324,13 @@ def _report_gap_payload(
         "severity_counts": _counter_payload(aggregate.severity_counts),
         "source_family": source_family,
         "source_family_counts": [],
+        "source_helper_counts": [],
+        "finding_code_prefix_counts": [],
+        "attribution_status": "runtime_report",
+        "attribution_reason": "report_rule_id",
+        "attribution_status_counts": {},
+        "attribution_reason_counts": {},
+        **actionability.to_payload(),
         "known_source_occurrence_count": 0,
         "source_count": 0,
         "included_source_count": 0,
@@ -723,16 +1348,18 @@ def _report_gap_payload(
         "rank_reasons": _report_rank_reasons(
             aggregate,
             source_family=source_family,
+            actionability=actionability.actionability.value,
         ),
     }
 
 
 def _ranked_gap_sort_key(
     gap: Mapping[str, JSONValue],
-) -> tuple[int, int, int, int, int, int, str, str, str]:
+) -> tuple[int, int, int, int, int, int, int, str, str, str]:
     severity_counts = _mapping_payload(gap.get("severity_counts"))
     max_severity = _optional_string(gap, "max_severity")
     return (
+        _ACTIONABILITY_SORT.get(_optional_string(gap, "actionability"), 9),
         0 if max_severity in {"error", "warning"} else 1,
         _SEVERITY_SORT.get(max_severity, 9),
         -_int_value(severity_counts, "error"),
@@ -750,8 +1377,10 @@ def _rank_reasons(
     *,
     report_occurrence_count: int,
     source_family: str,
+    actionability: str,
 ) -> list[JSONValue]:
     reasons: list[JSONValue] = [
+        f"actionability={actionability}",
         f"severity={aggregate.max_severity}",
         f"source_family={source_family or 'unknown'}",
         f"known_sources={aggregate.occurrence_count}",
@@ -765,8 +1394,10 @@ def _report_rank_reasons(
     aggregate: _ReportGapAggregate,
     *,
     source_family: str,
+    actionability: str,
 ) -> list[JSONValue]:
     return [
+        f"actionability={actionability}",
         f"severity={aggregate.max_severity}",
         f"source_family={source_family or 'unknown'}",
         f"report_occurrences={aggregate.occurrence_count}",
@@ -787,6 +1418,11 @@ def _known_code_counts(
     unmapped_rule_id_counts: Counter[str] = Counter()
     unmapped_source_family_counts: Counter[str] = Counter()
     unmapped_finding_code_counts: Counter[str] = Counter()
+    attribution_status_counts: Counter[str] = Counter()
+    attribution_reason_counts: Counter[str] = Counter()
+    unresolved_source_family_counts: Counter[str] = Counter()
+    unresolved_source_helper_counts: Counter[str] = Counter()
+    unresolved_finding_code_prefix_counts: Counter[str] = Counter()
     for aggregate in aggregates.values():
         severity_counts.update(aggregate.severity_counts)
         rule_id_counts[aggregate.rule_id] += aggregate.occurrence_count
@@ -794,6 +1430,18 @@ def _known_code_counts(
         finding_code_counts[
             aggregate.finding_code
         ] += aggregate.occurrence_count
+        attribution_status_counts.update(aggregate.attribution_status_counts)
+        attribution_reason_counts.update(aggregate.attribution_reason_counts)
+        if aggregate.attribution_status_counts["unresolved"]:
+            unresolved_source_family_counts.update(
+                aggregate.source_family_counts
+            )
+            unresolved_source_helper_counts.update(
+                aggregate.source_helper_counts
+            )
+            unresolved_finding_code_prefix_counts.update(
+                aggregate.finding_code_prefix_counts
+            )
         if not aggregate.mapped:
             unmapped_rule_id_counts[
                 aggregate.rule_id
@@ -818,6 +1466,29 @@ def _known_code_counts(
             finding_code_counts,
             key_name="finding_code",
             limit=code_limit,
+        ),
+        "attribution_status_counts": _counter_payload(
+            attribution_status_counts
+        ),
+        "attribution_reason_counts": _named_counter_payloads(
+            attribution_reason_counts,
+            key_name="attribution_reason",
+            limit=rule_limit,
+        ),
+        "unresolved_source_family_counts": _named_counter_payloads(
+            unresolved_source_family_counts,
+            key_name="source_family",
+            limit=rule_limit,
+        ),
+        "unresolved_source_helper_counts": _named_counter_payloads(
+            unresolved_source_helper_counts,
+            key_name="source_helper",
+            limit=rule_limit,
+        ),
+        "unresolved_finding_code_prefix_counts": _named_counter_payloads(
+            unresolved_finding_code_prefix_counts,
+            key_name="finding_code_prefix",
+            limit=rule_limit,
         ),
         "unmapped_rule_id_counts": _named_counter_payloads(
             unmapped_rule_id_counts,
@@ -852,6 +1523,7 @@ def _code_aggregate_payload(
         key_name="source_family",
         limit=source_limit,
     )
+    actionability = _code_aggregate_actionability(aggregate)
     return {
         "rule_id": aggregate.rule_id,
         "finding_code": aggregate.finding_code,
@@ -861,6 +1533,27 @@ def _code_aggregate_payload(
         "severity_counts": _counter_payload(aggregate.severity_counts),
         "source_family": _primary_source_family(aggregate.source_family_counts),
         "source_family_counts": source_family_counts,
+        "source_helper_counts": _named_counter_payloads(
+            aggregate.source_helper_counts,
+            key_name="source_helper",
+            limit=source_limit,
+        ),
+        "finding_code_prefix_counts": _named_counter_payloads(
+            aggregate.finding_code_prefix_counts,
+            key_name="finding_code_prefix",
+            limit=source_limit,
+        ),
+        "attribution_status": _primary_attribution_status(aggregate),
+        "attribution_reason": _primary_counter_key(
+            aggregate.attribution_reason_counts
+        ),
+        "attribution_status_counts": _counter_payload(
+            aggregate.attribution_status_counts
+        ),
+        "attribution_reason_counts": _counter_payload(
+            aggregate.attribution_reason_counts
+        ),
+        **actionability.to_payload(),
         "source_count": len(aggregate.source_counts),
         "included_source_count": len(sources),
         "omitted_source_count": max(
@@ -869,6 +1562,18 @@ def _code_aggregate_payload(
         ),
         "sources": sources,
     }
+
+
+def _code_aggregate_actionability(
+    aggregate: _CodeAggregate,
+) -> RemediationActionabilityDecision:
+    return classify_remediation_actionability(
+        rule_id=aggregate.rule_id,
+        finding_code=aggregate.finding_code,
+        severity=aggregate.max_severity,
+        mapped=aggregate.mapped,
+        attribution_status=_primary_attribution_status(aggregate),
+    )
 
 
 def _normalized_reports(
@@ -946,33 +1651,285 @@ def _string_keyword(node: ast.Call, name: str) -> str:
     return ""
 
 
-def _rule_id_from_call(
+def _rule_attribution_from_call(
+    node: ast.Call,
+    finding_code: str,
+    tree: ast.AST,
+    constants: Mapping[str, str],
+    *,
+    class_rule_ids: Mapping[str, str],
+    parents: Mapping[ast.AST, ast.AST],
+    source_family: str,
+) -> _RuleAttribution:
+    explicit = _explicit_rule_attribution(
+        node,
+        constants,
+        class_rule_ids=class_rule_ids,
+        parents=parents,
+        source_family=source_family,
+    )
+    if explicit is not None:
+        return explicit
+
+    helper_candidates = _enclosing_function_rule_candidates(
+        node,
+        tree,
+        constants,
+        class_rule_ids=class_rule_ids,
+        parents=parents,
+        source_family=source_family,
+    )
+    if len(helper_candidates) == 1:
+        return _RuleAttribution(
+            rule_id=next(iter(helper_candidates)),
+            status="inferred",
+            reason="unique_helper_rule",
+        )
+
+    prefix_rule_id = _finding_code_rule_id(finding_code)
+    if prefix_rule_id and (
+        not helper_candidates or prefix_rule_id in helper_candidates
+    ):
+        return _RuleAttribution(
+            rule_id=prefix_rule_id,
+            status="inferred",
+            reason="finding_code_prefix",
+        )
+
+    module_rule_ids = set(class_rule_ids.values())
+    if len(module_rule_ids) == 1:
+        return _RuleAttribution(
+            rule_id=next(iter(module_rule_ids)),
+            status="inferred",
+            reason="unique_module_rule",
+        )
+
+    if len(helper_candidates) > 1:
+        reason = "ambiguous_helper_rules"
+    elif len(module_rule_ids) > 1:
+        reason = "multiple_module_rules"
+    else:
+        reason = "no_rule_context"
+    return _RuleAttribution(
+        rule_id=_unresolved_rule_id(source_family),
+        status="unresolved",
+        reason=reason,
+    )
+
+
+def _explicit_rule_attribution(
     node: ast.Call,
     constants: Mapping[str, str],
     *,
     class_rule_ids: Mapping[str, str],
     parents: Mapping[ast.AST, ast.AST],
     source_family: str,
-) -> str:
+) -> _RuleAttribution | None:
     for keyword in node.keywords:
         if keyword.arg != "rule_id":
             continue
         value = keyword.value
         if isinstance(value, ast.Constant) and isinstance(value.value, str):
-            return value.value
-        if isinstance(value, ast.Name):
-            return constants.get(
-                value.id,
-                _unresolved_rule_id(source_family),
+            return _RuleAttribution(
+                rule_id=value.value,
+                status="exact",
+                reason="literal_rule_id",
             )
-        return _rule_id_from_expression(
+        if isinstance(value, ast.Name) and value.id in constants:
+            return _RuleAttribution(
+                rule_id=constants[value.id],
+                status="exact",
+                reason="module_constant",
+            )
+        rule_id = _rule_id_from_expression(
             value,
             constants,
             class_rule_ids=class_rule_ids,
             parents=parents,
             source_family=source_family,
         )
-    return _unresolved_rule_id(source_family)
+        if not rule_id.endswith(".unresolved"):
+            is_self = (
+                isinstance(value, ast.Attribute)
+                and isinstance(value.value, ast.Name)
+                and value.value.id == "self"
+            )
+            return _RuleAttribution(
+                rule_id=rule_id,
+                status="exact" if is_self else "inferred",
+                reason=("class_rule_id" if is_self else "local_rule_object"),
+            )
+    return None
+
+
+def _enclosing_function_rule_candidates(
+    node: ast.AST,
+    tree: ast.AST,
+    constants: Mapping[str, str],
+    *,
+    class_rule_ids: Mapping[str, str],
+    parents: Mapping[ast.AST, ast.AST],
+    source_family: str,
+) -> set[str]:
+    function = _nearest_function(node, parents)
+    if function is None:
+        return set()
+    return _function_rule_candidates(
+        function,
+        tree,
+        constants,
+        class_rule_ids=class_rule_ids,
+        parents=parents,
+        source_family=source_family,
+        visited=set(),
+    )
+
+
+def _function_rule_candidates(
+    function: ast.FunctionDef | ast.AsyncFunctionDef,
+    tree: ast.AST,
+    constants: Mapping[str, str],
+    *,
+    class_rule_ids: Mapping[str, str],
+    parents: Mapping[ast.AST, ast.AST],
+    source_family: str,
+    visited: set[int],
+) -> set[str]:
+    identity = id(function)
+    if identity in visited:
+        return set()
+    visited = {*visited, identity}
+    candidates: set[str] = set()
+
+    class_rule_id = _nearest_class_rule_id(
+        function,
+        parents=parents,
+        class_rule_ids=class_rule_ids,
+    )
+    if class_rule_id:
+        candidates.add(class_rule_id)
+    candidates.update(
+        _function_rule_id_annotations(function, class_rule_ids).values()
+    )
+    candidates.update(
+        _function_rule_id_assertions(function, class_rule_ids).values()
+    )
+    candidates.update(
+        _function_rule_id_assignments(function, class_rule_ids).values()
+    )
+    default_rule_id = _function_default_rule_id(function, constants)
+    if default_rule_id:
+        candidates.add(default_rule_id)
+
+    if class_rule_id:
+        return candidates
+
+    for call in _calls_to_function(tree, function.name):
+        argument_rule_id = _call_rule_id_argument(
+            call,
+            function,
+            constants,
+            class_rule_ids=class_rule_ids,
+            parents=parents,
+            source_family=source_family,
+        )
+        if argument_rule_id:
+            candidates.add(argument_rule_id)
+        caller_class_rule_id = _nearest_class_rule_id(
+            call,
+            parents=parents,
+            class_rule_ids=class_rule_ids,
+        )
+        if caller_class_rule_id:
+            candidates.add(caller_class_rule_id)
+            continue
+        caller = _nearest_function(call, parents)
+        if caller is None or caller is function:
+            continue
+        candidates.update(
+            _function_rule_candidates(
+                caller,
+                tree,
+                constants,
+                class_rule_ids=class_rule_ids,
+                parents=parents,
+                source_family=source_family,
+                visited=visited,
+            )
+        )
+    return candidates
+
+
+def _calls_to_function(
+    tree: ast.AST, function_name: str
+) -> tuple[ast.Call, ...]:
+    calls = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and _call_function_name(node.func) == function_name
+    ]
+    return tuple(sorted(calls, key=lambda item: (item.lineno, item.col_offset)))
+
+
+def _call_function_name(node: ast.AST) -> str:
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        return node.attr
+    return ""
+
+
+def _call_rule_id_argument(
+    call: ast.Call,
+    function: ast.FunctionDef | ast.AsyncFunctionDef,
+    constants: Mapping[str, str],
+    *,
+    class_rule_ids: Mapping[str, str],
+    parents: Mapping[ast.AST, ast.AST],
+    source_family: str,
+) -> str:
+    value: ast.AST | None = None
+    for keyword in call.keywords:
+        if keyword.arg == "rule_id":
+            value = keyword.value
+            break
+    if value is None:
+        args = list(function.args.posonlyargs) + list(function.args.args)
+        rule_indexes = [
+            index for index, arg in enumerate(args) if arg.arg == "rule_id"
+        ]
+        if rule_indexes and rule_indexes[0] < len(call.args):
+            value = call.args[rule_indexes[0]]
+    if value is None:
+        return ""
+    rule_id = _rule_id_from_expression(
+        value,
+        constants,
+        class_rule_ids=class_rule_ids,
+        parents=parents,
+        source_family=source_family,
+    )
+    return "" if rule_id.endswith(".unresolved") else rule_id
+
+
+def _function_default_rule_id(
+    function: ast.FunctionDef | ast.AsyncFunctionDef,
+    constants: Mapping[str, str],
+) -> str:
+    positional = list(function.args.posonlyargs) + list(function.args.args)
+    defaults = list(function.args.defaults)
+    if defaults:
+        for arg, default in zip(positional[-len(defaults) :], defaults):
+            if arg.arg == "rule_id":
+                return _rule_id_literal(default, constants)
+    for arg, kw_default in zip(
+        function.args.kwonlyargs,
+        function.args.kw_defaults,
+    ):
+        if arg.arg == "rule_id":
+            return _rule_id_literal(kw_default, constants)
+    return ""
 
 
 def _rule_id_from_expression(
@@ -1056,7 +2013,10 @@ def _function_rule_id_for_name(
     if name in annotations:
         return annotations[name]
     asserted = _function_rule_id_assertions(function, class_rule_ids)
-    return asserted.get(name, "")
+    if name in asserted:
+        return asserted[name]
+    assigned = _function_rule_id_assignments(function, class_rule_ids)
+    return assigned.get(name, "")
 
 
 def _nearest_function(
@@ -1069,6 +2029,14 @@ def _nearest_function(
             return parent
         parent = parents.get(parent)
     return None
+
+
+def _nearest_function_name(
+    node: ast.AST,
+    parents: Mapping[ast.AST, ast.AST],
+) -> str:
+    function = _nearest_function(node, parents)
+    return function.name if function is not None else "<module>"
 
 
 def _function_rule_id_annotations(
@@ -1112,12 +2080,56 @@ def _function_rule_id_assertions(
     return asserted
 
 
+def _function_rule_id_assignments(
+    function: ast.FunctionDef | ast.AsyncFunctionDef,
+    class_rule_ids: Mapping[str, str],
+) -> dict[str, str]:
+    assigned: dict[str, str] = {}
+    for node in ast.walk(function):
+        target: ast.Name | None = None
+        value: ast.AST | None = None
+        annotation: ast.AST | None = None
+        if isinstance(node, ast.AnnAssign) and isinstance(
+            node.target, ast.Name
+        ):
+            target = node.target
+            value = node.value
+            annotation = node.annotation
+        elif isinstance(node, ast.Assign) and len(node.targets) == 1:
+            if isinstance(node.targets[0], ast.Name):
+                target = node.targets[0]
+                value = node.value
+        if target is None:
+            continue
+        class_name = _annotation_name(annotation)
+        if not class_name and isinstance(value, ast.Call):
+            class_name = _annotation_name(value.func)
+        if class_name in class_rule_ids:
+            assigned[target.id] = class_rule_ids[class_name]
+    return assigned
+
+
 def _annotation_name(node: ast.AST | None) -> str:
     if isinstance(node, ast.Name):
         return node.id
     if isinstance(node, ast.Attribute):
         return node.attr
     return ""
+
+
+def _finding_code_rule_id(finding_code: str) -> str:
+    for prefix, rule_id in _FINDING_CODE_RULE_PREFIXES:
+        if finding_code.startswith(prefix):
+            return rule_id
+    return ""
+
+
+def _finding_code_prefix(finding_code: str) -> str:
+    for prefix, _rule_id in _FINDING_CODE_RULE_PREFIXES:
+        if finding_code.startswith(prefix):
+            return prefix.removesuffix("_")
+    parts = [part for part in finding_code.split("_") if part]
+    return "_".join(parts[:3])
 
 
 def _call_name_is(node: ast.AST, name: str) -> bool:
@@ -1162,6 +2174,21 @@ def _primary_source_family(counter: Counter[str]) -> str:
     if not counter:
         return ""
     return sorted(counter, key=lambda item: (-counter[item], item))[0]
+
+
+def _primary_counter_key(counter: Counter[str]) -> str:
+    if not counter:
+        return ""
+    return sorted(counter, key=lambda item: (-counter[item], item))[0]
+
+
+def _primary_attribution_status(aggregate: _CodeAggregate) -> str:
+    if not aggregate.attribution_status_counts:
+        return "unresolved"
+    return min(
+        aggregate.attribution_status_counts,
+        key=lambda item: (_ATTRIBUTION_STATUS_SORT.get(item, 9), item),
+    )
 
 
 def _max_severity(counter: Counter[str]) -> str:
@@ -1248,6 +2275,18 @@ def _format_code_group(group: Mapping[str, JSONValue]) -> str:
     omitted = _int_value(group, "omitted_source_count")
     if omitted:
         suffix += f" (+{omitted} more sources)"
+    attribution = _optional_string(group, "attribution_status")
+    attribution_reason = _optional_string(group, "attribution_reason")
+    if attribution:
+        suffix += f" attribution={attribution}"
+    if attribution_reason:
+        suffix += f"({attribution_reason})"
+    actionability = _optional_string(group, "actionability")
+    actionability_reason = _optional_string(group, "actionability_reason")
+    if actionability:
+        suffix += f" actionability={actionability}"
+    if actionability_reason:
+        suffix += f"({actionability_reason})"
     return (
         f"{_optional_string(group, 'max_severity') or 'info'} "
         f"{_optional_string(group, 'finding_code')} "
@@ -1260,6 +2299,16 @@ def _format_code_group(group: Mapping[str, JSONValue]) -> str:
 def _format_ranked_gap(group: Mapping[str, JSONValue]) -> str:
     reasons = _string_list(group.get("rank_reasons"))
     reason_text = f" reasons={'; '.join(reasons)}" if reasons else ""
+    attribution = _optional_string(group, "attribution_status") or "unknown"
+    attribution_reason = _optional_string(group, "attribution_reason")
+    attribution_text = f" attribution={attribution}"
+    if attribution_reason:
+        attribution_text += f"({attribution_reason})"
+    actionability = _optional_string(group, "actionability") or "unknown"
+    actionability_reason = _optional_string(group, "actionability_reason")
+    actionability_text = f" actionability={actionability}"
+    if actionability_reason:
+        actionability_text += f"({actionability_reason})"
     return (
         f"#{_int_value(group, 'rank')} "
         f"{_optional_string(group, 'max_severity') or 'info'} "
@@ -1268,8 +2317,39 @@ def _format_ranked_gap(group: Mapping[str, JSONValue]) -> str:
         f"rule={_optional_string(group, 'rule_id') or 'unknown'} "
         f"reports={_int_value(group, 'report_occurrence_count')} "
         f"known_sources={_int_value(group, 'known_source_occurrence_count')}"
+        f"{attribution_text}"
+        f"{actionability_text}"
         f"{reason_text}"
     )
+
+
+def _format_remediation_plan_item(
+    item: Mapping[str, JSONValue],
+) -> str:
+    selector = _mapping_payload(item.get("suggested_selector"))
+    action = _mapping_payload(item.get("suggested_action"))
+    fixability = _mapping_payload(item.get("fixability"))
+    missing = _string_list(item.get("missing_fields"))
+    missing_text = ",".join(missing) if missing else "none"
+    return (
+        f"#{_int_value(item, 'rank')} "
+        f"{_optional_string(fixability, 'level') or 'unknown'}"
+        f"/{_int_value(fixability, 'score')} "
+        f"{_optional_string(item, 'finding_code')} "
+        f"selector={_optional_string(selector, 'shape') or 'unknown'} "
+        f"action={_optional_string(action, 'action_kind') or 'inspect'} "
+        f"confidence={_optional_string(fixability, 'confidence') or 'low'} "
+        f"missing={missing_text}"
+    )
+
+
+def _format_named_counts(value: object, *, name_key: str) -> str:
+    parts = []
+    for item in _list_payload(value):
+        name = _optional_string(item, name_key)
+        if name:
+            parts.append(f"{name}={_int_value(item, 'count')}")
+    return ", ".join(parts)
 
 
 def _payload_limit_metadata(

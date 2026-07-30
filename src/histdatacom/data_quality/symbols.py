@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
+from itertools import combinations
 import math
 from pathlib import Path
-from typing import TypeVar
+from typing import cast, TypeVar
 import zipfile
 
 from histdatacom.data_quality.contracts import (
@@ -23,6 +25,11 @@ from histdatacom.data_quality.contracts import (
 from histdatacom.data_quality.polars_cache import (
     read_quality_polars_cache,
 )
+from histdatacom.data_quality.limits import bounded_report_limit
+from histdatacom.data_quality.training_features import (
+    TRAINING_SCHEMA_VERSION,
+    ensure_tick_training_features,
+)
 from histdatacom.fx_enums import Pairs
 from histdatacom.histdata_ascii import TICK, read_ascii_file
 from histdatacom.runtime_contracts import JSONValue
@@ -30,6 +37,15 @@ from histdatacom.runtime_contracts import JSONValue
 DOMAIN_SYMBOL_METADATA_RULE_ID = "domain.symbol_metadata"
 DOMAIN_CROSS_INSTRUMENT_RULE_ID = "domain.cross_instrument_consistency"
 CROSS_INSTRUMENT_METADATA_KEY = "cross_instrument_consistency"
+CROSS_SERIES_FINGERPRINT_RULE_ID = "fingerprint.cross_series"
+CROSS_SERIES_FINGERPRINT_SCHEMA_VERSION = (
+    "histdatacom.cross-series-fingerprint.v1"
+)
+CROSS_SERIES_FINGERPRINT_METADATA_KEY = "cross_series_fingerprint"
+CROSS_SERIES_FINGERPRINT_SUMMARY_CODE = "FINGERPRINT_CROSS_SERIES_SUMMARY"
+TIME_SERIES_FINGERPRINT_TOPOLOGY_SUMMARY_METADATA_KEY = (
+    "time_series_fingerprint_topology_summary"
+)
 
 ASSET_CLASS_FX = "fx"
 ASSET_CLASS_METAL = "metal"
@@ -86,6 +102,15 @@ INDEX_SYMBOLS = frozenset(
 )
 
 MAX_CROSS_INSTRUMENT_SAMPLES = 5
+DEFAULT_CROSS_SERIES_GROUP_LIMIT = 32
+DEFAULT_CROSS_SERIES_CORRELATION_LIMIT = 32
+CROSS_SERIES_ROW_IDENTITY_COLUMNS = (
+    "series_id",
+    "period",
+    "row_id",
+    "source_row_number",
+    "event_seq",
+)
 
 _CrossSample = TypeVar("_CrossSample")
 
@@ -217,10 +242,85 @@ DEFAULT_CROSS_INSTRUMENT_TOLERANCE = HistDataCrossInstrumentTolerance()
 
 
 @dataclass(frozen=True, slots=True)
+class CrossInstrumentPointInput:
+    """One public event-time midpoint consumed by cross-series diagnostics."""
+
+    timestamp_utc_ms: int
+    price: float
+    row_id: int
+    source_row_number: int
+    event_seq: int
+
+    def __post_init__(self) -> None:
+        if isinstance(self.timestamp_utc_ms, bool) or not isinstance(
+            self.timestamp_utc_ms, int
+        ):
+            raise ValueError("timestamp_utc_ms must be an integer")
+        price = float(self.price)
+        if not math.isfinite(price) or price <= 0.0:
+            raise ValueError("cross-instrument input price must be positive")
+        object.__setattr__(self, "price", price)
+        for name in ("row_id", "source_row_number", "event_seq"):
+            value = getattr(self, name)
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, int)
+                or value < 0
+            ):
+                raise ValueError(f"{name} must be a non-negative integer")
+
+
+@dataclass(frozen=True, slots=True)
+class CrossInstrumentSeriesInput:
+    """One reconstructed series supplied directly to the #331 rule surface."""
+
+    symbol: str
+    timeframe: str
+    period: str
+    series_id: str
+    points: tuple[CrossInstrumentPointInput, ...]
+    path: str = ""
+    computed_from: str = "reconstructed_event_stream"
+
+    def __post_init__(self) -> None:
+        symbol = normalize_histdata_symbol(self.symbol)
+        if not symbol:
+            raise ValueError("cross-instrument input requires a symbol")
+        object.__setattr__(self, "symbol", symbol)
+        for name in ("timeframe", "period", "series_id", "computed_from"):
+            value = str(getattr(self, name) or "").strip()
+            if not value:
+                raise ValueError(f"cross-instrument input requires {name}")
+            object.__setattr__(self, name, value)
+        points = tuple(
+            sorted(
+                tuple(self.points),
+                key=lambda item: (
+                    item.timestamp_utc_ms,
+                    item.event_seq,
+                    item.row_id,
+                ),
+            )
+        )
+        if not points:
+            raise ValueError("cross-instrument input requires points")
+        object.__setattr__(self, "points", points)
+        path = str(self.path or "").strip()
+        object.__setattr__(
+            self,
+            "path",
+            path or f"reconstructed://{self.series_id}",
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class _CrossInstrumentPoint:
     timestamp_utc_ms: int
     price: float
     row_number: int
+    row_id: int
+    source_row_number: int
+    event_seq: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -231,6 +331,12 @@ class _CrossInstrumentSeries:
     period: str
     price_kind: str
     points: dict[int, _CrossInstrumentPoint]
+    row_count: int
+    duplicate_timestamp_count: int
+    computed_from: str
+    series_id: str
+    cache_source: str = ""
+    training_schema_version: str = ""
 
     @property
     def symbol(self) -> str:
@@ -269,14 +375,21 @@ class _CrossInstrumentSeries:
         return {
             "path": self.target.path,
             "symbol": self.symbol,
+            "series_id": self.series_id,
             "base": self.base,
             "quote": self.quote,
             "timeframe": self.timeframe,
             "period": self.period,
             "price_kind": self.price_kind,
+            "row_count": self.row_count,
             "timestamp_count": self.timestamp_count,
+            "duplicate_timestamp_count": self.duplicate_timestamp_count,
             "start_timestamp_utc_ms": self.start_utc_ms,
             "end_timestamp_utc_ms": self.end_utc_ms,
+            "computed_from": self.computed_from,
+            "cache_source": self.cache_source or None,
+            "training_schema_version": self.training_schema_version or None,
+            "identity_columns": list(CROSS_SERIES_ROW_IDENTITY_COLUMNS),
         }
 
 
@@ -323,6 +436,15 @@ class _TriangularComparisonSample:
             "implied_price": self.implied_price,
             "relative_difference": self.relative_difference,
             "severity": self.severity.value,
+            "row_identity": {
+                "direct": _point_identity(self.direct, self.timestamp_utc_ms),
+                "numerator": _point_identity(
+                    self.numerator, self.timestamp_utc_ms
+                ),
+                "denominator": _point_identity(
+                    self.denominator, self.timestamp_utc_ms
+                ),
+            },
             "relationship": (
                 f"{self.numerator.symbol} / {self.denominator.symbol} "
                 f"~= {self.direct.symbol}"
@@ -359,6 +481,10 @@ class _InverseComparisonSample:
             "product": self.product,
             "relative_difference": self.relative_difference,
             "severity": self.severity.value,
+            "row_identity": {
+                "left": _point_identity(self.left, self.timestamp_utc_ms),
+                "right": _point_identity(self.right, self.timestamp_utc_ms),
+            },
             "relationship": f"{self.left.symbol} * {self.right.symbol} ~= 1",
             "paths": {
                 "left": self.left.target.path,
@@ -410,6 +536,20 @@ class _StaleJoinSample:
             "start_timestamp_utc_ms": self.start_timestamp_utc_ms,
             "end_timestamp_utc_ms": self.end_timestamp_utc_ms,
             "affected_timestamp_count": self.affected_timestamp_count,
+            "row_identity": {
+                "stale": _point_identity(
+                    self.stale_series,
+                    self.stale_value_timestamp_utc_ms,
+                ),
+                "active_start": _point_identity(
+                    self.active_series,
+                    self.start_timestamp_utc_ms,
+                ),
+                "active_end": _point_identity(
+                    self.active_series,
+                    self.end_timestamp_utc_ms,
+                ),
+            },
             "paths": {
                 "stale": self.stale_series.target.path,
                 "active": self.active_series.target.path,
@@ -448,6 +588,44 @@ class _CrossInstrumentScan:
     inverse_errors: list[_InverseComparisonSample] = field(default_factory=list)
     sparse_grids: list[_TimestampGridSample] = field(default_factory=list)
     stale_join_risks: list[_StaleJoinSample] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class CrossInstrumentScanProvider:
+    """Share one expensive cross-instrument scan across run-rule surfaces."""
+
+    _signature: tuple[object, ...] | None = field(default=None, init=False)
+    _scan: _CrossInstrumentScan | None = field(default=None, init=False)
+
+    def scan(
+        self,
+        targets: tuple[QualityTarget, ...],
+        *,
+        tolerance: HistDataCrossInstrumentTolerance,
+        warning_severity: QualitySeverity,
+        error_severity: QualitySeverity,
+    ) -> _CrossInstrumentScan:
+        """Return a shared scan and release it after the second consumer."""
+        signature = _cross_instrument_scan_signature(
+            targets,
+            tolerance=tolerance,
+            warning_severity=warning_severity,
+            error_severity=error_severity,
+        )
+        if self._scan is not None and self._signature == signature:
+            scan = self._scan
+            self._scan = None
+            self._signature = None
+            return scan
+        scan = _scan_cross_instrument_consistency(
+            targets,
+            tolerance=tolerance,
+            warning_severity=warning_severity,
+            error_severity=error_severity,
+        )
+        self._signature = signature
+        self._scan = scan
+        return scan
 
 
 FX_NON_JPY_PRECISION_RULE = HistDataSymbolPrecisionRule(
@@ -620,6 +798,11 @@ class HistDataCrossInstrumentConsistencyRule:
     )
     warning_severity: QualitySeverity = QualitySeverity.WARNING
     error_severity: QualitySeverity = QualitySeverity.ERROR
+    scan_provider: CrossInstrumentScanProvider | None = field(
+        default=None,
+        repr=False,
+        compare=False,
+    )
     rule_id: str = DOMAIN_CROSS_INSTRUMENT_RULE_ID
     description: str = (
         "Compare related FX instruments across one quality run for "
@@ -635,11 +818,12 @@ class HistDataCrossInstrumentConsistencyRule:
     ) -> QualityReport:
         """Return cross-instrument consistency findings."""
         target_tuple = tuple(targets)
-        scan = _scan_cross_instrument_consistency(
+        scan = _cross_instrument_scan_for_rule(
             target_tuple,
             tolerance=self.tolerance,
             warning_severity=self.warning_severity,
             error_severity=self.error_severity,
+            provider=self.scan_provider,
         )
         payload = _cross_instrument_payload(
             scan,
@@ -670,6 +854,121 @@ class HistDataCrossInstrumentConsistencyRule:
                 ),
             ),
             metadata={CROSS_INSTRUMENT_METADATA_KEY: payload},
+        )
+
+    def evaluate_series(
+        self,
+        series: Iterable[CrossInstrumentSeriesInput],
+        *,
+        metadata: Mapping[str, JSONValue] | None = None,
+    ) -> QualityReport:
+        """Validate reconstructed event streams without a filesystem roundtrip."""
+        inputs = tuple(series)
+        scan = _scan_cross_instrument_series_inputs(
+            inputs,
+            tolerance=self.tolerance,
+            warning_severity=self.warning_severity,
+            error_severity=self.error_severity,
+        )
+        payload = _cross_instrument_payload(scan, tolerance=self.tolerance)
+        if not _has_cross_instrument_surface(scan):
+            return QualityReport(
+                metadata={CROSS_INSTRUMENT_METADATA_KEY: payload},
+            )
+        targets = tuple(
+            _quality_target_for_series_input(item) for item in inputs
+        )
+        run_target = _cross_instrument_target(
+            targets,
+            metadata=metadata,
+            payload=payload,
+        )
+        findings = _cross_instrument_findings(
+            run_target,
+            scan=scan,
+            tolerance=self.tolerance,
+            rule_id=self.rule_id,
+        )
+        return QualityReport(
+            rule_results=(
+                QualityRuleResult(
+                    rule_id=self.rule_id,
+                    target=run_target,
+                    findings=findings,
+                ),
+            ),
+            metadata={CROSS_INSTRUMENT_METADATA_KEY: payload},
+        )
+
+
+@dataclass(slots=True)
+class HistDataCrossSeriesFingerprintRule:
+    """Emit a bounded run-scoped fingerprint for related FX series."""
+
+    tolerance: HistDataCrossInstrumentTolerance = (
+        DEFAULT_CROSS_INSTRUMENT_TOLERANCE
+    )
+    warning_severity: QualitySeverity = QualitySeverity.WARNING
+    error_severity: QualitySeverity = QualitySeverity.ERROR
+    scan_provider: CrossInstrumentScanProvider | None = field(
+        default=None,
+        repr=False,
+        compare=False,
+    )
+    group_limit: int = DEFAULT_CROSS_SERIES_GROUP_LIMIT
+    correlation_limit: int = DEFAULT_CROSS_SERIES_CORRELATION_LIMIT
+    rule_id: str = CROSS_SERIES_FINGERPRINT_RULE_ID
+    description: str = (
+        "Summarize run-scoped FX panel coverage, topology, dependence, "
+        "inverse consistency, triangular consistency, and stale-join risk."
+    )
+
+    def evaluate_run(
+        self,
+        targets: Iterable[QualityTarget],
+        *,
+        metadata: Mapping[str, JSONValue] | None = None,
+    ) -> QualityReport:
+        """Return one deterministic INFO fingerprint for the quality run."""
+        target_tuple = tuple(targets)
+        scan = _cross_instrument_scan_for_rule(
+            target_tuple,
+            tolerance=self.tolerance,
+            warning_severity=self.warning_severity,
+            error_severity=self.error_severity,
+            provider=self.scan_provider,
+        )
+        payload = _cross_series_fingerprint_payload(
+            scan,
+            tolerance=self.tolerance,
+            metadata=metadata,
+            group_limit=self.group_limit,
+            correlation_limit=self.correlation_limit,
+        )
+        run_target = _cross_instrument_target(
+            target_tuple,
+            metadata=metadata,
+            payload=payload,
+            rule_id=self.rule_id,
+            manifest="cross-series-fingerprint",
+        )
+        finding = _cross_instrument_finding(
+            run_target,
+            code=CROSS_SERIES_FINGERPRINT_SUMMARY_CODE,
+            message="Run-scoped cross-series fingerprint summary.",
+            severity=QualitySeverity.INFO,
+            rule_id=self.rule_id,
+            metadata={CROSS_SERIES_FINGERPRINT_METADATA_KEY: payload},
+        )
+        return QualityReport(
+            rule_results=(
+                QualityRuleResult(
+                    rule_id=self.rule_id,
+                    target=run_target,
+                    findings=(finding,),
+                ),
+            ),
+            metadata={CROSS_SERIES_FINGERPRINT_METADATA_KEY: payload},
         )
 
 
@@ -746,6 +1045,35 @@ def _target_symbol(target: QualityTarget) -> str:
     return str(target.symbol or target.metadata.get("symbol", "") or "")
 
 
+def _cross_series_id(target: QualityTarget) -> str:
+    symbol = normalize_histdata_symbol(_target_symbol(target))
+    return f"ascii:{target.timeframe}:{symbol}:histdata.com"
+
+
+def _duplicate_timestamp_row_count(counts: Counter[int]) -> int:
+    return sum(count for count in counts.values() if count > 1)
+
+
+def _point_identity(
+    series: _CrossInstrumentSeries,
+    timestamp_utc_ms: int,
+) -> dict[str, JSONValue]:
+    point = series.points.get(timestamp_utc_ms)
+    if point is None:
+        return {
+            "series_id": series.series_id,
+            "period": series.period,
+            "row_id": None,
+        }
+    return {
+        "series_id": series.series_id,
+        "period": series.period,
+        "row_id": point.row_id,
+        "source_row_number": point.source_row_number,
+        "event_seq": point.event_seq,
+    }
+
+
 def _domain_finding(
     target: QualityTarget,
     *,
@@ -767,6 +1095,55 @@ def _domain_finding(
             metadata={"symbol": _target_symbol(target)},
         ),
         metadata=dict(metadata),
+    )
+
+
+def _cross_instrument_scan_for_rule(
+    targets: tuple[QualityTarget, ...],
+    *,
+    tolerance: HistDataCrossInstrumentTolerance,
+    warning_severity: QualitySeverity,
+    error_severity: QualitySeverity,
+    provider: CrossInstrumentScanProvider | None,
+) -> _CrossInstrumentScan:
+    if provider is not None:
+        return provider.scan(
+            targets,
+            tolerance=tolerance,
+            warning_severity=warning_severity,
+            error_severity=error_severity,
+        )
+    return _scan_cross_instrument_consistency(
+        targets,
+        tolerance=tolerance,
+        warning_severity=warning_severity,
+        error_severity=error_severity,
+    )
+
+
+def _cross_instrument_scan_signature(
+    targets: tuple[QualityTarget, ...],
+    *,
+    tolerance: HistDataCrossInstrumentTolerance,
+    warning_severity: QualitySeverity,
+    error_severity: QualitySeverity,
+) -> tuple[object, ...]:
+    target_axes = tuple(
+        (
+            target.path,
+            target.kind.value,
+            target.data_format,
+            target.timeframe,
+            target.symbol,
+            target.period,
+        )
+        for target in targets
+    )
+    return (
+        target_axes,
+        tolerance,
+        warning_severity.value,
+        error_severity.value,
     )
 
 
@@ -809,6 +1186,100 @@ def _scan_cross_instrument_consistency(
             continue
         scan.fx_series.append(series)
 
+    return _complete_cross_instrument_scan(
+        scan,
+        tolerance=tolerance,
+        warning_severity=warning_severity,
+        error_severity=error_severity,
+    )
+
+
+def _scan_cross_instrument_series_inputs(
+    inputs: tuple[CrossInstrumentSeriesInput, ...],
+    *,
+    tolerance: HistDataCrossInstrumentTolerance,
+    warning_severity: QualitySeverity,
+    error_severity: QualitySeverity,
+) -> _CrossInstrumentScan:
+    scan = _CrossInstrumentScan(
+        target_count=len(inputs),
+        ascii_target_count=len(inputs),
+    )
+    for item in inputs:
+        target = _quality_target_for_series_input(item)
+        metadata = symbol_metadata_for(item.symbol)
+        if metadata.asset_class != ASSET_CLASS_FX:
+            _append_unavailable(
+                scan,
+                _CrossInstrumentUnavailable(
+                    reason="non_fx_series",
+                    symbols=(item.symbol,),
+                    timeframe=item.timeframe,
+                    period=item.period,
+                ),
+            )
+            continue
+        timestamp_counts = Counter(
+            point.timestamp_utc_ms for point in item.points
+        )
+        points: dict[int, _CrossInstrumentPoint] = {}
+        for row_number, point in enumerate(item.points, start=1):
+            points.setdefault(
+                point.timestamp_utc_ms,
+                _CrossInstrumentPoint(
+                    timestamp_utc_ms=point.timestamp_utc_ms,
+                    price=point.price,
+                    row_number=row_number,
+                    row_id=point.row_id,
+                    source_row_number=point.source_row_number,
+                    event_seq=point.event_seq,
+                ),
+            )
+        scan.fx_series.append(
+            _CrossInstrumentSeries(
+                target=target,
+                metadata=metadata,
+                timeframe=item.timeframe,
+                period=item.period,
+                price_kind="mid_bid_ask",
+                points=points,
+                row_count=len(item.points),
+                duplicate_timestamp_count=_duplicate_timestamp_row_count(
+                    timestamp_counts
+                ),
+                computed_from=item.computed_from,
+                series_id=item.series_id,
+            )
+        )
+    return _complete_cross_instrument_scan(
+        scan,
+        tolerance=tolerance,
+        warning_severity=warning_severity,
+        error_severity=error_severity,
+    )
+
+
+def _quality_target_for_series_input(
+    item: CrossInstrumentSeriesInput,
+) -> QualityTarget:
+    return QualityTarget(
+        path=item.path,
+        kind=QualityTargetKind.CACHE,
+        data_format="ascii",
+        timeframe=item.timeframe,
+        symbol=item.symbol,
+        period=item.period,
+        metadata={"computed_from": item.computed_from},
+    )
+
+
+def _complete_cross_instrument_scan(
+    scan: _CrossInstrumentScan,
+    *,
+    tolerance: HistDataCrossInstrumentTolerance,
+    warning_severity: QualitySeverity,
+    error_severity: QualitySeverity,
+) -> _CrossInstrumentScan:
     if not scan.fx_series:
         _append_unavailable(
             scan,
@@ -929,6 +1400,7 @@ def _cross_instrument_series(
         )
 
     points: dict[int, _CrossInstrumentPoint] = {}
+    timestamp_counts: Counter[int] = Counter()
     invalid_price_count = 0
     for row_number, row in enumerate(batch.rows, start=1):
         timestamp_utc_ms = int(row[0])
@@ -936,11 +1408,15 @@ def _cross_instrument_series(
         if price is None:
             invalid_price_count += 1
             continue
+        timestamp_counts[timestamp_utc_ms] += 1
         if timestamp_utc_ms not in points:
             points[timestamp_utc_ms] = _CrossInstrumentPoint(
                 timestamp_utc_ms=timestamp_utc_ms,
                 price=price,
                 row_number=row_number,
+                row_id=row_number,
+                source_row_number=row_number,
+                event_seq=row_number,
             )
 
     if not points:
@@ -968,6 +1444,12 @@ def _cross_instrument_series(
             period=target.period,
             price_kind=_cross_instrument_price_kind(target.timeframe),
             points=points,
+            row_count=len(batch.rows),
+            duplicate_timestamp_count=_duplicate_timestamp_row_count(
+                timestamp_counts
+            ),
+            computed_from="text_scan",
+            series_id=_cross_series_id(target),
         ),
         None,
         invalid_price_count,
@@ -984,7 +1466,7 @@ def _cross_instrument_series_from_polars_cache(
     ]
     | None
 ):
-    columns = ("datetime", "bid", "ask")
+    columns = ("datetime", "bid", "ask", "vol")
     cache = read_quality_polars_cache(
         target,
         required_columns=columns,
@@ -993,30 +1475,51 @@ def _cross_instrument_series_from_polars_cache(
         return None
 
     try:
-        frame = cache.frame.select(list(columns))
-        rows = frame.iter_rows(named=False)
+        frame = ensure_tick_training_features(cache.frame, target=target)
+        selected_columns = (
+            "datetime",
+            "bid",
+            "ask",
+            *CROSS_SERIES_ROW_IDENTITY_COLUMNS,
+            "training_schema_version",
+        )
+        rows = frame.select(list(selected_columns)).iter_rows(named=True)
     except Exception:
         return None
 
     points: dict[int, _CrossInstrumentPoint] = {}
+    timestamp_counts: Counter[int] = Counter()
     invalid_price_count = 0
     row_count = 0
+    series_id = ""
+    training_schema_version = ""
     for row_number, row in enumerate(rows, start=1):
         row_count += 1
         try:
-            timestamp_utc_ms = int(row[0])
-            price = (float(row[1]) + float(row[2])) / 2.0
+            timestamp_utc_ms = int(row["datetime"])
+            price = (float(row["bid"]) + float(row["ask"])) / 2.0
+            row_id = int(row["row_id"])
+            source_row_number = int(row["source_row_number"])
+            event_seq = int(row["event_seq"])
         except (TypeError, ValueError):
             invalid_price_count += 1
             continue
         if not math.isfinite(price) or price <= 0.0:
             invalid_price_count += 1
             continue
+        timestamp_counts[timestamp_utc_ms] += 1
+        series_id = str(row["series_id"] or series_id)
+        training_schema_version = str(
+            row["training_schema_version"] or training_schema_version
+        )
         if timestamp_utc_ms not in points:
             points[timestamp_utc_ms] = _CrossInstrumentPoint(
                 timestamp_utc_ms=timestamp_utc_ms,
                 price=price,
                 row_number=row_number,
+                row_id=row_id,
+                source_row_number=source_row_number,
+                event_seq=event_seq,
             )
 
     if not points:
@@ -1044,6 +1547,20 @@ def _cross_instrument_series_from_polars_cache(
             period=target.period,
             price_kind=_cross_instrument_price_kind(target.timeframe),
             points=points,
+            row_count=row_count,
+            duplicate_timestamp_count=_duplicate_timestamp_row_count(
+                timestamp_counts
+            ),
+            computed_from=(
+                "direct_cache"
+                if cache.source == "direct"
+                else "fresh_sibling_cache"
+            ),
+            series_id=series_id or _cross_series_id(target),
+            cache_source=cache.source,
+            training_schema_version=(
+                training_schema_version or TRAINING_SCHEMA_VERSION
+            ),
         ),
         None,
         invalid_price_count,
@@ -1423,6 +1940,594 @@ def _relative_difference_severity(
     return None
 
 
+def _cross_series_fingerprint_payload(
+    scan: _CrossInstrumentScan,
+    *,
+    tolerance: HistDataCrossInstrumentTolerance,
+    metadata: Mapping[str, JSONValue] | None,
+    group_limit: int,
+    correlation_limit: int,
+) -> dict[str, JSONValue]:
+    """Return the bounded fingerprint projection of one shared domain scan."""
+    group_limit_state = bounded_report_limit(
+        group_limit,
+        default_limit=DEFAULT_CROSS_SERIES_GROUP_LIMIT,
+    )
+    correlation_limit_state = bounded_report_limit(
+        correlation_limit,
+        default_limit=DEFAULT_CROSS_SERIES_CORRELATION_LIMIT,
+    )
+    topology_summary = _mapping_value(
+        (metadata or {}).get(
+            TIME_SERIES_FINGERPRINT_TOPOLOGY_SUMMARY_METADATA_KEY
+        )
+    )
+    topology_rows = _mapping_rows(topology_summary.get("target_summaries"))
+    grouped = _series_by_timeframe_period(scan.fx_series)
+    unique_series = _unique_cross_series_rows(scan.fx_series)
+    expected_symbols = sorted({series.symbol for series in unique_series})
+    group_payloads = [
+        _cross_series_group_payload(
+            _unique_cross_series_group(group),
+            timeframe=timeframe,
+            period=period,
+            expected_symbols=expected_symbols,
+            topology_rows=topology_rows,
+            correlation_limit=correlation_limit_state.effective_limit,
+        )
+        for (timeframe, period), group in sorted(grouped.items())
+        if len(expected_symbols) >= 2
+    ]
+    included_groups = list(group_limit_state.slice(group_payloads))
+    omitted_group_count = max(0, len(group_payloads) - len(included_groups))
+    source_basis_counts = Counter(
+        series.computed_from for series in unique_series
+    )
+    cache_source_counts = Counter(
+        series.cache_source for series in unique_series if series.cache_source
+    )
+    duplicate_timestamp_row_count = sum(
+        series.duplicate_timestamp_count for series in unique_series
+    )
+    incomplete_group_count = sum(
+        1 for group in group_payloads if group.get("complete") is not True
+    )
+    correlation_status_counts: Counter[str] = Counter()
+    for group in group_payloads:
+        correlation = _mapping_value(group.get("return_correlation"))
+        for row in _mapping_rows(correlation.get("pairs")):
+            correlation_status_counts[str(row.get("status") or "unknown")] += 1
+
+    status = "valid"
+    if not group_payloads:
+        status = "unavailable"
+    elif (
+        correlation_status_counts.get("unavailable", 0)
+        or incomplete_group_count
+    ):
+        status = "limited"
+
+    return cast(
+        dict[str, JSONValue],
+        {
+            "schema_version": CROSS_SERIES_FINGERPRINT_SCHEMA_VERSION,
+            "rule_id": CROSS_SERIES_FINGERPRINT_RULE_ID,
+            "status": status,
+            "calculation_basis": "shared_cross_instrument_scan",
+            "data_format": "ascii",
+            "timeframe": TICK,
+            "target_count": scan.target_count,
+            "ascii_tick_target_count": scan.ascii_target_count,
+            "fx_series_count": len(unique_series),
+            "group_count": len(group_payloads),
+            "incomplete_group_count": incomplete_group_count,
+            "included_group_count": len(included_groups),
+            "omitted_group_count": omitted_group_count,
+            "truncated": omitted_group_count > 0,
+            "limit_metadata": {
+                "groups": group_limit_state.limit_payload(),
+                "correlations_per_group": (
+                    correlation_limit_state.limit_payload()
+                ),
+            },
+            "source_basis_counts": _sorted_counter(source_basis_counts),
+            "cache_source_counts": _sorted_counter(cache_source_counts),
+            "row_identity": {
+                "columns": list(CROSS_SERIES_ROW_IDENTITY_COLUMNS),
+                "timestamp_is_durable_identity": False,
+                "duplicate_timestamp_row_count": (
+                    duplicate_timestamp_row_count
+                ),
+                "legacy_cache_enrichment_required": True,
+                "training_schema_version": TRAINING_SCHEMA_VERSION,
+            },
+            "topology_basis": {
+                "schema_version": topology_summary.get("schema_version"),
+                "target_count": _json_int(topology_summary.get("target_count")),
+                "included_target_count": _json_int(
+                    topology_summary.get("included_target_count")
+                ),
+                "truncated": topology_summary.get("truncated") is True,
+            },
+            "panel_coverage": _cross_series_panel_coverage(unique_series),
+            "return_correlation_status_counts": _sorted_counter(
+                correlation_status_counts
+            ),
+            "triangular_consistency": _cross_series_consistency_payload(
+                candidate_count=scan.triangular_candidate_count,
+                compared_timestamp_count=(
+                    scan.triangular_compared_timestamp_count
+                ),
+                warning_count=scan.triangular_warning_count,
+                error_count=scan.triangular_error_count,
+                warning_samples=scan.triangular_warnings,
+                error_samples=scan.triangular_errors,
+            ),
+            "inverse_consistency": _cross_series_consistency_payload(
+                candidate_count=scan.inverse_candidate_count,
+                compared_timestamp_count=(
+                    scan.inverse_compared_timestamp_count
+                ),
+                warning_count=scan.inverse_warning_count,
+                error_count=scan.inverse_error_count,
+                warning_samples=scan.inverse_warnings,
+                error_samples=scan.inverse_errors,
+            ),
+            "stale_join_risk": {
+                "risk_count": scan.stale_join_risk_count,
+                "samples": _publish_safe_cross_samples(scan.stale_join_risks),
+            },
+            "unavailable": {
+                "count": len(scan.unavailable),
+                "samples": _publish_safe_cross_samples(scan.unavailable),
+            },
+            "tolerance": tolerance.to_metadata(),
+            "groups": included_groups,
+        },
+    )
+
+
+def _cross_series_panel_coverage(
+    series_rows: Sequence[_CrossInstrumentSeries],
+) -> list[JSONValue]:
+    by_timeframe: dict[str, list[_CrossInstrumentSeries]] = {}
+    for series in series_rows:
+        by_timeframe.setdefault(series.timeframe, []).append(series)
+    payloads: list[JSONValue] = []
+    for timeframe, rows in sorted(by_timeframe.items()):
+        unique_rows = _unique_cross_series_rows(rows)
+        by_symbol: dict[str, list[_CrossInstrumentSeries]] = {}
+        for series in unique_rows:
+            by_symbol.setdefault(series.symbol, []).append(series)
+        if len(by_symbol) < 2:
+            continue
+        union_periods = sorted({series.period for series in unique_rows})
+        common_periods = sorted(
+            set.intersection(
+                *(
+                    {series.period for series in symbol_rows}
+                    for symbol_rows in by_symbol.values()
+                )
+            )
+        )
+        first_period_by_symbol = {
+            symbol: min(series.period for series in symbol_rows)
+            for symbol, symbol_rows in by_symbol.items()
+        }
+        last_period_by_symbol = {
+            symbol: max(series.period for series in symbol_rows)
+            for symbol, symbol_rows in by_symbol.items()
+        }
+        common_first_period = max(first_period_by_symbol.values())
+        common_last_period = min(last_period_by_symbol.values())
+        payloads.append(
+            cast(
+                JSONValue,
+                {
+                    "timeframe": timeframe,
+                    "symbols": sorted(by_symbol),
+                    "union_period_count": len(union_periods),
+                    "common_period_count": len(common_periods),
+                    "common_first_period": common_first_period,
+                    "common_last_period": common_last_period,
+                    "unequal_period_ranges": (
+                        len(set(first_period_by_symbol.values())) > 1
+                        or len(set(last_period_by_symbol.values())) > 1
+                    ),
+                    "limiting_start_symbols": sorted(
+                        symbol
+                        for symbol, period in first_period_by_symbol.items()
+                        if period == common_first_period
+                    ),
+                    "limiting_end_symbols": sorted(
+                        symbol
+                        for symbol, period in last_period_by_symbol.items()
+                        if period == common_last_period
+                    ),
+                    "first_period_by_symbol": dict(
+                        sorted(first_period_by_symbol.items())
+                    ),
+                    "last_period_by_symbol": dict(
+                        sorted(last_period_by_symbol.items())
+                    ),
+                    "missing_period_count_by_symbol": {
+                        symbol: len(
+                            set(union_periods).difference(
+                                series.period for series in symbol_rows
+                            )
+                        )
+                        for symbol, symbol_rows in sorted(by_symbol.items())
+                    },
+                },
+            )
+        )
+    return payloads
+
+
+def _unique_cross_series_rows(
+    rows: Sequence[_CrossInstrumentSeries],
+) -> list[_CrossInstrumentSeries]:
+    selected: dict[tuple[str, str, str], _CrossInstrumentSeries] = {}
+    for series in sorted(rows, key=_cross_series_source_preference):
+        selected.setdefault(
+            (series.timeframe, series.period, series.symbol),
+            series,
+        )
+    return [selected[key] for key in sorted(selected)]
+
+
+def _unique_cross_series_group(
+    group: Sequence[_CrossInstrumentSeries],
+) -> list[_CrossInstrumentSeries]:
+    return _unique_cross_series_rows(group)
+
+
+def _cross_series_source_preference(
+    series: _CrossInstrumentSeries,
+) -> tuple[int, int, str]:
+    computation_rank = {
+        "direct_cache": 0,
+        "fresh_sibling_cache": 1,
+        "text_scan": 2,
+    }
+    kind_rank = {
+        QualityTargetKind.CACHE: 0,
+        QualityTargetKind.CSV: 1,
+        QualityTargetKind.ZIP: 2,
+    }
+    return (
+        computation_rank.get(series.computed_from, 99),
+        kind_rank.get(series.target.kind, 99),
+        series.target.path,
+    )
+
+
+def _cross_series_group_payload(
+    group: list[_CrossInstrumentSeries],
+    *,
+    timeframe: str,
+    period: str,
+    expected_symbols: Sequence[str],
+    topology_rows: list[Mapping[str, JSONValue]],
+    correlation_limit: int,
+) -> dict[str, JSONValue]:
+    union = set().union(*(series.timestamps for series in group))
+    common = set.intersection(*(series.timestamps for series in group))
+    starts = [
+        start for series in group if (start := series.start_utc_ms) is not None
+    ]
+    ends = [end for series in group if (end := series.end_utc_ms) is not None]
+    common_start = max(starts) if starts else None
+    common_end = min(ends) if ends else None
+    symbols = [series.symbol for series in group]
+    group_topology_rows = [
+        row
+        for row in topology_rows
+        if _topology_row_matches_group(
+            row,
+            timeframe=timeframe,
+            period=period,
+            symbols=set(symbols),
+        )
+    ]
+    return cast(
+        dict[str, JSONValue],
+        {
+            "group_id": f"ascii:{timeframe}:{period}",
+            "target_axis": {
+                "data_format": "ascii",
+                "timeframe": timeframe,
+                "period": period,
+            },
+            "symbols": symbols,
+            "expected_symbols": list(expected_symbols),
+            "missing_symbols": sorted(
+                set(expected_symbols).difference(symbols)
+            ),
+            "complete": set(symbols) == set(expected_symbols),
+            "series_count": len(group),
+            "series": [_cross_series_profile(series) for series in group],
+            "timestamp_grid": {
+                "union_timestamp_count": len(union),
+                "common_timestamp_count": len(common),
+                "common_timestamp_ratio": _rounded_ratio(
+                    len(common), len(union)
+                ),
+                "missing_by_symbol": {
+                    series.symbol: len(union.difference(series.timestamps))
+                    for series in group
+                },
+            },
+            "coverage_ranges": {
+                "common_start_timestamp_utc_ms": common_start,
+                "common_end_timestamp_utc_ms": common_end,
+                "unequal_ranges": (len(set(starts)) > 1 or len(set(ends)) > 1),
+                "limiting_start_symbols": sorted(
+                    series.symbol
+                    for series in group
+                    if series.start_utc_ms == common_start
+                ),
+                "limiting_end_symbols": sorted(
+                    series.symbol
+                    for series in group
+                    if series.end_utc_ms == common_end
+                ),
+            },
+            "topology": _cross_series_topology_payload(
+                group_topology_rows,
+                group=group,
+            ),
+            "return_correlation": _cross_series_return_correlation_payload(
+                group,
+                limit=correlation_limit,
+            ),
+        },
+    )
+
+
+def _cross_series_profile(
+    series: _CrossInstrumentSeries,
+) -> dict[str, JSONValue]:
+    return cast(
+        dict[str, JSONValue],
+        {
+            "series_id": series.series_id,
+            "symbol": series.symbol,
+            "period": series.period,
+            "timeframe": series.timeframe,
+            "price_kind": series.price_kind,
+            "row_count": series.row_count,
+            "unique_timestamp_count": series.timestamp_count,
+            "duplicate_timestamp_row_count": series.duplicate_timestamp_count,
+            "start_timestamp_utc_ms": series.start_utc_ms,
+            "end_timestamp_utc_ms": series.end_utc_ms,
+            "computed_from": series.computed_from,
+            "cache_source": series.cache_source or None,
+            "training_schema_version": series.training_schema_version or None,
+            "identity_columns": list(CROSS_SERIES_ROW_IDENTITY_COLUMNS),
+        },
+    )
+
+
+def _cross_series_topology_payload(
+    rows: list[Mapping[str, JSONValue]],
+    *,
+    group: Sequence[_CrossInstrumentSeries],
+) -> dict[str, JSONValue]:
+    count_keys = (
+        "row_count",
+        "parsed_row_count",
+        "invalid_timestamp_count",
+        "duplicate_timestamp_count",
+        "non_monotonic_count",
+        "suspicious_gap_count",
+        "expected_session_closure_count",
+        "weekend_activity_count",
+    )
+    topology_computed_from_counts = Counter(
+        str(row.get("computed_from") or "unknown") for row in rows
+    )
+    topology_cache_source_counts = Counter(
+        str(row.get("cache_source"))
+        for row in rows
+        if row.get("cache_source") is not None
+    )
+    computed_from_counts = Counter(series.computed_from for series in group)
+    cache_source_counts = Counter(
+        series.cache_source for series in group if series.cache_source
+    )
+    payload: dict[str, JSONValue] = {
+        key: sum(_json_int(row.get(key)) for row in rows) for key in count_keys
+    }
+    payload.update(
+        {
+            "target_count": len(rows),
+            "source_series_count": len(group),
+            "duplicate_timestamp_row_count": sum(
+                series.duplicate_timestamp_count for series in group
+            ),
+            "computed_from_counts": _sorted_counter(computed_from_counts),
+            "cache_source_counts": _sorted_counter(cache_source_counts),
+            "topology_computed_from_counts": _sorted_counter(
+                topology_computed_from_counts
+            ),
+            "topology_cache_source_counts": _sorted_counter(
+                topology_cache_source_counts
+            ),
+            "mixed_computation_basis": len(computed_from_counts) > 1,
+            "mixed_cache_source": len(cache_source_counts) > 1,
+        }
+    )
+    return payload
+
+
+def _cross_series_return_correlation_payload(
+    group: list[_CrossInstrumentSeries],
+    *,
+    limit: int,
+) -> dict[str, JSONValue]:
+    rows = [
+        _return_correlation_pair(left, right)
+        for left, right in combinations(group, 2)
+    ]
+    limit_state = bounded_report_limit(
+        limit,
+        default_limit=DEFAULT_CROSS_SERIES_CORRELATION_LIMIT,
+    )
+    included = list(limit_state.slice(rows))
+    omitted = max(0, len(rows) - len(included))
+    return cast(
+        dict[str, JSONValue],
+        {
+            "pair_count": len(rows),
+            "included_pair_count": len(included),
+            "omitted_pair_count": omitted,
+            "truncated": omitted > 0,
+            "limit_metadata": {"pairs": limit_state.limit_payload()},
+            "pairs": included,
+        },
+    )
+
+
+def _return_correlation_pair(
+    left: _CrossInstrumentSeries,
+    right: _CrossInstrumentSeries,
+) -> dict[str, JSONValue]:
+    left_returns = _log_returns_by_timestamp(left)
+    right_returns = _log_returns_by_timestamp(right)
+    common = sorted(set(left_returns).intersection(right_returns))
+    payload: dict[str, JSONValue] = {
+        "left_symbol": left.symbol,
+        "right_symbol": right.symbol,
+        "overlap_return_count": len(common),
+    }
+    if len(common) < 2:
+        return {
+            **payload,
+            "status": "unavailable",
+            "reason": "insufficient_overlap",
+        }
+    left_values = [left_returns[timestamp] for timestamp in common]
+    right_values = [right_returns[timestamp] for timestamp in common]
+    correlation = _pearson_correlation(left_values, right_values)
+    if correlation is None:
+        return {**payload, "status": "unavailable", "reason": "zero_variance"}
+    return {
+        **payload,
+        "status": "valid",
+        "correlation": round(correlation, 12),
+    }
+
+
+def _log_returns_by_timestamp(
+    series: _CrossInstrumentSeries,
+) -> dict[int, float]:
+    returns: dict[int, float] = {}
+    previous_price: float | None = None
+    for timestamp, point in sorted(series.points.items()):
+        if (
+            previous_price is not None
+            and previous_price > 0
+            and point.price > 0
+        ):
+            returns[timestamp] = math.log(point.price / previous_price)
+        previous_price = point.price
+    return returns
+
+
+def _pearson_correlation(
+    left: Sequence[float],
+    right: Sequence[float],
+) -> float | None:
+    count = len(left)
+    if count != len(right) or count < 2:
+        return None
+    left_mean = math.fsum(left) / count
+    right_mean = math.fsum(right) / count
+    left_delta = [value - left_mean for value in left]
+    right_delta = [value - right_mean for value in right]
+    numerator = math.fsum(
+        left_value * right_value
+        for left_value, right_value in zip(left_delta, right_delta, strict=True)
+    )
+    left_scale = math.fsum(value * value for value in left_delta)
+    right_scale = math.fsum(value * value for value in right_delta)
+    denominator = math.sqrt(left_scale * right_scale)
+    if denominator == 0:
+        return None
+    return numerator / denominator
+
+
+def _cross_series_consistency_payload(
+    *,
+    candidate_count: int,
+    compared_timestamp_count: int,
+    warning_count: int,
+    error_count: int,
+    warning_samples: Sequence[object],
+    error_samples: Sequence[object],
+) -> dict[str, JSONValue]:
+    return {
+        "candidate_count": candidate_count,
+        "compared_timestamp_count": compared_timestamp_count,
+        "warning_count": warning_count,
+        "error_count": error_count,
+        "warning_samples": _publish_safe_cross_samples(warning_samples),
+        "error_samples": _publish_safe_cross_samples(error_samples),
+    }
+
+
+def _publish_safe_cross_samples(
+    samples: Sequence[object],
+) -> list[JSONValue]:
+    payloads: list[JSONValue] = []
+    for sample in samples[:MAX_CROSS_INSTRUMENT_SAMPLES]:
+        converter = getattr(sample, "to_metadata", None)
+        if not callable(converter):
+            continue
+        payload = dict(converter())
+        payload.pop("path", None)
+        payload.pop("paths", None)
+        payload.pop("error", None)
+        payloads.append(payload)
+    return payloads
+
+
+def _topology_row_matches_group(
+    row: Mapping[str, JSONValue],
+    *,
+    timeframe: str,
+    period: str,
+    symbols: set[str],
+) -> bool:
+    axis = _mapping_value(row.get("target_axis"))
+    return (
+        str(axis.get("timeframe") or "").upper() == timeframe.upper()
+        and str(axis.get("period") or "") == period
+        and str(axis.get("symbol") or "").upper() in symbols
+    )
+
+
+def _mapping_value(value: object) -> Mapping[str, JSONValue]:
+    return value if isinstance(value, Mapping) else {}
+
+
+def _mapping_rows(value: object) -> list[Mapping[str, JSONValue]]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, Mapping)]
+
+
+def _sorted_counter(counter: Counter[str]) -> dict[str, JSONValue]:
+    return {key: counter[key] for key in sorted(counter)}
+
+
+def _rounded_ratio(numerator: int, denominator: int) -> float | None:
+    if denominator <= 0:
+        return None
+    return round(numerator / denominator, 12)
+
+
 def _cross_instrument_payload(
     scan: _CrossInstrumentScan,
     *,
@@ -1484,17 +2589,19 @@ def _cross_instrument_target(
     *,
     metadata: Mapping[str, JSONValue] | None,
     payload: Mapping[str, JSONValue],
+    rule_id: str = DOMAIN_CROSS_INSTRUMENT_RULE_ID,
+    manifest: str = "cross-instrument-consistency",
 ) -> QualityTarget:
     root = _quality_run_root(metadata)
     if not root and targets:
         root = str(Path(targets[0].path).parent)
     return QualityTarget(
-        path=root or "cross-instrument-consistency",
+        path=root or manifest,
         kind=QualityTargetKind.DIRECTORY,
         data_format="ascii",
         metadata={
-            "manifest": "cross-instrument-consistency",
-            "rule_id": DOMAIN_CROSS_INSTRUMENT_RULE_ID,
+            "manifest": manifest,
+            "rule_id": rule_id,
             "target_count": _json_int(payload.get("target_count")),
             "fx_series_count": _json_int(payload.get("fx_series_count")),
             "triangular_candidate_count": _json_int(

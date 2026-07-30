@@ -51,6 +51,7 @@ class FakeRunner:
         precommit_file_mutation_sequence: (
             Sequence[Mapping[str, str]] | None
         ) = None,
+        pytest_returncode: int = 0,
         release_returncode: int = 0,
         ps_outputs: Sequence[str] = ("",),
         issue_state: str = "OPEN",
@@ -81,6 +82,7 @@ class FakeRunner:
         self.precommit_file_mutation_sequence = tuple(
             dict(item) for item in precommit_file_mutation_sequence or ()
         )
+        self.pytest_returncode = pytest_returncode
         self.release_returncode = release_returncode
         self.ps_outputs = tuple(ps_outputs)
         self.issue_state = issue_state
@@ -140,7 +142,7 @@ class FakeRunner:
             )
         if args == ("git", "status", "--porcelain=v1", "--untracked-files=all"):
             self.status_calls += 1
-            if self.precommit_changes and self.status_calls >= 11:
+            if self.precommit_changes and self.precommit_calls:
                 return _completed(args, stdout=self.precommit_changes)
             return _completed(args, stdout=self.status_stdout)
         if args[:3] == ("git", "add", "--"):
@@ -270,7 +272,14 @@ class FakeRunner:
         if args[:3] == (sys.executable, "-m", "histdatacom"):
             return _completed(args, stdout="usage: histdatacom\n")
         if args[:3] == (sys.executable, "-m", "pytest"):
-            return _completed(args, stdout="983 passed\n")
+            return _completed(
+                args,
+                returncode=self.pytest_returncode,
+                stdout=("983 passed\n" if self.pytest_returncode == 0 else ""),
+                stderr=(
+                    "pytest failed\n" if self.pytest_returncode != 0 else ""
+                ),
+            )
         if args[:3] == (sys.executable, "-m", "pre_commit"):
             index = self.precommit_calls
             self.precommit_calls += 1
@@ -527,12 +536,6 @@ def test_standalone_gate_run_without_mutation_opt_in_does_not_rerun(
         runner=runner,
     )
     payload = json.loads(capsys.readouterr().out)
-    pytest_calls = [
-        call
-        for call in runner.calls
-        if call[:3] == (sys.executable, "-m", "pytest")
-    ]
-
     assert exit_code == 0
     assert payload["readiness"]["state"] == "ready"
     assert payload["gates"]["changed_paths_after"] == []
@@ -549,7 +552,10 @@ def test_standalone_gate_run_without_mutation_opt_in_does_not_rerun(
         "formatter/tool-only mutation rerun is not required"
     )
     assert runner.precommit_calls == 1
-    assert len(pytest_calls) == 1
+    assert payload["gates"]["final_coverage"]["state"] == "not-applicable"
+    assert any(
+        call == (sys.executable, "-m", "pytest") for call in runner.calls
+    )
 
 
 def test_standalone_gate_run_non_formatter_mutation_blocks_rerun(
@@ -593,6 +599,46 @@ def test_standalone_gate_run_non_formatter_mutation_blocks_rerun(
     assert report["gates"]["rerun"]["eligible"] is False
 
 
+def test_full_tests_are_skipped_after_an_earlier_gate_failure(
+    tmp_path: Path,
+) -> None:
+    """A cheap failure should block before the full plain suite starts."""
+    module = _module()
+    runner = FakeRunner(precommit_returncode=1)
+
+    gates = module.collect_gate_summary(
+        tmp_path,
+        run_gates=True,
+        runner=runner,
+    )
+
+    assert gates["state"] == "fail"
+    assert gates["final_coverage"]["state"] == "not-applicable"
+    assert [result["name"] for result in gates["results"]][-1] == "pre-commit"
+    assert not any(
+        result["name"] == "full-tests" for result in gates["results"]
+    )
+
+
+def test_full_plain_test_failure_blocks_closure_readiness(
+    tmp_path: Path,
+) -> None:
+    """A failing release-independent test gate remains a closure blocker."""
+    module = _module()
+    runner = FakeRunner(pytest_returncode=1)
+
+    gates = module.collect_gate_summary(
+        tmp_path,
+        run_gates=True,
+        runner=runner,
+    )
+
+    assert gates["state"] == "fail"
+    assert gates["final_coverage"]["state"] == "not-applicable"
+    assert gates["results"][-1]["name"] == "full-tests"
+    assert gates["results"][-1]["status"] == "fail"
+
+
 def test_standalone_gate_run_formatter_rerun_success_clears_gate_blocker(
     tmp_path: Path,
 ) -> None:
@@ -628,12 +674,17 @@ def test_standalone_gate_run_formatter_rerun_success_clears_gate_blocker(
     assert report["gates"]["state"] == "pass"
     assert report["gates"]["required_rerun"]["state"] == "passed"
     assert report["gates"]["rerun"]["state"] == "pass"
+    assert report["gates"]["final_coverage"]["state"] == "not-applicable"
     assert "closure-gates-changed-files" not in (
         report["readiness"]["blocking_checks"]
     )
     assert "gate:pre-commit" not in report["readiness"]["blocking_checks"]
     assert "dirty-worktree" in report["readiness"]["blocking_checks"]
     assert runner.precommit_calls == 2
+    assert any(
+        result["name"] == "full-tests"
+        for result in report["gates"]["rerun"]["gates"]["results"]
+    )
 
 
 def test_standalone_gate_run_formatter_rerun_failure_blocks_readiness(
@@ -1616,7 +1667,8 @@ def test_closure_verification_infers_scope_runs_gates_without_mutation(
         for call in runner.calls
         if call[:3] == (sys.executable, "-m", "pytest")
     ]
-    assert len(pytest_calls) >= 2
+    assert len(pytest_calls) == 2
+    assert (sys.executable, "-m", "pytest") in pytest_calls
     assert not any(call[:3] == ("git", "add", "--") for call in runner.calls)
     assert not any(call[:3] == ("git", "commit", "-m") for call in runner.calls)
     assert not any(call[:2] == ("git", "push") for call in runner.calls)
@@ -1957,7 +2009,7 @@ def test_execute_workflow_runs_ready_sequence_and_closes_issue(
     assert any(call[:3] == ("git", "commit", "-m") for call in runner.calls)
     assert any(call[:2] == ("git", "push") for call in runner.calls)
     assert any(
-        call[:3] == (sys.executable, "-m", "pytest") for call in runner.calls
+        call == (sys.executable, "-m", "pytest") for call in runner.calls
     )
     assert any(call[:3] == ("gh", "issue", "close") for call in runner.calls)
 
@@ -2362,10 +2414,10 @@ def test_execute_workflow_pre_mutation_gates_run_before_git_mutation(
         runner=runner,
     )
     payload = json.loads(capsys.readouterr().out)
-    first_pytest = next(
+    first_full_tests = next(
         index
         for index, call in enumerate(runner.calls)
-        if call[:3] == (sys.executable, "-m", "pytest")
+        if call == (sys.executable, "-m", "pytest")
     )
     first_precommit = next(
         index
@@ -2384,8 +2436,7 @@ def test_execute_workflow_pre_mutation_gates_run_before_git_mutation(
     assert payload["pre_mutation_gates"]["enabled"] is True
     assert payload["pre_mutation_gates"]["state"] == "pass"
     assert payload["pre_mutation_gates"]["gates"]["state"] == "pass"
-    assert first_pytest < first_add
-    assert first_precommit < first_add
+    assert first_precommit < first_full_tests < first_add
     assert "## Pre-Mutation Gates" in markdown
     assert "- State: pass" in markdown
     assert any(call[:2] == ("git", "push") for call in runner.calls)
@@ -2646,6 +2697,9 @@ def test_execute_workflow_pre_mutation_formatter_rerun_success_allows_commit(
     )
     assert payload["pre_mutation_gates"]["rerun"]["changed_paths_after"] == []
     assert runner.precommit_calls >= 2
+    assert any(
+        call == (sys.executable, "-m", "pytest") for call in runner.calls
+    )
     assert any(call[:3] == ("git", "add", "--") for call in runner.calls)
     assert any(call[:3] == ("git", "commit", "-m") for call in runner.calls)
     assert any(call[:2] == ("git", "push") for call in runner.calls)
@@ -3390,7 +3444,7 @@ def test_guided_workflow_runs_gates_writes_reports_and_closes(
     ).exists()
     assert len(close_calls) == 1
     assert any(
-        call[:3] == (sys.executable, "-m", "pytest") for call in runner.calls
+        call == (sys.executable, "-m", "pytest") for call in runner.calls
     )
     assert any(
         call[:3] == (sys.executable, "-m", "pre_commit")

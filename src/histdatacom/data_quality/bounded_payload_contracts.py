@@ -6,6 +6,9 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import cast
 
+from histdatacom.data_quality.autoregressive import (
+    AUTOREGRESSIVE_SCHEMA_VERSION,
+)
 from histdatacom.data_quality.contracts import (
     QualityFinding,
     QualityLocation,
@@ -15,10 +18,42 @@ from histdatacom.data_quality.contracts import (
     QualityTarget,
     QualityTargetKind,
 )
-from histdatacom.data_quality.fingerprints import (
-    SERIES_FINGERPRINT_RULE_ID,
+from histdatacom.data_quality.classical_baselines import (
+    CLASSICAL_BASELINE_SCHEMA_VERSION,
 )
+from histdatacom.data_quality.classical_model_contracts import (
+    CLASSICAL_MODEL_INPUT_SCHEMA_VERSION,
+)
+from histdatacom.data_quality.classical_model_comparison import (
+    CLASSICAL_MODEL_COMPARISON_ELIGIBILITY_SCHEMA_VERSION,
+    CLASSICAL_MODEL_COMPARISON_SCHEMA_VERSION,
+    CLASSICAL_MODEL_COMPARISON_TRAINING_PROJECTION_SCHEMA_VERSION,
+    CLASSICAL_MODEL_FIT_ACCOUNTING_SCHEMA_VERSION,
+)
+from histdatacom.data_quality.engine import (
+    QUALITY_ENGINE_METADATA_KEY,
+    run_quality_assessment,
+)
+from histdatacom.data_quality.exponential_smoothing import (
+    EXPONENTIAL_SMOOTHING_SCHEMA_VERSION,
+)
+from histdatacom.data_quality.seasonal_exogenous import (
+    SEASONAL_EXOGENOUS_SCHEMA_VERSION,
+)
+from histdatacom.data_quality.state_space import STATE_SPACE_SCHEMA_VERSION
+from histdatacom.data_quality.volatility import VOLATILITY_SCHEMA_VERSION
+from histdatacom.data_quality.fingerprints import (
+    CROSS_SERIES_FINGERPRINT_METADATA_KEY,
+    CROSS_SERIES_FINGERPRINT_RULE_ID,
+    CROSS_SERIES_FINGERPRINT_SCHEMA_VERSION,
+    SERIES_FINGERPRINT_RULE_ID,
+    TIME_SERIES_FINGERPRINT_PARITY_SCHEMA_VERSION,
+)
+from histdatacom.data_quality.limits import bounded_report_limit
 from histdatacom.data_quality.profiles import QUALITY_REPORTING_METADATA_KEY
+from histdatacom.data_quality.synthetic_constraints import (
+    synthetic_constraints_from_fingerprint,
+)
 from histdatacom.data_quality.reporting import (
     QUALITY_REMEDIATION_CATALOG_AUDIT_METADATA_KEY,
     QualityExitPolicy,
@@ -134,6 +169,159 @@ _SEQUENCE_CONTRACTS: tuple[_BoundedSequenceContract, ...] = (
         ),
     ),
     _BoundedSequenceContract(
+        "remediation_plan",
+        (
+            "remediation_catalog_audit",
+            "payload_limits",
+            "remediation_plan",
+        ),
+        ("remediation_catalog_audit", "remediation_plan", "items"),
+        (
+            "remediation_catalog_audit",
+            "payload_limits",
+            "remediation_plan",
+            "total_count",
+        ),
+        (
+            "remediation_catalog_audit",
+            "payload_limits",
+            "remediation_plan",
+            "included_count",
+        ),
+        (
+            "remediation_catalog_audit",
+            "payload_limits",
+            "remediation_plan",
+            "omitted_count",
+        ),
+        (
+            "remediation_catalog_audit",
+            "payload_limits",
+            "remediation_plan",
+            "truncated",
+        ),
+    ),
+    _BoundedSequenceContract(
+        "remediation_attribution_reasons",
+        (
+            "remediation_catalog_audit",
+            "payload_limits",
+            "attribution_reason_counts",
+        ),
+        (
+            "remediation_catalog_audit",
+            "known_code_counts",
+            "attribution_reason_counts",
+        ),
+        (
+            "remediation_catalog_audit",
+            "payload_limits",
+            "attribution_reason_counts",
+            "total_count",
+        ),
+        (
+            "remediation_catalog_audit",
+            "payload_limits",
+            "attribution_reason_counts",
+            "included_count",
+        ),
+        (
+            "remediation_catalog_audit",
+            "payload_limits",
+            "attribution_reason_counts",
+            "omitted_count",
+        ),
+        (
+            "remediation_catalog_audit",
+            "payload_limits",
+            "attribution_reason_counts",
+            "truncated",
+        ),
+    ),
+    _BoundedSequenceContract(
+        "remediation_unresolved_helpers",
+        (
+            "remediation_catalog_audit",
+            "payload_limits",
+            "unresolved_source_helper_counts",
+        ),
+        (
+            "remediation_catalog_audit",
+            "known_code_counts",
+            "unresolved_source_helper_counts",
+        ),
+        (
+            "remediation_catalog_audit",
+            "payload_limits",
+            "unresolved_source_helper_counts",
+            "total_count",
+        ),
+        (
+            "remediation_catalog_audit",
+            "payload_limits",
+            "unresolved_source_helper_counts",
+            "included_count",
+        ),
+        (
+            "remediation_catalog_audit",
+            "payload_limits",
+            "unresolved_source_helper_counts",
+            "omitted_count",
+        ),
+        (
+            "remediation_catalog_audit",
+            "payload_limits",
+            "unresolved_source_helper_counts",
+            "truncated",
+        ),
+    ),
+    _BoundedSequenceContract(
+        "remediation_unresolved_prefixes",
+        (
+            "remediation_catalog_audit",
+            "payload_limits",
+            "unresolved_finding_code_prefix_counts",
+        ),
+        (
+            "remediation_catalog_audit",
+            "known_code_counts",
+            "unresolved_finding_code_prefix_counts",
+        ),
+        (
+            "remediation_catalog_audit",
+            "payload_limits",
+            "unresolved_finding_code_prefix_counts",
+            "total_count",
+        ),
+        (
+            "remediation_catalog_audit",
+            "payload_limits",
+            "unresolved_finding_code_prefix_counts",
+            "included_count",
+        ),
+        (
+            "remediation_catalog_audit",
+            "payload_limits",
+            "unresolved_finding_code_prefix_counts",
+            "omitted_count",
+        ),
+        (
+            "remediation_catalog_audit",
+            "payload_limits",
+            "unresolved_finding_code_prefix_counts",
+            "truncated",
+        ),
+    ),
+    _BoundedSequenceContract(
+        "quality_engine_skip_events",
+        ("quality_engine", "skip_events", "limit_metadata", "events"),
+        ("quality_engine", "skip_events", "events"),
+        ("quality_engine", "skip_events", "event_count"),
+        ("quality_engine", "skip_events", "included_event_count"),
+        ("quality_engine", "skip_events", "omitted_event_count"),
+        ("quality_engine", "skip_events", "truncated"),
+    ),
+    _BoundedSequenceContract(
         "fingerprint_distribution",
         ("fingerprint_distribution", "limit_metadata", "targets"),
         ("fingerprint_distribution", "target_summaries"),
@@ -165,6 +353,19 @@ _SEQUENCE_CONTRACTS: tuple[_BoundedSequenceContract, ...] = (
         ("fingerprint_topology", "included_target_count"),
         ("fingerprint_topology", "omitted_target_count"),
         ("fingerprint_topology", "truncated"),
+    ),
+    _BoundedSequenceContract(
+        "fingerprint_cross_series",
+        (
+            "fingerprint_cross_series",
+            "limit_metadata",
+            "groups",
+        ),
+        ("fingerprint_cross_series", "groups"),
+        ("fingerprint_cross_series", "group_count"),
+        ("fingerprint_cross_series", "included_group_count"),
+        ("fingerprint_cross_series", "omitted_group_count"),
+        ("fingerprint_cross_series", "truncated"),
     ),
     _BoundedSequenceContract(
         "fingerprint_topology_attention",
@@ -710,6 +911,15 @@ def _iter_limit_payloads(
     return tuple(results)
 
 
+class _RepresentativeQualitySkipRule:
+    rule_id = "time.ascii.gaps"
+    description = "semantic scans prefer extracted CSVs"
+
+    def evaluate(self, target: QualityTarget) -> tuple[QualityFinding, ...]:
+        del target
+        return ()
+
+
 def _representative_quality_report() -> QualityReport:
     valid_tick = _target(
         "data/EURUSD-T-valid.csv", symbol="EURUSD", timeframe="T"
@@ -734,6 +944,14 @@ def _representative_quality_report() -> QualityReport:
         kind=QualityTargetKind.DIRECTORY,
         data_format="ascii",
         timeframe="T",
+    )
+    duplicate_archive = QualityTarget(
+        path="data/EURUSD-T-valid.zip",
+        kind=QualityTargetKind.ZIP,
+        data_format=valid_tick.data_format,
+        timeframe=valid_tick.timeframe,
+        symbol=valid_tick.symbol,
+        period=valid_tick.period,
     )
 
     fingerprint_findings = (
@@ -788,6 +1006,7 @@ def _representative_quality_report() -> QualityReport:
         },
     )
     targets = (
+        duplicate_archive,
         valid_tick,
         limited_tick,
         tick,
@@ -796,9 +1015,15 @@ def _representative_quality_report() -> QualityReport:
         negative_spread,
         directory,
     )
+    skip_report = run_quality_assessment(
+        targets=targets,
+        rules=(_RepresentativeQualitySkipRule(),),
+    )
+    quality_engine = skip_report.metadata[QUALITY_ENGINE_METADATA_KEY]
     return QualityReport(
         targets=targets,
         rule_results=(
+            *skip_report.rule_results,
             *(
                 QualityRuleResult(
                     rule_id=SERIES_FINGERPRINT_RULE_ID,
@@ -829,13 +1054,114 @@ def _representative_quality_report() -> QualityReport:
             ),
         ),
         metadata={
+            QUALITY_ENGINE_METADATA_KEY: quality_engine,
+            CROSS_SERIES_FINGERPRINT_METADATA_KEY: (
+                _representative_cross_series_fingerprint()
+            ),
             QUALITY_REPORTING_METADATA_KEY: {
                 QUALITY_REMEDIATION_CATALOG_AUDIT_METADATA_KEY: {
                     "enabled": True,
                 }
-            }
+            },
         },
     )
+
+
+def _representative_cross_series_fingerprint() -> dict[str, JSONValue]:
+    group_limit = bounded_report_limit(32, default_limit=32)
+    correlation_limit = bounded_report_limit(32, default_limit=32)
+    return {
+        "schema_version": CROSS_SERIES_FINGERPRINT_SCHEMA_VERSION,
+        "rule_id": CROSS_SERIES_FINGERPRINT_RULE_ID,
+        "status": "valid",
+        "fx_series_count": 3,
+        "group_count": 1,
+        "incomplete_group_count": 0,
+        "included_group_count": 1,
+        "omitted_group_count": 0,
+        "truncated": False,
+        "limit_metadata": {
+            "groups": group_limit.limit_payload(),
+            "correlations_per_group": correlation_limit.limit_payload(),
+        },
+        "triangular_consistency": {
+            "candidate_count": 1,
+            "warning_count": 0,
+            "error_count": 0,
+        },
+        "inverse_consistency": {
+            "candidate_count": 0,
+            "warning_count": 0,
+            "error_count": 0,
+        },
+        "stale_join_risk": {"risk_count": 0, "samples": []},
+        "panel_coverage": [
+            {
+                "timeframe": "T",
+                "symbols": ["EURGBP", "EURUSD", "GBPUSD"],
+                "union_period_count": 1,
+                "common_period_count": 1,
+                "common_first_period": "201202",
+                "common_last_period": "201202",
+                "unequal_period_ranges": False,
+                "limiting_start_symbols": [
+                    "EURGBP",
+                    "EURUSD",
+                    "GBPUSD",
+                ],
+                "limiting_end_symbols": [
+                    "EURGBP",
+                    "EURUSD",
+                    "GBPUSD",
+                ],
+                "first_period_by_symbol": {
+                    "EURGBP": "201202",
+                    "EURUSD": "201202",
+                    "GBPUSD": "201202",
+                },
+                "last_period_by_symbol": {
+                    "EURGBP": "201202",
+                    "EURUSD": "201202",
+                    "GBPUSD": "201202",
+                },
+                "missing_period_count_by_symbol": {
+                    "EURGBP": 0,
+                    "EURUSD": 0,
+                    "GBPUSD": 0,
+                },
+            }
+        ],
+        "groups": [
+            {
+                "group_id": "ascii:T:201202",
+                "symbols": ["EURGBP", "EURUSD", "GBPUSD"],
+                "expected_symbols": ["EURGBP", "EURUSD", "GBPUSD"],
+                "missing_symbols": [],
+                "complete": True,
+                "timestamp_grid": {
+                    "common_timestamp_count": 3,
+                    "union_timestamp_count": 3,
+                    "common_timestamp_ratio": 1.0,
+                    "missing_by_symbol": {
+                        "EURGBP": 0,
+                        "EURUSD": 0,
+                        "GBPUSD": 0,
+                    },
+                },
+                "coverage_ranges": {"unequal_ranges": False},
+                "return_correlation": {
+                    "pair_count": 3,
+                    "included_pair_count": 3,
+                    "omitted_pair_count": 0,
+                    "truncated": False,
+                    "limit_metadata": {
+                        "pairs": correlation_limit.limit_payload()
+                    },
+                    "pairs": [],
+                },
+            }
+        ],
+    }
 
 
 def _target(path: str, *, symbol: str, timeframe: str) -> QualityTarget:
@@ -916,13 +1242,36 @@ def _limited_tick_fingerprint_payload() -> dict[str, JSONValue]:
         tick_spread_eligible=True,
         tick_spread_emitted=True,
     )
+    payload["synthetic_constraints"] = synthetic_constraints_from_fingerprint(
+        payload
+    )
+    payload["classical_baselines"] = _classical_baseline_payload(
+        "GBPUSD", status="limited"
+    )
+    payload["classical_model_input"] = _classical_model_input_payload(
+        "GBPUSD", status="limited"
+    )
+    payload["exponential_smoothing"] = _exponential_smoothing_payload(
+        "GBPUSD", status="limited"
+    )
+    payload["autoregressive"] = _autoregressive_payload(
+        "GBPUSD", status="limited"
+    )
+    payload["seasonal_exogenous"] = _seasonal_exogenous_payload(
+        "GBPUSD", status="limited"
+    )
+    payload["state_space"] = _state_space_payload("GBPUSD", status="limited")
+    payload["volatility"] = _volatility_payload("GBPUSD", status="limited")
+    payload["classical_model_comparison"] = _classical_model_comparison_payload(
+        "GBPUSD", status="limited"
+    )
     return payload
 
 
 def _tick_fingerprint_payload(
     *, symbol: str = "EURUSD"
 ) -> dict[str, JSONValue]:
-    return {
+    payload: dict[str, JSONValue] = {
         "target_axis": _axis(symbol=symbol, timeframe="T", kind="csv"),
         "coverage": {"row_count": 5, "parsed_row_count": 5},
         "temporal_topology": _topology_payload(computed_from="text_scan"),
@@ -952,6 +1301,7 @@ def _tick_fingerprint_payload(
                 }
             },
         },
+        "cache_source_parity": _cache_source_parity_payload(symbol),
         "microstructure_dynamics": _microstructure_dynamics_payload(),
         "dependence": _dependence_payload(status="ok"),
         "fingerprint_audit": _audit_payload(
@@ -979,6 +1329,361 @@ def _tick_fingerprint_payload(
         ),
         "source": {"kind": "csv_text"},
     }
+    payload["synthetic_constraints"] = synthetic_constraints_from_fingerprint(
+        payload
+    )
+    payload["classical_baselines"] = _classical_baseline_payload(symbol)
+    payload["classical_model_input"] = _classical_model_input_payload(symbol)
+    payload["exponential_smoothing"] = _exponential_smoothing_payload(symbol)
+    payload["autoregressive"] = _autoregressive_payload(symbol)
+    payload["seasonal_exogenous"] = _seasonal_exogenous_payload(symbol)
+    payload["state_space"] = _state_space_payload(symbol)
+    payload["volatility"] = _volatility_payload(symbol)
+    payload["classical_model_comparison"] = _classical_model_comparison_payload(
+        symbol
+    )
+    return payload
+
+
+def _classical_baseline_payload(
+    symbol: str,
+    *,
+    status: str = "ready",
+) -> dict[str, JSONValue]:
+    return {
+        "schema_version": CLASSICAL_BASELINE_SCHEMA_VERSION,
+        "advisory": True,
+        "status": status,
+        "reason": "stationarity_limited" if status == "limited" else None,
+        "target_axis": _axis(symbol=symbol, timeframe="T", kind="csv"),
+        "split_policy": {
+            "training_row_count": 80,
+            "evaluation_row_count": 20,
+        },
+        "evaluation": {
+            "guard_codes": (
+                ["stationarity_limited"] if status == "limited" else []
+            ),
+            "best_model": {
+                "model": "naive_random_walk",
+                "model_code": 1,
+                "mae": 0.0001,
+                "rmse": 0.0002,
+            },
+        },
+    }
+
+
+def _classical_model_input_payload(
+    symbol: str,
+    *,
+    status: str = "ready",
+) -> dict[str, JSONValue]:
+    return {
+        "schema_version": CLASSICAL_MODEL_INPUT_SCHEMA_VERSION,
+        "advisory": True,
+        "status": status,
+        "reason": "insufficient_folds" if status == "limited" else None,
+        "target_axis": _axis(symbol=symbol, timeframe="T", kind="csv"),
+        "regularization": {
+            "regularized_observation_count": 100,
+            "observed_bin_count": 96,
+            "expected_closure_count": 3,
+            "unexpected_missing_count": 1,
+        },
+        "fold_policy": {
+            "schema_version": "histdatacom.classical-model-fold.v1",
+            "fold_count": 8,
+            "valid_fold_count": 8,
+        },
+    }
+
+
+def _exponential_smoothing_payload(
+    symbol: str,
+    *,
+    status: str = "ready",
+) -> dict[str, JSONValue]:
+    return {
+        "schema_version": EXPONENTIAL_SMOOTHING_SCHEMA_VERSION,
+        "advisory": True,
+        "status": status,
+        "reason": "insufficient_data" if status == "limited" else None,
+        "target_axis": _axis(symbol=symbol, timeframe="T", kind="csv"),
+        "fit_summary": {
+            "fit_attempt_count": 4,
+            "failed_fit_count": 1 if status == "limited" else 0,
+        },
+        "evaluation": {
+            "model_count": 1,
+            "fold_count": 4,
+            "evaluated_fold_count": 3 if status == "limited" else 4,
+            "automatic_winner": False,
+        },
+    }
+
+
+def _autoregressive_payload(
+    symbol: str,
+    *,
+    status: str = "ready",
+) -> dict[str, JSONValue]:
+    return {
+        "schema_version": AUTOREGRESSIVE_SCHEMA_VERSION,
+        "advisory": True,
+        "status": status,
+        "reason": "insufficient_folds" if status == "limited" else None,
+        "target_axis": _axis(symbol=symbol, timeframe="T", kind="csv"),
+        "fit_summary": {
+            "fit_attempt_count": 12,
+            "failed_fit_count": 1 if status == "limited" else 0,
+            "converged_fit_count": 11 if status == "limited" else 12,
+        },
+        "evaluation": {
+            "model_count": 3,
+            "families": ["ar", "arma", "arima"],
+            "fold_count": 4,
+            "evaluated_fold_count": 3 if status == "limited" else 4,
+            "automatic_order_selection": False,
+            "automatic_winner": False,
+        },
+    }
+
+
+def _seasonal_exogenous_payload(
+    symbol: str,
+    *,
+    status: str = "ready",
+) -> dict[str, JSONValue]:
+    return {
+        "schema_version": SEASONAL_EXOGENOUS_SCHEMA_VERSION,
+        "advisory": True,
+        "status": status,
+        "reason": "insufficient_folds" if status == "limited" else None,
+        "target_axis": _axis(symbol=symbol, timeframe="T", kind="csv"),
+        "regressors": {
+            "column_order": ["source_hour_sin", "source_hour_cos"],
+            "known_in_advance": True,
+            "future_market_values_used": False,
+        },
+        "fit_summary": {
+            "fit_attempt_count": 12,
+            "failed_fit_count": 1 if status == "limited" else 0,
+            "converged_fit_count": 11 if status == "limited" else 12,
+        },
+        "evaluation": {
+            "model_count": 3,
+            "families": ["sarima", "arimax", "sarimax"],
+            "fold_count": 4,
+            "evaluated_fold_count": 3 if status == "limited" else 4,
+            "automatic_order_selection": False,
+            "automatic_winner": False,
+        },
+    }
+
+
+def _state_space_payload(
+    symbol: str,
+    *,
+    status: str = "ready",
+) -> dict[str, JSONValue]:
+    return {
+        "schema_version": STATE_SPACE_SCHEMA_VERSION,
+        "advisory": True,
+        "status": status,
+        "reason": "insufficient_folds" if status == "limited" else None,
+        "target_axis": _axis(symbol=symbol, timeframe="T", kind="csv"),
+        "missing_observation_policy": {
+            "regular_time_basis": True,
+            "fill_policy": "none",
+            "transition_policy": "prediction_only",
+        },
+        "fit_summary": {
+            "fit_attempt_count": 12,
+            "failed_fit_count": 1 if status == "limited" else 0,
+            "converged_fit_count": 11 if status == "limited" else 12,
+        },
+        "evaluation": {
+            "model_count": 3,
+            "families": ["local_level", "local_linear_trend", "structural"],
+            "fold_count": 4,
+            "evaluated_fold_count": 3 if status == "limited" else 4,
+            "filtered_state_policy": "forecast_origin_information_only",
+            "smoothed_state_policy": "retrospective_diagnostic_only",
+            "automatic_component_selection": False,
+            "automatic_winner": False,
+        },
+    }
+
+
+def _volatility_payload(
+    symbol: str,
+    *,
+    status: str = "ready",
+) -> dict[str, JSONValue]:
+    return {
+        "schema_version": VOLATILITY_SCHEMA_VERSION,
+        "advisory": True,
+        "status": status,
+        "reason": "insufficient_folds" if status == "limited" else None,
+        "target_axis": _axis(symbol=symbol, timeframe="T", kind="csv"),
+        "variance_contract": {
+            "conditional_variance": True,
+            "realized_proxy": "squared_return",
+            "mean_metrics_separate": True,
+        },
+        "fit_summary": {
+            "fit_attempt_count": 8,
+            "failed_fit_count": 1 if status == "limited" else 0,
+        },
+        "evaluation": {
+            "model_count": 2,
+            "families": ["arch", "garch"],
+            "fold_count": 4,
+            "evaluated_fold_count": 3 if status == "limited" else 4,
+            "automatic_order_selection": False,
+            "automatic_winner": False,
+        },
+    }
+
+
+def _classical_model_comparison_payload(
+    symbol: str,
+    *,
+    status: str = "ready",
+) -> dict[str, JSONValue]:
+    eligible = 2 if status == "ready" else 0
+    return {
+        "schema_version": CLASSICAL_MODEL_COMPARISON_SCHEMA_VERSION,
+        "advisory": True,
+        "status": status,
+        "reason": (
+            "reference_baseline_unavailable" if status == "limited" else None
+        ),
+        "target_axis": _axis(symbol=symbol, timeframe="T", kind="csv"),
+        "comparison_id": f"classical-model-comparison:{symbol.lower()}",
+        "comparison_count": 2,
+        "eligible_comparison_count": eligible,
+        "ineligible_comparison_count": 2 - eligible,
+        "model_count": 2,
+        "horizons": [1, 2],
+        "comparison_records": [
+            {
+                "schema_version": (
+                    CLASSICAL_MODEL_COMPARISON_ELIGIBILITY_SCHEMA_VERSION
+                ),
+                "comparison_id": "comparison:representative",
+                "family": "ar",
+                "model_id": "representative-ar",
+                "specification_id": "ar-1",
+                "target_metric": "mid_level",
+                "scale": "original_mid",
+                "horizon": 1,
+                "metric": "mae",
+                "metric_value": 0.0001,
+                "reference_baseline": "naive_random_walk",
+                "reference_metric_value": 0.0002,
+                "eligible": status == "ready",
+                "descriptive_only": True,
+            }
+        ],
+        "fit_accounting": {
+            "schema_version": CLASSICAL_MODEL_FIT_ACCOUNTING_SCHEMA_VERSION,
+            "totals": {"attempted": 8, "converged": 7, "failed": 1},
+            "failed_models_preserved_in_denominator": True,
+            "resource_terminations_separate": True,
+        },
+        "selection_policy": "none",
+        "descriptive_only": True,
+        "training_projection": {
+            "schema_version": (
+                CLASSICAL_MODEL_COMPARISON_TRAINING_PROJECTION_SCHEMA_VERSION
+            ),
+            "column_prefixes": [
+                "cm_comparison_",
+                "cm_skill_",
+                "cm_stability_",
+            ],
+            "annotation_count": 1,
+            "training_eligible": False,
+        },
+    }
+
+
+def _cache_source_parity_payload(symbol: str) -> dict[str, JSONValue]:
+    return {
+        "schema_version": TIME_SERIES_FINGERPRINT_PARITY_SCHEMA_VERSION,
+        "status": "match",
+        "advisory": True,
+        "target_axis": _axis(symbol=symbol, timeframe="T", kind="csv"),
+        "base_grain": {"data_format": "ascii", "timeframe": "T"},
+        "compared_section_count": 9,
+        "matching_section_count": 9,
+        "mismatched_section_count": 0,
+        "skipped_section_count": 0,
+        "mismatch_code_count": 0,
+        "included_mismatch_code_count": 0,
+        "omitted_mismatch_code_count": 0,
+        "truncated": False,
+        "limit_metadata": {
+            "mismatches": {
+                "requested_limit": 16,
+                "default_limit": 16,
+                "effective_limit": 16,
+                "unbounded": False,
+            }
+        },
+        "mismatch_codes": [],
+        "skipped_reasons": [],
+        "bases": {
+            "raw_source": {
+                "status": "available",
+                "kind": "csv_text",
+                "path": f"DAT_ASCII_{symbol}_T_201202.csv",
+                "member": None,
+                "row_count": 3,
+            },
+            "raw_cache": {
+                "status": "available",
+                "path": ".data",
+                "cache_source": "sibling",
+                "fresh": True,
+                "freshness": "fresh",
+                "row_count": 3,
+            },
+            "enriched_cache": {
+                "status": "available",
+                "training_schema_version": (
+                    "histdatacom.ascii-tick-training-features.v1"
+                ),
+                "cache_was_enriched": True,
+                "legacy_cache_enriched_on_read": False,
+            },
+            "quality_report": {
+                "status": "available",
+                "projection_kind": "audit_from_enriched_rows",
+            },
+            "influx_projection": {
+                "status": "available",
+                "projection_kind": "same_point_enriched_fields",
+                "missing_required_field_count": 0,
+            },
+        },
+        "comparisons": [
+            {"section": section, "status": "match"}
+            for section in (
+                "coverage",
+                "temporal_topology",
+                "calendar_regimes",
+                "conditional_distributions",
+                "training_columns",
+                "row_identity",
+                "duplicate_timestamps",
+                "quality_report_projection",
+                "influx_projection",
+            )
+        ],
+    }
 
 
 def _axis(*, symbol: str, timeframe: str, kind: str) -> dict[str, JSONValue]:
@@ -999,7 +1704,7 @@ def _topology_payload(
     non_monotonic_count: int = 0,
     suspicious_gap_count: int = 0,
 ) -> dict[str, JSONValue]:
-    return {
+    payload: dict[str, JSONValue] = {
         "row_count": 4,
         "parsed_row_count": 4 - invalid_timestamp_count,
         "invalid_timestamp_count": invalid_timestamp_count,
@@ -1014,6 +1719,38 @@ def _topology_payload(
         "computed_from": computed_from,
         "cache_source": None,
     }
+    if duplicate_timestamp_count:
+        payload["inspection_context"] = {
+            "schema_version": "histdatacom.timestamp-topology-inspection.v1",
+            "duplicate_timestamps": {
+                "total_count": 1,
+                "included_count": 1,
+                "omitted_count": 0,
+                "truncated": False,
+                "limit_metadata": {
+                    "samples": bounded_report_limit(
+                        1,
+                        default_limit=5,
+                        minimum_limit=0,
+                        maximum_limit=5,
+                        allow_unbounded=False,
+                    ).count_payload(1)
+                },
+                "duplicate_row_count": duplicate_timestamp_count,
+                "samples": [
+                    {
+                        "row_number": 2,
+                        "timestamp_source": "20120201 000000000",
+                        "timestamp_source_truncated": False,
+                        "timestamp_utc_ms": 1328072400000,
+                        "utc_timestamp": "2012-02-01T05:00:00Z",
+                        "occurrence_count": duplicate_timestamp_count + 1,
+                        "exact_row_group_count": 1,
+                    }
+                ],
+            },
+        }
+    return payload
 
 
 def _calendar_regimes_payload() -> dict[str, JSONValue]:

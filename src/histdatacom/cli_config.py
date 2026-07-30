@@ -23,6 +23,7 @@ _COMMAND_SECTION_KEYS = {
     "groups",
     "jobs",
     "quality",
+    "reconstruction",
     "runtime",
     "worker",
 }
@@ -72,6 +73,12 @@ _KEY_ALIASES = {
     "quality_preflight_validation_report_path": (
         "quality_preflight_validation_report_path"
     ),
+    "quality_preflight_validation_evidence": (
+        "quality_preflight_validation_evidence_path"
+    ),
+    "quality_preflight_validation_evidence_path": (
+        "quality_preflight_validation_evidence_path"
+    ),
     "quality_target": "quality_paths",
     "quality_targets": "quality_paths",
     "quality_check_groups": "quality_check_groups",
@@ -104,6 +111,9 @@ _KEY_ALIASES = {
     "symbol_group": "pair_groups",
     "symbol_groups": "pair_groups",
     "keep_runtime": "orchestration_keep_runtime",
+    "random": "random_window",
+    "random_period": "random_window",
+    "timezone": "output_timezone",
     "repo_quality": "repo_quality_refresh",
     "schedule": "schedule_key",
     "verbose": "verbosity",
@@ -112,6 +122,7 @@ _COMMAND_KEY_ALIASES = {
     "analytics_command": "command",
     "job_command": "command",
     "jobs_command": "command",
+    "reconstruction_command": "command",
     "runtime_command": "command",
     "subcommand": "command",
     "worker_command": "command",
@@ -161,6 +172,8 @@ _SCALAR_ARGS = {
     "by": "--by",
     "start_yearmonth": "--start_yearmonth",
     "end_yearmonth": "--end_yearmonth",
+    "random_window": "--random-window",
+    "random_seed": "--random-seed",
     "batch_size": "--batch_size",
     "cpu_utilization": "--cpu_utilization",
     "data_directory": "--data-directory",
@@ -179,6 +192,9 @@ _SCALAR_ARGS = {
     "quality_preflight_validation_report_path": (
         "--quality-preflight-validation-report"
     ),
+    "quality_preflight_validation_evidence_path": (
+        "--quality-preflight-validation-evidence"
+    ),
     "quality_preflight_sample_size": "--quality-preflight-sample-size",
     "quality_profile_path": "--quality-profile",
     "quality_profile_preview_format": "--quality-profile-preview-format",
@@ -192,6 +208,7 @@ _SCALAR_ARGS = {
     "request_bundle_out": "--request-bundle-out",
     "request_json_out": "--request-json-out",
     "schedule_key": "--schedule-key",
+    "output_timezone": "--timezone",
 }
 _LIST_ARGS = {
     "pair_groups": "--pair-groups",
@@ -214,7 +231,15 @@ _ALLOWED_KEYS = (
     | _CONTROL_BOOL_KEYS
     | {"verbosity"}
 )
-_ANALYTICS_COMMANDS = {"feed-regimes"}
+_ANALYTICS_COMMANDS = {
+    "cftc-positioning-corpus",
+    "feed-epochs-v2",
+    "feed-regimes",
+    "market-context-corpus",
+    "modern-reference-motif-library",
+    "observation-calibrate-v2",
+    "reverse-degradation-benchmark-corpus",
+}
 _ANALYTICS_ALIASES = {
     **_COMMAND_KEY_ALIASES,
     "path": "paths",
@@ -225,12 +250,71 @@ _ANALYTICS_TRUE_FLAG_ARGS = {
     "json": "--json",
 }
 _ANALYTICS_SCALAR_ARGS = {
+    "active_gap_cap_ms": "--active-gap-cap-ms",
+    "activity_bin_ms": "--activity-bin-ms",
+    "artifact_dir": "--artifact-dir",
+    "benchmark_manifest": "--benchmark-manifest",
+    "boundary_match_tolerance_periods": "--boundary-match-tolerance-periods",
     "bucket": "--bucket",
+    "burst_interval_ms": "--burst-interval-ms",
+    "calibration_period": "--calibration-period",
+    "definition": "--definition",
+    "cftc_positioning_corpus": "--cftc-positioning-corpus",
+    "evidence": "--evidence",
+    "epoch_artifact": "--epoch-artifact",
+    "max_evidence": "--max-evidence",
+    "max_fragments": "--max-fragments",
+    "max_matches": "--max-matches",
+    "end_date": "--end-date",
+    "max_events_per_window": "--max-events-per-window",
+    "max_events_per_symbol": "--max-events-per-symbol",
+    "max_events": "--max-events",
+    "max_ons_pages_per_query": "--max-ons-pages-per-query",
+    "max_pages_per_dataset": "--max-pages-per-dataset",
+    "max_peak_memory_bytes": "--max-peak-memory-bytes",
+    "max_artifact_bytes": "--max-artifact-bytes",
+    "max_runtime_seconds": "--max-runtime-seconds",
+    "max_rows": "--max-rows",
+    "max_source_bytes": "--max-source-bytes",
+    "max_response_bytes": "--max-response-bytes",
+    "max_total_source_bytes": "--max-total-source-bytes",
+    "max_sensitivity_runs": "--max-sensitivity-runs",
+    "min_boundary_support": "--min-boundary-support",
+    "min_change_score": "--min-change-score",
+    "min_evidence_periods": "--min-evidence-periods",
+    "min_feature_coverage": "--min-feature-coverage",
+    "min_symbol_count": "--min-symbol-count",
+    "min_segment_periods": "--min-segment-periods",
+    "minimum_events_per_window": "--minimum-events-per-window",
+    "minimum_events_per_symbol": "--minimum-events-per-symbol",
+    "neighbor_guard_seconds": "--neighbor-guard-seconds",
     "quiet_gap_ms": "--quiet-gap-ms",
+    "penalty_multiplier": "--penalty-multiplier",
     "report": "--report",
+    "robust_clip": "--robust-clip",
+    "final_holdout_period": "--final-holdout-period",
+    "validation_period": "--validation-period",
+    "operator_catalog": "--operator-catalog",
+    "observation_campaign": "--observation-campaign",
+    "page_size": "--page-size",
+    "previous_corpus": "--previous-corpus",
+    "start_date": "--start-date",
+    "source_root": "--source-root",
+    "market_context_corpus": "--market-context-corpus",
+    "gate_policy_commit": "--gate-policy-commit",
+    "max_staleness_days": "--max-staleness-days",
+    "timeout_seconds": "--timeout-seconds",
+    "window_duration_seconds": "--window-duration-seconds",
+    "windows_per_split": "--windows-per-split",
+    "windows_per_period": "--windows-per-period",
 }
 _ANALYTICS_LIST_ARGS = {
+    "features": "--features",
+    "ons_queries": "--ons-query",
     "paths": "--target",
+    "sessions": "--sessions",
+    "sources": "--sources",
+    "train_periods": "--train-periods",
 }
 _ANALYTICS_ALLOWED_KEYS = (
     {"command", "verbosity"}
@@ -282,6 +366,57 @@ _CLEANUP_ALLOWED_KEYS = (
     | set(_CLEANUP_SCALAR_ARGS)
     | set(_CLEANUP_LIST_ARGS)
 )
+_RECONSTRUCTION_COMMANDS = {
+    "cancel",
+    "outputs",
+    "plan",
+    "preflight",
+    "preview",
+    "replay",
+    "request",
+    "resume",
+    "run",
+    "status",
+}
+_RECONSTRUCTION_ALIASES = {
+    **_COMMAND_KEY_ALIASES,
+    "acknowledge_nonclaim": "acknowledge_scientific_nonclaim",
+    "allow_partial": "allow_refusals",
+    "manifest_path": "manifest",
+    "plan_path": "plan",
+    "receipt_path": "receipt",
+    "request_path": "request",
+    "spec_path": "spec",
+}
+_RECONSTRUCTION_GLOBAL_TRUE_FLAG_ARGS = {
+    "json": "--json",
+    "start_runtime": "--start-runtime",
+}
+_RECONSTRUCTION_TRUE_FLAG_ARGS = {
+    "acknowledge_scientific_nonclaim": ("--acknowledge-scientific-nonclaim"),
+    "allow_refusals": "--allow-refusals",
+    "local": "--local",
+    "offline": "--offline",
+    "submit_only": "--submit-only",
+}
+_RECONSTRUCTION_SCALAR_ARGS = {
+    "information_mode": "--information-mode",
+    "limit": "--limit",
+    "manifest": "--manifest",
+    "output": "--output",
+    "plan": "--plan",
+    "reason": "--reason",
+    "receipt": "--receipt",
+    "request": "--request",
+    "spec": "--spec",
+    "window_id": "--window-id",
+}
+_RECONSTRUCTION_ALLOWED_KEYS = (
+    {"command"}
+    | set(_RECONSTRUCTION_GLOBAL_TRUE_FLAG_ARGS)
+    | set(_RECONSTRUCTION_TRUE_FLAG_ARGS)
+    | set(_RECONSTRUCTION_SCALAR_ARGS)
+)
 _QUALITY_COMMANDS = {
     "catalog",
     "doctor-evidence",
@@ -290,6 +425,10 @@ _QUALITY_COMMANDS = {
     "fingerprint-discovery",
     "fingerprint-schema",
     "inspect-evidence",
+    "synthetic-fingerprint-validate",
+    "synthetic-generate",
+    "synthetic-tick-generate",
+    "synthetic-validate",
     "remediation-audit",
     "remediation-catalog",
 }
@@ -308,6 +447,20 @@ _QUALITY_ALIASES = {
     "quality_path": "target_root",
     "quality_profile": "quality_profile_path",
     "quality_profile_path": "quality_profile_path",
+    "reference_report": "reference_report",
+    "reference_cache": "reference_cache",
+    "candidate_report": "candidate_report",
+    "output_cache": "output_cache",
+    "block_size": "block_size",
+    "minimum_reference_rows": "minimum_reference_rows",
+    "max_reference_rows": "max_reference_rows",
+    "max_generated_rows": "max_generated_rows",
+    "max_abs_log_return": "max_abs_log_return",
+    "rounding_digits": "rounding_digits",
+    "diagnostic_sample_limit": "diagnostic_sample_limit",
+    "anchor_mode": "anchor_mode",
+    "seed": "seed",
+    "mismatch_limit": "mismatch_limit",
     "quality_preflight_evidence": "evidence_path",
     "quality_preflight_evidence_max_age": ("evidence_max_age_seconds"),
     "quality_preflight_evidence_max_age_seconds": ("evidence_max_age_seconds"),
@@ -323,23 +476,41 @@ _QUALITY_ALIASES = {
     "symbol_groups": "pair_groups",
     "target": "target_root",
     "target_axis_limit": "target_axis_limit",
+    "target_limit": "target_limit",
 }
 _QUALITY_TRUE_FLAG_ARGS = {
     "allow_stale_evidence": "--quality-preflight-evidence-stale-ok",
     "json": "--json",
     "verify": "--verify",
+    "overwrite_output": "--overwrite-output",
+    "overwrite_synthetic": "--overwrite-synthetic",
 }
 _QUALITY_SCALAR_ARGS = {
     "code_limit": "--code-limit",
+    "candidate_report": "--candidate-report",
+    "reference_cache": "--reference-cache",
+    "output_cache": "--output-cache",
+    "block_size": "--block-size",
+    "minimum_reference_rows": "--minimum-reference-rows",
+    "max_reference_rows": "--max-reference-rows",
+    "max_generated_rows": "--max-generated-rows",
+    "max_abs_log_return": "--max-abs-log-return",
+    "rounding_digits": "--rounding-digits",
+    "diagnostic_sample_limit": "--diagnostic-sample-limit",
+    "anchor_mode": "--anchor-mode",
+    "seed": "--seed",
     "evidence_max_age_seconds": (
         "--quality-preflight-evidence-max-age-seconds"
     ),
     "evidence_path": "--evidence",
     "quality_profile_path": "--quality-profile",
+    "reference_report": "--reference-report",
+    "mismatch_limit": "--mismatch-limit",
     "rule_limit": "--rule-limit",
     "source_limit": "--source-limit",
     "target_root": "--target",
     "target_axis_limit": "--target-axis-limit",
+    "target_limit": "--target-limit",
 }
 _QUALITY_LIST_ARGS = {
     "formats": "--formats",
@@ -679,6 +850,23 @@ def configured_quality_argv(args: Sequence[str]) -> list[str]:
         command_true_flags=_QUALITY_TRUE_FLAG_ARGS,
         command_scalar_args=_QUALITY_SCALAR_ARGS,
         command_list_args=_QUALITY_LIST_ARGS,
+    )
+
+
+def configured_reconstruction_argv(args: Sequence[str]) -> list[str]:
+    """Return reconstruction argv with YAML defaults injected."""
+    return _configured_subcommand_argv(
+        args,
+        section_name="reconstruction",
+        commands=_RECONSTRUCTION_COMMANDS,
+        allowed_keys=_RECONSTRUCTION_ALLOWED_KEYS,
+        aliases=_RECONSTRUCTION_ALIASES,
+        global_true_flags=_RECONSTRUCTION_GLOBAL_TRUE_FLAG_ARGS,
+        global_scalar_args={},
+        global_list_args={},
+        command_true_flags=_RECONSTRUCTION_TRUE_FLAG_ARGS,
+        command_scalar_args=_RECONSTRUCTION_SCALAR_ARGS,
+        command_list_args={},
     )
 
 

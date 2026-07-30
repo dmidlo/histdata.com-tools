@@ -39,6 +39,7 @@ def _write_cache_record(
         cache_filename=CACHE_FILENAME,
         cache_start=str(start),
         data_fxpair=pair,
+        data_format="ascii",
         data_timeframe=timeframe,
     )
 
@@ -96,6 +97,20 @@ def test_import_frame_with_headers_rejects_unsupported_timeframes() -> None:
             "M1",
             FIXTURES / "DAT_ASCII_EURUSD_T_201202.csv",
         )
+
+
+def test_import_frame_with_headers_rejects_retired_platform_filename(
+    tmp_path: Path,
+) -> None:
+    """The private API import seam must reject platform raw filenames."""
+    from histdatacom.api import Api
+
+    source = FIXTURES / "DAT_ASCII_EURUSD_T_201202.csv"
+    retired = tmp_path / "DAT_NT_EURUSD_T_LAST_201202.csv"
+    shutil.copyfile(source, retired)
+
+    with pytest.raises(ValueError, match="ASCII tick"):
+        Api._import_frame_with_headers("T", retired)
 
 
 def test_import_file_to_polars_wraps_raw_ingest_for_records() -> None:
@@ -304,6 +319,30 @@ def test_merge_records_accepts_explicit_records_without_queue(
     )
 
 
+def test_merge_records_declared_random_window_requires_resolved_selection(
+    tmp_path: Path,
+) -> None:
+    """The API helper must not fall back to a complete cache after metadata loss."""
+    from histdatacom.api import Api
+    from histdatacom.random_windows import RandomWindowError
+
+    source = Api._import_file_to_polars(
+        SimpleNamespace(data_timeframe="T"),
+        FIXTURES / "DAT_ASCII_EURUSD_T_201202.csv",
+    )
+    record = _write_cache_record(
+        tmp_path,
+        "missing-random-selection",
+        source,
+        pair="eurusd",
+        timeframe="T",
+        start=EXPECTED_TICK_DATETIMES[0],
+    )
+
+    with pytest.raises(RandomWindowError, match="resolved selection"):
+        Api(args={"random_window": "1m"}).merge_records([record])
+
+
 def test_merge_records_uses_explicit_return_type_without_parser_globals(
     tmp_path: Path,
 ) -> None:
@@ -401,6 +440,86 @@ def test_merge_caches_converts_single_pair_timeframe_return_types(
     assert values == EXPECTED_TICK_DATETIMES
 
 
+@pytest.mark.parametrize("api_return_type", ("polars", "pandas", "arrow"))
+def test_merge_caches_appends_timezone_aware_output_projection(
+    tmp_path: Path,
+    api_return_type: str,
+) -> None:
+    """Every API backend should preserve UTC millis and expose local wall time."""
+    from datetime import datetime, timezone
+
+    import pandas as pd
+    import polars as pl
+    import pyarrow as pa
+
+    from histdatacom.api import Api
+
+    utc_millis = [
+        int(
+            datetime(2024, 3, 10, hour, 30, tzinfo=timezone.utc).timestamp()
+            * 1000
+        )
+        for hour in (6, 7)
+    ]
+    source = pl.DataFrame(
+        {
+            "datetime": utc_millis,
+            "bid": [1.1, 1.2],
+            "ask": [1.1001, 1.2001],
+            "vol": [0, 0],
+            "timestamp_utc_ms": utc_millis,
+        }
+    )
+    record = _write_cache_record(
+        tmp_path,
+        "dst",
+        source,
+        pair="eurusd",
+        timeframe="T",
+        start=utc_millis[0],
+    )
+
+    result = Api(
+        args={"output_timezone": "America/New_York"},
+        return_type=api_return_type,
+    ).merge_records([record])
+
+    expected_local = [
+        "2024-03-10T01:30:00-05:00",
+        "2024-03-10T03:30:00-04:00",
+    ]
+    if api_return_type == "polars":
+        assert isinstance(result, pl.DataFrame)
+        assert result.schema["datetime_local"] == pl.Datetime(
+            "ms", "America/New_York"
+        )
+        canonical = result["datetime"].to_list()
+        timestamp_utc_ms = result["timestamp_utc_ms"].to_list()
+        localized = result["datetime_local"].to_list()
+    elif api_return_type == "pandas":
+        assert isinstance(result, pd.DataFrame)
+        assert str(result["datetime_local"].dt.tz) == "America/New_York"
+        canonical = result["datetime"].tolist()
+        timestamp_utc_ms = result["timestamp_utc_ms"].tolist()
+        localized = result["datetime_local"].tolist()
+    else:
+        assert isinstance(result, pa.Table)
+        assert result.schema.field("datetime_local").type == pa.timestamp(
+            "ms", tz="America/New_York"
+        )
+        canonical = result.column("datetime").to_pylist()
+        timestamp_utc_ms = result.column("timestamp_utc_ms").to_pylist()
+        localized = result.column("datetime_local").to_pylist()
+
+    assert canonical == utc_millis
+    assert timestamp_utc_ms == utc_millis
+    assert [value.isoformat() for value in localized] == expected_local
+
+    persisted = Api.import_cache_data(str(tmp_path / "dst" / CACHE_FILENAME))
+    assert "datetime_local" not in persisted.columns
+    assert persisted["datetime"].to_list() == utc_millis
+
+
 def test_merge_caches_returns_only_observed_pair_timeframe_sets(
     tmp_path: Path,
 ) -> None:
@@ -447,6 +566,43 @@ def test_merge_caches_returns_only_observed_pair_timeframe_sets(
     )
     assert [len(item["records"]) for item in result] == [1, 1]
     assert all(isinstance(item["data"], pl.DataFrame) for item in result)
+
+
+def test_merge_caches_projects_every_multi_series_result(
+    tmp_path: Path,
+) -> None:
+    """Multi-series result dictionaries should all receive the local projection."""
+    from histdatacom.api import Api
+
+    source = Api._import_file_to_polars(
+        SimpleNamespace(data_timeframe="T"),
+        FIXTURES / "DAT_ASCII_EURUSD_T_201202.csv",
+    )
+    records = [
+        _write_cache_record(
+            tmp_path,
+            pair,
+            source,
+            pair=pair,
+            timeframe="T",
+            start=EXPECTED_TICK_DATETIMES[0],
+        )
+        for pair in ("eurusd", "gbpusd")
+    ]
+
+    result = Api(
+        args={"output_timezone": "Asia/Tokyo"},
+        return_type="polars",
+    ).merge_records(records)
+
+    assert isinstance(result, list)
+    assert [item["pair"] for item in result] == ["eurusd", "gbpusd"]
+    assert all("datetime_local" in item["data"].columns for item in result)
+    assert all(
+        str(item["data"].schema["datetime_local"])
+        == "Datetime(time_unit='ms', time_zone='Asia/Tokyo')"
+        for item in result
+    )
 
 
 def test_merge_caches_returns_empty_list_when_no_cache_records(

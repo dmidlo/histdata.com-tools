@@ -64,6 +64,8 @@ def test_orchestration_contracts_run_request_round_trip(
         timeframes=("tick-data-quotes",),
         start_yearmonth="202201",
         end_yearmonth="202202",
+        random_window="90m",
+        random_seed=1729,
         data_directory="data",
         api_return_type="polars",
         validate_urls=True,
@@ -74,6 +76,8 @@ def test_orchestration_contracts_run_request_round_trip(
 
     assert restored == request
     assert restored.pairs == ("eurusd",)
+    assert restored.random_window == "90m"
+    assert restored.random_seed == 1729
     assert restored.metadata == {"source": "test"}
 
 

@@ -18,6 +18,10 @@ from histdatacom.fx_enums import (
 )
 from histdatacom.options import Options
 from histdatacom.runtime_contracts import RunRequest, WorkStatus
+from histdatacom.random_windows import (
+    RANDOM_WINDOW_SELECTION_METADATA_KEY,
+    RandomWindowSelectionV1,
+)
 from histdatacom.orchestration.client import (
     JobHandle,
     JobResult,
@@ -132,6 +136,7 @@ def _orchestration_quality_result(
     error: str = "",
     check_groups: list[str] | None = None,
     next_actions: dict[str, object] | None = None,
+    quality_engine: dict[str, object] | None = None,
     remediation_coverage: dict[str, object] | None = None,
     fingerprint_distribution: dict[str, object] | None = None,
     fingerprint_distribution_attention: dict[str, object] | None = None,
@@ -208,6 +213,8 @@ def _orchestration_quality_result(
     }
     if next_actions is not None:
         quality["next_actions"] = next_actions
+    if quality_engine is not None:
+        quality["quality_engine"] = quality_engine
     if remediation_coverage is not None:
         quality["remediation_coverage"] = remediation_coverage
     if fingerprint_distribution is not None:
@@ -875,6 +882,63 @@ def test_data_quality_cli_submits_quality_request_to_orchestration(
     assert f"targets: {expected_count}" in output
 
 
+def test_data_quality_cli_renders_quality_engine_skips(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    """Quality CLI should reconcile skips from bounded engine metadata."""
+    import histdatacom.histdata_com as histdata_com
+
+    target = write_ascii_case(tmp_path, CLEAN_TICK_CASE)
+
+    def fake_submit(request, **kwargs: object) -> JobResult:
+        return _orchestration_quality_result(
+            target_count=2,
+            check_groups=["time"],
+            quality_engine={
+                "planned_target_rule_evaluation_count": 2,
+                "target_rule_evaluation_count": 1,
+                "skipped_rule_evaluation_count": 1,
+                "skip_events": {
+                    "included_event_count": 1,
+                    "omitted_event_count": 0,
+                    "reason_counts": {
+                        "duplicate_archive_preferred_csv": 1,
+                    },
+                    "rule_id_counts": {"time.ascii.gaps": 1},
+                },
+            },
+        )
+
+    monkeypatch.setattr(
+        histdata_com,
+        "submit_run_request_and_observe_sync",
+        fake_submit,
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "histdatacom",
+            "--quality",
+            "--quality-checks",
+            "time",
+            "--quality-target",
+            str(target),
+        ],
+    )
+
+    assert histdata_com.main() is None
+
+    output = capsys.readouterr().out
+    assert "Quality engine skips" in output
+    assert "- evaluations: planned=2 executed=1 skipped=1" in output
+    assert "- events: included=1 omitted=0" in output
+    assert "- reasons: duplicate_archive_preferred_csv=1" in output
+    assert "- rules: time.ascii.gaps=1" in output
+
+
 def test_data_quality_cli_renders_fingerprint_topology_summary(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -1070,6 +1134,25 @@ def test_data_quality_cli_renders_fingerprint_topology_summary(
                         "max_gap_ms": 60_000,
                         "computed_from": "text_scan",
                         "cache_source": None,
+                        "inspection_context": {
+                            "duplicate_timestamps": {
+                                "total_count": 1,
+                                "included_count": 1,
+                                "omitted_count": 0,
+                                "samples": [
+                                    {
+                                        "row_number": 2,
+                                        "timestamp_source": (
+                                            "20120201 000000000"
+                                        ),
+                                        "occurrence_count": 2,
+                                    }
+                                ],
+                                "next_action": {
+                                    "code": ("inspect_duplicate_timestamp_rows")
+                                },
+                            }
+                        },
                     }
                 ],
             },
@@ -1119,6 +1202,11 @@ def test_data_quality_cli_renders_fingerprint_topology_summary(
         "non-monotonic=0, suspicious gaps=0, weekend activity=0, "
         "max gap 60s, computed_from=text_scan, "
         "next=inspect duplicate timestamp rows"
+    ) in output
+    assert (
+        "  - context duplicate_timestamps: samples=1/1 omitted=0 "
+        "action=inspect_duplicate_timestamp_rows "
+        "20120201 000000000 x2"
     ) in output
     assert "Fingerprint topology" in output
     assert (
@@ -1694,6 +1782,7 @@ def test_quality_profile_preview_prints_resolved_profile_without_submit(
     }
     assert [channel["kind"] for channel in explanation["input_channels"]] == [
         "built_in_default",
+        "named_profile",
         "profile_file",
         "cli_override",
     ]
@@ -1715,8 +1804,11 @@ def test_quality_profile_preview_prints_resolved_profile_without_submit(
         "path": "/reporting/remediation_catalog_audit/enabled",
         "value": True,
         "source": "cli_override",
+        "profile_name": "preview-profile",
+        "previous_source": "profile_file",
         "overridden_source": "profile_file",
         "override": True,
+        "previous_value": False,
     }
     diff = explanation["effective_diff"]
     assert diff["schema_version"] == (
@@ -2058,9 +2150,10 @@ def test_api_quality_profile_preview_returns_payload_without_submit(
     assert explanation["profile_source"]["kind"] == "api_options"
     assert [channel["kind"] for channel in explanation["input_channels"]] == [
         "built_in_default",
+        "named_profile",
         "api_options",
-        "cli_override",
     ]
+    assert payload["cli_overrides"] == {}
     value_sources = {
         item["path"]: item
         for item in explanation["effective_value_sources"]["values"]
@@ -2071,7 +2164,7 @@ def test_api_quality_profile_preview_returns_payload_without_submit(
     )
     assert (
         value_sources["/reporting/remediation_catalog_audit/enabled"]["source"]
-        == "cli_override"
+        == "api_options"
     )
     assert preview_path.read_text(encoding="utf-8").startswith(
         "Quality Profile Preview\n"
@@ -2138,6 +2231,7 @@ histdatacom:
     assert [channel["kind"] for channel in explanation["input_channels"]] == [
         "built_in_default",
         "yaml_config",
+        "named_profile",
         "profile_file",
     ]
     value_sources = {
@@ -2148,6 +2242,81 @@ histdatacom:
         value_sources["/rules/fingerprint.series/max_rows"]["source"]
         == "profile_file"
     )
+
+
+def test_config_quality_profile_override_is_attributed_to_yaml(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    """YAML reporting overrides should not be mislabeled as CLI input."""
+    import histdatacom.histdata_com as histdata_com
+
+    def fail_submit(*args: object, **kwargs: object) -> object:
+        raise AssertionError("quality profile preview must not submit")
+
+    profile_path = tmp_path / "quality-profile.json"
+    profile_path.write_text(
+        json.dumps(
+            {
+                "name": "yaml-override-profile",
+                "reporting": {"remediation_catalog_audit": {"enabled": False}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    config_path = tmp_path / "histdatacom.yaml"
+    config_path.write_text(
+        f"""
+histdatacom:
+  quality: true
+  quality_target: {tmp_path}
+  quality_profile: {profile_path}
+  quality_profile_preview: true
+  remediation_catalog_audit: true
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        histdata_com,
+        "submit_run_request_and_observe_sync",
+        fail_submit,
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["histdatacom", "--config", str(config_path)],
+    )
+
+    assert histdata_com.main() is None
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["cli_overrides"] == {}
+    channels = {
+        channel["kind"]: channel
+        for channel in payload["profile_explanation"]["input_channels"]
+    }
+    assert channels["yaml_config"]["path"] == str(config_path)
+    assert channels["yaml_config"]["paths"] == [
+        "/reporting/remediation_catalog_audit/enabled"
+    ]
+    sources = {
+        item["path"]: item
+        for item in payload["profile_explanation"]["effective_value_sources"][
+            "values"
+        ]
+    }
+    assert sources["/reporting/remediation_catalog_audit/enabled"] == {
+        "path": "/reporting/remediation_catalog_audit/enabled",
+        "value": True,
+        "source": "yaml_config",
+        "profile_name": "yaml-override-profile",
+        "source_path": str(config_path),
+        "override": True,
+        "previous_source": "profile_file",
+        "overridden_source": "profile_file",
+        "previous_value": False,
+    }
 
 
 def test_config_quality_profile_preview_markdown_renders_tables(
@@ -2775,6 +2944,180 @@ def test_api_orchestration_dataframe_return_is_materialized_from_cache_artifacts
         "start_if_needed": True,
         "wait_for_result": True,
     }
+
+
+def test_api_orchestration_materialization_applies_exact_random_window(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Client materialization should recover selection metadata from the run."""
+    import polars as pl
+
+    import histdatacom.histdata_com as histdata_com
+    from histdatacom.histdata_ascii import CACHE_FILENAME, write_polars_cache
+
+    start = 1_704_096_000_000
+    end = start + 60_000
+    cache_path = tmp_path / CACHE_FILENAME
+    source = pl.DataFrame(
+        {
+            "datetime": (start - 1, start, end),
+            "bid": (1.1, 1.2, 1.3),
+            "ask": (1.2, 1.3, 1.4),
+            "volume": (0.0, 0.0, 0.0),
+        }
+    )
+    job_result = _orchestration_cache_result(tmp_path)
+    write_polars_cache(source, cache_path)
+    selection = RandomWindowSelectionV1(
+        expression="1m",
+        mode="random",
+        support_start_utc_ms=start - 1,
+        support_end_utc_ms=end + 1,
+        seed=7,
+        selected_start_utc_ms=start,
+        selected_end_utc_ms=end,
+    )
+    stage_result = job_result.result["stage_results"][0]
+    stage_result["work_item"] = {
+        "metadata": {RANDOM_WINDOW_SELECTION_METADATA_KEY: selection.to_dict()}
+    }
+
+    monkeypatch.setattr(
+        histdata_com,
+        "submit_run_request_and_observe_sync",
+        lambda request, **kwargs: job_result,
+    )
+    options = _orchestration_options()
+    options.random_window = "1m"
+    options.random_seed = 7
+
+    result = histdata_com.main(options)
+
+    assert isinstance(result, pl.DataFrame)
+    assert result["datetime"].to_list() == [start]
+    assert histdata_com.RunRequest.from_options(options).random_seed == 7
+    assert pl.read_ipc(cache_path).height == 3
+
+
+def test_api_orchestration_random_window_fails_if_selection_is_missing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Completed cache artifacts cannot bypass a lost selection contract."""
+    import histdatacom.histdata_com as histdata_com
+    from histdatacom.random_windows import RandomWindowError
+
+    monkeypatch.setattr(
+        histdata_com,
+        "submit_run_request_and_observe_sync",
+        lambda request, **kwargs: _orchestration_cache_result(tmp_path),
+    )
+    options = _orchestration_options()
+    options.random_window = "1m"
+    options.random_seed = 7
+
+    with pytest.raises(RandomWindowError, match="missing its resolved"):
+        histdata_com.main(options)
+
+
+def test_api_orchestration_materialization_applies_output_timezone(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The client-side view should use the timezone carried by public Options."""
+    import polars as pl
+
+    import histdatacom.histdata_com as histdata_com
+
+    captured: dict[str, object] = {}
+
+    def fake_submit(request, **kwargs: object) -> JobResult:
+        captured["request"] = request
+        return _orchestration_cache_result(tmp_path)
+
+    monkeypatch.setattr(
+        histdata_com,
+        "submit_run_request_and_observe_sync",
+        fake_submit,
+    )
+    options = _orchestration_options()
+    options.output_timezone = "Europe/London"
+
+    result = histdata_com.main(options)
+
+    assert isinstance(result, pl.DataFrame)
+    assert result.schema["datetime_local"] == pl.Datetime("ms", "Europe/London")
+    request = captured["request"]
+    assert isinstance(request, RunRequest)
+    assert request.metadata["output_timezone"] == "Europe/London"
+
+
+def test_api_rejects_unknown_output_timezone_before_submission(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Invalid IANA zones must fail before starting or submitting orchestration."""
+    import histdatacom.histdata_com as histdata_com
+
+    def fail_submit(*args: object, **kwargs: object) -> object:
+        raise AssertionError("invalid timezone should not submit")
+
+    monkeypatch.setattr(
+        histdata_com,
+        "submit_run_request_and_observe_sync",
+        fail_submit,
+    )
+    options = _orchestration_options()
+    options.output_timezone = "Mars/Olympus_Mons"
+
+    with pytest.raises(ValueError, match="unsupported output timezone"):
+        histdata_com.main(options)
+
+
+def test_cli_reports_unknown_output_timezone_without_traceback(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """CLI configuration failures should use the bounded report boundary."""
+    import histdatacom.histdata_com as histdata_com
+
+    def fail_submit(*args: object, **kwargs: object) -> object:
+        raise AssertionError("invalid timezone should not submit")
+
+    monkeypatch.setattr(
+        histdata_com,
+        "submit_run_request_and_observe_sync",
+        fail_submit,
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "histdatacom",
+            "--timezone",
+            "Mars/Olympus_Mons",
+            "--request-json-out",
+            "-",
+            "-p",
+            "eurusd",
+            "-f",
+            "ascii",
+            "-t",
+            "tick-data-quotes",
+            "-s",
+            "2022-12",
+        ],
+    )
+
+    with pytest.raises(SystemExit) as err:
+        histdata_com.main()
+
+    captured = capsys.readouterr()
+    assert err.value.code == 1
+    assert "HistData configuration invalid" in captured.err
+    assert "CONFIGURATION_ERROR" in captured.err
+    assert "Mars/Olympus_Mons" in captured.err
+    assert "Traceback" not in captured.err
 
 
 @pytest.mark.parametrize(

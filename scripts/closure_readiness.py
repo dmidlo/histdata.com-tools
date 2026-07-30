@@ -338,7 +338,7 @@ class WorkflowProgressReporter:
         return round(now - self._started_at, 3)
 
 
-GATE_SPECS = (
+PRE_TEST_GATE_SPECS = (
     GateSpec(
         "readme-help-sync",
         (sys.executable, "scripts/sync_readme_cli_help.py", "--check"),
@@ -350,13 +350,18 @@ GATE_SPECS = (
         (sys.executable, "-m", "histdatacom", "--help"),
         "python -m histdatacom --help",
     ),
-    GateSpec("pytest", (sys.executable, "-m", "pytest"), "python -m pytest"),
     GateSpec(
         "pre-commit",
         (sys.executable, "-m", "pre_commit", "run", "--all-files"),
         "python -m pre_commit run --all-files",
     ),
 )
+FINAL_TEST_GATE = GateSpec(
+    "full-tests",
+    (sys.executable, "-m", "pytest"),
+    "python -m pytest",
+)
+GATE_SPECS = (*PRE_TEST_GATE_SPECS, FINAL_TEST_GATE)
 FORMATTER_MUTATION_GATES = frozenset({"pre-commit", "readme-help-sync"})
 FORMATTER_MUTATION_SUFFIXES = frozenset(
     {
@@ -869,8 +874,8 @@ def build_closure_verification_report(
                 "README help sync",
                 "git diff --check",
                 "main CLI help smoke",
-                "full pytest",
                 "full pre-commit",
+                "full plain pytest suite",
                 "optional TestPyPI local simple-registry preflight",
                 "final git status",
                 "issue readback",
@@ -2189,6 +2194,14 @@ def collect_gate_summary(
             "state": "not-run",
             "reason": "run with --run-gates to execute closure gates",
             "required": [gate.display for gate in GATE_SPECS],
+            "final_coverage": {
+                "state": "not-applicable",
+                "reason": (
+                    "coverage is enforced only for dev-to-main production "
+                    "promotion"
+                ),
+                "result": {},
+            },
             "results": [],
         }
     results = [
@@ -2198,8 +2211,29 @@ def collect_gate_summary(
             runner=runner,
             monitored_paths=monitored_paths,
         )
-        for gate in GATE_SPECS
+        for gate in PRE_TEST_GATE_SPECS
     ]
+    pre_test_payload = {"results": results}
+    pre_test_changed = _gate_changed_paths(pre_test_payload)
+    pre_test_failed = any(
+        _mapping(result).get("status") != "pass" for result in results
+    )
+    if not pre_test_failed and not pre_test_changed:
+        results.append(
+            _run_gate(
+                repo_root,
+                FINAL_TEST_GATE,
+                runner=runner,
+                monitored_paths=monitored_paths,
+            )
+        )
+    final_coverage = {
+        "state": "not-applicable",
+        "reason": (
+            "coverage is enforced only for dev-to-main production promotion"
+        ),
+        "result": {},
+    }
     gate_payload = {"results": results}
     changed_after = _gate_changed_paths(gate_payload)
     gate_sources = _gate_changed_path_sources(gate_payload)
@@ -2275,6 +2309,7 @@ def collect_gate_summary(
         "mutation_summary": mutation_summary,
         "required_rerun": required_rerun,
         "rerun": rerun_report,
+        "final_coverage": final_coverage,
         "results": results,
     }
 
@@ -4677,7 +4712,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--run-gates",
         action="store_true",
-        help="run pytest, pre-commit, help sync, diff check, and help smoke",
+        help="run the full plain test and pre-commit closure gates",
     )
     parser.add_argument(
         "--rerun-standalone-formatter-mutations",
@@ -6236,6 +6271,14 @@ def _pre_mutation_gates_not_run(*, enabled: bool) -> dict[str, Any]:
             "state": "not-run",
             "reason": reason,
             "required": [gate.display for gate in GATE_SPECS],
+            "final_coverage": {
+                "state": "not-applicable",
+                "reason": (
+                    "coverage is enforced only for dev-to-main production "
+                    "promotion"
+                ),
+                "result": {},
+            },
             "results": [],
         },
         "results": [],
@@ -7012,8 +7055,8 @@ def _closure_verification_command_plan(
         "state": "ready",
         "execute_workflow": _shell_command(parts),
         "notes": [
-            "execute-workflow will rerun closure gates before mutation",
-            "execute-workflow will rerun closure gates after push before close",
+            "execute-workflow will ensure closure gates before mutation",
+            "production coverage is reserved for dev-to-main promotion",
         ],
     }
 

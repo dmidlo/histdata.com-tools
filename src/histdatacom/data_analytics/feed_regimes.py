@@ -1,49 +1,44 @@
-"""Feed-regime analytics for HistData ASCII tick artifacts."""
+"""Canonical feed-regime compatibility and feed-epoch analytics surface."""
 
 from __future__ import annotations
 
-from collections import Counter, defaultdict
-from collections.abc import Iterable, Sequence
-from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
 import hashlib
 import json
-from math import ceil
+from collections import Counter, defaultdict
+from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass, field
 from pathlib import Path
-import re
+from statistics import median
+from typing import Any
 
-from histdatacom.histdata_ascii import (
-    CACHE_FILENAME,
-    EST_NO_DST_OFFSET_MS,
-    TICK,
-    read_ascii_file,
-    read_polars_cache,
+from histdatacom.data_analytics.feed_epochs import (
+    FeedEpochDefinitionV1,
+    FeedEpochEvidenceV1,
+    FeedEpochFitConfigV1,
+    fit_feed_epochs,
 )
+from histdatacom.data_quality.discovery import (
+    discover_quality_targets,
+    quality_target_from_path,
+)
+from histdatacom.data_quality.engine import run_quality_assessment
+from histdatacom.data_quality.fingerprints import (
+    TIME_SERIES_FINGERPRINT_METADATA_KEY,
+    HistDataFingerprintProfile,
+    fingerprint_quality_rules,
+)
+from histdatacom.histdata_ascii import TICK
 from histdatacom.runtime_contracts import ArtifactRef, JSONValue
 
 ANALYTICS_REPORT_SCHEMA_VERSION = "histdatacom.feed-regime-report.v1"
 FEED_REGIME_OPERATION = "feed-regime-detection"
 DEFAULT_QUIET_GAP_MS = 60_000
 _ASCII_FORMAT = "ascii"
-_CSV_SUFFIX = ".csv"
-_ZIP_SUFFIX = ".zip"
-
-_HISTDATA_DATA_FILENAME_RE = re.compile(
-    r"^DAT_(?P<format>ASCII)_(?P<symbol>[A-Z0-9]+)_"
-    r"(?P<timeframe>[A-Z0-9]+)_(?P<period>\d{4}(?:\d{2})?)"
-    r"(?:_[A-Z0-9_]+)?(?:\.csv)?$",
-    re.IGNORECASE,
-)
-_HISTDATA_ARCHIVE_FILENAME_RE = re.compile(
-    r"^HISTDATA_COM_(?P<format>ASCII)_(?P<symbol>[A-Z0-9]+)_"
-    r"(?P<timeframe>[A-Z0-9]+)(?P<period>\d{4}(?:\d{2})?)$",
-    re.IGNORECASE,
-)
 
 
 @dataclass(frozen=True, slots=True)
 class AnalyticsTarget:
-    """One local artifact considered by feed-regime analytics."""
+    """Compatibility projection of one canonical quality target."""
 
     path: str
     kind: str
@@ -55,7 +50,7 @@ class AnalyticsTarget:
 
     @property
     def is_supported_tick_target(self) -> bool:
-        """Return whether the target can feed tick-regime analytics."""
+        """Return whether the target can feed technological epoch fitting."""
         return self.data_format == _ASCII_FORMAT and self.timeframe == TICK
 
     def to_dict(self) -> dict[str, JSONValue]:
@@ -73,7 +68,7 @@ class AnalyticsTarget:
 
 @dataclass(frozen=True, slots=True)
 class AnalyticsDiscoveryResult:
-    """Result of discovering local analytics targets."""
+    """Canonical discovery result projected for analytics callers."""
 
     roots: tuple[str, ...] = ()
     targets: tuple[AnalyticsTarget, ...] = ()
@@ -96,7 +91,7 @@ class AnalyticsDiscoveryResult:
 
 @dataclass(frozen=True, slots=True)
 class FeedPeriodProfile:
-    """Tick-feed summary statistics for one symbol/time bucket."""
+    """Canonical fingerprint summary for one symbol-period."""
 
     symbol: str
     period: str
@@ -149,7 +144,7 @@ class FeedPeriodProfile:
 
 @dataclass(frozen=True, slots=True)
 class FeedRegimeEra:
-    """A contiguous run of similar feed behavior for one symbol."""
+    """Compatibility projection of one versioned technological epoch."""
 
     symbol: str
     label: str
@@ -190,11 +185,12 @@ class FeedRegimeEra:
 
 @dataclass(frozen=True, slots=True)
 class FeedRegimeReport:
-    """Machine-readable feed-regime analytics output."""
+    """Machine-readable compatibility report containing the epoch artifact."""
 
     discovery: AnalyticsDiscoveryResult
     period_profiles: tuple[FeedPeriodProfile, ...] = ()
     regimes: tuple[FeedRegimeEra, ...] = ()
+    epoch_definition: FeedEpochDefinitionV1 | None = None
     metadata: dict[str, JSONValue] = field(default_factory=dict)
 
     def summary(self) -> dict[str, JSONValue]:
@@ -207,13 +203,22 @@ class FeedRegimeReport:
             "operation": FEED_REGIME_OPERATION,
             "target_count": self.discovery.target_count,
             "supported_target_count": sum(
-                1
+                target.is_supported_tick_target
                 for target in self.discovery.targets
-                if target.is_supported_tick_target
             ),
             "profile_count": len(self.period_profiles),
             "regime_count": len(self.regimes),
             "symbols": symbols,
+            "epoch_definition_id": (
+                self.epoch_definition.definition_id
+                if self.epoch_definition is not None
+                else None
+            ),
+            "stability_status": (
+                self.epoch_definition.stability.status
+                if self.epoch_definition is not None
+                else "unavailable"
+            ),
         }
 
     def to_dict(self) -> dict[str, JSONValue]:
@@ -227,80 +232,33 @@ class FeedRegimeReport:
                 profile.to_dict() for profile in self.period_profiles
             ],
             "regimes": [regime.to_dict() for regime in self.regimes],
+            "epoch_definition": (
+                self.epoch_definition.to_dict()
+                if self.epoch_definition is not None
+                else None
+            ),
             "metadata": dict(self.metadata),
         }
-
-
-@dataclass(frozen=True, slots=True)
-class _TickObservation:
-    utc_ms: int
-    bid: float
-    ask: float
-    symbol: str
-    target_path: str
 
 
 def discover_analytics_targets(
     paths: Iterable[str | Path],
 ) -> AnalyticsDiscoveryResult:
-    """Discover local files usable by data-analytics operations."""
-    roots = _normalize_roots(paths)
-    seen_paths: set[str] = set()
-    targets: list[AnalyticsTarget] = []
-    for root in roots:
-        if not root.exists():
-            raise ValueError(f"analytics target path does not exist: {root}")
-        candidates = (
-            sorted(path for path in root.rglob("*") if path.is_file())
-            if root.is_dir()
-            else [root]
-        )
-        for candidate in candidates:
-            target = analytics_target_from_path(candidate)
-            if target is None:
-                if root == candidate:
-                    raise ValueError(
-                        f"unsupported analytics target file type: {candidate}"
-                    )
-                continue
-            resolved = str(candidate.resolve())
-            if resolved in seen_paths:
-                continue
-            seen_paths.add(resolved)
-            targets.append(target)
-
+    """Project canonical quality discovery without an independent scanner."""
+    discovery = discover_quality_targets(paths)
     return AnalyticsDiscoveryResult(
-        roots=tuple(str(root) for root in roots),
-        targets=tuple(sorted(targets, key=lambda target: target.path)),
-        metadata={
-            "operation": FEED_REGIME_OPERATION,
-            "supported_timeframe": TICK,
-            "quality_semantics": "analytics-only; no pass/fail status",
-        },
+        roots=discovery.roots,
+        targets=tuple(
+            _analytics_target(target) for target in discovery.targets
+        ),
+        metadata=_discovery_metadata(),
     )
 
 
 def analytics_target_from_path(path: str | Path) -> AnalyticsTarget | None:
-    """Return a local analytics target for supported artifact paths."""
-    source = Path(path)
-    kind = _target_kind(source)
-    if kind is None:
-        return None
-    metadata = _metadata_from_filename(source)
-    metadata["filename"] = source.name
-    metadata["supported_for_feed_regimes"] = (
-        metadata.get("data_format") == _ASCII_FORMAT
-        and metadata.get("timeframe") == TICK
-    )
-    return AnalyticsTarget(
-        path=str(source.resolve()),
-        kind=kind,
-        data_format=str(metadata.get("data_format", "") or ""),
-        timeframe=str(metadata.get("timeframe", "") or ""),
-        symbol=str(metadata.get("symbol", "") or ""),
-        period=str(metadata.get("period", "") or ""),
-        metadata=metadata,
-    )
+    """Project one canonical quality target into the analytics type."""
+    target = quality_target_from_path(path)
+    return _analytics_target(target) if target is not None else None
 
 
 def analyze_feed_regimes(
@@ -308,39 +266,76 @@ def analyze_feed_regimes(
     *,
     bucket: str = "month",
     quiet_gap_ms: int = DEFAULT_QUIET_GAP_MS,
+    fit_config: FeedEpochFitConfigV1 | None = None,
+    fingerprint_profile: HistDataFingerprintProfile | None = None,
 ) -> FeedRegimeReport:
-    """Analyze tick-rate and quote-update regimes across local targets."""
+    """Fit feed epochs through canonical discovery and fingerprint evidence."""
     normalized_bucket = _normalize_bucket(bucket)
-    discovery = discover_analytics_targets(paths)
-    observations_by_bucket: dict[tuple[str, str], list[_TickObservation]]
-    observations_by_bucket = defaultdict(list)
-    for target in discovery.targets:
-        for observation in _target_tick_observations(target):
-            period = _period_for_observation(observation, normalized_bucket)
-            observations_by_bucket[(observation.symbol, period)].append(
-                observation
-            )
-
-    profiles = tuple(
-        _profile_observations(
-            symbol=symbol,
-            period=period,
-            bucket=normalized_bucket,
-            observations=tuple(observations),
-            quiet_gap_ms=quiet_gap_ms,
-        )
-        for (symbol, period), observations in sorted(
-            observations_by_bucket.items()
-        )
+    if quiet_gap_ms <= 0:
+        raise ValueError("quiet_gap_ms must be positive")
+    quality_discovery = discover_quality_targets(tuple(paths))
+    discovery = AnalyticsDiscoveryResult(
+        roots=quality_discovery.roots,
+        targets=tuple(
+            _analytics_target(target) for target in quality_discovery.targets
+        ),
+        metadata=_discovery_metadata(),
     )
-    regimes = _segment_regimes(profiles)
+    quality_report = run_quality_assessment(
+        quality_discovery.targets,
+        fingerprint_quality_rules(fingerprint_profile),
+        metadata={
+            "operation": FEED_REGIME_OPERATION,
+            "consumer": "feed_epoch_fitting",
+        },
+    )
+    raw_evidence = tuple(
+        FeedEpochEvidenceV1.from_fingerprint(payload)
+        for payload in (
+            finding.metadata.get(TIME_SERIES_FINGERPRINT_METADATA_KEY)
+            for finding in quality_report.findings
+        )
+        if isinstance(payload, Mapping) and _fingerprint_is_usable_tick(payload)
+    )
+    evidence, evidence_preparation = _prepare_canonical_evidence(
+        raw_evidence,
+        requested_bucket=normalized_bucket,
+    )
+    effective_bucket = str(evidence_preparation["effective_bucket"])
+    effective_config = fit_config
+    if effective_config is None and len({item.period for item in evidence}) < 6:
+        effective_config = FeedEpochFitConfigV1(
+            min_evidence_periods=2,
+            min_segment_periods=1,
+        )
+    definition = fit_feed_epochs(evidence, config=effective_config)
+    profiles = tuple(
+        _period_profile_from_evidence(item, bucket=effective_bucket)
+        for item in evidence
+    )
+    regimes = _regimes_from_definition(
+        definition,
+        bucket=effective_bucket,
+        profiles=profiles,
+    )
     return FeedRegimeReport(
         discovery=discovery,
         period_profiles=profiles,
         regimes=regimes,
+        epoch_definition=definition,
         metadata={
             "quiet_gap_ms": quiet_gap_ms,
-            "bucket": normalized_bucket,
+            "bucket": effective_bucket,
+            "requested_bucket": normalized_bucket,
+            "evidence_preparation": evidence_preparation,
+            "fitting_basis": "canonical_time_series_fingerprint",
+            "fingerprint_target_count": len(quality_discovery.targets),
+            "raw_fingerprint_evidence_count": len(raw_evidence),
+            "evidence_count": len(evidence),
+            "config_id": definition.config.config_id,
+            "short_history_compatibility_fit": (
+                fit_config is None and definition.period_count < 6
+            ),
             "quality_semantics": (
                 "Feed-regime analytics are descriptive feature-engineering "
                 "signals and do not imply data-quality pass/fail status."
@@ -358,23 +353,31 @@ def write_feed_regime_report(
     report: FeedRegimeReport,
     path: str | Path,
 ) -> ArtifactRef:
-    """Write a feed-regime report and return its artifact reference."""
+    """Write a report containing its versioned epoch artifact."""
     output = Path(path).expanduser()
     output.parent.mkdir(parents=True, exist_ok=True)
     encoded = f"{feed_regime_report_to_json(report)}\n".encode("utf-8")
     output.write_bytes(encoded)
-    digest = hashlib.sha256(encoded).hexdigest()
+    definition = report.epoch_definition
     return ArtifactRef(
         kind="feed-regime-report",
         path=str(output.resolve()),
         size_bytes=len(encoded),
-        sha256=digest,
+        sha256=hashlib.sha256(encoded).hexdigest(),
         metadata={
             "schema_version": ANALYTICS_REPORT_SCHEMA_VERSION,
             "operation": FEED_REGIME_OPERATION,
             "target_count": report.discovery.target_count,
             "profile_count": len(report.period_profiles),
             "regime_count": len(report.regimes),
+            "epoch_definition_id": (
+                definition.definition_id if definition is not None else None
+            ),
+            "stability_status": (
+                definition.stability.status
+                if definition is not None
+                else "unavailable"
+            ),
         },
     )
 
@@ -384,7 +387,7 @@ def format_feed_regime_console_summary(
     *,
     artifact: ArtifactRef | None = None,
 ) -> str:
-    """Return a compact human-readable feed-regime summary."""
+    """Return a compact human-readable technological epoch summary."""
     summary = report.summary()
     lines = [
         "Feed regime analytics",
@@ -392,14 +395,14 @@ def format_feed_regime_console_summary(
         f"supported tick targets: {summary['supported_target_count']}",
         f"profiles: {summary['profile_count']}",
         f"regimes: {summary['regime_count']}",
+        f"stability: {summary['stability_status']}",
     ]
     if artifact is not None:
         lines.append(f"report: {artifact.path}")
     if not report.period_profiles:
-        lines.append("No supported ASCII tick targets discovered.")
+        lines.append("No supported ASCII tick fingerprint evidence discovered.")
         return "\n".join(lines)
-
-    lines.extend(("", "Regime eras"))
+    lines.extend(("", "Technological epochs"))
     for regime in report.regimes:
         lines.append(
             "- "
@@ -408,324 +411,458 @@ def format_feed_regime_console_summary(
             f"rate={_round_float(regime.mean_tick_rate_per_hour)}/hour "
             f"median_gap={_round_float(regime.median_interarrival_ms)}ms"
         )
+    definition = report.epoch_definition
+    if definition is not None and definition.boundaries:
+        lines.extend(("", "Uncertain transitions"))
+        for boundary in definition.boundaries:
+            lines.append(
+                "- "
+                f"{boundary.left_period}->{boundary.right_period} "
+                f"support={boundary.support} confidence={boundary.confidence} "
+                f"interval={boundary.uncertainty_start_utc_ms}:"
+                f"{boundary.uncertainty_end_utc_ms}"
+            )
     return "\n".join(lines)
 
 
-def _normalize_roots(paths: Iterable[str | Path]) -> tuple[Path, ...]:
-    roots = tuple(Path(path).expanduser() for path in paths)
-    if not roots:
-        raise ValueError("at least one analytics target path is required")
-    return roots
-
-
-def _target_kind(path: Path) -> str | None:
-    if path.name == CACHE_FILENAME:
-        return "cache"
-    suffix = path.suffix.lower()
-    if suffix == _CSV_SUFFIX:
-        return "csv"
-    if suffix == _ZIP_SUFFIX:
-        return "zip"
-    return None
-
-
-def _metadata_from_filename(path: Path) -> dict[str, JSONValue]:
-    if path.name == CACHE_FILENAME:
-        return {
-            "data_format": "",
-            "timeframe": "",
-            "symbol": "",
-            "period": "",
-            "cache_metadata_required": True,
-        }
-    stem = path.stem if path.suffix.lower() == _ZIP_SUFFIX else path.name
-    match = _HISTDATA_DATA_FILENAME_RE.match(path.name)
-    if match is None:
-        match = _HISTDATA_ARCHIVE_FILENAME_RE.match(stem)
-    if match is None:
-        return {
-            "data_format": "",
-            "timeframe": "",
-            "symbol": "",
-            "period": "",
-        }
-    groups = match.groupdict()
+def _discovery_metadata() -> dict[str, JSONValue]:
     return {
-        "data_format": str(groups.get("format", "")).lower(),
-        "timeframe": str(groups.get("timeframe", "")).upper(),
-        "symbol": str(groups.get("symbol", "")).upper(),
-        "period": str(groups.get("period", "")),
+        "operation": FEED_REGIME_OPERATION,
+        "supported_timeframe": TICK,
+        "quality_semantics": "analytics-only; no pass/fail status",
+        "discovery_basis": "canonical_quality_discovery",
     }
 
 
-def _target_tick_observations(
-    target: AnalyticsTarget,
-) -> tuple[_TickObservation, ...]:
-    if not target.is_supported_tick_target:
-        return ()
-    if target.kind == "cache":
-        return _cache_tick_observations(target)
-    batch = read_ascii_file(Path(target.path), target.timeframe)
-    return tuple(
-        _TickObservation(
-            utc_ms=int(row[0]),
-            bid=float(row[1]),
-            ask=float(row[2]),
-            symbol=target.symbol or "UNKNOWN",
-            target_path=target.path,
-        )
-        for row in batch.rows
+def _analytics_target(target: Any) -> AnalyticsTarget:
+    metadata = dict(target.metadata)
+    metadata["supported_for_feed_regimes"] = (
+        target.data_format == _ASCII_FORMAT and target.timeframe == TICK
+    )
+    metadata["discovery_basis"] = "canonical_quality_discovery"
+    return AnalyticsTarget(
+        path=target.path,
+        kind=target.kind.value,
+        data_format=target.data_format,
+        timeframe=target.timeframe,
+        symbol=target.symbol,
+        period=target.period,
+        metadata=metadata,
     )
 
 
-def _cache_tick_observations(
-    target: AnalyticsTarget,
-) -> tuple[_TickObservation, ...]:
-    frame = read_polars_cache(Path(target.path))
-    required = {"datetime", "bid", "ask"}
-    if not required.issubset(set(frame.columns)):
-        return ()
-    symbol = target.symbol or "UNKNOWN"
-    return tuple(
-        _TickObservation(
-            utc_ms=int(row["datetime"]),
-            bid=float(row["bid"]),
-            ask=float(row["ask"]),
-            symbol=symbol,
-            target_path=target.path,
-        )
-        for row in frame.select(["datetime", "bid", "ask"]).iter_rows(
-            named=True
-        )
+def _fingerprint_is_usable_tick(payload: Mapping[str, Any]) -> bool:
+    axis = payload.get("target_axis")
+    coverage = payload.get("coverage")
+    source = payload.get("source")
+    if not isinstance(axis, Mapping) or not isinstance(coverage, Mapping):
+        return False
+    if not isinstance(source, Mapping):
+        return False
+    return (
+        str(axis.get("data_format", "")).lower() == _ASCII_FORMAT
+        and str(axis.get("timeframe", "")).upper() == TICK
+        and source.get("kind") != "unavailable"
+        and int(coverage.get("parsed_row_count", 0) or 0) > 0
     )
+
+
+def _prepare_canonical_evidence(
+    evidence: Sequence[FeedEpochEvidenceV1],
+    *,
+    requested_bucket: str,
+) -> tuple[tuple[FeedEpochEvidenceV1, ...], dict[str, JSONValue]]:
+    """Select one canonical axis and coarsen safely to a common period grid."""
+    by_axis: dict[tuple[str, str], list[FeedEpochEvidenceV1]] = defaultdict(
+        list
+    )
+    for item in evidence:
+        by_axis[(item.symbol, item.period)].append(item)
+    selected = tuple(
+        min(items, key=_canonical_evidence_rank)
+        for _, items in sorted(by_axis.items())
+    )
+    duplicate_axis_count = len(evidence) - len(selected)
+    has_annual_evidence = any(len(item.period) == 4 for item in selected)
+    effective_bucket = (
+        "year" if requested_bucket == "year" or has_annual_evidence else "month"
+    )
+    annual_overlap_skip_count = 0
+    if effective_bucket == "year":
+        by_year: dict[tuple[str, str], list[FeedEpochEvidenceV1]] = defaultdict(
+            list
+        )
+        for item in selected:
+            by_year[(item.symbol, item.period[:4])].append(item)
+        prepared: list[FeedEpochEvidenceV1] = []
+        for (_, year), items in sorted(by_year.items()):
+            annual = [item for item in items if len(item.period) == 4]
+            if annual:
+                chosen = min(annual, key=_canonical_evidence_rank)
+                prepared.append(chosen)
+                annual_overlap_skip_count += len(items) - 1
+            else:
+                prepared.append(_aggregate_annual_evidence(items, year=year))
+        result = tuple(prepared)
+    else:
+        result = selected
+    reason = "requested_bucket"
+    if requested_bucket == "month" and has_annual_evidence:
+        reason = "annual_evidence_cannot_be_safely_disaggregated"
+    return result, {
+        "requested_bucket": requested_bucket,
+        "effective_bucket": effective_bucket,
+        "effective_bucket_reason": reason,
+        "raw_evidence_count": len(evidence),
+        "selected_axis_count": len(selected),
+        "fitted_evidence_count": len(result),
+        "duplicate_axis_skip_count": duplicate_axis_count,
+        "annual_overlap_skip_count": annual_overlap_skip_count,
+        "duplicate_axis_policy": "prefer_direct_cache_then_sibling_cache_then_text",
+        "mixed_granularity_policy": "coarsen_to_year_never_disaggregate",
+        "annual_overlap_policy": "prefer_canonical_annual_evidence",
+    }
+
+
+def _canonical_evidence_rank(item: FeedEpochEvidenceV1) -> tuple[int, str]:
+    cache_source = str(item.quality.get("cache_source", ""))
+    if item.source_kind == "cache" and cache_source == "direct":
+        rank = 0
+    elif item.source_kind == "cache":
+        rank = 1
+    elif item.source_kind == "csv_text":
+        rank = 2
+    elif item.source_kind == "zip_member":
+        rank = 3
+    else:
+        rank = 4
+    return rank, item.evidence_id
+
+
+def _aggregate_annual_evidence(
+    items: Sequence[FeedEpochEvidenceV1],
+    *,
+    year: str,
+) -> FeedEpochEvidenceV1:
+    ordered = tuple(
+        sorted(items, key=lambda item: (item.period, item.evidence_id))
+    )
+    symbol = ordered[0].symbol
+    component_sources: list[JSONValue] = [
+        {
+            "fingerprint_id": item.fingerprint_id,
+            "source_artifact_sha256": item.source_artifact_sha256,
+            "source_hash_basis": item.source_hash_basis,
+            "symbol": item.symbol,
+            "period": item.period,
+            "source_kind": item.source_kind,
+        }
+        for item in ordered
+    ]
+    feature_names = tuple(
+        sorted({name for item in ordered for name in item.feature_values})
+    )
+    feature_values = {
+        name: float(
+            median(
+                item.feature_values[name]
+                for item in ordered
+                if name in item.feature_values
+            )
+        )
+        for name in feature_names
+    }
+    feature_provenance = {
+        name: tuple(
+            sorted(
+                {
+                    path
+                    for item in ordered
+                    for path in item.feature_provenance.get(name, ())
+                }
+            )
+        )
+        for name in feature_names
+    }
+    fingerprint_id = _semantic_sha256(
+        {
+            "kind": "canonical_fingerprint_annual_aggregate",
+            "symbol": symbol,
+            "period": year,
+            "fingerprint_ids": [item.fingerprint_id for item in ordered],
+        }
+    )
+    source_hash = _semantic_sha256(
+        {
+            "kind": "canonical_fingerprint_source_aggregate",
+            "source_hashes": [item.source_artifact_sha256 for item in ordered],
+        }
+    )
+    return FeedEpochEvidenceV1(
+        symbol=symbol,
+        period=year,
+        start_timestamp_utc_ms=min(
+            item.start_timestamp_utc_ms for item in ordered
+        ),
+        end_timestamp_utc_ms=max(item.end_timestamp_utc_ms for item in ordered),
+        fingerprint_id=fingerprint_id,
+        source_artifact_sha256=source_hash,
+        source_hash_basis="canonical_fingerprint_aggregate_id",
+        source_kind="canonical_fingerprint_aggregate",
+        feature_values=feature_values,
+        feature_provenance=feature_provenance,
+        conditioning=_aggregate_conditioning(ordered),
+        quality={
+            "aggregation": "median_monthly_canonical_fingerprints",
+            "component_sources": component_sources,
+            "component_count": len(ordered),
+            "cache_source": "mixed",
+            "sequence_status": "derived",
+            "limitations": ["annual_values_are_monthly_fingerprint_aggregates"],
+        },
+        profile=_aggregate_profile(ordered),
+    )
+
+
+def _aggregate_conditioning(
+    items: Sequence[FeedEpochEvidenceV1],
+) -> dict[str, JSONValue]:
+    count_fields = (
+        "session_state_counts",
+        "active_session_counts",
+        "special_tag_counts",
+        "holiday_tag_counts",
+        "event_tag_counts",
+    )
+    result: dict[str, JSONValue] = {
+        name: _sum_count_maps(item.conditioning.get(name) for item in items)
+        for name in count_fields
+    }
+    statuses = sorted(
+        {
+            str(item.conditioning.get("calendar_status", "unavailable"))
+            for item in items
+        }
+    )
+    status_values: list[JSONValue] = []
+    status_values.extend(statuses)
+    result.update(
+        {
+            "calendar_status": statuses[0] if len(statuses) == 1 else "mixed",
+            "calendar_statuses": status_values,
+            "aggregation": "sum_counts_across_canonical_fingerprints",
+            "conditioning_payload_sha256": _semantic_sha256(
+                {
+                    "conditioning_hashes": [
+                        item.conditioning.get("conditioning_payload_sha256")
+                        for item in items
+                    ]
+                }
+            ),
+        }
+    )
+    return result
+
+
+def _aggregate_profile(
+    items: Sequence[FeedEpochEvidenceV1],
+) -> dict[str, JSONValue]:
+    row_count = sum(_profile_int(item, "row_count") for item in items)
+    quote_update_count = sum(
+        _profile_int(item, "quote_update_count") for item in items
+    )
+    interval_count = sum(
+        max(0, _profile_int(item, "row_count") - 1) for item in items
+    )
+    durations = sum(
+        max(0, item.end_timestamp_utc_ms - item.start_timestamp_utc_ms)
+        for item in items
+    )
+    weighted_spread_total = sum(
+        _profile_float(item, "spread_mean") * _profile_int(item, "row_count")
+        for item in items
+    )
+    return {
+        "row_count": row_count,
+        "tick_rate_per_hour": (
+            row_count * 3_600_000.0 / durations if durations else 0.0
+        ),
+        "median_interarrival_ms": _median_profile(
+            items, "median_interarrival_ms"
+        ),
+        "p95_interarrival_ms": _median_profile(items, "p95_interarrival_ms"),
+        "max_interarrival_ms": max(
+            (_profile_int(item, "max_interarrival_ms") for item in items),
+            default=0,
+        ),
+        "quiet_gap_count": sum(
+            _profile_int(item, "quiet_gap_count") for item in items
+        ),
+        "quote_update_count": quote_update_count,
+        "quote_update_ratio": (
+            quote_update_count / interval_count if interval_count else 0.0
+        ),
+        "zero_change_run_count": sum(
+            _profile_int(item, "zero_change_run_count") for item in items
+        ),
+        "zero_change_tick_count": sum(
+            _profile_int(item, "zero_change_tick_count") for item in items
+        ),
+        "spread_min": min(
+            (_profile_float(item, "spread_min") for item in items),
+            default=0.0,
+        ),
+        "spread_median": _median_profile(items, "spread_median"),
+        "spread_mean": weighted_spread_total / row_count if row_count else 0.0,
+        "spread_max": max(
+            (_profile_float(item, "spread_max") for item in items),
+            default=0.0,
+        ),
+        "session_counts": _sum_count_maps(
+            item.profile.get("session_counts") for item in items
+        ),
+    }
+
+
+def _sum_count_maps(values: Iterable[Any]) -> dict[str, JSONValue]:
+    counts: Counter[str] = Counter()
+    for value in values:
+        if not isinstance(value, Mapping):
+            continue
+        for name, count in value.items():
+            try:
+                counts[str(name)] += max(0, int(count))
+            except (TypeError, ValueError, OverflowError):
+                continue
+    result: dict[str, JSONValue] = {}
+    for name, count in sorted(counts.items()):
+        result[name] = int(count)
+    return result
+
+
+def _profile_int(item: FeedEpochEvidenceV1, name: str) -> int:
+    return max(0, int(_json_float(item.profile.get(name), default=0.0)))
+
+
+def _profile_float(item: FeedEpochEvidenceV1, name: str) -> float:
+    return _json_float(item.profile.get(name), default=0.0)
+
+
+def _json_float(value: JSONValue, *, default: float) -> float:
+    if isinstance(value, bool) or not isinstance(value, (str, int, float)):
+        return default
+    try:
+        return float(value)
+    except (TypeError, ValueError, OverflowError):
+        return default
+
+
+def _median_profile(items: Sequence[FeedEpochEvidenceV1], name: str) -> float:
+    return float(median(_profile_float(item, name) for item in items))
+
+
+def _semantic_sha256(value: Mapping[str, Any]) -> str:
+    encoded = json.dumps(value, sort_keys=True, separators=(",", ":")).encode(
+        "utf-8"
+    )
+    return "sha256:" + hashlib.sha256(encoded).hexdigest()
+
+
+def _period_profile_from_evidence(
+    evidence: FeedEpochEvidenceV1,
+    *,
+    bucket: str,
+) -> FeedPeriodProfile:
+    profile = evidence.profile
+    session_counts = profile.get("session_counts", {})
+    if not isinstance(session_counts, Mapping):
+        session_counts = {}
+    return FeedPeriodProfile(
+        symbol=evidence.symbol,
+        period=evidence.period,
+        bucket=bucket,
+        row_count=_profile_int(evidence, "row_count"),
+        start_utc_ms=evidence.start_timestamp_utc_ms,
+        end_utc_ms=evidence.end_timestamp_utc_ms,
+        tick_rate_per_hour=_profile_float(evidence, "tick_rate_per_hour"),
+        median_interarrival_ms=_profile_float(
+            evidence, "median_interarrival_ms"
+        ),
+        p95_interarrival_ms=_profile_float(evidence, "p95_interarrival_ms"),
+        max_interarrival_ms=int(
+            _profile_float(evidence, "max_interarrival_ms")
+        ),
+        quiet_gap_count=_profile_int(evidence, "quiet_gap_count"),
+        quote_update_count=_profile_int(evidence, "quote_update_count"),
+        quote_update_ratio=_profile_float(evidence, "quote_update_ratio"),
+        zero_change_run_count=_profile_int(evidence, "zero_change_run_count"),
+        zero_change_tick_count=_profile_int(evidence, "zero_change_tick_count"),
+        spread_min=_profile_float(evidence, "spread_min"),
+        spread_median=_profile_float(evidence, "spread_median"),
+        spread_mean=_profile_float(evidence, "spread_mean"),
+        spread_max=_profile_float(evidence, "spread_max"),
+        session_counts={
+            str(name): max(0, int(_json_float(value, default=0.0)))
+            for name, value in session_counts.items()
+        },
+    )
+
+
+def _regimes_from_definition(
+    definition: FeedEpochDefinitionV1,
+    *,
+    bucket: str,
+    profiles: Sequence[FeedPeriodProfile],
+) -> tuple[FeedRegimeEra, ...]:
+    result: list[FeedRegimeEra] = []
+    for epoch in definition.epochs:
+        members = tuple(
+            profile
+            for profile in profiles
+            if epoch.period_start <= profile.period <= epoch.period_end
+        )
+        rates = [profile.tick_rate_per_hour for profile in members]
+        gaps = [profile.median_interarrival_ms for profile in members]
+        updates = [profile.quote_update_ratio for profile in members]
+        result.append(
+            FeedRegimeEra(
+                symbol="+".join(definition.symbols),
+                label=epoch.label,
+                bucket=bucket,
+                period_start=epoch.period_start,
+                period_end=epoch.period_end,
+                start_utc_ms=epoch.start_timestamp_utc_ms,
+                end_utc_ms=epoch.end_timestamp_utc_ms,
+                profile_count=len(members),
+                row_count=sum(profile.row_count for profile in members),
+                mean_tick_rate_per_hour=(
+                    sum(rates) / len(rates) if rates else 0.0
+                ),
+                median_interarrival_ms=(float(median(gaps)) if gaps else 0.0),
+                quote_update_ratio=(
+                    sum(updates) / len(updates) if updates else 0.0
+                ),
+                quiet_gap_count=sum(
+                    profile.quiet_gap_count for profile in members
+                ),
+                metadata={
+                    "epoch_id": epoch.epoch_id,
+                    "definition_id": definition.definition_id,
+                    "stability_status": definition.stability.status,
+                    "transition_intervals_are_separate": True,
+                },
+            )
+        )
+    return tuple(result)
 
 
 def _normalize_bucket(bucket: str) -> str:
-    normalized = str(bucket or "month").strip().lower()
+    normalized = str(bucket or "").strip().lower()
     if normalized not in {"month", "year"}:
         raise ValueError("feed-regime bucket must be 'month' or 'year'")
     return normalized
 
 
-def _period_for_observation(
-    observation: _TickObservation,
-    bucket: str,
-) -> str:
-    source = _source_datetime(observation.utc_ms)
-    if bucket == "year":
-        return f"{source.year:04d}"
-    return f"{source.year:04d}{source.month:02d}"
-
-
-def _profile_observations(
-    *,
-    symbol: str,
-    period: str,
-    bucket: str,
-    observations: Sequence[_TickObservation],
-    quiet_gap_ms: int,
-) -> FeedPeriodProfile:
-    ordered = tuple(sorted(observations, key=lambda item: item.utc_ms))
-    timestamps = [item.utc_ms for item in ordered]
-    deltas = [
-        max(0, current - previous)
-        for previous, current in zip(timestamps, timestamps[1:], strict=False)
-    ]
-    spreads = [item.ask - item.bid for item in ordered]
-    quote_update_count = _quote_update_count(ordered)
-    zero_runs, zero_ticks = _zero_change_runs(ordered)
-    duration_ms = max(0, timestamps[-1] - timestamps[0]) if timestamps else 0
-    rate = len(ordered) * 3_600_000 / duration_ms if duration_ms > 0 else 0.0
-    return FeedPeriodProfile(
-        symbol=symbol,
-        period=period,
-        bucket=bucket,
-        row_count=len(ordered),
-        start_utc_ms=timestamps[0] if timestamps else 0,
-        end_utc_ms=timestamps[-1] if timestamps else 0,
-        tick_rate_per_hour=rate,
-        median_interarrival_ms=_median(deltas),
-        p95_interarrival_ms=_percentile(deltas, 95),
-        max_interarrival_ms=max(deltas) if deltas else 0,
-        quiet_gap_count=sum(1 for delta in deltas if delta >= quiet_gap_ms),
-        quote_update_count=quote_update_count,
-        quote_update_ratio=(
-            quote_update_count / max(1, len(ordered) - 1) if ordered else 0.0
-        ),
-        zero_change_run_count=zero_runs,
-        zero_change_tick_count=zero_ticks,
-        spread_min=min(spreads) if spreads else 0.0,
-        spread_median=_median(spreads),
-        spread_mean=(sum(spreads) / len(spreads) if spreads else 0.0),
-        spread_max=max(spreads) if spreads else 0.0,
-        session_counts=_session_counts(ordered),
-        target_paths=tuple(sorted({item.target_path for item in ordered})),
-    )
-
-
-def _segment_regimes(
-    profiles: Sequence[FeedPeriodProfile],
-) -> tuple[FeedRegimeEra, ...]:
-    grouped: dict[str, list[FeedPeriodProfile]] = defaultdict(list)
-    for profile in profiles:
-        grouped[profile.symbol].append(profile)
-
-    regimes: list[FeedRegimeEra] = []
-    for symbol, symbol_profiles in sorted(grouped.items()):
-        ordered = sorted(symbol_profiles, key=lambda item: item.period)
-        labels = _regime_labels(ordered)
-        current: list[FeedPeriodProfile] = []
-        current_label = ""
-        for profile, label in zip(ordered, labels, strict=True):
-            if current and label != current_label:
-                regimes.append(_era(symbol, current_label, tuple(current)))
-                current = []
-            current_label = label
-            current.append(profile)
-        if current:
-            regimes.append(_era(symbol, current_label, tuple(current)))
-    return tuple(regimes)
-
-
-def _regime_labels(profiles: Sequence[FeedPeriodProfile]) -> tuple[str, ...]:
-    if len(profiles) <= 1:
-        return tuple("stable" for _ in profiles)
-    rates = [profile.tick_rate_per_hour for profile in profiles]
-    max_rate = max(rates)
-    min_positive = min((rate for rate in rates if rate > 0), default=0.0)
-    if max_rate <= 0 or (min_positive and max_rate / min_positive < 1.5):
-        return tuple("stable" for _ in profiles)
-    labels: list[str] = []
-    for rate in rates:
-        ratio = rate / max_rate if max_rate else 0.0
-        if ratio < 0.25:
-            labels.append("sparse")
-        elif ratio < 0.70:
-            labels.append("transitional")
-        else:
-            labels.append("dense")
-    return tuple(labels)
-
-
-def _era(
-    symbol: str,
-    label: str,
-    profiles: Sequence[FeedPeriodProfile],
-) -> FeedRegimeEra:
-    rates = [profile.tick_rate_per_hour for profile in profiles]
-    gaps = [profile.median_interarrival_ms for profile in profiles]
-    updates = [profile.quote_update_ratio for profile in profiles]
-    return FeedRegimeEra(
-        symbol=symbol,
-        label=label,
-        bucket=profiles[0].bucket,
-        period_start=profiles[0].period,
-        period_end=profiles[-1].period,
-        start_utc_ms=min(profile.start_utc_ms for profile in profiles),
-        end_utc_ms=max(profile.end_utc_ms for profile in profiles),
-        profile_count=len(profiles),
-        row_count=sum(profile.row_count for profile in profiles),
-        mean_tick_rate_per_hour=sum(rates) / len(rates),
-        median_interarrival_ms=_median(gaps),
-        quote_update_ratio=sum(updates) / len(updates),
-        quiet_gap_count=sum(profile.quiet_gap_count for profile in profiles),
-        metadata={
-            "periods": [profile.period for profile in profiles],
-            "rate_min": _round_float(min(rates) if rates else 0.0),
-            "rate_max": _round_float(max(rates) if rates else 0.0),
-        },
-    )
-
-
-def _quote_update_count(observations: Sequence[_TickObservation]) -> int:
-    return sum(
-        1
-        for previous, current in zip(
-            observations,
-            observations[1:],
-            strict=False,
-        )
-        if previous.bid != current.bid or previous.ask != current.ask
-    )
-
-
-def _zero_change_runs(
-    observations: Sequence[_TickObservation],
-) -> tuple[int, int]:
-    runs = 0
-    ticks = 0
-    current_run = 1
-    for previous, current in zip(
-        observations,
-        observations[1:],
-        strict=False,
-    ):
-        if previous.bid == current.bid and previous.ask == current.ask:
-            current_run += 1
-            continue
-        if current_run > 1:
-            runs += 1
-            ticks += current_run
-        current_run = 1
-    if current_run > 1:
-        runs += 1
-        ticks += current_run
-    return runs, ticks
-
-
-def _session_counts(
-    observations: Sequence[_TickObservation],
-) -> dict[str, int]:
-    counts: Counter[str] = Counter()
-    for observation in observations:
-        sessions = _sessions_for_utc(_utc_datetime(observation.utc_ms))
-        counts.update(sessions or ("market_closed",))
-    return dict(counts)
-
-
-def _sessions_for_utc(value: datetime) -> tuple[str, ...]:
-    minute = value.hour * 60 + value.minute
-    sessions: list[str] = []
-    if _minute_in_window(minute, 0, 8 * 60):
-        sessions.append("asia")
-    if _minute_in_window(minute, 7 * 60, 16 * 60):
-        sessions.append("london")
-    if _minute_in_window(minute, 13 * 60, 22 * 60):
-        sessions.append("new_york")
-    return tuple(sessions)
-
-
-def _minute_in_window(minute: int, start: int, end: int) -> bool:
-    return start <= minute < end
-
-
-def _source_datetime(utc_ms: int) -> datetime:
-    return _utc_datetime(utc_ms) - timedelta(milliseconds=EST_NO_DST_OFFSET_MS)
-
-
-def _utc_datetime(utc_ms: int) -> datetime:
-    return datetime.fromtimestamp(utc_ms / 1000, tz=timezone.utc)
-
-
-def _median(values: Sequence[float | int]) -> float:
-    if not values:
-        return 0.0
-    ordered = sorted(float(value) for value in values)
-    midpoint = len(ordered) // 2
-    if len(ordered) % 2:
-        return ordered[midpoint]
-    return (ordered[midpoint - 1] + ordered[midpoint]) / 2
-
-
-def _percentile(values: Sequence[float | int], percentile: int) -> float:
-    if not values:
-        return 0.0
-    ordered = sorted(float(value) for value in values)
-    index = max(
-        0, min(len(ordered) - 1, ceil(percentile / 100 * len(ordered)) - 1)
-    )
-    return ordered[index]
-
-
-def _round_float(value: float) -> float:
-    return round(float(value), 6)
+def _round_float(value: float, digits: int = 6) -> float:
+    rounded = round(float(value), digits)
+    return 0.0 if rounded == 0.0 else rounded

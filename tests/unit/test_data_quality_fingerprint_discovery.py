@@ -6,6 +6,17 @@ from copy import deepcopy
 import json
 from pathlib import Path
 
+from histdatacom.data_quality.autoregressive import (
+    AUTOREGRESSIVE_COLUMNS,
+    AUTOREGRESSIVE_CONFIGURATION_SCHEMA_VERSION,
+    AUTOREGRESSIVE_EVALUATION_SCHEMA_VERSION,
+    AUTOREGRESSIVE_FIT_SCHEMA_VERSION,
+    AUTOREGRESSIVE_FORECAST_SCHEMA_VERSION,
+    AUTOREGRESSIVE_SCHEMA_VERSION,
+    AUTOREGRESSIVE_SUMMARY_METADATA_KEY,
+    AUTOREGRESSIVE_SUMMARY_SCHEMA_VERSION,
+    AUTOREGRESSIVE_TRAINING_PROJECTION_SCHEMA_VERSION,
+)
 from histdatacom.data_quality.fingerprint_discovery import (
     TIME_SERIES_FINGERPRINT_CONTRACT_AUDIT_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_REPORT_SURFACE_EVIDENCE_SCHEMA_VERSION,
@@ -17,24 +28,95 @@ from histdatacom.data_quality.fingerprint_discovery import (
     format_fingerprint_contract_audit,
     format_fingerprint_schema_discovery,
 )
+from histdatacom.data_quality.classical_baselines import (
+    CLASSICAL_BASELINE_SCHEMA_VERSION,
+    CLASSICAL_BASELINE_SUMMARY_SCHEMA_VERSION,
+    CLASSICAL_BASELINE_TRAINING_PROJECTION_SCHEMA_VERSION,
+)
+from histdatacom.data_quality.classical_model_contracts import (
+    CLASSICAL_MODEL_EVALUATION_RESULT_SCHEMA_VERSION,
+    CLASSICAL_MODEL_FIT_RESULT_SCHEMA_VERSION,
+    CLASSICAL_MODEL_FOLD_SCHEMA_VERSION,
+    CLASSICAL_MODEL_INPUT_SCHEMA_VERSION,
+    CLASSICAL_MODEL_INPUT_SUMMARY_METADATA_KEY,
+    CLASSICAL_MODEL_INPUT_SUMMARY_SCHEMA_VERSION,
+    CLASSICAL_MODEL_TRAINING_PROJECTION_SCHEMA_VERSION,
+)
+from histdatacom.data_quality.classical_model_comparison import (
+    CLASSICAL_MODEL_COMPARISON_COLUMNS,
+    CLASSICAL_MODEL_COMPARISON_SCHEMA_VERSION,
+    CLASSICAL_MODEL_COMPARISON_SUMMARY_METADATA_KEY,
+    CLASSICAL_MODEL_COMPARISON_SUMMARY_SCHEMA_VERSION,
+    CLASSICAL_MODEL_COMPARISON_TRAINING_PROJECTION_SCHEMA_VERSION,
+)
+from histdatacom.data_quality.exponential_smoothing import (
+    EXPONENTIAL_SMOOTHING_CONFIGURATION_SCHEMA_VERSION,
+    EXPONENTIAL_SMOOTHING_EVALUATION_SCHEMA_VERSION,
+    EXPONENTIAL_SMOOTHING_FIT_SCHEMA_VERSION,
+    EXPONENTIAL_SMOOTHING_FORECAST_SCHEMA_VERSION,
+    EXPONENTIAL_SMOOTHING_SCHEMA_VERSION,
+    EXPONENTIAL_SMOOTHING_SUMMARY_METADATA_KEY,
+    EXPONENTIAL_SMOOTHING_SUMMARY_SCHEMA_VERSION,
+    EXPONENTIAL_SMOOTHING_TRAINING_PROJECTION_SCHEMA_VERSION,
+)
+from histdatacom.data_quality.seasonal_exogenous import (
+    SEASONAL_EXOGENOUS_CONFIGURATION_SCHEMA_VERSION,
+    SEASONAL_EXOGENOUS_EVALUATION_SCHEMA_VERSION,
+    SEASONAL_EXOGENOUS_FIT_SCHEMA_VERSION,
+    SEASONAL_EXOGENOUS_FORECAST_SCHEMA_VERSION,
+    SEASONAL_EXOGENOUS_REGRESSOR_SCHEMA_VERSION,
+    SEASONAL_EXOGENOUS_SCHEMA_VERSION,
+    SEASONAL_EXOGENOUS_SUMMARY_METADATA_KEY,
+    SEASONAL_EXOGENOUS_SUMMARY_SCHEMA_VERSION,
+    SEASONAL_EXOGENOUS_TRAINING_PROJECTION_SCHEMA_VERSION,
+)
+from histdatacom.data_quality.state_space import (
+    STATE_SPACE_CONFIGURATION_SCHEMA_VERSION,
+    STATE_SPACE_EVALUATION_SCHEMA_VERSION,
+    STATE_SPACE_FIT_SCHEMA_VERSION,
+    STATE_SPACE_FORECAST_SCHEMA_VERSION,
+    STATE_SPACE_SCHEMA_VERSION,
+    STATE_SPACE_STATE_RESULT_SCHEMA_VERSION,
+    STATE_SPACE_SUMMARY_METADATA_KEY,
+    STATE_SPACE_SUMMARY_SCHEMA_VERSION,
+    STATE_SPACE_TRAINING_PROJECTION_SCHEMA_VERSION,
+)
+from histdatacom.data_quality.volatility import (
+    VOLATILITY_CONFIGURATION_SCHEMA_VERSION,
+    VOLATILITY_EVALUATION_SCHEMA_VERSION,
+    VOLATILITY_FIT_SCHEMA_VERSION,
+    VOLATILITY_FORECAST_SCHEMA_VERSION,
+    VOLATILITY_SCHEMA_VERSION,
+    VOLATILITY_SUMMARY_METADATA_KEY,
+    VOLATILITY_SUMMARY_SCHEMA_VERSION,
+    VOLATILITY_TRAINING_PROJECTION_SCHEMA_VERSION,
+)
 from histdatacom.data_quality.fingerprint_contracts import (
     FINGERPRINT_DISTRIBUTION_ATTENTION_DEFAULTS,
     FINGERPRINT_REPORT_SURFACE_CONTRACTS,
     FINGERPRINT_SCHEMA_CONTRACTS,
     FINGERPRINT_SECTION_LIMIT_DEFAULTS,
     FingerprintReportSurfaceContract,
+    IMPLEMENTED_FINGERPRINT_RUN_SECTION_CONTRACTS,
     IMPLEMENTED_FINGERPRINT_TARGET_SECTION_CONTRACTS,
     PLANNED_FINGERPRINT_RUN_SECTION_CONTRACTS,
     PLANNED_FINGERPRINT_TARGET_SECTION_CONTRACTS,
 )
 from histdatacom.data_quality.fingerprints import (
+    CROSS_SERIES_FINGERPRINT_METADATA_KEY,
+    CROSS_SERIES_FINGERPRINT_SCHEMA_VERSION,
     FINGERPRINT_AUDIT_SECTIONS,
     FINGERPRINT_DYNAMICS_SECTIONS,
     SERIES_FINGERPRINT_RULE_ID,
     HistDataFingerprintProfile,
     TIME_SERIES_FINGERPRINT_AUDIT_SCHEMA_VERSION,
+    TIME_SERIES_FINGERPRINT_DECOMPOSITION_SCHEMA_VERSION,
+    TIME_SERIES_FINGERPRINT_DECOMPOSITION_TRAINING_PROJECTION_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_DEPENDENCE_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_METADATA_KEY,
+    TIME_SERIES_FINGERPRINT_PARITY_SCHEMA_VERSION,
+    TIME_SERIES_FINGERPRINT_PARITY_SUMMARY_METADATA_KEY,
+    TIME_SERIES_FINGERPRINT_PARITY_SUMMARY_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_READINESS_SUMMARY_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_READINESS_SUMMARY_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_READINESS_RISK_METADATA_KEY,
@@ -45,6 +127,24 @@ from histdatacom.data_quality.fingerprints import (
 from histdatacom.data_quality.profiles import (
     QUALITY_PROFILE_SCHEMA_VERSION,
     load_quality_profile_file,
+)
+from histdatacom.data_quality.synthetic_constraints import (
+    SYNTHETIC_CONSTRAINT_SUMMARY_SCHEMA_VERSION,
+    SYNTHETIC_CONSTRAINTS_SCHEMA_VERSION,
+    SYNTHETIC_VALIDATION_SCHEMA_VERSION,
+)
+from histdatacom.data_quality.synthetic_generation import (
+    SYNTHETIC_TICK_GENERATION_CONFIGURATION_SCHEMA_VERSION,
+    SYNTHETIC_TICK_GENERATION_SCHEMA_VERSION,
+    SYNTHETIC_TICK_GENERATION_VALIDATION_SCHEMA_VERSION,
+)
+from histdatacom.data_quality.training_features import (
+    EXPONENTIAL_SMOOTHING_COLUMNS,
+    SEASONAL_EXOGENOUS_COLUMNS,
+    KALMAN_COLUMNS,
+    STATE_SPACE_COLUMNS,
+    VOLATILITY_COLUMNS,
+    training_feature_definitions,
 )
 from histdatacom.runtime_contracts import JSONValue
 
@@ -76,21 +176,273 @@ def test_fingerprint_schema_discovery_reports_contract_surface() -> None:
         schemas["fingerprint_stationarity_diagnostics"]["schema_version"]
         == TIME_SERIES_FINGERPRINT_STATIONARITY_SCHEMA_VERSION
     )
+    assert schemas["fingerprint_decomposition"]["schema_version"] == (
+        TIME_SERIES_FINGERPRINT_DECOMPOSITION_SCHEMA_VERSION
+    )
+    assert schemas["fingerprint_classical_baselines"]["schema_version"] == (
+        CLASSICAL_BASELINE_SCHEMA_VERSION
+    )
+    assert (
+        schemas["fingerprint_classical_baseline_training_projection"][
+            "schema_version"
+        ]
+        == CLASSICAL_BASELINE_TRAINING_PROJECTION_SCHEMA_VERSION
+    )
+    assert (
+        schemas["fingerprint_classical_baseline_summary"]["schema_version"]
+        == CLASSICAL_BASELINE_SUMMARY_SCHEMA_VERSION
+    )
+    assert schemas["fingerprint_classical_model_input"]["schema_version"] == (
+        CLASSICAL_MODEL_INPUT_SCHEMA_VERSION
+    )
+    assert schemas["fingerprint_classical_model_fold"]["schema_version"] == (
+        CLASSICAL_MODEL_FOLD_SCHEMA_VERSION
+    )
+    assert schemas["fingerprint_classical_model_fit_result"][
+        "schema_version"
+    ] == (CLASSICAL_MODEL_FIT_RESULT_SCHEMA_VERSION)
+    assert schemas["fingerprint_classical_model_evaluation_result"][
+        "schema_version"
+    ] == (CLASSICAL_MODEL_EVALUATION_RESULT_SCHEMA_VERSION)
+    assert schemas["fingerprint_classical_model_training_projection"][
+        "schema_version"
+    ] == (CLASSICAL_MODEL_TRAINING_PROJECTION_SCHEMA_VERSION)
+    assert schemas["fingerprint_classical_model_input_summary"][
+        "schema_version"
+    ] == (CLASSICAL_MODEL_INPUT_SUMMARY_SCHEMA_VERSION)
+    assert schemas["fingerprint_exponential_smoothing"]["schema_version"] == (
+        EXPONENTIAL_SMOOTHING_SCHEMA_VERSION
+    )
+    assert (
+        schemas["fingerprint_exponential_smoothing_configuration"][
+            "schema_version"
+        ]
+        == EXPONENTIAL_SMOOTHING_CONFIGURATION_SCHEMA_VERSION
+    )
+    assert (
+        schemas["fingerprint_exponential_smoothing_fit"]["schema_version"]
+        == EXPONENTIAL_SMOOTHING_FIT_SCHEMA_VERSION
+    )
+    assert (
+        schemas["fingerprint_exponential_smoothing_forecast"]["schema_version"]
+        == EXPONENTIAL_SMOOTHING_FORECAST_SCHEMA_VERSION
+    )
+    assert (
+        schemas["fingerprint_exponential_smoothing_evaluation"][
+            "schema_version"
+        ]
+        == EXPONENTIAL_SMOOTHING_EVALUATION_SCHEMA_VERSION
+    )
+    assert (
+        schemas["fingerprint_exponential_smoothing_training_projection"][
+            "schema_version"
+        ]
+        == EXPONENTIAL_SMOOTHING_TRAINING_PROJECTION_SCHEMA_VERSION
+    )
+    assert (
+        schemas["fingerprint_exponential_smoothing_summary"]["schema_version"]
+        == EXPONENTIAL_SMOOTHING_SUMMARY_SCHEMA_VERSION
+    )
+    assert schemas["fingerprint_autoregressive"]["schema_version"] == (
+        AUTOREGRESSIVE_SCHEMA_VERSION
+    )
+    assert (
+        schemas["fingerprint_autoregressive_configuration"]["schema_version"]
+        == AUTOREGRESSIVE_CONFIGURATION_SCHEMA_VERSION
+    )
+    assert schemas["fingerprint_autoregressive_fit"]["schema_version"] == (
+        AUTOREGRESSIVE_FIT_SCHEMA_VERSION
+    )
+    assert schemas["fingerprint_autoregressive_forecast"]["schema_version"] == (
+        AUTOREGRESSIVE_FORECAST_SCHEMA_VERSION
+    )
+    assert (
+        schemas["fingerprint_autoregressive_evaluation"]["schema_version"]
+        == AUTOREGRESSIVE_EVALUATION_SCHEMA_VERSION
+    )
+    assert (
+        schemas["fingerprint_autoregressive_training_projection"][
+            "schema_version"
+        ]
+        == AUTOREGRESSIVE_TRAINING_PROJECTION_SCHEMA_VERSION
+    )
+    assert schemas["fingerprint_autoregressive_summary"]["schema_version"] == (
+        AUTOREGRESSIVE_SUMMARY_SCHEMA_VERSION
+    )
+    assert schemas["fingerprint_seasonal_exogenous"]["schema_version"] == (
+        SEASONAL_EXOGENOUS_SCHEMA_VERSION
+    )
+    assert schemas["fingerprint_seasonal_exogenous_configuration"][
+        "schema_version"
+    ] == (SEASONAL_EXOGENOUS_CONFIGURATION_SCHEMA_VERSION)
+    assert schemas["fingerprint_seasonal_exogenous_regressors"][
+        "schema_version"
+    ] == (SEASONAL_EXOGENOUS_REGRESSOR_SCHEMA_VERSION)
+    assert schemas["fingerprint_seasonal_exogenous_fit"]["schema_version"] == (
+        SEASONAL_EXOGENOUS_FIT_SCHEMA_VERSION
+    )
+    assert schemas["fingerprint_seasonal_exogenous_forecast"][
+        "schema_version"
+    ] == (SEASONAL_EXOGENOUS_FORECAST_SCHEMA_VERSION)
+    assert schemas["fingerprint_seasonal_exogenous_evaluation"][
+        "schema_version"
+    ] == (SEASONAL_EXOGENOUS_EVALUATION_SCHEMA_VERSION)
+    assert schemas["fingerprint_seasonal_exogenous_training_projection"][
+        "schema_version"
+    ] == (SEASONAL_EXOGENOUS_TRAINING_PROJECTION_SCHEMA_VERSION)
+    assert schemas["fingerprint_seasonal_exogenous_summary"][
+        "schema_version"
+    ] == (SEASONAL_EXOGENOUS_SUMMARY_SCHEMA_VERSION)
+    assert schemas["fingerprint_state_space"]["schema_version"] == (
+        STATE_SPACE_SCHEMA_VERSION
+    )
+    assert (
+        schemas["fingerprint_state_space_configuration"]["schema_version"]
+        == STATE_SPACE_CONFIGURATION_SCHEMA_VERSION
+    )
+    assert schemas["fingerprint_state_space_fit"]["schema_version"] == (
+        STATE_SPACE_FIT_SCHEMA_VERSION
+    )
+    assert schemas["fingerprint_kalman_state_result"]["schema_version"] == (
+        STATE_SPACE_STATE_RESULT_SCHEMA_VERSION
+    )
+    assert schemas["fingerprint_state_space_forecast"]["schema_version"] == (
+        STATE_SPACE_FORECAST_SCHEMA_VERSION
+    )
+    assert schemas["fingerprint_state_space_evaluation"]["schema_version"] == (
+        STATE_SPACE_EVALUATION_SCHEMA_VERSION
+    )
+    assert (
+        schemas["fingerprint_state_space_training_projection"]["schema_version"]
+        == STATE_SPACE_TRAINING_PROJECTION_SCHEMA_VERSION
+    )
+    assert schemas["fingerprint_state_space_summary"]["schema_version"] == (
+        STATE_SPACE_SUMMARY_SCHEMA_VERSION
+    )
+    assert schemas["fingerprint_volatility"]["schema_version"] == (
+        VOLATILITY_SCHEMA_VERSION
+    )
+    assert (
+        schemas["fingerprint_volatility_configuration"]["schema_version"]
+        == VOLATILITY_CONFIGURATION_SCHEMA_VERSION
+    )
+    assert schemas["fingerprint_volatility_fit"]["schema_version"] == (
+        VOLATILITY_FIT_SCHEMA_VERSION
+    )
+    assert schemas["fingerprint_volatility_forecast"]["schema_version"] == (
+        VOLATILITY_FORECAST_SCHEMA_VERSION
+    )
+    assert schemas["fingerprint_volatility_evaluation"]["schema_version"] == (
+        VOLATILITY_EVALUATION_SCHEMA_VERSION
+    )
+    assert (
+        schemas["fingerprint_volatility_training_projection"]["schema_version"]
+        == VOLATILITY_TRAINING_PROJECTION_SCHEMA_VERSION
+    )
+    assert schemas["fingerprint_volatility_summary"]["schema_version"] == (
+        VOLATILITY_SUMMARY_SCHEMA_VERSION
+    )
+    assert (
+        schemas["fingerprint_classical_model_comparison"]["schema_version"]
+        == CLASSICAL_MODEL_COMPARISON_SCHEMA_VERSION
+    )
+    assert (
+        schemas["fingerprint_classical_model_comparison_training_projection"][
+            "schema_version"
+        ]
+        == CLASSICAL_MODEL_COMPARISON_TRAINING_PROJECTION_SCHEMA_VERSION
+    )
+    assert (
+        schemas["fingerprint_classical_model_comparison_summary"][
+            "schema_version"
+        ]
+        == CLASSICAL_MODEL_COMPARISON_SUMMARY_SCHEMA_VERSION
+    )
+    assert (
+        schemas["fingerprint_decomposition_training_projection"][
+            "schema_version"
+        ]
+        == TIME_SERIES_FINGERPRINT_DECOMPOSITION_TRAINING_PROJECTION_SCHEMA_VERSION
+    )
     assert schemas["fingerprint_readiness_summary"]["schema_version"] == (
         TIME_SERIES_FINGERPRINT_READINESS_SUMMARY_SCHEMA_VERSION
     )
     assert schemas["fingerprint_readiness_risk"]["schema_version"] == (
         TIME_SERIES_FINGERPRINT_READINESS_RISK_SCHEMA_VERSION
     )
-    assert schemas["cross_series_fingerprint"]["status"] == "planned"
+    assert schemas["fingerprint_cache_source_parity"]["schema_version"] == (
+        TIME_SERIES_FINGERPRINT_PARITY_SCHEMA_VERSION
+    )
+    assert (
+        schemas["fingerprint_cache_source_parity_summary"]["schema_version"]
+        == TIME_SERIES_FINGERPRINT_PARITY_SUMMARY_SCHEMA_VERSION
+    )
+    assert schemas["fingerprint_synthetic_constraints"]["schema_version"] == (
+        SYNTHETIC_CONSTRAINTS_SCHEMA_VERSION
+    )
+    assert (
+        schemas["fingerprint_synthetic_constraint_summary"]["schema_version"]
+        == SYNTHETIC_CONSTRAINT_SUMMARY_SCHEMA_VERSION
+    )
+    assert schemas["fingerprint_synthetic_validation"]["schema_version"] == (
+        SYNTHETIC_VALIDATION_SCHEMA_VERSION
+    )
+    assert schemas["synthetic_tick_generation"]["schema_version"] == (
+        SYNTHETIC_TICK_GENERATION_SCHEMA_VERSION
+    )
+    assert (
+        schemas["synthetic_tick_generation_configuration"]["schema_version"]
+        == SYNTHETIC_TICK_GENERATION_CONFIGURATION_SCHEMA_VERSION
+    )
+    assert (
+        schemas["synthetic_tick_generation_validation"]["schema_version"]
+        == SYNTHETIC_TICK_GENERATION_VALIDATION_SCHEMA_VERSION
+    )
+    assert schemas["cross_series_fingerprint"] == {
+        "schema_version": CROSS_SERIES_FINGERPRINT_SCHEMA_VERSION,
+        "status": "implemented",
+        "rule_id": "fingerprint.cross_series",
+        "metadata_key": CROSS_SERIES_FINGERPRINT_METADATA_KEY,
+        "bounded_payload_key": "fingerprint_cross_series",
+    }
     assert payload["metadata_keys"]["finding_metadata"] == {
-        "series_fingerprint": TIME_SERIES_FINGERPRINT_METADATA_KEY
+        "series_fingerprint": TIME_SERIES_FINGERPRINT_METADATA_KEY,
+        "cross_series_fingerprint": CROSS_SERIES_FINGERPRINT_METADATA_KEY,
     }
     assert payload["metadata_keys"]["report_metadata"]["readiness_summary"] == (
         TIME_SERIES_FINGERPRINT_READINESS_SUMMARY_METADATA_KEY
     )
     assert payload["metadata_keys"]["report_metadata"]["readiness_risk"] == (
         TIME_SERIES_FINGERPRINT_READINESS_RISK_METADATA_KEY
+    )
+    assert (
+        payload["metadata_keys"]["report_metadata"]["cache_source_parity"]
+        == TIME_SERIES_FINGERPRINT_PARITY_SUMMARY_METADATA_KEY
+    )
+    assert payload["metadata_keys"]["report_metadata"][
+        "classical_model_input"
+    ] == (CLASSICAL_MODEL_INPUT_SUMMARY_METADATA_KEY)
+    assert (
+        payload["metadata_keys"]["report_metadata"]["exponential_smoothing"]
+        == EXPONENTIAL_SMOOTHING_SUMMARY_METADATA_KEY
+    )
+    assert payload["metadata_keys"]["report_metadata"]["autoregressive"] == (
+        AUTOREGRESSIVE_SUMMARY_METADATA_KEY
+    )
+    assert payload["metadata_keys"]["report_metadata"][
+        "seasonal_exogenous"
+    ] == (SEASONAL_EXOGENOUS_SUMMARY_METADATA_KEY)
+    assert payload["metadata_keys"]["report_metadata"]["state_space"] == (
+        STATE_SPACE_SUMMARY_METADATA_KEY
+    )
+    assert payload["metadata_keys"]["report_metadata"]["volatility"] == (
+        VOLATILITY_SUMMARY_METADATA_KEY
+    )
+    assert (
+        payload["metadata_keys"]["report_metadata"][
+            "classical_model_comparison"
+        ]
+        == CLASSICAL_MODEL_COMPARISON_SUMMARY_METADATA_KEY
     )
 
     implemented = payload["sections"]["implemented"]["target_sections"]
@@ -103,16 +455,165 @@ def test_fingerprint_schema_discovery_reports_contract_surface() -> None:
         "microstructure_dynamics",
         "dependence",
         "stationarity_diagnostics",
+        "decomposition",
+        "cache_source_parity",
+        "classical_baselines",
+        "classical_model_input",
+        "exponential_smoothing",
+        "autoregressive",
+        "seasonal_exogenous",
+        "state_space",
+        "volatility",
+        "classical_model_comparison",
+        "synthetic_constraints",
         "fingerprint_audit",
     ]
-    planned = payload["sections"]["planned"]["target_sections"]
-    assert [section["name"] for section in planned] == [
-        "decomposition",
-        "synthetic_constraints",
+    exponential = next(
+        section
+        for section in implemented
+        if section["name"] == "exponential_smoothing"
+    )
+    definitions = {
+        definition.name: definition
+        for definition in training_feature_definitions()
+    }
+    synthetic = next(
+        section
+        for section in implemented
+        if section["name"] == "synthetic_constraints"
+    )
+    assert synthetic["generation_in_scope"] is True
+    assert synthetic["generation_method"] == "empirical_block_bootstrap"
+    assert synthetic["issue"] == "#81"
+    assert exponential["augmented_columns"] == [
+        {
+            "name": name,
+            "dtype": definitions[name].dtype,
+            "nullable": definitions[name].nullable,
+            "grain": definitions[name].grain,
+            "source": definitions[name].source,
+        }
+        for name in EXPONENTIAL_SMOOTHING_COLUMNS
     ]
+    autoregressive = next(
+        section
+        for section in implemented
+        if section["name"] == "autoregressive"
+    )
+    assert autoregressive["augmented_columns"] == [
+        {
+            "name": name,
+            "dtype": definitions[name].dtype,
+            "nullable": definitions[name].nullable,
+            "grain": definitions[name].grain,
+            "source": definitions[name].source,
+        }
+        for name in AUTOREGRESSIVE_COLUMNS
+    ]
+    seasonal_exogenous = next(
+        section
+        for section in implemented
+        if section["name"] == "seasonal_exogenous"
+    )
+    assert seasonal_exogenous["model_families"] == [
+        "sarima",
+        "arimax",
+        "sarimax",
+    ]
+    assert seasonal_exogenous["augmented_column_prefixes"] == [
+        "cm_sarima_",
+        "cm_arimax_",
+        "cm_sarimax_",
+    ]
+    assert seasonal_exogenous["augmented_columns"] == [
+        {
+            "name": name,
+            "dtype": definitions[name].dtype,
+            "nullable": definitions[name].nullable,
+            "grain": definitions[name].grain,
+            "source": definitions[name].source,
+        }
+        for name in SEASONAL_EXOGENOUS_COLUMNS
+    ]
+    state_space = next(
+        section for section in implemented if section["name"] == "state_space"
+    )
+    assert state_space["model_families"] == [
+        "local_level",
+        "local_linear_trend",
+        "structural",
+    ]
+    assert state_space["augmented_column_prefixes"] == [
+        "cm_state_space_",
+        "cm_kalman_",
+    ]
+    assert state_space["augmented_columns"] == [
+        {
+            "name": name,
+            "dtype": definitions[name].dtype,
+            "nullable": definitions[name].nullable,
+            "grain": definitions[name].grain,
+            "source": definitions[name].source,
+        }
+        for name in (*STATE_SPACE_COLUMNS, *KALMAN_COLUMNS)
+    ]
+    volatility = next(
+        section for section in implemented if section["name"] == "volatility"
+    )
+    assert volatility["model_families"] == ["arch", "garch"]
+    assert volatility["augmented_column_prefixes"] == [
+        "cm_arch_",
+        "cm_garch_",
+    ]
+    assert volatility["augmented_columns"] == [
+        {
+            "name": name,
+            "dtype": definitions[name].dtype,
+            "nullable": definitions[name].nullable,
+            "grain": definitions[name].grain,
+            "source": definitions[name].source,
+        }
+        for name in VOLATILITY_COLUMNS
+    ]
+    comparison = next(
+        section
+        for section in implemented
+        if section["name"] == "classical_model_comparison"
+    )
+    assert comparison["augmented_column_prefixes"] == [
+        "cm_comparison_",
+        "cm_skill_",
+        "cm_stability_",
+    ]
+    assert comparison["augmented_columns"] == [
+        {
+            "name": name,
+            "dtype": definitions[name].dtype,
+            "nullable": definitions[name].nullable,
+            "grain": definitions[name].grain,
+            "source": definitions[name].source,
+        }
+        for name in CLASSICAL_MODEL_COMPARISON_COLUMNS
+    ]
+    planned = payload["sections"]["planned"]["target_sections"]
+    assert planned == []
+    assert payload["sections"]["planned"]["run_sections"] == []
+    assert payload["sections"]["implemented"]["run_sections"] == [
+        {
+            "name": "cross_series_fingerprint",
+            "status": "implemented",
+            "rule_id": "fingerprint.cross_series",
+            "issue": "#331",
+        }
+    ]
+    assert payload["target_capabilities"]["run_rule_status"]["status"] == (
+        "implemented"
+    )
     assert "observed_sequence" in payload["calculation_bases"]["basis"]
     assert "source_text_order" in payload["calculation_bases"]["row_order"]
     assert "not_emitted" in payload["vocabularies"]["skip_and_reason_codes"]
+    assert len(IMPLEMENTED_FINGERPRINT_RUN_SECTION_CONTRACTS) == 1
+    assert PLANNED_FINGERPRINT_RUN_SECTION_CONTRACTS == ()
 
 
 def test_fingerprint_schema_discovery_uses_contract_registry() -> None:
@@ -412,6 +913,7 @@ def test_fingerprint_schema_discovery_reflects_profile_overrides() -> None:
                     "histogram_bins": 12,
                     "max_rows": 250,
                     "rounding_digits": 6,
+                    "topology_inspection_sample_limit": 2,
                     "distribution_attention": {
                         "zero_spread_min_rate": 0.25,
                         "negative_spread_min_count": 2,
@@ -431,6 +933,7 @@ def test_fingerprint_schema_discovery_reflects_profile_overrides() -> None:
     assert effective["histogram_bins"] == 12
     assert effective["max_rows"] == 250
     assert effective["rounding_digits"] == 6
+    assert effective["topology_inspection_sample_limit"] == 2
     assert effective["distribution_attention"]["zero_spread_min_rate"] == 0.25
     assert effective["distribution_attention"]["negative_spread_min_count"] == 2
 
@@ -477,6 +980,7 @@ def test_format_fingerprint_schema_discovery_renders_human_summary() -> None:
     assert "- microstructure_dynamics: implemented; timeframes=[T]" in output
     assert "- dependence: implemented; timeframes=[T]" in output
     assert "- stationarity_diagnostics: implemented; timeframes=[T]" in output
+    assert "- decomposition: implemented; timeframes=[T]" in output
     assert "without reading source or running data quality checks" in output
 
 

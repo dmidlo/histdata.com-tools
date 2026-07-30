@@ -166,9 +166,13 @@ def test_help_advertises_orchestration_jobs_not_orchestration() -> None:
     assert "Orchestration:" in help_text
     assert "analytics   Run offline data analytics operations" in help_text
     assert "groups      List instrument groups and major triangles" in help_text
+    assert (
+        "datasets    Resolve and verify versioned local datasets" in help_text
+    )
     assert "quality     Inspect local data quality evidence" in help_text
     assert "histdatacom analytics --help" in help_text
     assert "histdatacom groups --help" in help_text
+    assert "histdatacom datasets --help" in help_text
     assert "histdatacom jobs --help" in help_text
     assert "histdatacom quality --help" in help_text
     assert "--config PATH" in help_text
@@ -209,6 +213,7 @@ def test_help_advertises_quality_preflight_mode() -> None:
     assert "--quality-preflight-evidence-max-age-seconds" in help_text
     assert "--quality-preflight-evidence-stale-ok" in help_text
     assert "--quality-preflight-validation-report" in help_text
+    assert "--quality-preflight-validation-evidence" in help_text
     assert "latest" in help_text
     assert "--quality-preflight-run-validation" in help_text
     assert "--quality-preflight-sample-size" in help_text
@@ -228,6 +233,20 @@ def test_help_advertises_request_json_export() -> None:
     assert "--request-json-out" in help_text
     assert "--request-bundle-out" in help_text
     assert "without submitting work" in help_text
+
+
+def test_help_advertises_deterministic_random_windows() -> None:
+    """The public help should expose expression, seed, and bounded-session modes."""
+    parser = ArgParser(Options())
+    parser._set_args()
+    help_text = parser.format_help()
+
+    # argparse renders aliases differently before Python 3.11, but both public
+    # spellings and the expression metavar must remain visible.
+    assert "-r EXPRESSION" in help_text
+    assert "--random-window" in help_text
+    assert "--random-seed INTEGER" in help_text
+    assert "all matching occurrences" in " ".join(help_text.split())
 
 
 def test_help_advertises_pair_groups() -> None:
@@ -538,6 +557,7 @@ histdatacom:
   data_directory: {data_dir}
   cpu_utilization: low
   batch_size: 123
+  timezone: America/New_York
   keep_runtime: true
   no_overlap: true
   orchestration_start: false
@@ -571,6 +591,7 @@ histdatacom:
     assert options.data_directory == str(data_dir)
     assert options.cpu_utilization == "low"
     assert options.batch_size == 123
+    assert options.output_timezone == "America/New_York"
     assert options.validate_urls
     assert options.download_data_archives
     assert not options.extract_csvs
@@ -582,6 +603,58 @@ histdatacom:
     assert options.request_bundle_out == str(bundle_path)
     assert options.request_json_out == str(request_path)
     assert options.verbosity == 2
+
+
+def test_cli_timezone_flag_uses_output_projection_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The short and long public flag should populate output_timezone."""
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["histdatacom", "-z", "Europe/London", "--request-json-out", "-"],
+    )
+
+    options = ArgParser(Options())()
+
+    assert options.output_timezone == "Europe/London"
+
+
+def test_api_options_preserve_output_timezone(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Programmatic API options should survive the argparse compatibility seam."""
+    monkeypatch.setattr(sys, "argv", ["histdatacom"])
+    options = Options()
+    options.from_api = True
+    options.pairs = {"eurusd"}
+    options.formats = {"ascii"}
+    options.timeframes = {"T"}
+    options.start_yearmonth = "2022-12"
+    options.output_timezone = "Asia/Tokyo"
+
+    parsed = ArgParser(options)()
+
+    assert parsed.output_timezone == "Asia/Tokyo"
+
+
+def test_api_options_preserve_random_window_contract(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Programmatic expression/seed inputs should survive argparse compatibility."""
+    monkeypatch.setattr(sys, "argv", ["histdatacom"])
+    options = Options()
+    options.from_api = True
+    options.pairs = {"eurusd"}
+    options.formats = {"ascii"}
+    options.timeframes = {"T"}
+    options.random_window = "90m"
+    options.random_seed = 20260714
+
+    parsed = ArgParser(options)()
+
+    assert parsed.random_window == "90m"
+    assert parsed.random_seed == 20260714
 
 
 def test_config_file_keeps_explicit_cli_overrides(
@@ -664,6 +737,105 @@ histdatacom:
         "usdjpy",
     }
     assert options.pair_groups == ["majors"]
+
+
+def test_config_file_applies_random_window_and_seed(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Recurrent YAML requests should round-trip deterministic window inputs."""
+    config_path = tmp_path / "random-window.yaml"
+    config_path.write_text(
+        """
+histdatacom:
+  validate_urls: true
+  pairs: [eurusd]
+  formats: [ascii]
+  timeframes: [tick-data-quotes]
+  random_window: 2d
+  random_seed: 1729
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["histdatacom", "--config", str(config_path)],
+    )
+
+    options = ArgParser(Options())()
+
+    assert options.random_window == "2d"
+    assert options.random_seed == 1729
+
+
+def test_bounded_session_window_accepts_same_month_without_seed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Both bounds mean all session occurrences, including within one month."""
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "histdatacom",
+            "-V",
+            "-p",
+            "eurusd",
+            "-f",
+            "ascii",
+            "-t",
+            "tick-data-quotes",
+            "-s",
+            "2024-01",
+            "-e",
+            "2024-01",
+            "-r",
+            "ldn",
+        ],
+    )
+
+    options = ArgParser(Options())()
+
+    assert options.start_yearmonth == "202401"
+    assert options.end_yearmonth == "202401"
+    assert options.random_window == "ldn"
+    assert options.random_seed is None
+
+
+@pytest.mark.parametrize(
+    "tail",
+    (
+        ("--random-window", "2d"),
+        ("--random-seed", "4"),
+        ("--random-window", "ldn--ny", "--random-seed", "4"),
+        ("-A", "--random-window", "2d", "--random-seed", "4"),
+    ),
+)
+def test_random_window_cli_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+    tail: tuple[str, ...],
+) -> None:
+    """Missing seeds, orphan seeds, malformed forms, and repo mode must fail."""
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "histdatacom",
+            "-V",
+            "-p",
+            "eurusd",
+            "-f",
+            "ascii",
+            "-t",
+            "tick-data-quotes",
+            *tail,
+        ],
+    )
+
+    with pytest.raises(SystemExit) as err:
+        ArgParser(Options())()
+
+    assert err.value.code == 1
 
 
 def test_config_file_applies_major_triangle_pair_group(
@@ -778,6 +950,16 @@ histdatacom:
     assert options.quality_profile["reporting"] == {
         "remediation_catalog_audit": {"enabled": True}
     }
+    sources = {
+        item["path"]: item
+        for item in options.quality_profile_resolution[
+            "effective_value_sources"
+        ]
+    }
+    assert (
+        sources["/reporting/remediation_catalog_audit/enabled"]["source"]
+        == "yaml_config"
+    )
     assert options.quality_fail_on == "never"
     assert options.quality_max_errors == 2
     assert options.quality_max_warnings == 5
@@ -792,6 +974,7 @@ def test_config_file_applies_quality_preflight_defaults(
     config_path = tmp_path / "quality-preflight.yaml"
     report_path = tmp_path / "reports" / "preflight.json"
     preview_path = tmp_path / "reports" / "preflight-profile.md"
+    validation_path = tmp_path / "reports" / "validation.json"
     config_path.write_text(
         f"""
 histdatacom:
@@ -802,6 +985,7 @@ histdatacom:
   quality_preflight_profile_preview_output: {preview_path}
   quality_preflight_profile_preview_format: markdown
   quality_preflight_validation_report: latest
+  quality_preflight_validation_evidence: {validation_path}
   quality_preflight_run_validation: true
   quality_preflight_sample_size: 2
   pair_groups: [majors]
@@ -827,6 +1011,9 @@ histdatacom:
     )
     assert options.quality_preflight_profile_preview_format == "markdown"
     assert options.quality_preflight_validation_report_path == "latest"
+    assert options.quality_preflight_validation_evidence_path == str(
+        validation_path
+    )
     assert options.quality_preflight_run_validation
     assert options.quality_preflight_sample_size == 2
     assert options.pair_groups == ["majors"]
@@ -1041,6 +1228,19 @@ def test_data_quality_cli_loads_quality_profile_file(
     assert options.quality_profile["name"] == "cli-profile"
     assert options.quality_profile["source"] == "file"
     assert options.quality_profile["source_path"] == str(profile_path)
+    resolution = options.quality_profile_resolution
+    assert [channel["kind"] for channel in resolution["input_channels"]] == [
+        "built_in_default",
+        "named_profile",
+        "profile_file",
+    ]
+    sources = {
+        item["path"]: item for item in resolution["effective_value_sources"]
+    }
+    assert (
+        sources["/rules/ingestion.ascii.row_count/min_row_count"]["source"]
+        == "profile_file"
+    )
 
 
 def test_data_quality_cli_enables_remediation_catalog_audit_profile(
@@ -1066,6 +1266,22 @@ def test_data_quality_cli_enables_remediation_catalog_audit_profile(
     assert options.quality_profile["source"] == "cli-options"
     assert options.quality_profile["reporting"] == {
         "remediation_catalog_audit": {"enabled": True}
+    }
+    sources = {
+        item["path"]: item
+        for item in options.quality_profile_resolution[
+            "effective_value_sources"
+        ]
+    }
+    assert sources["/reporting/remediation_catalog_audit/enabled"] == {
+        "path": "/reporting/remediation_catalog_audit/enabled",
+        "value": True,
+        "source": "cli_override",
+        "profile_name": "operator",
+        "override": True,
+        "previous_source": "built_in_default",
+        "overridden_source": "built_in_default",
+        "previous_value": False,
     }
 
 
@@ -1119,6 +1335,16 @@ def test_data_quality_cli_merges_remediation_catalog_audit_with_profile(
     assert options.quality_profile["reporting"] == {
         "remediation_catalog_audit": {"enabled": True}
     }
+    sources = {
+        item["path"]: item
+        for item in options.quality_profile_resolution[
+            "effective_value_sources"
+        ]
+    }
+    assert (
+        sources["/reporting/remediation_catalog_audit/enabled"]["source"]
+        == "cli_override"
+    )
 
 
 def test_quality_profile_preview_uses_normal_profile_validation(
@@ -1277,6 +1503,11 @@ def test_repo_quality_columns_are_display_only_for_repo_table(
         ["histdatacom", "--quality-preflight-evidence", "preflight.json"],
         ["histdatacom", "--quality-preflight-evidence-max-age-seconds", "60"],
         ["histdatacom", "--quality-preflight-evidence-stale-ok"],
+        [
+            "histdatacom",
+            "--quality-preflight-validation-evidence",
+            "validation.json",
+        ],
         ["histdatacom", "--quality", "--quality-preflight-evidence-stale-ok"],
         ["histdatacom", "--quality", "-D"],
         ["histdatacom", "--repo-quality", "-A"],
@@ -1382,6 +1613,18 @@ def test_api_quality_options_accept_inline_profile(
     assert parsed.quality_profile["reporting"] == {
         "remediation_catalog_audit": {"enabled": True}
     }
+    assert [
+        channel["kind"]
+        for channel in parsed.quality_profile_resolution["input_channels"]
+    ] == ["built_in_default", "named_profile", "api_options"]
+    sources = {
+        item["path"]: item
+        for item in parsed.quality_profile_resolution["effective_value_sources"]
+    }
+    assert (
+        sources["/reporting/remediation_catalog_audit/enabled"]["source"]
+        == "api_options"
+    )
 
 
 def test_argparser_bare_construction_uses_fresh_option_namespace(

@@ -4,12 +4,65 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from typing import cast
 
+from histdatacom.data_quality.autoregressive import (
+    AUTOREGRESSIVE_BOUNDED_PAYLOAD_KEY,
+    AUTOREGRESSIVE_CONFIGURATION_SCHEMA_VERSION,
+    AUTOREGRESSIVE_EVALUATION_SCHEMA_VERSION,
+    AUTOREGRESSIVE_FAMILIES,
+    AUTOREGRESSIVE_FIT_SCHEMA_VERSION,
+    AUTOREGRESSIVE_FIT_STATUS_CODES,
+    AUTOREGRESSIVE_FORECAST_SCHEMA_VERSION,
+    AUTOREGRESSIVE_REASON_CODES,
+    AUTOREGRESSIVE_SCHEMA_VERSION,
+    AUTOREGRESSIVE_SUMMARY_METADATA_KEY,
+    AUTOREGRESSIVE_SUMMARY_SCHEMA_VERSION,
+    AUTOREGRESSIVE_TRAINING_PROJECTION_SCHEMA_VERSION,
+    DEFAULT_AUTOREGRESSIVE_SUMMARY_TARGET_LIMIT,
+)
 from histdatacom.data_quality.calendar import (
     TIME_SERIES_FINGERPRINT_CALENDAR_REGIMES_SCHEMA_VERSION,
 )
+from histdatacom.data_quality.classical_baselines import (
+    CLASSICAL_BASELINE_BOUNDED_PAYLOAD_KEY,
+    CLASSICAL_BASELINE_SCHEMA_VERSION,
+    CLASSICAL_BASELINE_SUMMARY_METADATA_KEY,
+    CLASSICAL_BASELINE_SUMMARY_SCHEMA_VERSION,
+    CLASSICAL_BASELINE_TRAINING_PROJECTION_SCHEMA_VERSION,
+    DEFAULT_BASELINE_SUMMARY_TARGET_LIMIT,
+)
+from histdatacom.data_quality.classical_model_contracts import (
+    CLASSICAL_MODEL_EVALUATION_RESULT_SCHEMA_VERSION,
+    CLASSICAL_MODEL_FIT_RESULT_SCHEMA_VERSION,
+    CLASSICAL_MODEL_FOLD_SCHEMA_VERSION,
+    CLASSICAL_MODEL_INPUT_BOUNDED_PAYLOAD_KEY,
+    CLASSICAL_MODEL_INPUT_SCHEMA_VERSION,
+    CLASSICAL_MODEL_INPUT_SUMMARY_METADATA_KEY,
+    CLASSICAL_MODEL_INPUT_SUMMARY_SCHEMA_VERSION,
+    CLASSICAL_MODEL_TRAINING_PROJECTION_SCHEMA_VERSION,
+    DEFAULT_MODEL_INPUT_SUMMARY_TARGET_LIMIT,
+    MODEL_FAILURE_REASON_CODES,
+    MODEL_FIT_STATUSES,
+    MODEL_TRANSFORM_CODES,
+)
+from histdatacom.data_quality.classical_model_comparison import (
+    CLASSICAL_MODEL_COMPARISON_BOUNDED_PAYLOAD_KEY,
+    CLASSICAL_MODEL_COMPARISON_ELIGIBILITY_SCHEMA_VERSION,
+    CLASSICAL_MODEL_COMPARISON_SCHEMA_VERSION,
+    CLASSICAL_MODEL_COMPARISON_SUMMARY_METADATA_KEY,
+    CLASSICAL_MODEL_COMPARISON_SUMMARY_SCHEMA_VERSION,
+    CLASSICAL_MODEL_COMPARISON_TRAINING_PROJECTION_SCHEMA_VERSION,
+    CLASSICAL_MODEL_FIT_ACCOUNTING_SCHEMA_VERSION,
+    CLASSICAL_MODEL_SKILL_SCHEMA_VERSION,
+    CLASSICAL_MODEL_STABILITY_SCHEMA_VERSION,
+    COMPARISON_REASON_CODES,
+    DEFAULT_CLASSICAL_MODEL_COMPARISON_SUMMARY_TARGET_LIMIT,
+)
 from histdatacom.data_quality.fingerprints import (
+    CROSS_SERIES_FINGERPRINT_METADATA_KEY,
     CROSS_SERIES_FINGERPRINT_RULE_ID,
+    CROSS_SERIES_FINGERPRINT_SCHEMA_VERSION,
     DEFAULT_FINGERPRINT_DISTRIBUTION_ATTENTION_LIMIT,
     DEFAULT_FINGERPRINT_DISTRIBUTION_FLAG_CACHE_FLOAT_PRECISION,
     DEFAULT_FINGERPRINT_DISTRIBUTION_FLAG_TRUNCATED,
@@ -24,16 +77,20 @@ from histdatacom.data_quality.fingerprints import (
     DEFAULT_FINGERPRINT_READINESS_RISK_REASON_LIMIT,
     DEFAULT_FINGERPRINT_READINESS_RISK_SECTION_LIMIT,
     DEFAULT_FINGERPRINT_READINESS_RISK_TARGET_LIMIT,
+    DEFAULT_FINGERPRINT_PARITY_SUMMARY_LIMIT,
     DEFAULT_FINGERPRINT_READINESS_SUMMARY_LIMIT,
     DEFAULT_FINGERPRINT_REGIME_COUNT_LIMIT,
     DEFAULT_FINGERPRINT_REGIME_SUMMARY_LIMIT,
     DEFAULT_FINGERPRINT_TOPOLOGY_ATTENTION_LIMIT,
+    DEFAULT_FINGERPRINT_TOPOLOGY_INSPECTION_SAMPLE_LIMIT,
     DEFAULT_FINGERPRINT_TOPOLOGY_SUMMARY_LIMIT,
     SERIES_FINGERPRINT_RULE_ID,
     TIME_SERIES_FINGERPRINT_AUDIT_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_CONDITIONAL_DISTRIBUTIONS_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_COVERAGE_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_COVERAGE_SCHEMA_VERSION,
+    TIME_SERIES_FINGERPRINT_DECOMPOSITION_SCHEMA_VERSION,
+    TIME_SERIES_FINGERPRINT_DECOMPOSITION_TRAINING_PROJECTION_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_DEPENDENCE_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_DISTRIBUTION_ATTENTION_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_DISTRIBUTION_ATTENTION_SCHEMA_VERSION,
@@ -41,6 +98,9 @@ from histdatacom.data_quality.fingerprints import (
     TIME_SERIES_FINGERPRINT_DISTRIBUTION_SUMMARY_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_DYNAMICS_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_METADATA_KEY,
+    TIME_SERIES_FINGERPRINT_PARITY_SCHEMA_VERSION,
+    TIME_SERIES_FINGERPRINT_PARITY_SUMMARY_METADATA_KEY,
+    TIME_SERIES_FINGERPRINT_PARITY_SUMMARY_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_READINESS_SUMMARY_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_READINESS_SUMMARY_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_READINESS_RISK_METADATA_KEY,
@@ -54,6 +114,97 @@ from histdatacom.data_quality.fingerprints import (
     TIME_SERIES_FINGERPRINT_TOPOLOGY_SUMMARY_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_TOPOLOGY_SUMMARY_SCHEMA_VERSION,
 )
+from histdatacom.data_quality.exponential_smoothing import (
+    DEFAULT_EXPONENTIAL_SMOOTHING_SUMMARY_TARGET_LIMIT,
+    EXPONENTIAL_SMOOTHING_BOUNDED_PAYLOAD_KEY,
+    EXPONENTIAL_SMOOTHING_CONFIGURATION_SCHEMA_VERSION,
+    EXPONENTIAL_SMOOTHING_EVALUATION_SCHEMA_VERSION,
+    EXPONENTIAL_SMOOTHING_FAMILIES,
+    EXPONENTIAL_SMOOTHING_FIT_SCHEMA_VERSION,
+    EXPONENTIAL_SMOOTHING_FORECAST_SCHEMA_VERSION,
+    EXPONENTIAL_SMOOTHING_REASON_CODES,
+    EXPONENTIAL_SMOOTHING_SCHEMA_VERSION,
+    EXPONENTIAL_SMOOTHING_SUMMARY_METADATA_KEY,
+    EXPONENTIAL_SMOOTHING_SUMMARY_SCHEMA_VERSION,
+    EXPONENTIAL_SMOOTHING_TRAINING_PROJECTION_SCHEMA_VERSION,
+)
+from histdatacom.data_quality.time import (
+    TIMESTAMP_TOPOLOGY_INSPECTION_SCHEMA_VERSION,
+)
+from histdatacom.data_quality.synthetic_constraints import (
+    DEFAULT_SYNTHETIC_CONSTRAINT_SUMMARY_LIMIT,
+    SYNTHETIC_CONSTRAINT_BOUNDED_PAYLOAD_KEY,
+    SYNTHETIC_CONSTRAINT_SUMMARY_METADATA_KEY,
+    SYNTHETIC_CONSTRAINT_SUMMARY_SCHEMA_VERSION,
+    SYNTHETIC_CONSTRAINTS_SCHEMA_VERSION,
+    SYNTHETIC_VALIDATION_SCHEMA_VERSION,
+)
+from histdatacom.data_quality.synthetic_generation import (
+    SYNTHETIC_TICK_GENERATION_CONFIGURATION_SCHEMA_VERSION,
+    SYNTHETIC_TICK_GENERATION_SCHEMA_VERSION,
+    SYNTHETIC_TICK_GENERATION_VALIDATION_SCHEMA_VERSION,
+)
+from histdatacom.data_quality.seasonal_exogenous import (
+    DEFAULT_SEASONAL_EXOGENOUS_SUMMARY_TARGET_LIMIT,
+    SEASONAL_EXOGENOUS_BOUNDED_PAYLOAD_KEY,
+    SEASONAL_EXOGENOUS_CONFIGURATION_SCHEMA_VERSION,
+    SEASONAL_EXOGENOUS_EVALUATION_SCHEMA_VERSION,
+    SEASONAL_EXOGENOUS_FAMILIES,
+    SEASONAL_EXOGENOUS_FIT_SCHEMA_VERSION,
+    SEASONAL_EXOGENOUS_FIT_STATUS_CODES,
+    SEASONAL_EXOGENOUS_FORECAST_SCHEMA_VERSION,
+    SEASONAL_EXOGENOUS_REASON_CODES,
+    SEASONAL_EXOGENOUS_REGRESSOR_SCHEMA_VERSION,
+    SEASONAL_EXOGENOUS_SCHEMA_VERSION,
+    SEASONAL_EXOGENOUS_SUMMARY_METADATA_KEY,
+    SEASONAL_EXOGENOUS_SUMMARY_SCHEMA_VERSION,
+    SEASONAL_EXOGENOUS_TRAINING_PROJECTION_SCHEMA_VERSION,
+)
+from histdatacom.data_quality.state_space import (
+    DEFAULT_STATE_SPACE_SUMMARY_TARGET_LIMIT,
+    STATE_SPACE_BOUNDED_PAYLOAD_KEY,
+    STATE_SPACE_CONFIGURATION_SCHEMA_VERSION,
+    STATE_SPACE_EVALUATION_SCHEMA_VERSION,
+    STATE_SPACE_FAMILIES,
+    STATE_SPACE_FIT_SCHEMA_VERSION,
+    STATE_SPACE_FIT_STATUS_CODES,
+    STATE_SPACE_FORECAST_SCHEMA_VERSION,
+    STATE_SPACE_REASON_CODES,
+    STATE_SPACE_SCHEMA_VERSION,
+    STATE_SPACE_STATE_RESULT_SCHEMA_VERSION,
+    STATE_SPACE_SUMMARY_METADATA_KEY,
+    STATE_SPACE_SUMMARY_SCHEMA_VERSION,
+    STATE_SPACE_TRAINING_PROJECTION_SCHEMA_VERSION,
+)
+from histdatacom.data_quality.volatility import (
+    ASYMMETRIC_VOLATILITY_EXTENSION_REGISTRY,
+    DEFAULT_VOLATILITY_SUMMARY_TARGET_LIMIT,
+    VOLATILITY_BOUNDED_PAYLOAD_KEY,
+    VOLATILITY_CONFIGURATION_SCHEMA_VERSION,
+    VOLATILITY_DISTRIBUTIONS,
+    VOLATILITY_EVALUATION_SCHEMA_VERSION,
+    VOLATILITY_FAMILIES,
+    VOLATILITY_FIT_SCHEMA_VERSION,
+    VOLATILITY_FIT_STATUS_CODES,
+    VOLATILITY_FORECAST_SCHEMA_VERSION,
+    VOLATILITY_INPUT_DEFINITIONS,
+    VOLATILITY_MEAN_MODELS,
+    VOLATILITY_REASON_CODES,
+    VOLATILITY_SCHEMA_VERSION,
+    VOLATILITY_SUMMARY_METADATA_KEY,
+    VOLATILITY_SUMMARY_SCHEMA_VERSION,
+    VOLATILITY_TRAINING_PROJECTION_SCHEMA_VERSION,
+)
+from histdatacom.data_quality.training_features import (
+    AUTOREGRESSIVE_COLUMNS,
+    EXPONENTIAL_SMOOTHING_COLUMNS,
+    SEASONAL_EXOGENOUS_COLUMNS,
+    KALMAN_COLUMNS,
+    STATE_SPACE_COLUMNS,
+    VOLATILITY_COLUMNS,
+    CLASSICAL_MODEL_COMPARISON_COLUMNS,
+    training_feature_definitions,
+)
 from histdatacom.histdata_ascii import TICK
 from histdatacom.runtime_contracts import JSONValue
 
@@ -64,7 +215,17 @@ FINGERPRINT_SERIES_CONFIG_KEYS = (
     "histogram_bins",
     "max_rows",
     "rounding_digits",
+    "topology_inspection_sample_limit",
     "distribution_attention",
+    "cache_source_parity",
+    "classical_baselines",
+    "classical_model_input",
+    "exponential_smoothing",
+    "autoregressive",
+    "seasonal_exogenous",
+    "state_space",
+    "volatility",
+    "classical_model_comparison",
 )
 FINGERPRINT_DISTRIBUTION_ATTENTION_CONFIG_KEYS = (
     "invalid_row_min_count",
@@ -89,6 +250,11 @@ FINGERPRINT_DISTRIBUTION_ATTENTION_BOUNDED_PAYLOAD_KEY = (
 FINGERPRINT_REGIME_BOUNDED_PAYLOAD_KEY = "fingerprint_regime"
 FINGERPRINT_READINESS_BOUNDED_PAYLOAD_KEY = "fingerprint_readiness"
 FINGERPRINT_READINESS_RISK_BOUNDED_PAYLOAD_KEY = "fingerprint_readiness_risk"
+FINGERPRINT_CROSS_SERIES_BOUNDED_PAYLOAD_KEY = "fingerprint_cross_series"
+FINGERPRINT_PARITY_BOUNDED_PAYLOAD_KEY = "fingerprint_parity"
+FINGERPRINT_SYNTHETIC_CONSTRAINT_BOUNDED_PAYLOAD_KEY = (
+    SYNTHETIC_CONSTRAINT_BOUNDED_PAYLOAD_KEY
+)
 
 FINGERPRINT_SECTION_STATUSES = ("valid", "limited", "skipped", "unavailable")
 FINGERPRINT_DYNAMICS_STATUSES = ("ok", "limited", "unavailable")
@@ -115,6 +281,8 @@ FINGERPRINT_SKIP_REASON_CODES = (
     "no_computable_lags",
     "skipped_lags",
     "skipped_rolling_windows",
+    "stationarity_limited",
+    "stationarity_unavailable",
     "not_emitted",
 )
 FINGERPRINT_TOPOLOGY_LIMITATIONS = (
@@ -137,7 +305,10 @@ FINGERPRINT_BASIS_DESCRIPTIONS = (
         "observed_sequence",
         "statistics computed over parsed row order without regular-grid imputation",
     ),
-    ("regular_grid", "reserved for future grid-regularized calculations"),
+    (
+        "regular_grid",
+        "deterministic UTC grid derived from enriched ASCII tick rows",
+    ),
     ("limited", "section emitted with advisory limitations"),
     ("unavailable", "section could not compute enough contract data"),
 )
@@ -327,6 +498,13 @@ FINGERPRINT_SCHEMA_CONTRACTS = (
         status="implemented",
     ),
     FingerprintSchemaContract(
+        "fingerprint_topology_inspection",
+        TIMESTAMP_TOPOLOGY_INSPECTION_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        payload_path="temporal_topology.inspection_context",
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
         "fingerprint_distribution_summary",
         TIME_SERIES_FINGERPRINT_DISTRIBUTION_SUMMARY_SCHEMA_VERSION,
         rule_id=SERIES_FINGERPRINT_RULE_ID,
@@ -384,10 +562,467 @@ FINGERPRINT_SCHEMA_CONTRACTS = (
         status="implemented",
     ),
     FingerprintSchemaContract(
+        "fingerprint_decomposition",
+        TIME_SERIES_FINGERPRINT_DECOMPOSITION_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        payload_path="time_series_fingerprint.decomposition",
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_decomposition_training_projection",
+        TIME_SERIES_FINGERPRINT_DECOMPOSITION_TRAINING_PROJECTION_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        payload_path=(
+            "time_series_fingerprint.decomposition.training_projection"
+        ),
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_classical_baselines",
+        CLASSICAL_BASELINE_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        payload_path="time_series_fingerprint.classical_baselines",
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_classical_baseline_training_projection",
+        CLASSICAL_BASELINE_TRAINING_PROJECTION_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        payload_path=(
+            "time_series_fingerprint.classical_baselines.training_projection"
+        ),
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_classical_baseline_summary",
+        CLASSICAL_BASELINE_SUMMARY_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        metadata_key=CLASSICAL_BASELINE_SUMMARY_METADATA_KEY,
+        bounded_payload_key=CLASSICAL_BASELINE_BOUNDED_PAYLOAD_KEY,
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_classical_model_input",
+        CLASSICAL_MODEL_INPUT_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        payload_path="time_series_fingerprint.classical_model_input",
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_classical_model_fold",
+        CLASSICAL_MODEL_FOLD_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        payload_path="time_series_fingerprint.classical_model_input.fold_policy",
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_classical_model_fit_result",
+        CLASSICAL_MODEL_FIT_RESULT_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_classical_model_evaluation_result",
+        CLASSICAL_MODEL_EVALUATION_RESULT_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_classical_model_training_projection",
+        CLASSICAL_MODEL_TRAINING_PROJECTION_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        payload_path=(
+            "time_series_fingerprint.classical_model_input.training_projection"
+        ),
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_classical_model_input_summary",
+        CLASSICAL_MODEL_INPUT_SUMMARY_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        metadata_key=CLASSICAL_MODEL_INPUT_SUMMARY_METADATA_KEY,
+        bounded_payload_key=CLASSICAL_MODEL_INPUT_BOUNDED_PAYLOAD_KEY,
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_exponential_smoothing",
+        EXPONENTIAL_SMOOTHING_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        payload_path="time_series_fingerprint.exponential_smoothing",
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_exponential_smoothing_configuration",
+        EXPONENTIAL_SMOOTHING_CONFIGURATION_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        payload_path="time_series_fingerprint.exponential_smoothing.configuration",
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_exponential_smoothing_fit",
+        EXPONENTIAL_SMOOTHING_FIT_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        payload_path="time_series_fingerprint.exponential_smoothing.fit_summary",
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_exponential_smoothing_forecast",
+        EXPONENTIAL_SMOOTHING_FORECAST_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_exponential_smoothing_evaluation",
+        EXPONENTIAL_SMOOTHING_EVALUATION_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        payload_path="time_series_fingerprint.exponential_smoothing.evaluation",
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_exponential_smoothing_training_projection",
+        EXPONENTIAL_SMOOTHING_TRAINING_PROJECTION_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        payload_path=(
+            "time_series_fingerprint.exponential_smoothing.training_projection"
+        ),
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_exponential_smoothing_summary",
+        EXPONENTIAL_SMOOTHING_SUMMARY_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        metadata_key=EXPONENTIAL_SMOOTHING_SUMMARY_METADATA_KEY,
+        bounded_payload_key=EXPONENTIAL_SMOOTHING_BOUNDED_PAYLOAD_KEY,
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_autoregressive",
+        AUTOREGRESSIVE_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        payload_path="time_series_fingerprint.autoregressive",
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_autoregressive_configuration",
+        AUTOREGRESSIVE_CONFIGURATION_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        payload_path="time_series_fingerprint.autoregressive.configuration",
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_autoregressive_fit",
+        AUTOREGRESSIVE_FIT_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        payload_path="time_series_fingerprint.autoregressive.fit_summary",
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_autoregressive_forecast",
+        AUTOREGRESSIVE_FORECAST_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_autoregressive_evaluation",
+        AUTOREGRESSIVE_EVALUATION_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        payload_path="time_series_fingerprint.autoregressive.evaluation",
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_autoregressive_training_projection",
+        AUTOREGRESSIVE_TRAINING_PROJECTION_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        payload_path=(
+            "time_series_fingerprint.autoregressive.training_projection"
+        ),
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_autoregressive_summary",
+        AUTOREGRESSIVE_SUMMARY_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        metadata_key=AUTOREGRESSIVE_SUMMARY_METADATA_KEY,
+        bounded_payload_key=AUTOREGRESSIVE_BOUNDED_PAYLOAD_KEY,
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_seasonal_exogenous",
+        SEASONAL_EXOGENOUS_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        payload_path="time_series_fingerprint.seasonal_exogenous",
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_seasonal_exogenous_configuration",
+        SEASONAL_EXOGENOUS_CONFIGURATION_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        payload_path="time_series_fingerprint.seasonal_exogenous.configuration",
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_seasonal_exogenous_regressors",
+        SEASONAL_EXOGENOUS_REGRESSOR_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        payload_path="time_series_fingerprint.seasonal_exogenous.regressors",
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_seasonal_exogenous_fit",
+        SEASONAL_EXOGENOUS_FIT_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        payload_path="time_series_fingerprint.seasonal_exogenous.fit_summary",
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_seasonal_exogenous_forecast",
+        SEASONAL_EXOGENOUS_FORECAST_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_seasonal_exogenous_evaluation",
+        SEASONAL_EXOGENOUS_EVALUATION_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        payload_path="time_series_fingerprint.seasonal_exogenous.evaluation",
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_seasonal_exogenous_training_projection",
+        SEASONAL_EXOGENOUS_TRAINING_PROJECTION_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        payload_path=(
+            "time_series_fingerprint.seasonal_exogenous.training_projection"
+        ),
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_seasonal_exogenous_summary",
+        SEASONAL_EXOGENOUS_SUMMARY_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        metadata_key=SEASONAL_EXOGENOUS_SUMMARY_METADATA_KEY,
+        bounded_payload_key=SEASONAL_EXOGENOUS_BOUNDED_PAYLOAD_KEY,
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_state_space",
+        STATE_SPACE_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        payload_path="time_series_fingerprint.state_space",
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_state_space_configuration",
+        STATE_SPACE_CONFIGURATION_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        payload_path="time_series_fingerprint.state_space.configuration",
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_state_space_fit",
+        STATE_SPACE_FIT_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        payload_path="time_series_fingerprint.state_space.fit_summary",
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_kalman_state_result",
+        STATE_SPACE_STATE_RESULT_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_state_space_forecast",
+        STATE_SPACE_FORECAST_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_state_space_evaluation",
+        STATE_SPACE_EVALUATION_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        payload_path="time_series_fingerprint.state_space.evaluation",
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_state_space_training_projection",
+        STATE_SPACE_TRAINING_PROJECTION_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        payload_path="time_series_fingerprint.state_space.training_projection",
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_state_space_summary",
+        STATE_SPACE_SUMMARY_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        metadata_key=STATE_SPACE_SUMMARY_METADATA_KEY,
+        bounded_payload_key=STATE_SPACE_BOUNDED_PAYLOAD_KEY,
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_volatility",
+        VOLATILITY_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        payload_path="time_series_fingerprint.volatility",
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_volatility_configuration",
+        VOLATILITY_CONFIGURATION_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        payload_path="time_series_fingerprint.volatility.configuration",
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_volatility_fit",
+        VOLATILITY_FIT_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        payload_path="time_series_fingerprint.volatility.fit_summary",
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_volatility_forecast",
+        VOLATILITY_FORECAST_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_volatility_evaluation",
+        VOLATILITY_EVALUATION_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        payload_path="time_series_fingerprint.volatility.evaluation",
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_volatility_training_projection",
+        VOLATILITY_TRAINING_PROJECTION_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        payload_path=("time_series_fingerprint.volatility.training_projection"),
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_volatility_summary",
+        VOLATILITY_SUMMARY_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        metadata_key=VOLATILITY_SUMMARY_METADATA_KEY,
+        bounded_payload_key=VOLATILITY_BOUNDED_PAYLOAD_KEY,
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_classical_model_comparison",
+        CLASSICAL_MODEL_COMPARISON_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        payload_path="time_series_fingerprint.classical_model_comparison",
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_classical_model_comparison_eligibility",
+        CLASSICAL_MODEL_COMPARISON_ELIGIBILITY_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        payload_path=(
+            "time_series_fingerprint.classical_model_comparison."
+            "comparison_records"
+        ),
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_classical_model_skill",
+        CLASSICAL_MODEL_SKILL_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_classical_model_stability",
+        CLASSICAL_MODEL_STABILITY_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_classical_model_fit_accounting",
+        CLASSICAL_MODEL_FIT_ACCOUNTING_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        payload_path=(
+            "time_series_fingerprint.classical_model_comparison.fit_accounting"
+        ),
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_classical_model_comparison_training_projection",
+        CLASSICAL_MODEL_COMPARISON_TRAINING_PROJECTION_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        payload_path=(
+            "time_series_fingerprint.classical_model_comparison."
+            "training_projection"
+        ),
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_classical_model_comparison_summary",
+        CLASSICAL_MODEL_COMPARISON_SUMMARY_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        metadata_key=CLASSICAL_MODEL_COMPARISON_SUMMARY_METADATA_KEY,
+        bounded_payload_key=CLASSICAL_MODEL_COMPARISON_BOUNDED_PAYLOAD_KEY,
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
         "fingerprint_audit",
         TIME_SERIES_FINGERPRINT_AUDIT_SCHEMA_VERSION,
         rule_id=SERIES_FINGERPRINT_RULE_ID,
         payload_path="time_series_fingerprint.fingerprint_audit",
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_cache_source_parity",
+        TIME_SERIES_FINGERPRINT_PARITY_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        payload_path="time_series_fingerprint.cache_source_parity",
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_cache_source_parity_summary",
+        TIME_SERIES_FINGERPRINT_PARITY_SUMMARY_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        metadata_key=TIME_SERIES_FINGERPRINT_PARITY_SUMMARY_METADATA_KEY,
+        bounded_payload_key=FINGERPRINT_PARITY_BOUNDED_PAYLOAD_KEY,
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_synthetic_constraints",
+        SYNTHETIC_CONSTRAINTS_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        payload_path="time_series_fingerprint.synthetic_constraints",
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_synthetic_constraint_summary",
+        SYNTHETIC_CONSTRAINT_SUMMARY_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        metadata_key=SYNTHETIC_CONSTRAINT_SUMMARY_METADATA_KEY,
+        bounded_payload_key=FINGERPRINT_SYNTHETIC_CONSTRAINT_BOUNDED_PAYLOAD_KEY,
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "fingerprint_synthetic_validation",
+        SYNTHETIC_VALIDATION_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "synthetic_tick_generation",
+        SYNTHETIC_TICK_GENERATION_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "synthetic_tick_generation_configuration",
+        SYNTHETIC_TICK_GENERATION_CONFIGURATION_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
+        status="implemented",
+    ),
+    FingerprintSchemaContract(
+        "synthetic_tick_generation_validation",
+        SYNTHETIC_TICK_GENERATION_VALIDATION_SCHEMA_VERSION,
+        rule_id=SERIES_FINGERPRINT_RULE_ID,
         status="implemented",
     ),
     FingerprintSchemaContract(
@@ -408,10 +1043,11 @@ FINGERPRINT_SCHEMA_CONTRACTS = (
     ),
     FingerprintSchemaContract(
         "cross_series_fingerprint",
-        None,
+        CROSS_SERIES_FINGERPRINT_SCHEMA_VERSION,
         rule_id=CROSS_SERIES_FINGERPRINT_RULE_ID,
-        status="planned",
-        issue="#331",
+        metadata_key=CROSS_SERIES_FINGERPRINT_METADATA_KEY,
+        bounded_payload_key=FINGERPRINT_CROSS_SERIES_BOUNDED_PAYLOAD_KEY,
+        status="implemented",
     ),
 )
 
@@ -465,6 +1101,86 @@ FINGERPRINT_REPORT_SURFACE_CONTRACTS = (
         "Fingerprint regimes",
     ),
     FingerprintReportSurfaceContract(
+        "cache_source_parity",
+        "fingerprint_cache_source_parity_summary",
+        TIME_SERIES_FINGERPRINT_PARITY_SUMMARY_METADATA_KEY,
+        FINGERPRINT_PARITY_BOUNDED_PAYLOAD_KEY,
+        "cache_source_parity",
+        "Fingerprint cache/source parity",
+    ),
+    FingerprintReportSurfaceContract(
+        "synthetic_constraints",
+        "fingerprint_synthetic_constraint_summary",
+        SYNTHETIC_CONSTRAINT_SUMMARY_METADATA_KEY,
+        FINGERPRINT_SYNTHETIC_CONSTRAINT_BOUNDED_PAYLOAD_KEY,
+        "synthetic_constraints",
+        "Synthetic fingerprint constraints",
+    ),
+    FingerprintReportSurfaceContract(
+        "classical_baselines",
+        "fingerprint_classical_baseline_summary",
+        CLASSICAL_BASELINE_SUMMARY_METADATA_KEY,
+        CLASSICAL_BASELINE_BOUNDED_PAYLOAD_KEY,
+        "classical_baselines",
+        "Classical fingerprint baselines",
+    ),
+    FingerprintReportSurfaceContract(
+        "classical_model_input",
+        "fingerprint_classical_model_input_summary",
+        CLASSICAL_MODEL_INPUT_SUMMARY_METADATA_KEY,
+        CLASSICAL_MODEL_INPUT_BOUNDED_PAYLOAD_KEY,
+        "classical_model_input",
+        "Classical model input contracts",
+    ),
+    FingerprintReportSurfaceContract(
+        "exponential_smoothing",
+        "fingerprint_exponential_smoothing_summary",
+        EXPONENTIAL_SMOOTHING_SUMMARY_METADATA_KEY,
+        EXPONENTIAL_SMOOTHING_BOUNDED_PAYLOAD_KEY,
+        "exponential_smoothing",
+        "Exponential-smoothing models",
+    ),
+    FingerprintReportSurfaceContract(
+        "autoregressive",
+        "fingerprint_autoregressive_summary",
+        AUTOREGRESSIVE_SUMMARY_METADATA_KEY,
+        AUTOREGRESSIVE_BOUNDED_PAYLOAD_KEY,
+        "autoregressive",
+        "Autoregressive models",
+    ),
+    FingerprintReportSurfaceContract(
+        "seasonal_exogenous",
+        "fingerprint_seasonal_exogenous_summary",
+        SEASONAL_EXOGENOUS_SUMMARY_METADATA_KEY,
+        SEASONAL_EXOGENOUS_BOUNDED_PAYLOAD_KEY,
+        "seasonal_exogenous",
+        "Seasonal and exogenous models",
+    ),
+    FingerprintReportSurfaceContract(
+        "state_space",
+        "fingerprint_state_space_summary",
+        STATE_SPACE_SUMMARY_METADATA_KEY,
+        STATE_SPACE_BOUNDED_PAYLOAD_KEY,
+        "state_space",
+        "State-space and Kalman models",
+    ),
+    FingerprintReportSurfaceContract(
+        "volatility",
+        "fingerprint_volatility_summary",
+        VOLATILITY_SUMMARY_METADATA_KEY,
+        VOLATILITY_BOUNDED_PAYLOAD_KEY,
+        "volatility",
+        "ARCH and GARCH volatility models",
+    ),
+    FingerprintReportSurfaceContract(
+        "classical_model_comparison",
+        "fingerprint_classical_model_comparison_summary",
+        CLASSICAL_MODEL_COMPARISON_SUMMARY_METADATA_KEY,
+        CLASSICAL_MODEL_COMPARISON_BOUNDED_PAYLOAD_KEY,
+        "classical_model_comparison",
+        "Classical model comparison",
+    ),
+    FingerprintReportSurfaceContract(
         "readiness_summary",
         "fingerprint_readiness_summary",
         TIME_SERIES_FINGERPRINT_READINESS_SUMMARY_METADATA_KEY,
@@ -479,6 +1195,14 @@ FINGERPRINT_REPORT_SURFACE_CONTRACTS = (
         FINGERPRINT_READINESS_RISK_BOUNDED_PAYLOAD_KEY,
         "readiness_risk",
         "Fingerprint readiness risk",
+    ),
+    FingerprintReportSurfaceContract(
+        "cross_series",
+        "cross_series_fingerprint",
+        CROSS_SERIES_FINGERPRINT_METADATA_KEY,
+        FINGERPRINT_CROSS_SERIES_BOUNDED_PAYLOAD_KEY,
+        "cross_series",
+        "Cross-series fingerprint",
     ),
 )
 
@@ -501,6 +1225,10 @@ IMPLEMENTED_FINGERPRINT_TARGET_SECTION_CONTRACTS = (
         target_timeframes=(TICK,),
         schema_key="series_fingerprint",
         basis_values=("observed_sequence",),
+        extra={
+            "optional_nested_schema_key": "fingerprint_topology_inspection",
+            "profile_controlled_by": ["topology_inspection_sample_limit"],
+        },
     ),
     FingerprintTargetSectionContract(
         "calendar_regimes",
@@ -561,6 +1289,376 @@ IMPLEMENTED_FINGERPRINT_TARGET_SECTION_CONTRACTS = (
         },
     ),
     FingerprintTargetSectionContract(
+        "decomposition",
+        (
+            "advisory trend, seasonality, residual, smoothing-window, and "
+            "structural-break proxies"
+        ),
+        target_timeframes=(TICK,),
+        schema_key="fingerprint_decomposition",
+        basis_values=("observed_sequence",),
+        row_order_values=("source_text_order", "cache_order"),
+        extra={
+            "profile_controlled_by": [
+                "rolling_windows",
+                "histogram_bins",
+                "rounding_digits",
+            ],
+            "stationarity_basis": "stationarity_diagnostics",
+            "training_projection_grain": "period",
+            "training_projection_identity": [
+                "series_id",
+                "period",
+                "row_id",
+            ],
+        },
+    ),
+    FingerprintTargetSectionContract(
+        "cache_source_parity",
+        "opt-in source/cache and enriched training projection comparison",
+        target_timeframes=(TICK,),
+        schema_key="fingerprint_cache_source_parity",
+        basis_values=("text_scan", "direct_cache", "fresh_sibling_cache"),
+        extra={
+            "profile_controlled_by": ["cache_source_parity"],
+            "default_enabled": False,
+            "advisory": True,
+        },
+    ),
+    FingerprintTargetSectionContract(
+        "classical_baselines",
+        "opt-in deterministic advisory baselines over enriched tick rows",
+        target_timeframes=(TICK,),
+        schema_key="fingerprint_classical_baselines",
+        basis_values=("observed_sequence_walk_forward",),
+        row_order_values=("series_id_period_row_id",),
+        extra={
+            "issue": "#332",
+            "profile_controlled_by": ["classical_baselines"],
+            "default_enabled": False,
+            "advisory": True,
+            "base_grain": "ascii/T",
+            "metric": "mid",
+            "timestamp_required": False,
+            "model_families": [
+                "naive_random_walk",
+                "rolling_mean",
+                "rolling_median",
+                "session_seasonal_naive",
+            ],
+        },
+    ),
+    FingerprintTargetSectionContract(
+        "classical_model_input",
+        "opt-in regularized input and evaluation contract over enriched tick rows",
+        target_timeframes=(TICK,),
+        schema_key="fingerprint_classical_model_input",
+        basis_values=("regular_grid_from_enriched_ascii_ticks",),
+        row_order_values=("series_id_period_row_id",),
+        extra={
+            "issue": "#421",
+            "profile_controlled_by": ["classical_model_input"],
+            "default_enabled": False,
+            "advisory": True,
+            "base_grain": "ascii/T",
+            "derived_grain": "regular_grid",
+            "timestamp_required_as_identity": False,
+            "augmented_column_prefixes": [
+                "cm_input_",
+                "cm_fold_",
+                "cm_evaluation_",
+            ],
+            "model_fitting_in_scope": False,
+            "aggregations": ["first", "last", "mean", "median"],
+            "transforms": list(MODEL_TRANSFORM_CODES),
+            "fold_kinds": ["expanding", "rolling"],
+            "fit_statuses": list(MODEL_FIT_STATUSES),
+            "failure_reason_codes": list(MODEL_FAILURE_REASON_CODES),
+            "row_mapping_policy": (
+                "availability_safe_repetition_after_bin_close"
+            ),
+        },
+    ),
+    FingerprintTargetSectionContract(
+        "exponential_smoothing",
+        "opt-in fitted SES, Holt, Holt-Winters, and ETS diagnostics",
+        target_timeframes=(TICK,),
+        schema_key="fingerprint_exponential_smoothing",
+        basis_values=("regular_grid_rolling_origin",),
+        row_order_values=("series_id_period_row_id",),
+        extra={
+            "issue": "#422",
+            "profile_controlled_by": [
+                "classical_model_input",
+                "exponential_smoothing",
+            ],
+            "default_enabled": False,
+            "advisory": True,
+            "base_grain": "ascii/T",
+            "derived_grain": "regular_grid",
+            "optional_dependency_extra": "models",
+            "backend": "statsmodels",
+            "model_families": list(EXPONENTIAL_SMOOTHING_FAMILIES),
+            "failure_reason_codes": list(EXPONENTIAL_SMOOTHING_REASON_CODES),
+            "augmented_column_prefixes": ["cm_ets_"],
+            "augmented_columns": [
+                {
+                    "name": definition.name,
+                    "dtype": definition.dtype,
+                    "nullable": definition.nullable,
+                    "grain": definition.grain,
+                    "source": definition.source,
+                }
+                for definition in training_feature_definitions()
+                if definition.name in EXPONENTIAL_SMOOTHING_COLUMNS
+            ],
+            "automatic_search": False,
+            "automatic_winner": False,
+            "row_mapping_policy": ("first_source_row_at_or_after_availability"),
+        },
+    ),
+    FingerprintTargetSectionContract(
+        "autoregressive",
+        "opt-in fitted explicit-order AR, ARMA, and ARIMA diagnostics",
+        target_timeframes=(TICK,),
+        schema_key="fingerprint_autoregressive",
+        basis_values=("regular_grid_rolling_origin",),
+        row_order_values=("series_id_period_row_id",),
+        extra={
+            "issue": "#423",
+            "profile_controlled_by": [
+                "classical_model_input",
+                "autoregressive",
+            ],
+            "default_enabled": False,
+            "advisory": True,
+            "base_grain": "ascii/T",
+            "derived_grain": "regular_grid",
+            "optional_dependency_extra": "models",
+            "backend": "statsmodels",
+            "model_families": list(AUTOREGRESSIVE_FAMILIES),
+            "fit_statuses": list(AUTOREGRESSIVE_FIT_STATUS_CODES),
+            "failure_reason_codes": list(AUTOREGRESSIVE_REASON_CODES),
+            "augmented_column_prefixes": [
+                "cm_ar_",
+                "cm_arma_",
+                "cm_arima_",
+            ],
+            "augmented_columns": [
+                {
+                    "name": definition.name,
+                    "dtype": definition.dtype,
+                    "nullable": definition.nullable,
+                    "grain": definition.grain,
+                    "source": definition.source,
+                }
+                for definition in training_feature_definitions()
+                if definition.name in AUTOREGRESSIVE_COLUMNS
+            ],
+            "explicit_order_configuration": True,
+            "automatic_order_selection": False,
+            "automatic_winner": False,
+            "row_mapping_policy": ("first_source_row_at_or_after_availability"),
+        },
+    ),
+    FingerprintTargetSectionContract(
+        "seasonal_exogenous",
+        "opt-in fitted explicit-order SARIMA, ARIMAX, and SARIMAX diagnostics",
+        target_timeframes=(TICK,),
+        schema_key="fingerprint_seasonal_exogenous",
+        basis_values=("regular_grid_rolling_origin",),
+        row_order_values=("series_id_period_row_id",),
+        extra={
+            "issue": "#424",
+            "profile_controlled_by": [
+                "classical_model_input",
+                "seasonal_exogenous",
+            ],
+            "default_enabled": False,
+            "advisory": True,
+            "base_grain": "ascii/T",
+            "derived_grain": "regular_grid",
+            "optional_dependency_extra": "models",
+            "backend": "statsmodels",
+            "model_families": list(SEASONAL_EXOGENOUS_FAMILIES),
+            "fit_statuses": list(SEASONAL_EXOGENOUS_FIT_STATUS_CODES),
+            "failure_reason_codes": list(SEASONAL_EXOGENOUS_REASON_CODES),
+            "augmented_column_prefixes": [
+                "cm_sarima_",
+                "cm_arimax_",
+                "cm_sarimax_",
+            ],
+            "augmented_columns": [
+                {
+                    "name": definition.name,
+                    "dtype": definition.dtype,
+                    "nullable": definition.nullable,
+                    "grain": definition.grain,
+                    "source": definition.source,
+                }
+                for definition in training_feature_definitions()
+                if definition.name in SEASONAL_EXOGENOUS_COLUMNS
+            ],
+            "explicit_order_configuration": True,
+            "deterministic_regressor_contract": True,
+            "future_regressor_policy": "calendar_known_in_advance_only",
+            "automatic_order_selection": False,
+            "automatic_winner": False,
+            "row_mapping_policy": ("first_source_row_at_or_after_availability"),
+        },
+    ),
+    FingerprintTargetSectionContract(
+        "state_space",
+        "opt-in structural state-space and leakage-safe Kalman diagnostics",
+        target_timeframes=(TICK,),
+        schema_key="fingerprint_state_space",
+        basis_values=("regular_grid_rolling_origin",),
+        row_order_values=("series_id_period_row_id",),
+        extra={
+            "issue": "#425",
+            "profile_controlled_by": [
+                "classical_model_input",
+                "state_space",
+            ],
+            "default_enabled": False,
+            "advisory": True,
+            "base_grain": "ascii/T",
+            "derived_grain": "regular_grid",
+            "optional_dependency_extra": "models",
+            "backend": "statsmodels",
+            "model_families": list(STATE_SPACE_FAMILIES),
+            "fit_statuses": list(STATE_SPACE_FIT_STATUS_CODES),
+            "failure_reason_codes": list(STATE_SPACE_REASON_CODES),
+            "augmented_column_prefixes": [
+                "cm_state_space_",
+                "cm_kalman_",
+            ],
+            "augmented_columns": [
+                {
+                    "name": definition.name,
+                    "dtype": definition.dtype,
+                    "nullable": definition.nullable,
+                    "grain": definition.grain,
+                    "source": definition.source,
+                }
+                for definition in training_feature_definitions()
+                if definition.name in (*STATE_SPACE_COLUMNS, *KALMAN_COLUMNS)
+            ],
+            "explicit_component_configuration": True,
+            "filtered_state_policy": "forecast_origin_information_only",
+            "smoothed_state_policy": "retrospective_diagnostic_only",
+            "missing_observation_policy": "prediction_only_transition",
+            "automatic_component_selection": False,
+            "automatic_winner": False,
+            "row_mapping_policy": "first_source_row_at_or_after_availability",
+        },
+    ),
+    FingerprintTargetSectionContract(
+        "volatility",
+        "opt-in symmetric ARCH/GARCH conditional-variance diagnostics",
+        target_timeframes=(TICK,),
+        schema_key="fingerprint_volatility",
+        basis_values=("regular_grid_rolling_origin",),
+        row_order_values=("series_id_period_row_id",),
+        extra={
+            "issue": "#426",
+            "profile_controlled_by": [
+                "classical_model_input",
+                "volatility",
+            ],
+            "default_enabled": False,
+            "advisory": True,
+            "base_grain": "ascii/T",
+            "derived_grain": "regular_grid",
+            "optional_dependency_extra": "models",
+            "backend": "arch",
+            "model_families": list(VOLATILITY_FAMILIES),
+            "input_definitions": list(VOLATILITY_INPUT_DEFINITIONS),
+            "mean_models": list(VOLATILITY_MEAN_MODELS),
+            "distributions": list(VOLATILITY_DISTRIBUTIONS),
+            "fit_statuses": list(VOLATILITY_FIT_STATUS_CODES),
+            "failure_reason_codes": list(VOLATILITY_REASON_CODES),
+            "augmented_column_prefixes": ["cm_arch_", "cm_garch_"],
+            "augmented_columns": [
+                {
+                    "name": definition.name,
+                    "dtype": definition.dtype,
+                    "nullable": definition.nullable,
+                    "grain": definition.grain,
+                    "source": definition.source,
+                }
+                for definition in training_feature_definitions()
+                if definition.name in VOLATILITY_COLUMNS
+            ],
+            "explicit_order_configuration": True,
+            "mean_and_variance_metrics_separate": True,
+            "realized_variance_proxy_explicit": True,
+            "asymmetric_extension_registry": cast(
+                JSONValue, list(ASYMMETRIC_VOLATILITY_EXTENSION_REGISTRY)
+            ),
+            "asymmetric_fitting_enabled": False,
+            "automatic_order_selection": False,
+            "automatic_winner": False,
+            "row_mapping_policy": "first_source_row_at_or_after_availability",
+        },
+    ),
+    FingerprintTargetSectionContract(
+        "classical_model_comparison",
+        "family-neutral skill, stability, failure, and eligibility reporting",
+        target_timeframes=(TICK,),
+        schema_key="fingerprint_classical_model_comparison",
+        basis_values=("saved_bounded_model_evaluation_artifacts",),
+        row_order_values=("series_id_period_row_id",),
+        extra={
+            "issue": "#427",
+            "profile_controlled_by": ["classical_model_comparison"],
+            "default_enabled": False,
+            "advisory": True,
+            "base_grain": "ascii/T",
+            "derived_grain": "regular_grid_rolling_origin",
+            "model_fitting_in_scope": False,
+            "mean_and_variance_metrics_separate": True,
+            "explicit_reference_baselines": True,
+            "multiple_horizons": True,
+            "selection_policy": "none",
+            "failure_reason_codes": list(COMPARISON_REASON_CODES),
+            "augmented_column_prefixes": [
+                "cm_comparison_",
+                "cm_skill_",
+                "cm_stability_",
+            ],
+            "augmented_columns": [
+                {
+                    "name": definition.name,
+                    "dtype": definition.dtype,
+                    "nullable": definition.nullable,
+                    "grain": definition.grain,
+                    "source": definition.source,
+                }
+                for definition in training_feature_definitions()
+                if definition.name in CLASSICAL_MODEL_COMPARISON_COLUMNS
+            ],
+            "row_mapping_policy": "first_source_row_at_or_after_availability",
+        },
+    ),
+    FingerprintTargetSectionContract(
+        "synthetic_constraints",
+        "generator-facing defects, stylized facts, artifacts, and validation contract",
+        target_timeframes=(TICK,),
+        schema_key="fingerprint_synthetic_constraints",
+        basis_values=("enriched_training_frame", "fingerprint_fallback"),
+        extra={
+            "issue": "#81",
+            "constraint_issue": "#333",
+            "advisory": True,
+            "base_grain": "ascii/T",
+            "generation_in_scope": True,
+            "generation_method": "empirical_block_bootstrap",
+            "generator_schema_key": "synthetic_tick_generation",
+            "non_tick_input_constraints_supported": False,
+        },
+    ),
+    FingerprintTargetSectionContract(
         "fingerprint_audit",
         "machine-readable expected/emitted/skipped section accounting and readiness",
         target_timeframes=(TICK,),
@@ -568,22 +1666,27 @@ IMPLEMENTED_FINGERPRINT_TARGET_SECTION_CONTRACTS = (
     ),
 )
 
-PLANNED_FINGERPRINT_TARGET_SECTION_CONTRACTS = (
-    FingerprintPlannedSectionContract("decomposition", "#330"),
-    FingerprintPlannedSectionContract("synthetic_constraints", "#333"),
-)
-PLANNED_FINGERPRINT_RUN_SECTION_CONTRACTS = (
+PLANNED_FINGERPRINT_TARGET_SECTION_CONTRACTS: tuple[
+    FingerprintPlannedSectionContract, ...
+] = ()
+IMPLEMENTED_FINGERPRINT_RUN_SECTION_CONTRACTS = (
     FingerprintRunSectionContract(
         "cross_series_fingerprint",
-        "planned",
+        "implemented",
         CROSS_SERIES_FINGERPRINT_RULE_ID,
         "#331",
     ),
 )
+PLANNED_FINGERPRINT_RUN_SECTION_CONTRACTS: tuple[
+    FingerprintRunSectionContract, ...
+] = ()
 
 FINGERPRINT_SECTION_LIMIT_DEFAULTS = {
     "topology_summary_target_limit": DEFAULT_FINGERPRINT_TOPOLOGY_SUMMARY_LIMIT,
     "topology_attention_target_limit": DEFAULT_FINGERPRINT_TOPOLOGY_ATTENTION_LIMIT,
+    "topology_inspection_sample_limit": (
+        DEFAULT_FINGERPRINT_TOPOLOGY_INSPECTION_SAMPLE_LIMIT
+    ),
     "distribution_summary_target_limit": DEFAULT_FINGERPRINT_DISTRIBUTION_SUMMARY_LIMIT,
     "distribution_attention_target_limit": (
         DEFAULT_FINGERPRINT_DISTRIBUTION_ATTENTION_LIMIT
@@ -600,6 +1703,30 @@ FINGERPRINT_SECTION_LIMIT_DEFAULTS = {
     ),
     "readiness_risk_reason_limit": (
         DEFAULT_FINGERPRINT_READINESS_RISK_REASON_LIMIT
+    ),
+    "parity_summary_target_limit": DEFAULT_FINGERPRINT_PARITY_SUMMARY_LIMIT,
+    "synthetic_constraint_summary_target_limit": (
+        DEFAULT_SYNTHETIC_CONSTRAINT_SUMMARY_LIMIT
+    ),
+    "classical_baseline_summary_target_limit": (
+        DEFAULT_BASELINE_SUMMARY_TARGET_LIMIT
+    ),
+    "classical_model_input_summary_target_limit": (
+        DEFAULT_MODEL_INPUT_SUMMARY_TARGET_LIMIT
+    ),
+    "exponential_smoothing_summary_target_limit": (
+        DEFAULT_EXPONENTIAL_SMOOTHING_SUMMARY_TARGET_LIMIT
+    ),
+    "autoregressive_summary_target_limit": (
+        DEFAULT_AUTOREGRESSIVE_SUMMARY_TARGET_LIMIT
+    ),
+    "seasonal_exogenous_summary_target_limit": (
+        DEFAULT_SEASONAL_EXOGENOUS_SUMMARY_TARGET_LIMIT
+    ),
+    "state_space_summary_target_limit": DEFAULT_STATE_SPACE_SUMMARY_TARGET_LIMIT,
+    "volatility_summary_target_limit": DEFAULT_VOLATILITY_SUMMARY_TARGET_LIMIT,
+    "classical_model_comparison_summary_target_limit": (
+        DEFAULT_CLASSICAL_MODEL_COMPARISON_SUMMARY_TARGET_LIMIT
     ),
 }
 FINGERPRINT_DISTRIBUTION_ATTENTION_DEFAULTS = {

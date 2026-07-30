@@ -10,6 +10,7 @@ from histdatacom.data_quality.contracts import (
     QualityRule,
     QualityRuleResult,
     QualityRunRule,
+    QualitySkipEvent,
     QualityTarget,
 )
 from histdatacom.data_quality.fingerprints import (
@@ -27,6 +28,10 @@ from histdatacom.data_quality.fingerprints import (
     series_fingerprint_topology_attention_summary,
     series_fingerprint_topology_summary,
 )
+from histdatacom.data_quality.limits import (
+    BoundedReportLimit,
+    bounded_report_limit,
+)
 from histdatacom.data_quality.ticks import (
     can_evaluate_tick_quality_bundle,
     evaluate_tick_quality_bundle,
@@ -34,6 +39,15 @@ from histdatacom.data_quality.ticks import (
 from histdatacom.runtime_contracts import JSONValue
 
 QualityProgressCallback = Callable[[Mapping[str, JSONValue]], None]
+
+QUALITY_ENGINE_METADATA_KEY = "quality_engine"
+QUALITY_ENGINE_SCHEMA_VERSION = "histdatacom.quality-engine.v1"
+QUALITY_SKIP_EVENTS_SCHEMA_VERSION = "histdatacom.quality-skip-events.v1"
+QUALITY_SKIP_REASON_DUPLICATE_ARCHIVE_PREFERRED_CSV = (
+    "duplicate_archive_preferred_csv"
+)
+DEFAULT_QUALITY_SKIP_EVENT_LIMIT = 128
+DEFAULT_QUALITY_SKIP_COUNT_LIMIT = 64
 
 
 def evaluate_quality_rule(
@@ -62,8 +76,7 @@ def run_quality_assessment(
     run_rule_tuple = tuple(run_rules)
     base_metadata = dict(metadata or {})
     csv_dimensions = _csv_target_dimensions(target_tuple)
-    skipped_duplicate_archive_rule_count = 0
-    skipped_duplicate_archive_rule_counts: Counter[str] = Counter()
+    skip_events: list[QualitySkipEvent] = []
     evaluation_plan: list[
         tuple[int, QualityTarget, tuple[tuple[int, QualityRule], ...]]
     ] = []
@@ -77,8 +90,15 @@ def run_quality_assessment(
                 target,
                 csv_dimensions,
             ):
-                skipped_duplicate_archive_rule_count += 1
-                skipped_duplicate_archive_rule_counts[str(rule.rule_id)] += 1
+                skip_events.append(
+                    QualitySkipEvent.from_target(
+                        reason_code=(
+                            QUALITY_SKIP_REASON_DUPLICATE_ARCHIVE_PREFERRED_CSV
+                        ),
+                        rule_id=str(rule.rule_id),
+                        target=target,
+                    )
+                )
                 rule_offset += 1
                 continue
             bundle_candidates = rule_tuple[rule_offset : rule_offset + 3]
@@ -204,35 +224,32 @@ def run_quality_assessment(
             target=target,
         )
 
-    if skipped_duplicate_archive_rule_count:
-        base_metadata["quality_engine"] = {
-            "target_count": len(target_tuple),
-            "rule_count": len(rule_tuple),
-            "target_rule_evaluation_count": len(rule_results_list),
-            "skipped_duplicate_archive_rule_evaluation_count": (
-                skipped_duplicate_archive_rule_count
-            ),
-            "duplicate_archive_scan_policy": (
-                "prefer_extracted_csv_for_non_inventory_rules"
-            ),
-        }
     rule_results = tuple(rule_results_list)
-    skipped_fingerprint_target_count = skipped_duplicate_archive_rule_counts[
-        SERIES_FINGERPRINT_RULE_ID
-    ]
+    ordered_skip_events = tuple(
+        sorted(skip_events, key=lambda event: event.sort_key)
+    )
+    if ordered_skip_events:
+        base_metadata[QUALITY_ENGINE_METADATA_KEY] = _quality_engine_metadata(
+            target_count=len(target_tuple),
+            rule_count=len(rule_tuple),
+            run_rule_count=len(run_rule_tuple),
+            executed_target_rule_count=len(rule_results_list),
+            skip_events=ordered_skip_events,
+        )
+    fingerprint_skip_events = tuple(
+        event
+        for event in ordered_skip_events
+        if event.rule_id == SERIES_FINGERPRINT_RULE_ID
+    )
+    skipped_fingerprint_target_count = len(fingerprint_skip_events)
+    skipped_fingerprint_reason_counts = Counter(
+        event.reason_code for event in fingerprint_skip_events
+    )
     fingerprint_coverage_summary = series_fingerprint_coverage_summary(
         (finding for result in rule_results for finding in result.findings),
         discovered_target_count=len(target_tuple),
         skipped_fingerprint_target_count=skipped_fingerprint_target_count,
-        skipped_reason_counts=(
-            {
-                "duplicate_archive_preferred_csv": (
-                    skipped_fingerprint_target_count
-                )
-            }
-            if skipped_fingerprint_target_count
-            else None
-        ),
+        skipped_reason_counts=skipped_fingerprint_reason_counts or None,
     )
     if fingerprint_coverage_summary is not None:
         base_metadata[TIME_SERIES_FINGERPRINT_COVERAGE_METADATA_KEY] = (
@@ -340,6 +357,95 @@ def _merge_targets(
         if target not in merged:
             merged.append(target)
     return tuple(merged)
+
+
+def _quality_engine_metadata(
+    *,
+    target_count: int,
+    rule_count: int,
+    run_rule_count: int,
+    executed_target_rule_count: int,
+    skip_events: tuple[QualitySkipEvent, ...],
+) -> dict[str, JSONValue]:
+    skip_reason_counts = Counter(event.reason_code for event in skip_events)
+    duplicate_archive_skip_count = skip_reason_counts[
+        QUALITY_SKIP_REASON_DUPLICATE_ARCHIVE_PREFERRED_CSV
+    ]
+    planned_target_rule_count = target_count * rule_count
+    return {
+        "schema_version": QUALITY_ENGINE_SCHEMA_VERSION,
+        "target_count": target_count,
+        "rule_count": rule_count,
+        "run_rule_count": run_rule_count,
+        "planned_target_rule_evaluation_count": planned_target_rule_count,
+        "target_rule_evaluation_count": executed_target_rule_count,
+        "skipped_rule_evaluation_count": len(skip_events),
+        "skipped_duplicate_archive_rule_evaluation_count": (
+            duplicate_archive_skip_count
+        ),
+        "duplicate_archive_scan_policy": (
+            "prefer_extracted_csv_for_non_inventory_rules"
+        ),
+        "skip_events": _quality_skip_events_metadata(skip_events),
+    }
+
+
+def _quality_skip_events_metadata(
+    skip_events: tuple[QualitySkipEvent, ...],
+) -> dict[str, JSONValue]:
+    event_limit = bounded_report_limit(
+        None,
+        default_limit=DEFAULT_QUALITY_SKIP_EVENT_LIMIT,
+        maximum_limit=DEFAULT_QUALITY_SKIP_EVENT_LIMIT,
+        allow_unbounded=False,
+    )
+    count_limit = bounded_report_limit(
+        None,
+        default_limit=DEFAULT_QUALITY_SKIP_COUNT_LIMIT,
+        maximum_limit=DEFAULT_QUALITY_SKIP_COUNT_LIMIT,
+        allow_unbounded=False,
+    )
+    reason_counts = Counter(event.reason_code for event in skip_events)
+    rule_id_counts = Counter(event.rule_id for event in skip_events)
+    target_kind_counts = Counter(
+        event.target_kind.value for event in skip_events
+    )
+    included_events = event_limit.slice(skip_events)
+    return {
+        "schema_version": QUALITY_SKIP_EVENTS_SCHEMA_VERSION,
+        "event_count": len(skip_events),
+        "included_event_count": len(included_events),
+        "omitted_event_count": max(0, len(skip_events) - len(included_events)),
+        "truncated": len(included_events) < len(skip_events),
+        "reason_counts": _bounded_quality_skip_counts(
+            reason_counts,
+            limit=count_limit,
+        ),
+        "rule_id_counts": _bounded_quality_skip_counts(
+            rule_id_counts,
+            limit=count_limit,
+        ),
+        "target_kind_counts": _bounded_quality_skip_counts(
+            target_kind_counts,
+            limit=count_limit,
+        ),
+        "events": [event.to_dict() for event in included_events],
+        "limit_metadata": {
+            "events": event_limit.count_payload(len(skip_events)),
+            "reasons": count_limit.count_payload(len(reason_counts)),
+            "rules": count_limit.count_payload(len(rule_id_counts)),
+            "target_kinds": count_limit.count_payload(len(target_kind_counts)),
+        },
+    }
+
+
+def _bounded_quality_skip_counts(
+    counts: Counter[str],
+    *,
+    limit: BoundedReportLimit,
+) -> dict[str, JSONValue]:
+    ordered = sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+    return {key: count for key, count in limit.slice(ordered)}
 
 
 def _csv_target_dimensions(

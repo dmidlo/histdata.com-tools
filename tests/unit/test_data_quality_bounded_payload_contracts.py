@@ -24,7 +24,7 @@ def test_bounded_payload_contract_audit_passes_representative_payload() -> None:
     assert payload["status"] == "pass"
     assert payload["finding_count"] == 0
     assert payload["findings"] == []
-    assert payload["checked_surfaces"]["sequence_contract_count"] == 13
+    assert payload["checked_surfaces"]["sequence_contract_count"] == 19
     assert "does not read local market data" in payload["non_goals"]
 
 
@@ -96,6 +96,68 @@ def test_bounded_payload_contract_audit_detects_truncation_mismatch() -> None:
     assert audit["status"] == "fail"
     finding = _first_finding(audit, "bounded_payload_truncation_mismatch")
     assert finding["path"] == "payload_limits.target_summaries.truncated"
+
+
+def test_bounded_payload_contract_audit_checks_quality_skip_events() -> None:
+    """Engine skip count metadata should match its bounded event sequence."""
+    payload = _representative_payload_copy()
+    skip_events = payload["quality_engine"]["skip_events"]
+    assert isinstance(skip_events, dict)
+    events = skip_events["events"]
+    assert isinstance(events, list)
+    events.clear()
+
+    audit = bounded_payload_contract_audit(payload)
+
+    assert audit["status"] == "fail"
+    finding = _first_finding(audit, "bounded_payload_count_mismatch")
+    assert finding["path"] == (
+        "quality_engine.skip_events.limit_metadata.events.included_count"
+    )
+
+
+def test_bounded_payload_contract_audit_checks_remediation_plan_limits() -> (
+    None
+):
+    """Remediation-plan item counts should remain independently bounded."""
+    payload = _representative_payload_copy()
+    plan = payload["remediation_catalog_audit"]["remediation_plan"]
+    assert isinstance(plan, dict)
+    items = plan["items"]
+    assert isinstance(items, list)
+    items.clear()
+
+    audit = bounded_payload_contract_audit(payload)
+
+    assert audit["status"] == "fail"
+    finding = _first_finding(audit, "bounded_payload_count_mismatch")
+    assert finding["path"] == (
+        "remediation_catalog_audit.payload_limits.remediation_plan."
+        "included_count"
+    )
+
+
+def test_bounded_payload_contract_audit_checks_topology_inspection_limits() -> (
+    None
+):
+    """Nested inspection samples should share bounded count invariants."""
+    payload = _representative_payload_copy()
+    targets = payload["fingerprint_topology_attention"]["target_summaries"]
+    inspected = next(
+        target for target in targets if "inspection_context" in target
+    )
+    sample_limits = inspected["inspection_context"]["duplicate_timestamps"][
+        "limit_metadata"
+    ]["samples"]
+    sample_limits["included_count"] = 7
+
+    audit = bounded_payload_contract_audit(payload)
+
+    assert audit["status"] == "fail"
+    finding = _first_finding(audit, "bounded_payload_count_mismatch")
+    assert "inspection_context.duplicate_timestamps.limit_metadata.samples" in (
+        finding["path"]
+    )
 
 
 def test_format_bounded_payload_contract_audit_renders_human_summary() -> None:

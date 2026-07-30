@@ -22,6 +22,7 @@ from histdatacom.data_quality.polars_cache import (
     read_quality_polars_cache,
 )
 from histdatacom.histdata_ascii import (
+    TICK,
     columns_for_timeframe,
     delimiter_for_timeframe,
     parse_histdata_datetime_to_utc_ms,
@@ -471,23 +472,37 @@ def ingestion_quality_rules() -> tuple[QualityRule, ...]:
 
 def _is_ingestion_count_target(target: QualityTarget) -> bool:
     return (
-        _is_ascii_text_target(target) or target.kind is QualityTargetKind.CACHE
+        target.data_format == "ascii"
+        and target.timeframe == TICK
+        and (
+            target.kind
+            in {
+                QualityTargetKind.CSV,
+                QualityTargetKind.ZIP,
+                QualityTargetKind.CACHE,
+            }
+        )
     )
 
 
 def _is_ascii_schema_target(target: QualityTarget) -> bool:
     return _is_ascii_text_target(target) or (
         target.data_format == "ascii"
+        and target.timeframe == TICK
         and target.kind is QualityTargetKind.CACHE
-        and bool(target.timeframe)
     )
 
 
 def _is_ascii_text_target(target: QualityTarget) -> bool:
-    return target.data_format == "ascii" and target.kind in {
-        QualityTargetKind.CSV,
-        QualityTargetKind.ZIP,
-    }
+    return (
+        target.data_format == "ascii"
+        and target.timeframe == TICK
+        and target.kind
+        in {
+            QualityTargetKind.CSV,
+            QualityTargetKind.ZIP,
+        }
+    )
 
 
 def _profile_ingestion_target(target: QualityTarget) -> _IngestionProfile:

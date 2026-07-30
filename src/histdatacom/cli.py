@@ -87,10 +87,10 @@ from histdatacom.data_quality.preflight import (
     DEFAULT_QUALITY_PREFLIGHT_SAMPLE_SIZE,
 )
 from histdatacom.data_quality.profiles import (
-    QualityProfile,
     QualityProfileError,
-    load_quality_profile_file,
-    quality_profile_from_mapping,
+    apply_quality_profile_overrides,
+    load_quality_profile_file_resolution,
+    resolve_quality_profile,
 )
 from histdatacom.fx_enums import (
     Format,
@@ -100,6 +100,11 @@ from histdatacom.fx_enums import (
     normalize_pair_group,
     pair_group_names,
     get_valid_format_timeframes,
+)
+from histdatacom.random_windows import (
+    RandomWindowError,
+    parse_random_window_expression,
+    random_window_requires_seed,
 )
 from histdatacom.verbosity import normalize_verbosity
 from histdatacom.utils import (
@@ -131,21 +136,9 @@ def _positive_int(value: str) -> int:
     return parsed
 
 
-def _enable_remediation_catalog_audit(
-    profile: QualityProfile,
-) -> QualityProfile:
-    """Return a profile with remediation-catalog audit reporting enabled."""
-    payload = profile.to_request_payload()
-    reporting_value = payload.get("reporting", {})
-    reporting = (
-        dict(reporting_value) if isinstance(reporting_value, dict) else {}
-    )
-    audit_value = reporting.get("remediation_catalog_audit", {})
-    audit = dict(audit_value) if isinstance(audit_value, dict) else {}
-    audit["enabled"] = True
-    reporting["remediation_catalog_audit"] = audit
-    payload["reporting"] = reporting
-    return quality_profile_from_mapping(payload)
+def _argv_has_option(args: Tuple[str, ...], option: str) -> bool:
+    """Return whether argv contains an option in split or equals form."""
+    return any(arg == option or arg.startswith(f"{option}=") for arg in args)
 
 
 class ArgParser(argparse.ArgumentParser):  # noqa:H601
@@ -170,15 +163,19 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
                 "Commands:\n"
                 "  analytics   Run offline data analytics operations\n"
                 "  cleanup     Remove transient source artifacts\n"
+                "  datasets    Resolve and verify versioned local datasets\n"
                 "  groups      List instrument groups and major triangles\n"
                 "  jobs        Inspect and control orchestrated work\n"
                 "  quality     Inspect local data quality evidence\n"
+                "  reconstruction  Plan, run, and inspect reconstruction\n"
                 "  runtime     Inspect and manage the orchestration runtime\n\n"
                 "Run `histdatacom analytics --help` for analytics commands.\n"
                 "Run `histdatacom cleanup --help` for cleanup commands.\n"
+                "Run `histdatacom datasets --help` for dataset commands.\n"
                 "Run `histdatacom groups --help` for group discovery commands.\n"
                 "Run `histdatacom jobs --help` for job telemetry commands."
                 "\nRun `histdatacom quality --help` for quality commands."
+                "\nRun `histdatacom reconstruction --help` for reconstruction."
             ),
         )
         # bring in the defaults arg DTO from outer class, use the
@@ -186,6 +183,8 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
 
         self.arg_namespace = options if options is not None else Options()
         self._default_args = self.arg_namespace.to_dict()
+        self._explicit_cli_args: Tuple[str, ...] = ()
+        self._config_file_args: Tuple[str, ...] = ()
         self.set_defaults(**self._default_args)
 
     @classmethod
@@ -371,6 +370,12 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
                     "--quality-preflight-validation-report requires --quality-preflight"
                 )
                 raise SystemExit(1)
+            if self.arg_namespace.quality_preflight_validation_evidence_path:
+                print(  # noqa:T201
+                    "--quality-preflight-validation-evidence requires "
+                    "--quality-preflight"
+                )
+                raise SystemExit(1)
             if self.arg_namespace.quality_preflight_run_validation:
                 print(  # noqa:T201
                     "--quality-preflight-run-validation requires --quality-preflight"
@@ -481,6 +486,15 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
                 )
                 raise SystemExit(1)
             if (
+                self.arg_namespace.quality_preflight_validation_evidence_path
+                == "-"
+            ):
+                print(  # noqa:T201
+                    "--quality-preflight-validation-evidence requires a "
+                    "file path, not '-'"
+                )
+                raise SystemExit(1)
+            if (
                 self.arg_namespace.quality_profile_preview
                 and self.arg_namespace.quality_preflight_profile_preview_output_path
             ):
@@ -500,6 +514,7 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             raise SystemExit(1)
         elif (
             self.arg_namespace.quality_preflight_validation_report_path
+            or self.arg_namespace.quality_preflight_validation_evidence_path
             or self.arg_namespace.quality_preflight_run_validation
         ):
             print(  # noqa:T201
@@ -532,40 +547,80 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
         self._load_quality_profile()
 
     def _load_quality_profile(self) -> None:
-        """Validate and embed an operator quality profile, when configured."""
+        """Resolve a profile and preserve value-level source metadata."""
+        config_path = str(self.arg_namespace.config_path or "")
         try:
             if self.arg_namespace.quality_profile_path:
-                profile = load_quality_profile_file(
-                    self.arg_namespace.quality_profile_path
+                if self.arg_namespace.from_api:
+                    selected_by = "api_options"
+                elif _argv_has_option(
+                    self._explicit_cli_args,
+                    "--quality-profile",
+                ):
+                    selected_by = "cli_override"
+                else:
+                    selected_by = "yaml_config"
+                resolution = load_quality_profile_file_resolution(
+                    self.arg_namespace.quality_profile_path,
+                    config_path=config_path,
+                    selected_by=selected_by,
                 )
             elif self.arg_namespace.quality_profile:
-                profile = quality_profile_from_mapping(
+                resolution = resolve_quality_profile(
                     self.arg_namespace.quality_profile,
-                    source="api-options",
-                )
-            elif self.arg_namespace.quality_remediation_catalog_audit:
-                profile = quality_profile_from_mapping(
-                    {
-                        "reporting": {
-                            "remediation_catalog_audit": {
-                                "enabled": True,
-                            }
-                        }
-                    },
                     source=(
                         "api-options"
                         if self.arg_namespace.from_api
-                        else "cli-options"
+                        else "operator-config"
+                    ),
+                    config_path=config_path,
+                    selected_by=(
+                        "api_options"
+                        if self.arg_namespace.from_api
+                        else "operator_config"
                     ),
                 )
             else:
-                return
+                resolution = resolve_quality_profile(
+                    config_path=config_path,
+                )
             if self.arg_namespace.quality_remediation_catalog_audit:
-                profile = _enable_remediation_catalog_audit(profile)
+                if self.arg_namespace.from_api:
+                    override_source = "api_options"
+                elif _argv_has_option(
+                    self._explicit_cli_args,
+                    "--quality-remediation-catalog-audit",
+                ):
+                    override_source = "cli_override"
+                elif _argv_has_option(
+                    self._config_file_args,
+                    "--quality-remediation-catalog-audit",
+                ):
+                    override_source = "yaml_config"
+                else:
+                    override_source = "cli_override"
+                resolution = apply_quality_profile_overrides(
+                    resolution,
+                    {
+                        "reporting.remediation_catalog_audit.enabled": True,
+                    },
+                    source=override_source,
+                    source_path=(
+                        config_path if override_source == "yaml_config" else ""
+                    ),
+                )
         except QualityProfileError as exc:
             print(f"quality profile error: {exc}")  # noqa:T201
             raise SystemExit(1) from exc
-        self.arg_namespace.quality_profile = profile.to_request_payload()
+        self.arg_namespace.quality_profile_resolution = resolution.to_payload()
+        if (
+            self.arg_namespace.quality_profile_path
+            or self.arg_namespace.quality_profile
+            or self.arg_namespace.quality_remediation_catalog_audit
+        ):
+            self.arg_namespace.quality_profile = (
+                resolution.profile.to_request_payload()
+            )
 
     def _clean_from_api_args(self) -> list:  # noqa:CCR001
         """Build the args list from api Options.
@@ -705,6 +760,17 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
                             ),
                         ]
                     )
+                if (
+                    self.arg_namespace.quality_preflight_validation_evidence_path
+                ):
+                    args.extend(
+                        [
+                            "--quality-preflight-validation-evidence",
+                            (
+                                self.arg_namespace.quality_preflight_validation_evidence_path
+                            ),
+                        ]
+                    )
                 if self.arg_namespace.quality_preflight_run_validation:
                     args.append("--quality-preflight-run-validation")
                 args.extend(
@@ -781,6 +847,12 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             args.extend(["-s", self.arg_namespace.start_yearmonth])
         if self.arg_namespace.end_yearmonth:
             args.extend(["-e", self.arg_namespace.end_yearmonth])
+        if self.arg_namespace.random_window:
+            args.extend(["--random-window", self.arg_namespace.random_window])
+        if self.arg_namespace.random_seed is not None:
+            args.extend(["--random-seed", str(self.arg_namespace.random_seed)])
+        if self.arg_namespace.output_timezone:
+            args.extend(["--timezone", self.arg_namespace.output_timezone])
         if self.arg_namespace.available_remote_data:
             args.append("-A")
         if self.arg_namespace.update_remote_data:
@@ -982,6 +1054,57 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
         self._check_end_yearmonth_in_range()
         self._check_start_lessthan_end()
         self._validate_prerequisites()
+
+    def _check_random_window_input(self) -> None:
+        """Validate deterministic tick-window selection inputs."""
+        expression = str(self.arg_namespace.random_window or "")
+        seed = self.arg_namespace.random_seed
+        if not expression:
+            if seed is not None:
+                print(
+                    "ERROR: --random-seed requires --random-window"
+                )  # noqa:T201
+                raise SystemExit(1)
+            return
+        if (
+            self.arg_namespace.available_remote_data
+            or self.arg_namespace.update_remote_data
+        ):
+            print(  # noqa:T201
+                "ERROR: --random-window cannot be combined with repository "
+                "inventory modes -A or -U"
+            )
+            raise SystemExit(1)
+        if (
+            self.arg_namespace.data_quality
+            or self.arg_namespace.repo_quality_refresh
+            or self.arg_namespace.quality_preflight
+        ):
+            print(  # noqa:T201
+                "ERROR: --random-window is a tick projection option and "
+                "cannot be combined with data-quality modes"
+            )
+            raise SystemExit(1)
+        try:
+            parse_random_window_expression(expression)
+            if seed is not None and seed > 2**63 - 1:
+                raise RandomWindowError(
+                    "random-window seed exceeds signed int64 range"
+                )
+            if (
+                random_window_requires_seed(
+                    expression,
+                    start_yearmonth=self.arg_namespace.start_yearmonth,
+                    end_yearmonth=self.arg_namespace.end_yearmonth,
+                )
+                and seed is None
+            ):
+                raise RandomWindowError(
+                    "random selection requires --random-seed"
+                )
+        except RandomWindowError as exc:
+            print(f"ERROR: invalid --random-window: {exc}")  # noqa:T201
+            raise SystemExit(1) from exc
 
     def _validate_prerequisites(self) -> None:
         """Set prereqs for behavior flags -V -D -X -I."""
@@ -1216,6 +1339,8 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             ValueError: -s and -e cannot be the same.
             SystemExit: Exit on error
         """
+        if getattr(self.arg_namespace, "random_window", ""):
+            return
         try:
             start_yearmonth = self.arg_namespace.start_yearmonth
             start_year = get_year_from_datemonth(start_yearmonth)
@@ -1520,6 +1645,37 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
                 " e.g. -e 2020-00 or -e 2022-04"
             ),
         )
+        config_args.add_argument(
+            "-r",
+            "--random-window",
+            dest="random_window",
+            type=str,
+            metavar="EXPRESSION",
+            help=(
+                "select deterministic duration/session tick windows; random "
+                "selection requires --random-seed, while session expressions "
+                "with both -s and -e return all matching occurrences"
+            ),
+        )
+        config_args.add_argument(
+            "--random-seed",
+            dest="random_seed",
+            type=_non_negative_int,
+            metavar="INTEGER",
+            help="seed required for reproducible random-window selection",
+        )
+        config_args.add_argument(
+            "-z",
+            "--timezone",
+            "--output-timezone",
+            dest="output_timezone",
+            type=str,
+            metavar="IANA_ZONE",
+            help=(
+                "append datetime_local to API results in an IANA timezone; "
+                "canonical cache and Influx timestamps remain UTC"
+            ),
+        )
         influx_args.add_argument(
             "-I",
             "--import_to_influxdb",
@@ -1777,6 +1933,16 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             ),
         )
         quality_args.add_argument(
+            "--quality-preflight-validation-evidence",
+            dest="quality_preflight_validation_evidence_path",
+            type=str,
+            metavar="PATH",
+            help=(
+                "write bounded machine-readable validation evidence to PATH "
+                "and reference it from quality preflight evidence"
+            ),
+        )
+        quality_args.add_argument(
             "--quality-preflight-evidence",
             dest="quality_preflight_evidence_path",
             type=str,
@@ -1912,11 +2078,15 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
 
         if self.arg_namespace.from_api:
             args = self._clean_from_api_args()
+            self._explicit_cli_args = ()
+            self._config_file_args = ()
             self.parse_args(args, namespace=self.arg_namespace)
         else:
             # Get the args from sys.argv
             cli_args = sys.argv[1:]
             config_args = self._config_args_from_cli(cli_args)
+            self._explicit_cli_args = tuple(cli_args)
+            self._config_file_args = tuple(config_args)
             self.parse_args(
                 [*config_args, *cli_args],
                 namespace=self.arg_namespace,
@@ -1926,6 +2096,7 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
         self._adjust_for_repo_data_request()
         self._check_quality_mode()
         self._check_datetime_input()
+        self._check_random_window_input()
         self._check_for_ascii_if_influx()
         self._check_for_ascii_if_api()
         self._check_for_supported_format_timeframe_combination()

@@ -19,6 +19,21 @@ def test_exposed_classes() -> None:
         "Pairs",
         "Timeframe",
         "Format",
+        "DatasetCatalog",
+        "DatasetQueryScopeV1",
+        "DatasetResolutionV1",
+        "DatasetVersionManifestV1",
+        "FixtureProviderAdapter",
+        "HistDataProviderAdapter",
+        "ReconstructionClient",
+        "ReconstructionExecutionRequestV1",
+        "ReconstructionExitCode",
+        "ReconstructionOperationReceiptV1",
+        "ReconstructionPlanSetPreflightV1",
+        "ReconstructionPlanSetV1",
+        "ReconstructionPlanShardV1",
+        "ReconstructionPlanSpecV1",
+        "ReconstructionPreflightV1",
     }
 
 

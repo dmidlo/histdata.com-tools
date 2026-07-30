@@ -1,0 +1,19 @@
+{
+  "advertised_manifest_ref": null,
+  "carry_state_ref": null,
+  "checkpoint_id": "checkpoint:sha256:360f81eec78eeaf06514f41790e2339fcba24ba2c7665da7a9a7009a96591e5f",
+  "committed_manifest_ref": null,
+  "completed_batch_ids": [],
+  "input_watermark_ns": null,
+  "interruption_reason": "",
+  "output_watermark_ns": null,
+  "parent_checkpoint_id": null,
+  "phase": "planned",
+  "rejection_summary_ref": null,
+  "revision": 0,
+  "run_id": "reconstruction-run:sha256:0219b294392b6c6f67153513f8cb95ab6090f8f760a8b6f7d11437bb65266775",
+  "schema_version": "histdatacom.reconstruction-checkpoint.v1",
+  "staged_manifest_ref": null,
+  "synchronization_unit_id": "synchronization-unit:sha256:2c3242707c28a462c62ace3d92883a8dba84596e464d00daee202afbb7d7e179",
+  "window_id": "reconstruction-window:sha256:2c3242707c28a462c62ace3d92883a8dba84596e464d00daee202afbb7d7e179"
+}

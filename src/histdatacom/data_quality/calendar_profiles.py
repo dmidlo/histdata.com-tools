@@ -12,6 +12,10 @@ from histdatacom.runtime_contracts import JSONValue
 CALENDAR_PROFILE_SCHEMA_VERSION = "histdatacom.calendar-profile.v1"
 DEFAULT_CALENDAR_PROFILE_NAME = "static-major-holidays"
 DEFAULT_CALENDAR_PROFILE_SOURCE = "static_month_day_major_holidays"
+DEFAULT_WEEKEND_ACTIVITY_POLICY = "advisory"
+DEFAULT_EXPECTED_SESSION_CLOSURE_POLICY = "expected"
+WEEKEND_ACTIVITY_POLICIES = frozenset({"strict", "advisory", "allowed"})
+EXPECTED_SESSION_CLOSURE_POLICIES = frozenset({"expected", "unexpected"})
 
 _UNIX_EPOCH_DATE = date(1970, 1, 1)
 
@@ -258,6 +262,10 @@ class HistDataCalendarProfile:
     schema_version: str = CALENDAR_PROFILE_SCHEMA_VERSION
     complete: bool = False
     static_advisory: bool = True
+    weekend_activity_policy: str = DEFAULT_WEEKEND_ACTIVITY_POLICY
+    expected_session_closure_policy: str = (
+        DEFAULT_EXPECTED_SESSION_CLOSURE_POLICY
+    )
     limitations: tuple[str, ...] = ()
     date_tags: tuple[HistDataCalendarDateTag, ...] = ()
     window_tags: tuple[HistDataCalendarWindowTag, ...] = ()
@@ -272,6 +280,16 @@ class HistDataCalendarProfile:
             raise ValueError(msg)
         _validate_name(self.name, path="calendar_profile.name")
         _validate_name(self.source, path="calendar_profile.source")
+        _validate_policy(
+            self.weekend_activity_policy,
+            allowed=WEEKEND_ACTIVITY_POLICIES,
+            path="calendar_profile.weekend_activity_policy",
+        )
+        _validate_policy(
+            self.expected_session_closure_policy,
+            allowed=EXPECTED_SESSION_CLOSURE_POLICIES,
+            path="calendar_profile.expected_session_closure_policy",
+        )
 
     def holiday_tags_for(
         self,
@@ -372,6 +390,10 @@ class HistDataCalendarProfile:
             "version": self.version,
             "complete": self.complete,
             "static_advisory": self.static_advisory,
+            "weekend_activity_policy": self.weekend_activity_policy,
+            "expected_session_closure_policy": (
+                self.expected_session_closure_policy
+            ),
             "limitations": list(self.limitations),
             "date_tags": [tag.to_metadata() for tag in self.date_tags],
             "window_tags": [tag.to_metadata() for tag in self.window_tags],
@@ -419,6 +441,8 @@ def calendar_profile_from_mapping(
             "version",
             "complete",
             "static_advisory",
+            "weekend_activity_policy",
+            "expected_session_closure_policy",
             "limitations",
             "date_tags",
             "fixed_holidays",
@@ -455,6 +479,18 @@ def calendar_profile_from_mapping(
         complete=_bool_value(payload.get("complete"), default=False),
         static_advisory=_bool_value(
             payload.get("static_advisory"), default=False
+        ),
+        weekend_activity_policy=_policy_value(
+            payload.get("weekend_activity_policy"),
+            default=DEFAULT_WEEKEND_ACTIVITY_POLICY,
+            allowed=WEEKEND_ACTIVITY_POLICIES,
+            path="calendar_profile.weekend_activity_policy",
+        ),
+        expected_session_closure_policy=_policy_value(
+            payload.get("expected_session_closure_policy"),
+            default=DEFAULT_EXPECTED_SESSION_CLOSURE_POLICY,
+            allowed=EXPECTED_SESSION_CLOSURE_POLICIES,
+            path="calendar_profile.expected_session_closure_policy",
         ),
         limitations=_string_tuple(payload.get("limitations")),
         date_tags=tuple(date_tags),
@@ -671,6 +707,29 @@ def _bool_value(value: Any, *, default: bool) -> bool:
     if text in {"0", "false", "no", "off"}:
         return False
     raise ValueError(f"calendar profile boolean value invalid: {value!r}")
+
+
+def _policy_value(
+    value: Any,
+    *,
+    default: str,
+    allowed: frozenset[str],
+    path: str,
+) -> str:
+    normalized = str(value or default).strip().lower().replace("-", "_")
+    _validate_policy(normalized, allowed=allowed, path=path)
+    return normalized
+
+
+def _validate_policy(
+    value: str,
+    *,
+    allowed: frozenset[str],
+    path: str,
+) -> None:
+    if value not in allowed:
+        choices = ", ".join(sorted(allowed))
+        raise ValueError(f"{path} must be one of: {choices}")
 
 
 def _int_value(value: Any, *, default: int) -> int:

@@ -17,6 +17,7 @@ from histdatacom.histdata_ascii import (
     convert_polars_datetime_to_utc_ms,
     convert_batch_for_api,
     delimiter_for_timeframe,
+    filename_has_unsupported_raw_dimensions,
     format_influx_line,
     merge_batches,
     normalize_ascii_row,
@@ -253,6 +254,48 @@ def test_polars_zip_ingest_requires_exactly_one_csv_member(
         read_ascii_file_to_polars(archive_path, "T")
 
 
+def test_ascii_import_rejects_retired_platform_filename(
+    tmp_path: Path,
+) -> None:
+    """Direct raw imports must not trust caller-supplied tick context."""
+    source = FIXTURES / "DAT_ASCII_EURUSD_T_201202.csv"
+    retired = tmp_path / "DAT_NT_EURUSD_T_LAST_201202.csv"
+    retired.write_bytes(source.read_bytes())
+
+    with pytest.raises(ValueError, match="ASCII tick"):
+        read_ascii_file_to_polars(retired, "T")
+    with pytest.raises(ValueError, match="ASCII tick"):
+        read_ascii_file(retired, "T")
+
+
+def test_ascii_status_report_filename_keeps_supported_dimensions() -> None:
+    """Live same-stem TXT reports retain the supported ASCII tick axes."""
+    assert not filename_has_unsupported_raw_dimensions(
+        "DAT_ASCII_EURUSD_T_202201.txt"
+    )
+    assert filename_has_unsupported_raw_dimensions(
+        "DAT_NT_EURUSD_T_LAST_202201.txt"
+    )
+
+
+def test_ascii_zip_import_rejects_retired_platform_member(
+    tmp_path: Path,
+) -> None:
+    """Opaque ZIP wrappers must not hide a retired raw member filename."""
+    archive_path = tmp_path / "opaque.zip"
+    source = FIXTURES / "DAT_ASCII_EURUSD_T_201202.csv"
+    with zipfile.ZipFile(archive_path, "w") as archive:
+        archive.writestr(
+            "DAT_NT_EURUSD_T_LAST_201202.csv",
+            source.read_bytes(),
+        )
+
+    with pytest.raises(ValueError, match="ASCII tick"):
+        read_ascii_file_to_polars(archive_path, "T")
+    with pytest.raises(ValueError, match="ASCII tick"):
+        read_ascii_file(archive_path, "T")
+
+
 @pytest.mark.parametrize(
     ("timeframe", "filename"),
     (("T", "DAT_ASCII_EURUSD_T_201202.csv"),),
@@ -285,6 +328,58 @@ def test_polars_cache_rejects_legacy_cache_payloads(
         read_polars_cache(cache_path)
 
     assert str(err.value) == LEGACY_CACHE_ERROR
+
+
+@pytest.mark.parametrize(
+    ("data_format", "timeframe"),
+    (("metatrader", "T"), ("ascii", "M1")),
+)
+def test_polars_cache_rejects_enriched_retired_dimensions(
+    tmp_path: Path,
+    data_format: str,
+    timeframe: str,
+) -> None:
+    """Canonical cache reads must not trust retired row metadata."""
+    import polars as pl
+
+    cache_path = tmp_path / CACHE_FILENAME
+    pl.DataFrame(
+        {
+            "datetime": [1],
+            "bid": [1.0],
+            "ask": [1.1],
+            "vol": [0],
+            "format": [data_format],
+            "timeframe": [timeframe],
+        }
+    ).write_ipc(cache_path)
+
+    with pytest.raises(ValueError, match="ASCII tick"):
+        read_polars_cache(cache_path)
+
+
+def test_polars_cache_writer_rejects_enriched_retired_dimensions(
+    tmp_path: Path,
+) -> None:
+    """The low-level canonical cache writer must also fail closed."""
+    import polars as pl
+
+    cache_path = tmp_path / CACHE_FILENAME
+    frame = pl.DataFrame(
+        {
+            "datetime": [1],
+            "bid": [1.0],
+            "ask": [1.1],
+            "vol": [0],
+            "format": ["ascii"],
+            "timeframe": ["M1"],
+        }
+    )
+
+    with pytest.raises(ValueError, match="ASCII tick"):
+        write_polars_cache(frame, cache_path)
+
+    assert not cache_path.exists()
 
 
 @pytest.mark.parametrize(
@@ -532,3 +627,29 @@ def test_influx_line_protocol_rejects_removed_m1_timeframe() -> None:
     """M1 rows should not be accepted by the tick-only line protocol."""
     with pytest.raises(ValueError, match="unsupported ASCII timeframe"):
         format_influx_line("eurusd", "ascii", "M1", EXPECTED_TICK_ROWS[1])
+
+
+def test_influx_line_protocol_rejects_removed_platform_format() -> None:
+    """Platform-specific formats must not leak through direct projection."""
+    with pytest.raises(ValueError, match="ASCII tick"):
+        format_influx_line(
+            "eurusd",
+            "ninjatrader",
+            "T",
+            EXPECTED_TICK_ROWS[1],
+        )
+
+
+def test_enriched_influx_line_rejects_retired_row_dimensions() -> None:
+    """Enriched row metadata must not override a supported projection target."""
+    columns = ("datetime", "bid", "ask", "vol", "format", "timeframe")
+    row = (*EXPECTED_TICK_ROWS[1], "metatrader", "T")
+
+    with pytest.raises(ValueError, match="ASCII tick"):
+        format_influx_line(
+            "eurusd",
+            "ascii",
+            "T",
+            row,
+            columns=columns,
+        )

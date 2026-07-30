@@ -13,17 +13,52 @@ from histdatacom.data_quality.calendar_profiles import (
     HistDataCalendarProfile,
     calendar_profile_from_mapping,
 )
+from histdatacom.data_quality.autoregressive import (
+    AutoregressiveProfile,
+    AutoregressiveSpecification,
+)
+from histdatacom.data_quality.classical_baselines import (
+    MAX_BASELINE_ROLLING_WINDOWS,
+    ClassicalBaselineProfile,
+)
+from histdatacom.data_quality.classical_model_contracts import (
+    ClassicalModelInputProfile,
+    ClassicalModelResourcePolicy,
+)
+from histdatacom.data_quality.classical_model_comparison import (
+    ClassicalModelComparisonProfile,
+)
 from histdatacom.data_quality.contracts import QualitySeverity
+from histdatacom.data_quality.exponential_smoothing import (
+    ExponentialSmoothingProfile,
+    ExponentialSmoothingSpecification,
+)
 from histdatacom.data_quality.fingerprints import (
     DEFAULT_FINGERPRINT_HISTOGRAM_BINS,
     DEFAULT_FINGERPRINT_LAGS,
     DEFAULT_FINGERPRINT_MAX_ROWS,
+    DEFAULT_FINGERPRINT_PARITY_MISMATCH_LIMIT,
     DEFAULT_FINGERPRINT_QUANTILES,
     DEFAULT_FINGERPRINT_ROLLING_WINDOWS,
     DEFAULT_FINGERPRINT_ROUNDING_DIGITS,
+    DEFAULT_FINGERPRINT_TOPOLOGY_INSPECTION_SAMPLE_LIMIT,
     SERIES_FINGERPRINT_RULE_ID,
     HistDataFingerprintDistributionAttentionProfile,
+    HistDataFingerprintParityProfile,
     HistDataFingerprintProfile,
+)
+from histdatacom.data_quality.seasonal_exogenous import (
+    CalendarRegressorProfile,
+    SeasonalExogenousProfile,
+    SeasonalExogenousSpecification,
+)
+from histdatacom.data_quality.state_space import (
+    StateSpaceProfile,
+    StateSpaceSpecification,
+)
+from histdatacom.data_quality.volatility import (
+    VolatilityProfile,
+    VolatilitySpecification,
 )
 from histdatacom.data_quality.ingestion import (
     ASCII_ROW_COUNT_INGESTION_RULE_ID,
@@ -58,6 +93,9 @@ from histdatacom.data_quality.time import (
 from histdatacom.runtime_contracts import JSONValue
 
 QUALITY_PROFILE_SCHEMA_VERSION = "histdatacom.quality-profile.v1"
+QUALITY_PROFILE_RESOLUTION_SCHEMA_VERSION = (
+    "histdatacom.quality-profile-resolution.v1"
+)
 DEFAULT_QUALITY_PROFILE_NAME = "default"
 DEFAULT_QUALITY_PROFILE_SOURCE = "default"
 OPERATOR_QUALITY_PROFILE_SOURCE = "operator-config"
@@ -474,7 +512,17 @@ class QualityProfile:
                 "histogram_bins",
                 "max_rows",
                 "rounding_digits",
+                "topology_inspection_sample_limit",
                 "distribution_attention",
+                "cache_source_parity",
+                "classical_baselines",
+                "classical_model_input",
+                "exponential_smoothing",
+                "autoregressive",
+                "seasonal_exogenous",
+                "state_space",
+                "volatility",
+                "classical_model_comparison",
             },
             SERIES_FINGERPRINT_RULE_ID,
         )
@@ -518,6 +566,14 @@ class QualityProfile:
                 minimum=0,
                 path=SERIES_FINGERPRINT_RULE_ID,
             ),
+            topology_inspection_sample_limit=_int_field(
+                config,
+                "topology_inspection_sample_limit",
+                DEFAULT_FINGERPRINT_TOPOLOGY_INSPECTION_SAMPLE_LIMIT,
+                minimum=0,
+                maximum=DEFAULT_FINGERPRINT_TOPOLOGY_INSPECTION_SAMPLE_LIMIT,
+                path=SERIES_FINGERPRINT_RULE_ID,
+            ),
             calendar_profile=self.calendar_profile(),
             distribution_attention=(
                 _fingerprint_distribution_attention_profile(
@@ -528,6 +584,80 @@ class QualityProfile:
                     ),
                     path=f"{SERIES_FINGERPRINT_RULE_ID}.distribution_attention",
                 )
+            ),
+            cache_source_parity=_fingerprint_parity_profile(
+                _mapping_field(
+                    config,
+                    "cache_source_parity",
+                    path=SERIES_FINGERPRINT_RULE_ID,
+                ),
+                path=f"{SERIES_FINGERPRINT_RULE_ID}.cache_source_parity",
+            ),
+            classical_baselines=_classical_baseline_profile(
+                _mapping_field(
+                    config,
+                    "classical_baselines",
+                    path=SERIES_FINGERPRINT_RULE_ID,
+                ),
+                path=f"{SERIES_FINGERPRINT_RULE_ID}.classical_baselines",
+            ),
+            classical_model_input=_classical_model_input_profile(
+                _mapping_field(
+                    config,
+                    "classical_model_input",
+                    path=SERIES_FINGERPRINT_RULE_ID,
+                ),
+                path=(f"{SERIES_FINGERPRINT_RULE_ID}.classical_model_input"),
+            ),
+            exponential_smoothing=_exponential_smoothing_profile(
+                _mapping_field(
+                    config,
+                    "exponential_smoothing",
+                    path=SERIES_FINGERPRINT_RULE_ID,
+                ),
+                path=f"{SERIES_FINGERPRINT_RULE_ID}.exponential_smoothing",
+            ),
+            autoregressive=_autoregressive_profile(
+                _mapping_field(
+                    config,
+                    "autoregressive",
+                    path=SERIES_FINGERPRINT_RULE_ID,
+                ),
+                path=f"{SERIES_FINGERPRINT_RULE_ID}.autoregressive",
+            ),
+            seasonal_exogenous=_seasonal_exogenous_profile(
+                _mapping_field(
+                    config,
+                    "seasonal_exogenous",
+                    path=SERIES_FINGERPRINT_RULE_ID,
+                ),
+                path=f"{SERIES_FINGERPRINT_RULE_ID}.seasonal_exogenous",
+            ),
+            state_space=_state_space_profile(
+                _mapping_field(
+                    config,
+                    "state_space",
+                    path=SERIES_FINGERPRINT_RULE_ID,
+                ),
+                path=f"{SERIES_FINGERPRINT_RULE_ID}.state_space",
+            ),
+            volatility=_volatility_profile(
+                _mapping_field(
+                    config,
+                    "volatility",
+                    path=SERIES_FINGERPRINT_RULE_ID,
+                ),
+                path=f"{SERIES_FINGERPRINT_RULE_ID}.volatility",
+            ),
+            classical_model_comparison=_classical_model_comparison_profile(
+                _mapping_field(
+                    config,
+                    "classical_model_comparison",
+                    path=SERIES_FINGERPRINT_RULE_ID,
+                ),
+                path=(
+                    f"{SERIES_FINGERPRINT_RULE_ID}.classical_model_comparison"
+                ),
             ),
         )
 
@@ -573,13 +703,224 @@ class QualityProfile:
         return payload
 
 
+@dataclass(frozen=True, slots=True)
+class QualityProfileValueSource:
+    """Value-level provenance retained while a quality profile is resolved."""
+
+    path: str
+    value: JSONValue
+    source: str
+    profile_name: str = ""
+    source_path: str = ""
+    selected_by: str = ""
+    override: bool = False
+    previous_source: str = ""
+    previous_value: JSONValue | None = None
+    previous_value_present: bool = False
+
+    def to_payload(self) -> dict[str, JSONValue]:
+        """Return deterministic JSON-compatible provenance metadata."""
+        payload: dict[str, JSONValue] = {
+            "path": self.path,
+            "value": self.value,
+            "source": self.source,
+        }
+        if self.profile_name:
+            payload["profile_name"] = self.profile_name
+        if self.source_path:
+            payload["source_path"] = self.source_path
+        if self.selected_by:
+            payload["selected_by"] = self.selected_by
+        if self.override:
+            payload["override"] = True
+            payload["previous_source"] = self.previous_source or "unknown"
+            payload["overridden_source"] = self.previous_source or "unknown"
+            if self.previous_value_present:
+                payload["previous_value"] = self.previous_value
+        return payload
+
+
+@dataclass(frozen=True, slots=True)
+class QualityProfileResolution:
+    """Resolved quality profile plus deterministic value provenance."""
+
+    profile: QualityProfile
+    value_sources: tuple[QualityProfileValueSource, ...]
+    input_channels: tuple[dict[str, JSONValue], ...]
+    schema_version: str = QUALITY_PROFILE_RESOLUTION_SCHEMA_VERSION
+
+    def to_payload(self) -> dict[str, JSONValue]:
+        """Return the resolution contract as JSON-compatible metadata."""
+        return {
+            "schema_version": self.schema_version,
+            "resolved_profile": _expanded_quality_profile_payload(self.profile),
+            "input_channels": cast(JSONValue, list(self.input_channels)),
+            "effective_value_sources": cast(
+                JSONValue,
+                [item.to_payload() for item in self.value_sources],
+            ),
+        }
+
+
 def default_quality_profile() -> QualityProfile:
     """Return the deterministic default profile."""
     return QualityProfile()
 
 
+def resolve_quality_profile(
+    payload: Mapping[str, Any] | None = None,
+    *,
+    source: str = OPERATOR_QUALITY_PROFILE_SOURCE,
+    source_path: str = "",
+    config_path: str = "",
+    selected_by: str = "",
+) -> QualityProfileResolution:
+    """Resolve a profile while retaining source metadata for every value."""
+    raw_payload = dict(payload or {})
+    profile = _quality_profile_from_mapping(
+        raw_payload,
+        source=source,
+        source_path=source_path,
+    )
+    source_kind = (
+        "built_in_default"
+        if not raw_payload
+        else quality_profile_source_kind(source)
+    )
+    explicit_values = dict(_flatten_profile_mapping(raw_payload))
+    sources: list[QualityProfileValueSource] = []
+    for path, value in _flatten_profile_mapping(
+        _expanded_quality_profile_payload(profile)
+    ):
+        value_source = _resolved_profile_value_source(
+            path,
+            explicit_values=explicit_values,
+            source_kind=source_kind,
+        )
+        sources.append(
+            QualityProfileValueSource(
+                path=path,
+                value=value,
+                source=value_source,
+                profile_name=(
+                    profile.name
+                    if value_source not in {"built_in_default", "named_profile"}
+                    else ""
+                ),
+                source_path=(
+                    source_path if value_source != "built_in_default" else ""
+                ),
+                selected_by=(
+                    selected_by
+                    if value_source not in {"built_in_default", "named_profile"}
+                    else ""
+                ),
+            )
+        )
+    channels: list[dict[str, JSONValue]] = [
+        {
+            "kind": "built_in_default",
+            "description": "Built-in quality profile defaults.",
+        }
+    ]
+    if config_path:
+        _append_profile_input_channel(
+            channels,
+            {"kind": "yaml_config", "path": config_path},
+        )
+    if _is_named_quality_profile(profile, raw_payload):
+        _append_profile_input_channel(
+            channels,
+            {"kind": "named_profile", "profile_name": profile.name},
+        )
+    if raw_payload:
+        channel: dict[str, JSONValue] = {
+            "kind": source_kind,
+            "profile_name": profile.name,
+        }
+        if source_path:
+            channel["source_path"] = source_path
+        if selected_by:
+            channel["selected_by"] = selected_by
+        _append_profile_input_channel(channels, channel)
+    return QualityProfileResolution(
+        profile=profile,
+        value_sources=tuple(sorted(sources, key=lambda item: item.path)),
+        input_channels=tuple(channels),
+    )
+
+
+def apply_quality_profile_overrides(
+    resolution: QualityProfileResolution,
+    overrides: Mapping[str, JSONValue],
+    *,
+    source: str,
+    source_path: str = "",
+) -> QualityProfileResolution:
+    """Apply value overrides while retaining previous source and value facts."""
+    if not overrides:
+        return resolution
+    payload = resolution.profile.to_request_payload()
+    if resolution.profile.is_default:
+        payload["name"] = "operator"
+        payload["source"] = _quality_profile_contract_source(source)
+    override_pointers: set[str] = set()
+    for path, value in sorted(overrides.items()):
+        pointer = _profile_pointer(path)
+        override_pointers.add(pointer)
+        _set_profile_pointer(payload, pointer, value)
+    profile = _quality_profile_from_mapping(payload)
+    before = {item.path: item for item in resolution.value_sources}
+    sources: list[QualityProfileValueSource] = []
+    for path, value in _flatten_profile_mapping(
+        _expanded_quality_profile_payload(profile)
+    ):
+        previous = before.get(path)
+        changed = previous is None or previous.value != value
+        explicitly_overridden = path in override_pointers
+        if not changed and not explicitly_overridden and previous is not None:
+            sources.append(previous)
+            continue
+        sources.append(
+            QualityProfileValueSource(
+                path=path,
+                value=value,
+                source=source,
+                profile_name=profile.name,
+                source_path=source_path,
+                override=True,
+                previous_source=(previous.source if previous else "unknown"),
+                previous_value=(previous.value if previous else None),
+                previous_value_present=previous is not None,
+            )
+        )
+    channels = [dict(channel) for channel in resolution.input_channels]
+    _append_profile_input_channel(
+        channels,
+        {
+            "kind": source,
+            "paths": cast(JSONValue, sorted(override_pointers)),
+        },
+    )
+    return QualityProfileResolution(
+        profile=profile,
+        value_sources=tuple(sorted(sources, key=lambda item: item.path)),
+        input_channels=tuple(channels),
+    )
+
+
 def load_quality_profile_file(path: str | Path) -> QualityProfile:
     """Load and validate a JSON quality profile file."""
+    return load_quality_profile_file_resolution(path).profile
+
+
+def load_quality_profile_file_resolution(
+    path: str | Path,
+    *,
+    config_path: str = "",
+    selected_by: str = "",
+) -> QualityProfileResolution:
+    """Load a JSON profile while preserving file and selection provenance."""
     profile_path = Path(path).expanduser()
     try:
         payload = json.loads(profile_path.read_text(encoding="utf-8"))
@@ -592,10 +933,12 @@ def load_quality_profile_file(path: str | Path) -> QualityProfile:
     if not isinstance(payload, Mapping):
         msg = "quality profile JSON root must be an object"
         raise QualityProfileError(msg)
-    return quality_profile_from_mapping(
+    return resolve_quality_profile(
         payload,
         source="file",
         source_path=str(profile_path),
+        config_path=config_path,
+        selected_by=selected_by,
     )
 
 
@@ -606,6 +949,20 @@ def quality_profile_from_mapping(
     source_path: str = "",
 ) -> QualityProfile:
     """Validate and return a quality profile from a mapping payload."""
+    return _quality_profile_from_mapping(
+        payload,
+        source=source,
+        source_path=source_path,
+    )
+
+
+def _quality_profile_from_mapping(
+    payload: Mapping[str, Any] | None,
+    *,
+    source: str = OPERATOR_QUALITY_PROFILE_SOURCE,
+    source_path: str = "",
+) -> QualityProfile:
+    """Construct a profile without discarding resolver input metadata."""
     if not payload:
         return default_quality_profile()
     _reject_unknown_keys(payload, _TOP_LEVEL_KEYS, "quality_profile")
@@ -633,6 +990,19 @@ def quality_profile_from_mapping(
     return profile
 
 
+def quality_profile_resolution_from_value(
+    value: Mapping[str, Any] | QualityProfile | None,
+) -> QualityProfileResolution:
+    """Normalize a public profile value into the structured resolution form."""
+    if isinstance(value, QualityProfile):
+        return resolve_quality_profile(
+            value.to_request_payload(),
+            source=value.source,
+            source_path=value.source_path,
+        )
+    return resolve_quality_profile(value)
+
+
 def quality_profile_from_value(
     value: Mapping[str, Any] | QualityProfile | None,
 ) -> QualityProfile:
@@ -649,6 +1019,153 @@ def quality_profile_metadata(
 ) -> dict[str, JSONValue]:
     """Return report metadata for an optional public profile value."""
     return quality_profile_from_value(value).to_metadata()
+
+
+def quality_profile_source_kind(value: str | QualityProfile) -> str:
+    """Return a stable public provenance kind for a profile source."""
+    source = value.source if isinstance(value, QualityProfile) else str(value)
+    aliases = {
+        "default": "built_in_default",
+        "file": "profile_file",
+        "api-options": "api_options",
+        "cli-options": "cli_options",
+        "operator-config": "operator_config",
+        "yaml-config": "yaml_config",
+        "cli-override": "cli_override",
+    }
+    return aliases.get(source, source.replace("-", "_") or "unknown")
+
+
+def _expanded_quality_profile_payload(
+    profile: QualityProfile,
+) -> dict[str, JSONValue]:
+    payload = profile.to_request_payload()
+    if "reporting" not in payload:
+        payload["reporting"] = profile.reporting_profile().to_metadata()
+    return payload
+
+
+def _flatten_profile_mapping(
+    value: Mapping[str, Any],
+    *,
+    prefix: str = "",
+) -> list[tuple[str, JSONValue]]:
+    flattened: list[tuple[str, JSONValue]] = []
+    for key in sorted(value, key=str):
+        path = f"{prefix}/{_profile_pointer_token(str(key))}"
+        item = value[key]
+        if isinstance(item, Mapping):
+            if item:
+                flattened.extend(_flatten_profile_mapping(item, prefix=path))
+            else:
+                flattened.append((path, {}))
+        else:
+            flattened.append((path, cast(JSONValue, item)))
+    return flattened
+
+
+def _resolved_profile_value_source(
+    path: str,
+    *,
+    explicit_values: Mapping[str, JSONValue],
+    source_kind: str,
+) -> str:
+    if path == "/name" and path in explicit_values:
+        return "named_profile"
+    if path in explicit_values:
+        return source_kind
+    if (
+        path in {"/source", "/source_path"}
+        and source_kind != "built_in_default"
+    ):
+        return source_kind
+    return "built_in_default"
+
+
+def _is_named_quality_profile(
+    profile: QualityProfile,
+    raw_payload: Mapping[str, Any],
+) -> bool:
+    return "name" in raw_payload and profile.name not in {
+        DEFAULT_QUALITY_PROFILE_NAME,
+        "operator",
+    }
+
+
+def _append_profile_input_channel(
+    channels: list[dict[str, JSONValue]],
+    channel: Mapping[str, JSONValue],
+) -> None:
+    kind = str(channel.get("kind") or "")
+    for existing in channels:
+        if existing.get("kind") != kind:
+            continue
+        for key, value in channel.items():
+            if key == "paths":
+                current = existing.get("paths")
+                current_paths = (
+                    list(current) if isinstance(current, list) else []
+                )
+                incoming = list(value) if isinstance(value, list) else []
+                existing["paths"] = cast(
+                    JSONValue,
+                    sorted({str(item) for item in (*current_paths, *incoming)}),
+                )
+            elif key != "kind":
+                existing[key] = value
+        return
+    channels.append(dict(channel))
+
+
+def _profile_pointer(path: str) -> str:
+    if path.startswith("/"):
+        return path
+    return "/" + "/".join(
+        _profile_pointer_token(part) for part in path.split(".") if part
+    )
+
+
+def _profile_pointer_token(value: str) -> str:
+    return value.replace("~", "~0").replace("/", "~1")
+
+
+def _profile_pointer_token_unescape(value: str) -> str:
+    return value.replace("~1", "/").replace("~0", "~")
+
+
+def _set_profile_pointer(
+    payload: dict[str, JSONValue],
+    pointer: str,
+    value: JSONValue,
+) -> None:
+    tokens = [
+        _profile_pointer_token_unescape(token)
+        for token in pointer.strip("/").split("/")
+        if token
+    ]
+    if not tokens:
+        raise QualityProfileError(
+            "quality profile override path cannot be empty"
+        )
+    current: dict[str, JSONValue] = payload
+    for token in tokens[:-1]:
+        existing = current.get(token)
+        if isinstance(existing, dict):
+            child = existing
+        else:
+            child = {}
+            current[token] = child
+        current = child
+    current[tokens[-1]] = value
+
+
+def _quality_profile_contract_source(source: str) -> str:
+    aliases = {
+        "api_options": "api-options",
+        "cli_override": "cli-options",
+        "yaml_config": "yaml-config",
+    }
+    return aliases.get(source, source.replace("_", "-"))
 
 
 def validate_quality_profile(profile: QualityProfile) -> None:
@@ -1202,6 +1719,1592 @@ def _fingerprint_distribution_attention_profile(
     )
 
 
+def _fingerprint_parity_profile(
+    value: Mapping[str, JSONValue],
+    *,
+    path: str,
+) -> HistDataFingerprintParityProfile:
+    _reject_unknown_keys(value, {"enabled", "mismatch_limit"}, path)
+    return HistDataFingerprintParityProfile(
+        enabled=_bool_field(value, "enabled", False, path=path),
+        mismatch_limit=_int_field(
+            value,
+            "mismatch_limit",
+            DEFAULT_FINGERPRINT_PARITY_MISMATCH_LIMIT,
+            minimum=0,
+            path=path,
+        ),
+    )
+
+
+def _classical_baseline_profile(
+    value: Mapping[str, JSONValue],
+    *,
+    path: str,
+) -> ClassicalBaselineProfile:
+    base = ClassicalBaselineProfile()
+    _reject_unknown_keys(
+        value,
+        {
+            "enabled",
+            "evaluation_fraction",
+            "minimum_training_rows",
+            "minimum_evaluation_rows",
+            "rolling_windows",
+            "session_seasonal_enabled",
+            "rounding_digits",
+        },
+        path,
+    )
+    rolling_windows = _fingerprint_int_sequence(
+        value,
+        "rolling_windows",
+        base.rolling_windows,
+        path=path,
+    )
+    if len(rolling_windows) > MAX_BASELINE_ROLLING_WINDOWS:
+        raise QualityProfileError(
+            f"{path}.rolling_windows supports at most "
+            f"{MAX_BASELINE_ROLLING_WINDOWS} values"
+        )
+    return ClassicalBaselineProfile(
+        enabled=_bool_field(value, "enabled", base.enabled, path=path),
+        evaluation_fraction=_float_field(
+            value,
+            "evaluation_fraction",
+            base.evaluation_fraction,
+            minimum=0.01,
+            maximum=0.99,
+            path=path,
+        ),
+        minimum_training_rows=_int_field(
+            value,
+            "minimum_training_rows",
+            base.minimum_training_rows,
+            minimum=1,
+            path=path,
+        ),
+        minimum_evaluation_rows=_int_field(
+            value,
+            "minimum_evaluation_rows",
+            base.minimum_evaluation_rows,
+            minimum=1,
+            path=path,
+        ),
+        rolling_windows=rolling_windows,
+        session_seasonal_enabled=_bool_field(
+            value,
+            "session_seasonal_enabled",
+            base.session_seasonal_enabled,
+            path=path,
+        ),
+        rounding_digits=_int_field(
+            value,
+            "rounding_digits",
+            base.rounding_digits,
+            minimum=0,
+            maximum=16,
+            path=path,
+        ),
+    )
+
+
+def _classical_model_input_profile(
+    value: Mapping[str, JSONValue],
+    *,
+    path: str,
+) -> ClassicalModelInputProfile:
+    base = ClassicalModelInputProfile()
+    _reject_unknown_keys(
+        value,
+        {
+            "enabled",
+            "frequency_ms",
+            "alignment_epoch_ms",
+            "closed_side",
+            "label_side",
+            "midpoint_aggregation",
+            "spread_aggregation",
+            "minimum_observations_per_bin",
+            "expected_closure_policy",
+            "unexpected_missing_policy",
+            "transform",
+            "differencing_order",
+            "seasonal_differencing_order",
+            "seasonal_period",
+            "horizons",
+            "fold_kind",
+            "minimum_training_observations",
+            "minimum_evaluation_observations",
+            "step_size",
+            "rolling_window",
+            "embargo_observations",
+            "rounding_digits",
+            "resources",
+        },
+        path,
+    )
+    resources = _classical_model_resource_policy(
+        _mapping_field(value, "resources", path=path),
+        path=f"{path}.resources",
+    )
+    try:
+        return ClassicalModelInputProfile(
+            enabled=_bool_field(value, "enabled", base.enabled, path=path),
+            frequency_ms=_int_field(
+                value,
+                "frequency_ms",
+                base.frequency_ms,
+                minimum=1,
+                path=path,
+            ),
+            alignment_epoch_ms=_int_field(
+                value,
+                "alignment_epoch_ms",
+                base.alignment_epoch_ms,
+                path=path,
+            ),
+            closed_side=_string_field(
+                value, "closed_side", base.closed_side, path=path
+            ),
+            label_side=_string_field(
+                value, "label_side", base.label_side, path=path
+            ),
+            midpoint_aggregation=_string_field(
+                value,
+                "midpoint_aggregation",
+                base.midpoint_aggregation,
+                path=path,
+            ),
+            spread_aggregation=_string_field(
+                value,
+                "spread_aggregation",
+                base.spread_aggregation,
+                path=path,
+            ),
+            minimum_observations_per_bin=_int_field(
+                value,
+                "minimum_observations_per_bin",
+                base.minimum_observations_per_bin,
+                minimum=1,
+                path=path,
+            ),
+            expected_closure_policy=_string_field(
+                value,
+                "expected_closure_policy",
+                base.expected_closure_policy,
+                path=path,
+            ),
+            unexpected_missing_policy=_string_field(
+                value,
+                "unexpected_missing_policy",
+                base.unexpected_missing_policy,
+                path=path,
+            ),
+            transform=_string_field(
+                value, "transform", base.transform, path=path
+            ),
+            differencing_order=_int_field(
+                value,
+                "differencing_order",
+                base.differencing_order,
+                minimum=0,
+                maximum=2,
+                path=path,
+            ),
+            seasonal_differencing_order=_int_field(
+                value,
+                "seasonal_differencing_order",
+                base.seasonal_differencing_order,
+                minimum=0,
+                maximum=1,
+                path=path,
+            ),
+            seasonal_period=_int_field(
+                value,
+                "seasonal_period",
+                base.seasonal_period,
+                minimum=0,
+                path=path,
+            ),
+            horizons=_fingerprint_int_sequence(
+                value,
+                "horizons",
+                base.horizons,
+                path=path,
+            ),
+            fold_kind=_string_field(
+                value, "fold_kind", base.fold_kind, path=path
+            ),
+            minimum_training_observations=_int_field(
+                value,
+                "minimum_training_observations",
+                base.minimum_training_observations,
+                minimum=1,
+                path=path,
+            ),
+            minimum_evaluation_observations=_int_field(
+                value,
+                "minimum_evaluation_observations",
+                base.minimum_evaluation_observations,
+                minimum=1,
+                path=path,
+            ),
+            step_size=_int_field(
+                value,
+                "step_size",
+                base.step_size,
+                minimum=1,
+                path=path,
+            ),
+            rolling_window=_int_field(
+                value,
+                "rolling_window",
+                base.rolling_window,
+                minimum=0,
+                path=path,
+            ),
+            embargo_observations=_int_field(
+                value,
+                "embargo_observations",
+                base.embargo_observations,
+                minimum=0,
+                path=path,
+            ),
+            rounding_digits=_int_field(
+                value,
+                "rounding_digits",
+                base.rounding_digits,
+                minimum=0,
+                maximum=16,
+                path=path,
+            ),
+            resources=resources,
+        )
+    except ValueError as exc:
+        raise QualityProfileError(f"{path}: {exc}") from exc
+
+
+def _classical_model_resource_policy(
+    value: Mapping[str, JSONValue],
+    *,
+    path: str,
+) -> ClassicalModelResourcePolicy:
+    base = ClassicalModelResourcePolicy()
+    keys = set(base.to_metadata())
+    _reject_unknown_keys(value, keys, path)
+    try:
+        return ClassicalModelResourcePolicy(
+            **{
+                key: _int_field(
+                    value,
+                    key,
+                    int(getattr(base, key)),
+                    minimum=1,
+                    path=path,
+                )
+                for key in keys
+            }
+        )
+    except ValueError as exc:
+        raise QualityProfileError(f"{path}: {exc}") from exc
+
+
+def _exponential_smoothing_profile(
+    value: Mapping[str, JSONValue],
+    *,
+    path: str,
+) -> ExponentialSmoothingProfile:
+    base = ExponentialSmoothingProfile()
+    _reject_unknown_keys(
+        value,
+        {
+            "enabled",
+            "specifications",
+            "projection_specification_id",
+            "projection_horizon",
+            "baseline_rolling_windows",
+            "rounding_digits",
+        },
+        path,
+    )
+    specifications = base.specifications
+    if "specifications" in value:
+        raw = value["specifications"]
+        if not isinstance(raw, list) or not raw:
+            raise QualityProfileError(
+                f"{path}.specifications must be a non-empty list"
+            )
+        parsed: list[ExponentialSmoothingSpecification] = []
+        for index, item in enumerate(raw):
+            parsed.append(
+                _exponential_smoothing_specification(
+                    _expect_mapping(
+                        item, path=f"{path}.specifications[{index}]"
+                    ),
+                    path=f"{path}.specifications[{index}]",
+                )
+            )
+        specifications = tuple(parsed)
+    try:
+        return ExponentialSmoothingProfile(
+            enabled=_bool_field(value, "enabled", base.enabled, path=path),
+            specifications=specifications,
+            projection_specification_id=_string_field(
+                value,
+                "projection_specification_id",
+                (
+                    specifications[0].specification_id
+                    if "projection_specification_id" not in value
+                    else base.projection_specification_id
+                ),
+                path=path,
+            ),
+            projection_horizon=_int_field(
+                value,
+                "projection_horizon",
+                base.projection_horizon,
+                minimum=1,
+                path=path,
+            ),
+            baseline_rolling_windows=_fingerprint_int_sequence(
+                value,
+                "baseline_rolling_windows",
+                base.baseline_rolling_windows,
+                path=path,
+            ),
+            rounding_digits=_int_field(
+                value,
+                "rounding_digits",
+                base.rounding_digits,
+                minimum=0,
+                maximum=16,
+                path=path,
+            ),
+        )
+    except ValueError as exc:
+        raise QualityProfileError(f"{path}: {exc}") from exc
+
+
+def _autoregressive_profile(
+    value: Mapping[str, JSONValue],
+    *,
+    path: str,
+) -> AutoregressiveProfile:
+    base = AutoregressiveProfile()
+    _reject_unknown_keys(
+        value,
+        {
+            "enabled",
+            "specifications",
+            "projection_specification_ids",
+            "projection_horizon",
+            "baseline_rolling_windows",
+            "compare_exponential_smoothing",
+            "rounding_digits",
+        },
+        path,
+    )
+    specifications = base.specifications
+    if "specifications" in value:
+        raw = value["specifications"]
+        if not isinstance(raw, list) or not raw:
+            raise QualityProfileError(
+                f"{path}.specifications must be a non-empty list"
+            )
+        specifications = tuple(
+            _autoregressive_specification(
+                _expect_mapping(item, path=f"{path}.specifications[{index}]"),
+                path=f"{path}.specifications[{index}]",
+            )
+            for index, item in enumerate(raw)
+        )
+    projection_ids = base.projection_specification_ids
+    if "projection_specification_ids" in value:
+        raw_ids = value["projection_specification_ids"]
+        if not isinstance(raw_ids, list) or not raw_ids:
+            raise QualityProfileError(
+                f"{path}.projection_specification_ids must be a non-empty list"
+            )
+        if not all(isinstance(item, str) and item for item in raw_ids):
+            raise QualityProfileError(
+                f"{path}.projection_specification_ids must contain strings"
+            )
+        projection_ids = tuple(cast(list[str], raw_ids))
+    elif "specifications" in value:
+        by_family: dict[str, str] = {}
+        for specification in specifications:
+            by_family.setdefault(
+                specification.family, specification.specification_id
+            )
+        projection_ids = tuple(by_family.values())
+    try:
+        return AutoregressiveProfile(
+            enabled=_bool_field(value, "enabled", base.enabled, path=path),
+            specifications=specifications,
+            projection_specification_ids=projection_ids,
+            projection_horizon=_int_field(
+                value,
+                "projection_horizon",
+                base.projection_horizon,
+                minimum=1,
+                path=path,
+            ),
+            baseline_rolling_windows=_fingerprint_int_sequence(
+                value,
+                "baseline_rolling_windows",
+                base.baseline_rolling_windows,
+                path=path,
+            ),
+            compare_exponential_smoothing=_bool_field(
+                value,
+                "compare_exponential_smoothing",
+                base.compare_exponential_smoothing,
+                path=path,
+            ),
+            rounding_digits=_int_field(
+                value,
+                "rounding_digits",
+                base.rounding_digits,
+                minimum=0,
+                maximum=16,
+                path=path,
+            ),
+        )
+    except ValueError as exc:
+        raise QualityProfileError(f"{path}: {exc}") from exc
+
+
+def _autoregressive_specification(
+    value: Mapping[str, JSONValue],
+    *,
+    path: str,
+) -> AutoregressiveSpecification:
+    _reject_unknown_keys(
+        value,
+        {
+            "specification_id",
+            "family",
+            "p",
+            "d",
+            "q",
+            "trend",
+            "initialization_method",
+            "estimation_method",
+            "enforce_stationarity",
+            "enforce_invertibility",
+            "concentrate_scale",
+            "fixed_parameters",
+            "max_iterations",
+        },
+        path,
+    )
+    if (
+        "specification_id" not in value
+        or "family" not in value
+        or "p" not in value
+    ):
+        raise QualityProfileError(
+            f"{path} requires specification_id, family, and p"
+        )
+    family = _string_field(value, "family", "", path=path)
+    fixed_parameters: tuple[tuple[str, float], ...] = ()
+    if "fixed_parameters" in value:
+        raw_fixed = _expect_mapping(
+            value["fixed_parameters"], path=f"{path}.fixed_parameters"
+        )
+        parsed_fixed: list[tuple[str, float]] = []
+        for name, raw_value in sorted(raw_fixed.items()):
+            if isinstance(raw_value, bool):
+                raise QualityProfileError(
+                    f"{path}.fixed_parameters.{name} must be a number"
+                )
+            try:
+                parsed_fixed.append((name, float(cast(Any, raw_value))))
+            except (TypeError, ValueError) as exc:
+                raise QualityProfileError(
+                    f"{path}.fixed_parameters.{name} must be a number"
+                ) from exc
+        fixed_parameters = tuple(parsed_fixed)
+    try:
+        return AutoregressiveSpecification(
+            specification_id=_string_field(
+                value, "specification_id", "", path=path
+            ),
+            family=family,
+            p=_int_field(value, "p", 0, minimum=0, path=path),
+            d=_int_field(value, "d", 0, minimum=0, path=path),
+            q=_int_field(value, "q", 0, minimum=0, path=path),
+            trend=_string_field(value, "trend", "n", path=path),
+            initialization_method=_string_field(
+                value, "initialization_method", "default", path=path
+            ),
+            estimation_method=_string_field(
+                value, "estimation_method", "statespace", path=path
+            ),
+            enforce_stationarity=_bool_field(
+                value, "enforce_stationarity", True, path=path
+            ),
+            enforce_invertibility=_bool_field(
+                value, "enforce_invertibility", True, path=path
+            ),
+            concentrate_scale=_bool_field(
+                value, "concentrate_scale", False, path=path
+            ),
+            fixed_parameters=fixed_parameters,
+            max_iterations=_int_field(
+                value, "max_iterations", 200, minimum=1, path=path
+            ),
+        )
+    except ValueError as exc:
+        raise QualityProfileError(f"{path}: {exc}") from exc
+
+
+def _seasonal_exogenous_profile(
+    value: Mapping[str, JSONValue],
+    *,
+    path: str,
+) -> SeasonalExogenousProfile:
+    base = SeasonalExogenousProfile()
+    _reject_unknown_keys(
+        value,
+        {
+            "enabled",
+            "specifications",
+            "projection_specification_ids",
+            "projection_horizon",
+            "regressor_profile",
+            "baseline_rolling_windows",
+            "compare_exponential_smoothing",
+            "compare_autoregressive",
+            "rounding_digits",
+        },
+        path,
+    )
+    specifications = base.specifications
+    if "specifications" in value:
+        raw = value["specifications"]
+        if not isinstance(raw, list) or not raw:
+            raise QualityProfileError(
+                f"{path}.specifications must be a non-empty list"
+            )
+        specifications = tuple(
+            _seasonal_exogenous_specification(
+                _expect_mapping(item, path=f"{path}.specifications[{index}]"),
+                path=f"{path}.specifications[{index}]",
+            )
+            for index, item in enumerate(raw)
+        )
+    projection_ids = base.projection_specification_ids
+    if "projection_specification_ids" in value:
+        raw_ids = value["projection_specification_ids"]
+        if not isinstance(raw_ids, list) or not raw_ids:
+            raise QualityProfileError(
+                f"{path}.projection_specification_ids must be a non-empty list"
+            )
+        if not all(isinstance(item, str) and item for item in raw_ids):
+            raise QualityProfileError(
+                f"{path}.projection_specification_ids must contain strings"
+            )
+        projection_ids = tuple(cast(list[str], raw_ids))
+    elif "specifications" in value:
+        by_family: dict[str, str] = {}
+        for specification in specifications:
+            by_family.setdefault(
+                specification.family, specification.specification_id
+            )
+        projection_ids = tuple(by_family.values())
+    try:
+        return SeasonalExogenousProfile(
+            enabled=_bool_field(value, "enabled", base.enabled, path=path),
+            specifications=specifications,
+            projection_specification_ids=projection_ids,
+            projection_horizon=_int_field(
+                value,
+                "projection_horizon",
+                base.projection_horizon,
+                minimum=1,
+                path=path,
+            ),
+            regressor_profile=_calendar_regressor_profile(
+                _mapping_field(value, "regressor_profile", path=path),
+                path=f"{path}.regressor_profile",
+            ),
+            baseline_rolling_windows=_fingerprint_int_sequence(
+                value,
+                "baseline_rolling_windows",
+                base.baseline_rolling_windows,
+                path=path,
+            ),
+            compare_exponential_smoothing=_bool_field(
+                value,
+                "compare_exponential_smoothing",
+                base.compare_exponential_smoothing,
+                path=path,
+            ),
+            compare_autoregressive=_bool_field(
+                value,
+                "compare_autoregressive",
+                base.compare_autoregressive,
+                path=path,
+            ),
+            rounding_digits=_int_field(
+                value,
+                "rounding_digits",
+                base.rounding_digits,
+                minimum=0,
+                maximum=16,
+                path=path,
+            ),
+        )
+    except ValueError as exc:
+        raise QualityProfileError(f"{path}: {exc}") from exc
+
+
+def _state_space_profile(
+    value: Mapping[str, JSONValue],
+    *,
+    path: str,
+) -> StateSpaceProfile:
+    base = StateSpaceProfile()
+    _reject_unknown_keys(
+        value,
+        {
+            "enabled",
+            "specifications",
+            "projection_specification_id",
+            "projection_horizon",
+            "max_state_dimension",
+            "max_component_count",
+            "max_prediction_only_gap",
+            "max_retained_states",
+            "baseline_rolling_windows",
+            "compare_exponential_smoothing",
+            "compare_autoregressive",
+            "compare_seasonal_exogenous",
+            "rounding_digits",
+        },
+        path,
+    )
+    specifications = base.specifications
+    if "specifications" in value:
+        raw = value["specifications"]
+        if not isinstance(raw, list) or not raw:
+            raise QualityProfileError(
+                f"{path}.specifications must be a non-empty list"
+            )
+        specifications = tuple(
+            _state_space_specification(
+                _expect_mapping(item, path=f"{path}.specifications[{index}]"),
+                path=f"{path}.specifications[{index}]",
+            )
+            for index, item in enumerate(raw)
+        )
+    projection_id = _string_field(
+        value,
+        "projection_specification_id",
+        (
+            specifications[0].specification_id
+            if "specifications" in value
+            else base.projection_specification_id
+        ),
+        path=path,
+    )
+    try:
+        return StateSpaceProfile(
+            enabled=_bool_field(value, "enabled", base.enabled, path=path),
+            specifications=specifications,
+            projection_specification_id=projection_id,
+            projection_horizon=_int_field(
+                value,
+                "projection_horizon",
+                base.projection_horizon,
+                minimum=1,
+                path=path,
+            ),
+            max_state_dimension=_int_field(
+                value,
+                "max_state_dimension",
+                base.max_state_dimension,
+                minimum=1,
+                maximum=256,
+                path=path,
+            ),
+            max_component_count=_int_field(
+                value,
+                "max_component_count",
+                base.max_component_count,
+                minimum=1,
+                maximum=16,
+                path=path,
+            ),
+            max_prediction_only_gap=_int_field(
+                value,
+                "max_prediction_only_gap",
+                base.max_prediction_only_gap,
+                minimum=0,
+                path=path,
+            ),
+            max_retained_states=_int_field(
+                value,
+                "max_retained_states",
+                base.max_retained_states,
+                minimum=1,
+                maximum=64,
+                path=path,
+            ),
+            baseline_rolling_windows=_fingerprint_int_sequence(
+                value,
+                "baseline_rolling_windows",
+                base.baseline_rolling_windows,
+                path=path,
+            ),
+            compare_exponential_smoothing=_bool_field(
+                value,
+                "compare_exponential_smoothing",
+                base.compare_exponential_smoothing,
+                path=path,
+            ),
+            compare_autoregressive=_bool_field(
+                value,
+                "compare_autoregressive",
+                base.compare_autoregressive,
+                path=path,
+            ),
+            compare_seasonal_exogenous=_bool_field(
+                value,
+                "compare_seasonal_exogenous",
+                base.compare_seasonal_exogenous,
+                path=path,
+            ),
+            rounding_digits=_int_field(
+                value,
+                "rounding_digits",
+                base.rounding_digits,
+                minimum=0,
+                maximum=16,
+                path=path,
+            ),
+        )
+    except ValueError as exc:
+        raise QualityProfileError(f"{path}: {exc}") from exc
+
+
+def _state_space_specification(
+    value: Mapping[str, JSONValue],
+    *,
+    path: str,
+) -> StateSpaceSpecification:
+    _reject_unknown_keys(
+        value,
+        {
+            "specification_id",
+            "family",
+            "irregular",
+            "stochastic_level",
+            "stochastic_trend",
+            "seasonal_period",
+            "seasonal_cycle_ms",
+            "stochastic_seasonal",
+            "cycle",
+            "stochastic_cycle",
+            "damped_cycle",
+            "autoregressive_order",
+            "initialization_method",
+            "approximate_diffuse_variance",
+            "optimizer",
+            "fixed_parameters",
+            "max_iterations",
+        },
+        path,
+    )
+    if "specification_id" not in value or "family" not in value:
+        raise QualityProfileError(
+            f"{path} requires specification_id and family"
+        )
+    fixed_parameters: tuple[tuple[str, float], ...] = ()
+    if "fixed_parameters" in value:
+        raw_fixed = _expect_mapping(
+            value["fixed_parameters"], path=f"{path}.fixed_parameters"
+        )
+        parsed: list[tuple[str, float]] = []
+        for name, raw_value in sorted(raw_fixed.items()):
+            if isinstance(raw_value, bool):
+                raise QualityProfileError(
+                    f"{path}.fixed_parameters.{name} must be a number"
+                )
+            try:
+                parsed.append((name, float(cast(Any, raw_value))))
+            except (TypeError, ValueError) as exc:
+                raise QualityProfileError(
+                    f"{path}.fixed_parameters.{name} must be a number"
+                ) from exc
+        fixed_parameters = tuple(parsed)
+    family = _string_field(value, "family", "", path=path)
+    default_trend = family == "local_linear_trend"
+    try:
+        return StateSpaceSpecification(
+            specification_id=_string_field(
+                value, "specification_id", "", path=path
+            ),
+            family=family,
+            irregular=_bool_field(value, "irregular", True, path=path),
+            stochastic_level=_bool_field(
+                value, "stochastic_level", True, path=path
+            ),
+            stochastic_trend=_bool_field(
+                value, "stochastic_trend", default_trend, path=path
+            ),
+            seasonal_period=_int_field(
+                value, "seasonal_period", 0, minimum=0, path=path
+            ),
+            seasonal_cycle_ms=_int_field(
+                value, "seasonal_cycle_ms", 0, minimum=0, path=path
+            ),
+            stochastic_seasonal=_bool_field(
+                value, "stochastic_seasonal", True, path=path
+            ),
+            cycle=_bool_field(value, "cycle", False, path=path),
+            stochastic_cycle=_bool_field(
+                value, "stochastic_cycle", False, path=path
+            ),
+            damped_cycle=_bool_field(value, "damped_cycle", False, path=path),
+            autoregressive_order=_int_field(
+                value, "autoregressive_order", 0, minimum=0, path=path
+            ),
+            initialization_method=_string_field(
+                value, "initialization_method", "default", path=path
+            ),
+            approximate_diffuse_variance=_float_field(
+                value,
+                "approximate_diffuse_variance",
+                1_000_000.0,
+                minimum=0.0,
+                path=path,
+            ),
+            optimizer=_string_field(value, "optimizer", "lbfgs", path=path),
+            fixed_parameters=fixed_parameters,
+            max_iterations=_int_field(
+                value, "max_iterations", 200, minimum=1, path=path
+            ),
+        )
+    except ValueError as exc:
+        raise QualityProfileError(f"{path}: {exc}") from exc
+
+
+def _volatility_profile(
+    value: Mapping[str, JSONValue], *, path: str
+) -> VolatilityProfile:
+    base = VolatilityProfile()
+    _reject_unknown_keys(
+        value,
+        {
+            "enabled",
+            "specifications",
+            "projection_specification_ids",
+            "projection_horizon",
+            "realized_variance_proxy",
+            "annualization_periods",
+            "baseline_rolling_windows",
+            "ewma_decay",
+            "maximum_persistence",
+            "maximum_covariance_condition_number",
+            "boundary_tolerance",
+            "compare_exponential_smoothing",
+            "compare_autoregressive",
+            "compare_seasonal_exogenous",
+            "compare_state_space",
+            "rounding_digits",
+        },
+        path,
+    )
+    specifications = base.specifications
+    if "specifications" in value:
+        raw = value["specifications"]
+        if not isinstance(raw, list) or not raw:
+            raise QualityProfileError(
+                f"{path}.specifications must be a non-empty list"
+            )
+        specifications = tuple(
+            _volatility_specification(
+                _expect_mapping(item, path=f"{path}.specifications[{index}]"),
+                path=f"{path}.specifications[{index}]",
+            )
+            for index, item in enumerate(raw)
+        )
+    projection_ids = base.projection_specification_ids
+    if "projection_specification_ids" in value:
+        raw_ids = value["projection_specification_ids"]
+        if (
+            not isinstance(raw_ids, list)
+            or not raw_ids
+            or not all(isinstance(item, str) and item for item in raw_ids)
+        ):
+            raise QualityProfileError(
+                f"{path}.projection_specification_ids must contain strings"
+            )
+        projection_ids = tuple(cast(list[str], raw_ids))
+    elif "specifications" in value:
+        by_family: dict[str, str] = {}
+        for specification in specifications:
+            by_family.setdefault(
+                specification.family, specification.specification_id
+            )
+        projection_ids = tuple(by_family.values())
+    try:
+        return VolatilityProfile(
+            enabled=_bool_field(value, "enabled", base.enabled, path=path),
+            specifications=specifications,
+            projection_specification_ids=projection_ids,
+            projection_horizon=_int_field(
+                value,
+                "projection_horizon",
+                base.projection_horizon,
+                minimum=1,
+                path=path,
+            ),
+            realized_variance_proxy=_string_field(
+                value,
+                "realized_variance_proxy",
+                base.realized_variance_proxy,
+                path=path,
+            ),
+            annualization_periods=_int_field(
+                value,
+                "annualization_periods",
+                base.annualization_periods,
+                minimum=0,
+                path=path,
+            ),
+            baseline_rolling_windows=_fingerprint_int_sequence(
+                value,
+                "baseline_rolling_windows",
+                base.baseline_rolling_windows,
+                path=path,
+            ),
+            ewma_decay=_float_field(
+                value, "ewma_decay", base.ewma_decay, path=path
+            ),
+            maximum_persistence=_float_field(
+                value,
+                "maximum_persistence",
+                base.maximum_persistence,
+                path=path,
+            ),
+            maximum_covariance_condition_number=_float_field(
+                value,
+                "maximum_covariance_condition_number",
+                base.maximum_covariance_condition_number,
+                minimum=1.0,
+                path=path,
+            ),
+            boundary_tolerance=_float_field(
+                value,
+                "boundary_tolerance",
+                base.boundary_tolerance,
+                path=path,
+            ),
+            compare_exponential_smoothing=_bool_field(
+                value,
+                "compare_exponential_smoothing",
+                base.compare_exponential_smoothing,
+                path=path,
+            ),
+            compare_autoregressive=_bool_field(
+                value,
+                "compare_autoregressive",
+                base.compare_autoregressive,
+                path=path,
+            ),
+            compare_seasonal_exogenous=_bool_field(
+                value,
+                "compare_seasonal_exogenous",
+                base.compare_seasonal_exogenous,
+                path=path,
+            ),
+            compare_state_space=_bool_field(
+                value,
+                "compare_state_space",
+                base.compare_state_space,
+                path=path,
+            ),
+            rounding_digits=_int_field(
+                value,
+                "rounding_digits",
+                base.rounding_digits,
+                minimum=0,
+                maximum=16,
+                path=path,
+            ),
+        )
+    except ValueError as exc:
+        raise QualityProfileError(f"{path}: {exc}") from exc
+
+
+def _classical_model_comparison_profile(
+    value: Mapping[str, JSONValue], *, path: str
+) -> ClassicalModelComparisonProfile:
+    base = ClassicalModelComparisonProfile()
+    _reject_unknown_keys(
+        value,
+        {
+            "enabled",
+            "mean_reference_baseline",
+            "variance_reference_baseline",
+            "near_zero_tolerance",
+            "minimum_stability_folds",
+            "drift_tolerance",
+            "max_models",
+            "max_horizons",
+            "max_comparisons",
+            "max_reason_codes",
+            "max_samples",
+            "rounding_digits",
+        },
+        path,
+    )
+    try:
+        return ClassicalModelComparisonProfile(
+            enabled=_bool_field(value, "enabled", base.enabled, path=path),
+            mean_reference_baseline=_string_field(
+                value,
+                "mean_reference_baseline",
+                base.mean_reference_baseline,
+                path=path,
+            ),
+            variance_reference_baseline=_string_field(
+                value,
+                "variance_reference_baseline",
+                base.variance_reference_baseline,
+                path=path,
+            ),
+            near_zero_tolerance=_float_field(
+                value,
+                "near_zero_tolerance",
+                base.near_zero_tolerance,
+                minimum=0.0,
+                path=path,
+            ),
+            minimum_stability_folds=_int_field(
+                value,
+                "minimum_stability_folds",
+                base.minimum_stability_folds,
+                minimum=2,
+                path=path,
+            ),
+            drift_tolerance=_float_field(
+                value,
+                "drift_tolerance",
+                base.drift_tolerance,
+                minimum=0.0,
+                path=path,
+            ),
+            max_models=_int_field(
+                value, "max_models", base.max_models, minimum=1, path=path
+            ),
+            max_horizons=_int_field(
+                value,
+                "max_horizons",
+                base.max_horizons,
+                minimum=1,
+                path=path,
+            ),
+            max_comparisons=_int_field(
+                value,
+                "max_comparisons",
+                base.max_comparisons,
+                minimum=1,
+                path=path,
+            ),
+            max_reason_codes=_int_field(
+                value,
+                "max_reason_codes",
+                base.max_reason_codes,
+                minimum=1,
+                path=path,
+            ),
+            max_samples=_int_field(
+                value,
+                "max_samples",
+                base.max_samples,
+                minimum=1,
+                path=path,
+            ),
+            rounding_digits=_int_field(
+                value,
+                "rounding_digits",
+                base.rounding_digits,
+                minimum=0,
+                maximum=16,
+                path=path,
+            ),
+        )
+    except ValueError as exc:
+        raise QualityProfileError(f"{path}: {exc}") from exc
+
+
+def _volatility_specification(
+    value: Mapping[str, JSONValue], *, path: str
+) -> VolatilitySpecification:
+    _reject_unknown_keys(
+        value,
+        {
+            "specification_id",
+            "family",
+            "input_definition",
+            "mean_model",
+            "mean_model_reference_id",
+            "distribution",
+            "innovation_order",
+            "variance_order",
+            "scale_factor",
+            "variance_initialization",
+            "initial_variance",
+            "covariance_type",
+            "optimizer_tolerance",
+            "parameter_bounds",
+            "max_iterations",
+        },
+        path,
+    )
+    if "specification_id" not in value or "family" not in value:
+        raise QualityProfileError(
+            f"{path} requires specification_id and family"
+        )
+    family = _string_field(value, "family", "", path=path)
+    try:
+        return VolatilitySpecification(
+            specification_id=_string_field(
+                value, "specification_id", "", path=path
+            ),
+            family=family,
+            input_definition=_string_field(
+                value, "input_definition", "raw_return", path=path
+            ),
+            mean_model=_string_field(value, "mean_model", "zero", path=path),
+            mean_model_reference_id=_optional_string_profile_field(
+                value, "mean_model_reference_id", "", path=path
+            ),
+            distribution=_string_field(
+                value, "distribution", "normal", path=path
+            ),
+            innovation_order=_int_field(
+                value, "innovation_order", 1, minimum=1, path=path
+            ),
+            variance_order=_int_field(
+                value,
+                "variance_order",
+                0 if family == "arch" else 1,
+                minimum=0,
+                path=path,
+            ),
+            scale_factor=_float_field(
+                value, "scale_factor", 100.0, minimum=0.0, path=path
+            ),
+            variance_initialization=_string_field(
+                value,
+                "variance_initialization",
+                "backend_default",
+                path=path,
+            ),
+            initial_variance=_optional_float_profile_field(
+                value, "initial_variance", None, minimum=0.0, path=path
+            ),
+            covariance_type=_string_field(
+                value, "covariance_type", "robust", path=path
+            ),
+            optimizer_tolerance=_optional_float_profile_field(
+                value,
+                "optimizer_tolerance",
+                None,
+                minimum=0.0,
+                path=path,
+            ),
+            parameter_bounds=cast(
+                tuple[tuple[str, float | None, float | None], ...],
+                _parameter_bounds_profile_field(
+                    value, "parameter_bounds", path=path
+                ),
+            ),
+            max_iterations=_int_field(
+                value, "max_iterations", 200, minimum=1, path=path
+            ),
+        )
+    except ValueError as exc:
+        raise QualityProfileError(f"{path}: {exc}") from exc
+
+
+def _calendar_regressor_profile(
+    value: Mapping[str, JSONValue],
+    *,
+    path: str,
+) -> CalendarRegressorProfile:
+    base = CalendarRegressorProfile()
+    _reject_unknown_keys(
+        value,
+        {
+            "allow_partial_calendar",
+            "require_complete_calendar_for",
+            "max_regressors",
+        },
+        path,
+    )
+    required = base.require_complete_calendar_for
+    if "require_complete_calendar_for" in value:
+        raw = value["require_complete_calendar_for"]
+        if not isinstance(raw, list) or not all(
+            isinstance(item, str) and item for item in raw
+        ):
+            raise QualityProfileError(
+                f"{path}.require_complete_calendar_for must contain strings"
+            )
+        required = tuple(cast(list[str], raw))
+    try:
+        return CalendarRegressorProfile(
+            allow_partial_calendar=_bool_field(
+                value,
+                "allow_partial_calendar",
+                base.allow_partial_calendar,
+                path=path,
+            ),
+            require_complete_calendar_for=required,
+            max_regressors=_int_field(
+                value,
+                "max_regressors",
+                base.max_regressors,
+                minimum=1,
+                maximum=64,
+                path=path,
+            ),
+        )
+    except ValueError as exc:
+        raise QualityProfileError(f"{path}: {exc}") from exc
+
+
+def _seasonal_exogenous_specification(
+    value: Mapping[str, JSONValue],
+    *,
+    path: str,
+) -> SeasonalExogenousSpecification:
+    _reject_unknown_keys(
+        value,
+        {
+            "specification_id",
+            "family",
+            "p",
+            "d",
+            "q",
+            "seasonal_p",
+            "seasonal_d",
+            "seasonal_q",
+            "seasonal_period",
+            "seasonal_cycle_ms",
+            "trend",
+            "initialization_method",
+            "optimizer",
+            "enforce_stationarity",
+            "enforce_invertibility",
+            "concentrate_scale",
+            "use_exact_diffuse",
+            "regressor_names",
+            "fixed_parameters",
+            "max_iterations",
+        },
+        path,
+    )
+    required_keys = {"specification_id", "family", "p"}
+    if not required_keys.issubset(value):
+        raise QualityProfileError(
+            f"{path} requires specification_id, family, and p"
+        )
+    regressors: tuple[str, ...] = ()
+    if "regressor_names" in value:
+        raw = value["regressor_names"]
+        if not isinstance(raw, list) or not all(
+            isinstance(item, str) and item for item in raw
+        ):
+            raise QualityProfileError(
+                f"{path}.regressor_names must contain strings"
+            )
+        regressors = tuple(cast(list[str], raw))
+    fixed_parameters: tuple[tuple[str, float], ...] = ()
+    if "fixed_parameters" in value:
+        raw_fixed = _expect_mapping(
+            value["fixed_parameters"], path=f"{path}.fixed_parameters"
+        )
+        parsed: list[tuple[str, float]] = []
+        for name, raw_value in sorted(raw_fixed.items()):
+            if isinstance(raw_value, bool):
+                raise QualityProfileError(
+                    f"{path}.fixed_parameters.{name} must be a number"
+                )
+            try:
+                parsed.append((name, float(cast(Any, raw_value))))
+            except (TypeError, ValueError) as exc:
+                raise QualityProfileError(
+                    f"{path}.fixed_parameters.{name} must be a number"
+                ) from exc
+        fixed_parameters = tuple(parsed)
+    try:
+        return SeasonalExogenousSpecification(
+            specification_id=_string_field(
+                value, "specification_id", "", path=path
+            ),
+            family=_string_field(value, "family", "", path=path),
+            p=_int_field(value, "p", 0, minimum=0, path=path),
+            d=_int_field(value, "d", 0, minimum=0, path=path),
+            q=_int_field(value, "q", 0, minimum=0, path=path),
+            seasonal_p=_int_field(value, "seasonal_p", 0, minimum=0, path=path),
+            seasonal_d=_int_field(value, "seasonal_d", 0, minimum=0, path=path),
+            seasonal_q=_int_field(value, "seasonal_q", 0, minimum=0, path=path),
+            seasonal_period=_int_field(
+                value, "seasonal_period", 0, minimum=0, path=path
+            ),
+            seasonal_cycle_ms=_int_field(
+                value, "seasonal_cycle_ms", 0, minimum=0, path=path
+            ),
+            trend=_string_field(value, "trend", "n", path=path),
+            initialization_method=_string_field(
+                value, "initialization_method", "default", path=path
+            ),
+            optimizer=_string_field(value, "optimizer", "lbfgs", path=path),
+            enforce_stationarity=_bool_field(
+                value, "enforce_stationarity", True, path=path
+            ),
+            enforce_invertibility=_bool_field(
+                value, "enforce_invertibility", True, path=path
+            ),
+            concentrate_scale=_bool_field(
+                value, "concentrate_scale", False, path=path
+            ),
+            use_exact_diffuse=_bool_field(
+                value, "use_exact_diffuse", False, path=path
+            ),
+            regressor_names=regressors,
+            fixed_parameters=fixed_parameters,
+            max_iterations=_int_field(
+                value, "max_iterations", 200, minimum=1, path=path
+            ),
+        )
+    except ValueError as exc:
+        raise QualityProfileError(f"{path}: {exc}") from exc
+
+
+def _exponential_smoothing_specification(
+    value: Mapping[str, JSONValue],
+    *,
+    path: str,
+) -> ExponentialSmoothingSpecification:
+    base = ExponentialSmoothingSpecification()
+    _reject_unknown_keys(
+        value,
+        {
+            "specification_id",
+            "family",
+            "level",
+            "error",
+            "trend",
+            "damped_trend",
+            "seasonal",
+            "seasonal_periods",
+            "initialization_method",
+            "initial_level",
+            "initial_trend",
+            "initial_seasonal",
+            "optimized",
+            "method",
+            "use_brute",
+            "remove_bias",
+            "smoothing_level",
+            "smoothing_trend",
+            "smoothing_seasonal",
+            "damping_trend",
+            "parameter_bounds",
+            "max_iterations",
+        },
+        path,
+    )
+    try:
+        return ExponentialSmoothingSpecification(
+            specification_id=_string_field(
+                value,
+                "specification_id",
+                base.specification_id,
+                path=path,
+            ),
+            family=_string_field(value, "family", base.family, path=path),
+            level=_bool_field(value, "level", base.level, path=path),
+            error=_string_field(value, "error", base.error, path=path),
+            trend=_string_field(value, "trend", base.trend, path=path),
+            damped_trend=_bool_field(
+                value, "damped_trend", base.damped_trend, path=path
+            ),
+            seasonal=_string_field(value, "seasonal", base.seasonal, path=path),
+            seasonal_periods=_int_field(
+                value,
+                "seasonal_periods",
+                base.seasonal_periods,
+                minimum=0,
+                path=path,
+            ),
+            initialization_method=_string_field(
+                value,
+                "initialization_method",
+                base.initialization_method,
+                path=path,
+            ),
+            initial_level=_optional_float_profile_field(
+                value, "initial_level", base.initial_level, path=path
+            ),
+            initial_trend=_optional_float_profile_field(
+                value, "initial_trend", base.initial_trend, path=path
+            ),
+            initial_seasonal=_float_tuple_profile_field(
+                value,
+                "initial_seasonal",
+                base.initial_seasonal,
+                path=path,
+            ),
+            optimized=_bool_field(
+                value, "optimized", base.optimized, path=path
+            ),
+            method=_optional_string_profile_field(
+                value, "method", base.method, path=path
+            ),
+            use_brute=_bool_field(
+                value, "use_brute", base.use_brute, path=path
+            ),
+            remove_bias=_bool_field(
+                value, "remove_bias", base.remove_bias, path=path
+            ),
+            smoothing_level=_optional_float_profile_field(
+                value,
+                "smoothing_level",
+                base.smoothing_level,
+                minimum=0.0,
+                maximum=1.0,
+                path=path,
+            ),
+            smoothing_trend=_optional_float_profile_field(
+                value,
+                "smoothing_trend",
+                base.smoothing_trend,
+                minimum=0.0,
+                maximum=1.0,
+                path=path,
+            ),
+            smoothing_seasonal=_optional_float_profile_field(
+                value,
+                "smoothing_seasonal",
+                base.smoothing_seasonal,
+                minimum=0.0,
+                maximum=1.0,
+                path=path,
+            ),
+            damping_trend=_optional_float_profile_field(
+                value,
+                "damping_trend",
+                base.damping_trend,
+                minimum=0.0,
+                maximum=1.0,
+                path=path,
+            ),
+            parameter_bounds=_parameter_bounds_profile_field(
+                value, "parameter_bounds", path=path
+            ),
+            max_iterations=_int_field(
+                value,
+                "max_iterations",
+                base.max_iterations,
+                minimum=1,
+                path=path,
+            ),
+        )
+    except ValueError as exc:
+        raise QualityProfileError(f"{path}: {exc}") from exc
+
+
+def _optional_float_profile_field(
+    mapping: Mapping[str, JSONValue],
+    key: str,
+    default: float | None,
+    *,
+    minimum: float | None = None,
+    maximum: float | None = None,
+    path: str,
+) -> float | None:
+    if key not in mapping or mapping[key] is None:
+        return default
+    return _float_field(
+        mapping,
+        key,
+        0.0,
+        minimum=minimum,
+        maximum=maximum,
+        path=path,
+    )
+
+
+def _float_tuple_profile_field(
+    mapping: Mapping[str, JSONValue],
+    key: str,
+    default: tuple[float, ...],
+    *,
+    path: str,
+) -> tuple[float, ...]:
+    if key not in mapping:
+        return default
+    value = mapping[key]
+    if not isinstance(value, list):
+        raise QualityProfileError(f"{path}.{key} must be a list of numbers")
+    parsed: list[float] = []
+    for index, item in enumerate(value):
+        if isinstance(item, bool):
+            raise QualityProfileError(f"{path}.{key}[{index}] must be a number")
+        try:
+            parsed.append(float(item))  # type: ignore[arg-type]
+        except (TypeError, ValueError) as exc:
+            raise QualityProfileError(
+                f"{path}.{key}[{index}] must be a number"
+            ) from exc
+    return tuple(parsed)
+
+
+def _optional_string_profile_field(
+    mapping: Mapping[str, JSONValue],
+    key: str,
+    default: str,
+    *,
+    path: str,
+) -> str:
+    if key not in mapping or mapping[key] in (None, ""):
+        return default
+    return _string_field(mapping, key, default, path=path)
+
+
+def _parameter_bounds_profile_field(
+    mapping: Mapping[str, JSONValue],
+    key: str,
+    *,
+    path: str,
+) -> tuple[tuple[str, float, float], ...]:
+    if key not in mapping:
+        return ()
+    value = mapping[key]
+    if not isinstance(value, list):
+        raise QualityProfileError(f"{path}.{key} must be a list of objects")
+    parsed: list[tuple[str, float, float]] = []
+    for index, item in enumerate(value):
+        bound_path = f"{path}.{key}[{index}]"
+        bound = _expect_mapping(item, path=bound_path)
+        _reject_unknown_keys(bound, {"parameter", "lower", "upper"}, bound_path)
+        parameter = _string_field(bound, "parameter", "", path=bound_path)
+        lower = _float_field(bound, "lower", 0.0, path=bound_path)
+        upper = _float_field(bound, "upper", 0.0, path=bound_path)
+        parsed.append((parameter, lower, upper))
+    return tuple(parsed)
+
+
 def _quality_reporting_profile(
     value: Mapping[str, JSONValue],
 ) -> QualityReportingProfile:
@@ -1274,6 +3377,7 @@ def _int_field(
     default: int,
     *,
     minimum: int | None = None,
+    maximum: int | None = None,
     path: str,
 ) -> int:
     if key not in mapping:
@@ -1289,6 +3393,9 @@ def _int_field(
         raise QualityProfileError(msg) from exc
     if minimum is not None and parsed < minimum:
         msg = f"{path}.{key} must be >= {minimum}"
+        raise QualityProfileError(msg)
+    if maximum is not None and parsed > maximum:
+        msg = f"{path}.{key} must be <= {maximum}"
         raise QualityProfileError(msg)
     return parsed
 
@@ -1429,6 +3536,22 @@ def _bool_field(
         msg = f"{path}.{key} must be a boolean"
         raise QualityProfileError(msg)
     return value
+
+
+def _string_field(
+    mapping: Mapping[str, JSONValue],
+    key: str,
+    default: str,
+    *,
+    path: str,
+) -> str:
+    if key not in mapping:
+        return default
+    value = mapping[key]
+    if not isinstance(value, str) or not value.strip():
+        msg = f"{path}.{key} must be a non-empty string"
+        raise QualityProfileError(msg)
+    return value.strip()
 
 
 def _reject_unknown_keys(

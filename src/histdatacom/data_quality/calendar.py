@@ -444,6 +444,10 @@ def calendar_policy_metadata(
         "holiday_calendar_complete": profile.complete,
         "holiday_calendar_static_advisory": profile.static_advisory,
         "holiday_calendar_limitations": "; ".join(profile.limitations),
+        "weekend_activity_policy": profile.weekend_activity_policy,
+        "expected_session_closure_policy": (
+            profile.expected_session_closure_policy
+        ),
         "static_major_holidays": [
             holiday.to_metadata() for holiday in STATIC_MAJOR_HOLIDAYS
         ],
@@ -458,6 +462,7 @@ def calendar_regime_payload_for_target(
     target: QualityTarget,
     *,
     calendar_profile: HistDataCalendarProfile | None = None,
+    prefer_cache: bool = True,
 ) -> dict[str, JSONValue]:
     """Return deterministic calendar/session fingerprint metadata."""
     profile = calendar_profile or default_calendar_profile()
@@ -474,6 +479,7 @@ def calendar_regime_payload_for_target(
                 target,
                 calendar_profile=profile,
                 asset_class=_target_asset_class(target),
+                prefer_cache=prefer_cache,
             )
         )
     except (
@@ -520,8 +526,12 @@ def _calendar_scan_for_target(
     *,
     calendar_profile: HistDataCalendarProfile,
     asset_class: str,
+    prefer_cache: bool = True,
 ) -> tuple[_CalendarScan, str, str, str | None]:
-    timestamp_scan = _timestamp_scan_for_target(target)
+    timestamp_scan = _timestamp_scan_for_target(
+        target,
+        prefer_cache=prefer_cache,
+    )
     if _can_use_timestamp_scan_for_calendar(timestamp_scan):
         source_member = (
             timestamp_scan.valid_rows[0].source_member

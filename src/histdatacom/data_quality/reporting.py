@@ -19,21 +19,75 @@ from histdatacom.data_quality.contracts import (
     QualityStatus,
     QualityTargetSummary,
 )
+from histdatacom.data_quality.classical_baselines import (
+    CLASSICAL_BASELINE_BOUNDED_PAYLOAD_KEY,
+    CLASSICAL_BASELINE_SUMMARY_METADATA_KEY,
+    classical_baseline_summary,
+    format_classical_baseline_summary_lines,
+)
+from histdatacom.data_quality.classical_model_contracts import (
+    CLASSICAL_MODEL_INPUT_BOUNDED_PAYLOAD_KEY,
+    CLASSICAL_MODEL_INPUT_SUMMARY_METADATA_KEY,
+    classical_model_input_summary,
+    format_classical_model_input_summary_lines,
+)
+from histdatacom.data_quality.classical_model_comparison import (
+    CLASSICAL_MODEL_COMPARISON_BOUNDED_PAYLOAD_KEY,
+    CLASSICAL_MODEL_COMPARISON_SUMMARY_METADATA_KEY,
+    classical_model_comparison_summary,
+    format_classical_model_comparison_summary_lines,
+)
+from histdatacom.data_quality.autoregressive import (
+    AUTOREGRESSIVE_BOUNDED_PAYLOAD_KEY,
+    AUTOREGRESSIVE_SUMMARY_METADATA_KEY,
+    autoregressive_summary,
+    format_autoregressive_summary_lines,
+)
+from histdatacom.data_quality.engine import QUALITY_ENGINE_METADATA_KEY
+from histdatacom.data_quality.exponential_smoothing import (
+    EXPONENTIAL_SMOOTHING_BOUNDED_PAYLOAD_KEY,
+    EXPONENTIAL_SMOOTHING_SUMMARY_METADATA_KEY,
+    exponential_smoothing_summary,
+    format_exponential_smoothing_summary_lines,
+)
 from histdatacom.data_quality.fingerprint_contracts import (
+    FINGERPRINT_CROSS_SERIES_BOUNDED_PAYLOAD_KEY,
     FINGERPRINT_COVERAGE_BOUNDED_PAYLOAD_KEY,
     FINGERPRINT_DISTRIBUTION_ATTENTION_BOUNDED_PAYLOAD_KEY,
     FINGERPRINT_DISTRIBUTION_BOUNDED_PAYLOAD_KEY,
+    FINGERPRINT_PARITY_BOUNDED_PAYLOAD_KEY,
     FINGERPRINT_READINESS_BOUNDED_PAYLOAD_KEY,
     FINGERPRINT_READINESS_RISK_BOUNDED_PAYLOAD_KEY,
     FINGERPRINT_REGIME_BOUNDED_PAYLOAD_KEY,
+    FINGERPRINT_SYNTHETIC_CONSTRAINT_BOUNDED_PAYLOAD_KEY,
     FINGERPRINT_TOPOLOGY_ATTENTION_BOUNDED_PAYLOAD_KEY,
     FINGERPRINT_TOPOLOGY_BOUNDED_PAYLOAD_KEY,
 )
+from histdatacom.data_quality.seasonal_exogenous import (
+    SEASONAL_EXOGENOUS_BOUNDED_PAYLOAD_KEY,
+    SEASONAL_EXOGENOUS_SUMMARY_METADATA_KEY,
+    format_seasonal_exogenous_summary_lines,
+    seasonal_exogenous_summary,
+)
+from histdatacom.data_quality.state_space import (
+    STATE_SPACE_BOUNDED_PAYLOAD_KEY,
+    STATE_SPACE_SUMMARY_METADATA_KEY,
+    format_state_space_summary_lines,
+    state_space_summary,
+)
+from histdatacom.data_quality.volatility import (
+    VOLATILITY_BOUNDED_PAYLOAD_KEY,
+    VOLATILITY_SUMMARY_METADATA_KEY,
+    format_volatility_summary_lines,
+    volatility_summary,
+)
 from histdatacom.data_quality.fingerprints import (
+    CROSS_SERIES_FINGERPRINT_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_COVERAGE_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_DISTRIBUTION_ATTENTION_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_DISTRIBUTION_SUMMARY_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_METADATA_KEY,
+    TIME_SERIES_FINGERPRINT_PARITY_SUMMARY_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_READINESS_SUMMARY_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_READINESS_RISK_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_REGIME_SUMMARY_METADATA_KEY,
@@ -42,6 +96,7 @@ from histdatacom.data_quality.fingerprints import (
     series_fingerprint_coverage_summary,
     series_fingerprint_distribution_attention_summary,
     series_fingerprint_distribution_summary,
+    series_fingerprint_parity_summary,
     series_fingerprint_readiness_summary,
     series_fingerprint_readiness_risk_summary,
     series_fingerprint_regime_summary,
@@ -56,9 +111,16 @@ from histdatacom.data_quality.limits import (
     bounded_report_limit,
 )
 from histdatacom.data_quality.remediation import (
+    RemediationActionability,
+    classify_remediation_actionability,
     remediation_hint_payloads_for_finding,
 )
 from histdatacom.data_quality.profiles import QUALITY_REPORTING_METADATA_KEY
+from histdatacom.data_quality.synthetic_constraints import (
+    SYNTHETIC_CONSTRAINT_SUMMARY_METADATA_KEY,
+    format_synthetic_constraint_summary_lines,
+    synthetic_constraint_summary,
+)
 from histdatacom.publication_safety import (
     publish_safe_json_mapping,
     publish_safe_path,
@@ -82,11 +144,23 @@ QUALITY_PAYLOAD_REMEDIATION_COVERAGE_GROUP_LIMIT = 16
 QUALITY_PAYLOAD_REMEDIATION_COVERAGE_TARGET_AXIS_LIMIT = 8
 QUALITY_PAYLOAD_REMEDIATION_CATALOG_AUDIT_RULE_LIMIT = 16
 QUALITY_PAYLOAD_REMEDIATION_CATALOG_AUDIT_SOURCE_LIMIT = 8
+QUALITY_REMEDIATION_PLAN_DISPLAY_LIMIT = 5
 
 _FINGERPRINT_REPORT_SURFACE_EVIDENCE_ACTIVE = False
 _NEXT_ACTION_SEVERITY_RANK = {"info": 1, "warning": 2, "error": 3}
 _REMEDIATION_COVERAGE_SEVERITY_RANK = {"info": 1, "warning": 2, "error": 3}
+_REMEDIATION_ACTIONABILITY_SORT = {
+    RemediationActionability.REMEDIABLE_DEFECT.value: 0,
+    RemediationActionability.NEEDS_DIAGNOSTIC_CONTEXT.value: 1,
+    RemediationActionability.NEEDS_RULE_ATTRIBUTION.value: 2,
+    RemediationActionability.UNSAFE_TO_AUTOMATE.value: 3,
+    RemediationActionability.POLICY_OR_PROFILE_DECISION.value: 4,
+    RemediationActionability.UNSUPPORTED_FORMAT_OR_CAPABILITY.value: 5,
+    RemediationActionability.EXPECTED_ARTIFACT_OR_CONTEXT.value: 6,
+    RemediationActionability.INFORMATIONAL_ONLY.value: 7,
+}
 _NEXT_ACTION_ATTENTION_RANK = {
+    "contextual": 0,
     "session": 1,
     "sequence": 2,
     "unavailable": 3,
@@ -109,6 +183,7 @@ class _NextActionAggregate:
     message: str
     action_kind: str
     rule_id: str
+    policy_context: dict[str, JSONValue] = field(default_factory=dict)
     occurrence_count: int = 0
     severity_counts: Counter[str] = field(default_factory=Counter)
     attention_level_counts: Counter[str] = field(default_factory=Counter)
@@ -125,6 +200,8 @@ class _RemediationCoverageAggregate:
     rule_id: str
     finding_code: str
     mapped: bool
+    actionability: str
+    actionability_reason: str
     occurrence_count: int = 0
     severity_counts: Counter[str] = field(default_factory=Counter)
     target_axis_counts: Counter[tuple[str, str, str, str, str]] = field(
@@ -294,6 +371,66 @@ def quality_report_payload(
             fingerprint_regimes
         )
         payload["metadata"] = metadata
+    fingerprint_parity = _fingerprint_parity_summary(report)
+    if fingerprint_parity is not None:
+        metadata = _mapping_payload(payload.get("metadata"))
+        metadata[TIME_SERIES_FINGERPRINT_PARITY_SUMMARY_METADATA_KEY] = (
+            fingerprint_parity
+        )
+        payload["metadata"] = metadata
+    synthetic_constraints = _synthetic_constraint_summary(report)
+    if synthetic_constraints is not None:
+        metadata = _mapping_payload(payload.get("metadata"))
+        metadata[SYNTHETIC_CONSTRAINT_SUMMARY_METADATA_KEY] = (
+            synthetic_constraints
+        )
+        payload["metadata"] = metadata
+    classical_baselines = _classical_baseline_summary(report)
+    if classical_baselines is not None:
+        metadata = _mapping_payload(payload.get("metadata"))
+        metadata[CLASSICAL_BASELINE_SUMMARY_METADATA_KEY] = classical_baselines
+        payload["metadata"] = metadata
+    classical_model_input = _classical_model_input_summary(report)
+    if classical_model_input is not None:
+        metadata = _mapping_payload(payload.get("metadata"))
+        metadata[CLASSICAL_MODEL_INPUT_SUMMARY_METADATA_KEY] = (
+            classical_model_input
+        )
+        payload["metadata"] = metadata
+    exponential_smoothing = _exponential_smoothing_summary(report)
+    if exponential_smoothing is not None:
+        metadata = _mapping_payload(payload.get("metadata"))
+        metadata[EXPONENTIAL_SMOOTHING_SUMMARY_METADATA_KEY] = (
+            exponential_smoothing
+        )
+        payload["metadata"] = metadata
+    autoregressive = _autoregressive_summary(report)
+    if autoregressive is not None:
+        metadata = _mapping_payload(payload.get("metadata"))
+        metadata[AUTOREGRESSIVE_SUMMARY_METADATA_KEY] = autoregressive
+        payload["metadata"] = metadata
+    seasonal_exogenous = _seasonal_exogenous_summary(report)
+    if seasonal_exogenous is not None:
+        metadata = _mapping_payload(payload.get("metadata"))
+        metadata[SEASONAL_EXOGENOUS_SUMMARY_METADATA_KEY] = seasonal_exogenous
+        payload["metadata"] = metadata
+    state_space = _state_space_summary(report)
+    if state_space is not None:
+        metadata = _mapping_payload(payload.get("metadata"))
+        metadata[STATE_SPACE_SUMMARY_METADATA_KEY] = state_space
+        payload["metadata"] = metadata
+    volatility = _volatility_summary(report)
+    if volatility is not None:
+        metadata = _mapping_payload(payload.get("metadata"))
+        metadata[VOLATILITY_SUMMARY_METADATA_KEY] = volatility
+        payload["metadata"] = metadata
+    classical_model_comparison = _classical_model_comparison_summary(report)
+    if classical_model_comparison is not None:
+        metadata = _mapping_payload(payload.get("metadata"))
+        metadata[CLASSICAL_MODEL_COMPARISON_SUMMARY_METADATA_KEY] = (
+            classical_model_comparison
+        )
+        payload["metadata"] = metadata
     fingerprint_topology = _fingerprint_topology_summary(report)
     if fingerprint_topology is not None:
         metadata = _mapping_payload(payload.get("metadata"))
@@ -432,6 +569,9 @@ def format_quality_console_summary(
     if summary.target_count == 0:
         lines.append("No data quality targets discovered.")
     lines.extend(
+        format_quality_engine_skip_lines(_quality_engine_summary(report))
+    )
+    lines.extend(
         format_quality_next_action_lines(quality_next_actions_summary(report))
     )
     lines.extend(
@@ -466,6 +606,50 @@ def format_quality_console_summary(
             )
         )
         lines.extend(
+            format_fingerprint_parity_summary_lines(
+                _fingerprint_parity_summary(report)
+            )
+        )
+        lines.extend(
+            format_synthetic_constraint_summary_lines(
+                _synthetic_constraint_summary(report)
+            )
+        )
+        lines.extend(
+            format_classical_baseline_summary_lines(
+                _classical_baseline_summary(report)
+            )
+        )
+        lines.extend(
+            format_classical_model_input_summary_lines(
+                _classical_model_input_summary(report)
+            )
+        )
+        lines.extend(
+            format_exponential_smoothing_summary_lines(
+                _exponential_smoothing_summary(report)
+            )
+        )
+        lines.extend(
+            format_autoregressive_summary_lines(_autoregressive_summary(report))
+        )
+        lines.extend(
+            format_seasonal_exogenous_summary_lines(
+                _seasonal_exogenous_summary(report)
+            )
+        )
+        lines.extend(
+            format_state_space_summary_lines(_state_space_summary(report))
+        )
+        lines.extend(
+            format_volatility_summary_lines(_volatility_summary(report))
+        )
+        lines.extend(
+            format_classical_model_comparison_summary_lines(
+                _classical_model_comparison_summary(report)
+            )
+        )
+        lines.extend(
             format_fingerprint_topology_attention_lines(
                 _fingerprint_topology_attention_summary(report)
             )
@@ -483,6 +667,11 @@ def format_quality_console_summary(
         lines.extend(
             format_fingerprint_readiness_risk_lines(
                 _fingerprint_readiness_risk_summary(report)
+            )
+        )
+        lines.extend(
+            format_cross_series_fingerprint_lines(
+                _cross_series_fingerprint_summary(report)
             )
         )
 
@@ -541,17 +730,29 @@ def bounded_quality_payload(
         _fingerprint_distribution_attention_summary(report)
     )
     fingerprint_regimes = _fingerprint_regime_summary(report)
+    fingerprint_parity = _fingerprint_parity_summary(report)
+    synthetic_constraints = _synthetic_constraint_summary(report)
+    classical_baselines = _classical_baseline_summary(report)
+    classical_model_input = _classical_model_input_summary(report)
+    exponential_smoothing = _exponential_smoothing_summary(report)
+    autoregressive = _autoregressive_summary(report)
+    seasonal_exogenous = _seasonal_exogenous_summary(report)
+    state_space = _state_space_summary(report)
+    volatility = _volatility_summary(report)
+    classical_model_comparison = _classical_model_comparison_summary(report)
     fingerprint_topology = _fingerprint_topology_summary(report)
     fingerprint_topology_attention = _fingerprint_topology_attention_summary(
         report
     )
     fingerprint_readiness = _fingerprint_readiness_summary(report)
     fingerprint_readiness_risk = _fingerprint_readiness_risk_summary(report)
+    cross_series_fingerprint = _cross_series_fingerprint_summary(report)
     next_actions = quality_next_actions_summary(report)
     remediation_coverage = quality_remediation_coverage_summary(report)
     remediation_catalog_audit = quality_remediation_catalog_audit_summary(
         report
     )
+    quality_engine = _quality_engine_summary(report)
     payload_limits: dict[str, JSONValue] = {
         "discovery_targets": _payload_limit_metadata(
             _sequence_count(discovery.get("targets")),
@@ -605,6 +806,34 @@ def bounded_quality_payload(
         )
     if fingerprint_regimes is not None:
         payload[FINGERPRINT_REGIME_BOUNDED_PAYLOAD_KEY] = fingerprint_regimes
+    if fingerprint_parity is not None:
+        payload[FINGERPRINT_PARITY_BOUNDED_PAYLOAD_KEY] = fingerprint_parity
+    if synthetic_constraints is not None:
+        payload[FINGERPRINT_SYNTHETIC_CONSTRAINT_BOUNDED_PAYLOAD_KEY] = (
+            synthetic_constraints
+        )
+    if classical_baselines is not None:
+        payload[CLASSICAL_BASELINE_BOUNDED_PAYLOAD_KEY] = classical_baselines
+    if classical_model_input is not None:
+        payload[CLASSICAL_MODEL_INPUT_BOUNDED_PAYLOAD_KEY] = (
+            classical_model_input
+        )
+    if exponential_smoothing is not None:
+        payload[EXPONENTIAL_SMOOTHING_BOUNDED_PAYLOAD_KEY] = (
+            exponential_smoothing
+        )
+    if autoregressive is not None:
+        payload[AUTOREGRESSIVE_BOUNDED_PAYLOAD_KEY] = autoregressive
+    if seasonal_exogenous is not None:
+        payload[SEASONAL_EXOGENOUS_BOUNDED_PAYLOAD_KEY] = seasonal_exogenous
+    if state_space is not None:
+        payload[STATE_SPACE_BOUNDED_PAYLOAD_KEY] = state_space
+    if volatility is not None:
+        payload[VOLATILITY_BOUNDED_PAYLOAD_KEY] = volatility
+    if classical_model_comparison is not None:
+        payload[CLASSICAL_MODEL_COMPARISON_BOUNDED_PAYLOAD_KEY] = (
+            classical_model_comparison
+        )
     if fingerprint_topology is not None:
         payload[FINGERPRINT_TOPOLOGY_BOUNDED_PAYLOAD_KEY] = fingerprint_topology
     if fingerprint_topology_attention is not None:
@@ -619,6 +848,10 @@ def bounded_quality_payload(
         payload[FINGERPRINT_READINESS_RISK_BOUNDED_PAYLOAD_KEY] = (
             fingerprint_readiness_risk
         )
+    if cross_series_fingerprint is not None:
+        payload[FINGERPRINT_CROSS_SERIES_BOUNDED_PAYLOAD_KEY] = (
+            cross_series_fingerprint
+        )
     if next_actions is not None:
         payload["next_actions"] = next_actions
     if remediation_coverage is not None:
@@ -630,6 +863,8 @@ def bounded_quality_payload(
                 remediation_catalog_audit
             )
         )
+    if quality_engine is not None:
+        payload[QUALITY_ENGINE_METADATA_KEY] = quality_engine
     if not publish_safe:
         return payload
     return _publish_safe_mapping(payload)
@@ -1038,10 +1273,14 @@ def quality_remediation_coverage_summary(
     finding_code_counts: Counter[str] = Counter()
     mapped_finding_code_counts: Counter[str] = Counter()
     unmapped_finding_code_counts: Counter[str] = Counter()
+    actionability_counts: Counter[str] = Counter()
     mapped_finding_count = 0
     unmapped_finding_count = 0
 
     for aggregate in aggregates.values():
+        actionability_counts[
+            aggregate.actionability
+        ] += aggregate.occurrence_count
         severity_counts.update(aggregate.severity_counts)
         rule_id_counts[aggregate.rule_id] += aggregate.occurrence_count
         finding_code_counts[
@@ -1085,6 +1324,20 @@ def quality_remediation_coverage_summary(
         for aggregate in included_unmapped_groups
         if _remediation_coverage_group_is_warning_or_error(aggregate)
     )
+    unmapped_actionable_warning_error_groups = [
+        aggregate
+        for aggregate in unmapped_groups
+        if _remediation_coverage_group_is_warning_or_error(aggregate)
+        and aggregate.actionability
+        == RemediationActionability.REMEDIABLE_DEFECT.value
+    ]
+    included_unmapped_actionable_warning_error_group_count = sum(
+        1
+        for aggregate in included_unmapped_groups
+        if _remediation_coverage_group_is_warning_or_error(aggregate)
+        and aggregate.actionability
+        == RemediationActionability.REMEDIABLE_DEFECT.value
+    )
     count_limits = _remediation_coverage_count_limits(
         rule_id_counts=rule_id_counts,
         mapped_rule_id_counts=mapped_rule_id_counts,
@@ -1107,6 +1360,37 @@ def quality_remediation_coverage_summary(
             count
             for severity, count in unmapped_severity_counts.items()
             if severity in {"error", "warning"}
+        ),
+        "actionability_counts": _counter_payload(actionability_counts),
+        "unmapped_actionable_warning_error_finding_count": sum(
+            aggregate.occurrence_count
+            for aggregate in unmapped_actionable_warning_error_groups
+        ),
+        "intentionally_unremediable_warning_error_finding_count": sum(
+            aggregate.occurrence_count
+            for aggregate in unmapped_groups
+            if _remediation_coverage_group_is_warning_or_error(aggregate)
+            and aggregate.actionability
+            in {
+                RemediationActionability.POLICY_OR_PROFILE_DECISION.value,
+                RemediationActionability.UNSUPPORTED_FORMAT_OR_CAPABILITY.value,
+                RemediationActionability.EXPECTED_ARTIFACT_OR_CONTEXT.value,
+                RemediationActionability.UNSAFE_TO_AUTOMATE.value,
+            }
+        ),
+        "blocked_by_attribution_warning_error_finding_count": sum(
+            aggregate.occurrence_count
+            for aggregate in unmapped_groups
+            if _remediation_coverage_group_is_warning_or_error(aggregate)
+            and aggregate.actionability
+            == RemediationActionability.NEEDS_RULE_ATTRIBUTION.value
+        ),
+        "blocked_by_missing_diagnostics_warning_error_finding_count": sum(
+            aggregate.occurrence_count
+            for aggregate in unmapped_groups
+            if _remediation_coverage_group_is_warning_or_error(aggregate)
+            and aggregate.actionability
+            == RemediationActionability.NEEDS_DIAGNOSTIC_CONTEXT.value
         ),
         "severity_counts": _counter_payload(severity_counts),
         "mapped_severity_counts": _counter_payload(mapped_severity_counts),
@@ -1161,6 +1445,17 @@ def quality_remediation_coverage_summary(
             unmapped_warning_error_group_count
             - included_unmapped_warning_error_group_count,
         ),
+        "unmapped_actionable_warning_error_group_count": len(
+            unmapped_actionable_warning_error_groups
+        ),
+        "included_unmapped_actionable_warning_error_group_count": (
+            included_unmapped_actionable_warning_error_group_count
+        ),
+        "omitted_unmapped_actionable_warning_error_group_count": max(
+            0,
+            len(unmapped_actionable_warning_error_groups)
+            - included_unmapped_actionable_warning_error_group_count,
+        ),
         "unmapped_groups": [
             _remediation_coverage_group_payload(
                 aggregate,
@@ -1206,9 +1501,53 @@ def format_quality_remediation_coverage_lines(
             "omitted: "
             f"{_int_metadata(summary, 'omitted_unmapped_warning_error_group_count')}"
         ),
+        (
+            "- actionability: actionable="
+            f"{_int_metadata(summary, 'unmapped_actionable_warning_error_group_count')} "
+            "blocked_attribution="
+            f"{_int_metadata(summary, 'blocked_by_attribution_warning_error_finding_count')} "
+            "blocked_diagnostics="
+            f"{_int_metadata(summary, 'blocked_by_missing_diagnostics_warning_error_finding_count')} "
+            "intentional_boundary="
+            f"{_int_metadata(summary, 'intentionally_unremediable_warning_error_finding_count')}"
+        ),
     ]
     for group in groups:
         lines.append(f"- {_format_quality_remediation_coverage_group(group)}")
+    return lines
+
+
+def format_quality_engine_skip_lines(
+    summary: Mapping[str, JSONValue] | None,
+) -> list[str]:
+    """Return concise reconciliation lines for skipped rule evaluations."""
+    if not summary:
+        return []
+    skipped = _int_metadata(summary, "skipped_rule_evaluation_count")
+    skip_events = _mapping_payload(summary.get("skip_events"))
+    if not skipped or not skip_events:
+        return []
+    lines = [
+        "",
+        "Quality engine skips",
+        (
+            "- evaluations: "
+            f"planned={_int_metadata(summary, 'planned_target_rule_evaluation_count')} "
+            f"executed={_int_metadata(summary, 'target_rule_evaluation_count')} "
+            f"skipped={skipped}"
+        ),
+        (
+            "- events: "
+            f"included={_int_metadata(skip_events, 'included_event_count')} "
+            f"omitted={_int_metadata(skip_events, 'omitted_event_count')}"
+        ),
+    ]
+    reason_counts = _format_count_metadata(skip_events.get("reason_counts"))
+    if reason_counts:
+        lines.append(f"- reasons: {reason_counts}")
+    rule_id_counts = _format_count_metadata(skip_events.get("rule_id_counts"))
+    if rule_id_counts:
+        lines.append(f"- rules: {rule_id_counts}")
     return lines
 
 
@@ -1285,7 +1624,41 @@ def format_quality_remediation_catalog_audit_lines(
             "unmapped warning/error groups="
             f"{report_gap_count}"
         ),
+        (
+            "- attribution: "
+            "exact="
+            f"{_int_metadata(audit_summary, 'exact_attribution_occurrence_count')} "
+            "inferred="
+            f"{_int_metadata(audit_summary, 'inferred_attribution_occurrence_count')} "
+            "unresolved="
+            f"{_int_metadata(audit_summary, 'unresolved_attribution_occurrence_count')}"
+        ),
+        (
+            "- actionability: actionable="
+            f"{_int_metadata(audit_summary, 'unmapped_actionable_warning_error_gap_count')} "
+            "blocked_attribution="
+            f"{_int_metadata(audit_summary, 'blocked_by_attribution_warning_error_code_count')} "
+            "blocked_diagnostics="
+            f"{_int_metadata(audit_summary, 'blocked_by_missing_diagnostics_warning_error_code_count')} "
+            "intentional_boundary="
+            f"{_int_metadata(audit_summary, 'intentionally_unremediable_warning_error_code_count')}"
+        ),
     ]
+    remediation_plan = _mapping_payload(summary.get("remediation_plan"))
+    plan_items = _list_metadata(remediation_plan.get("items"))
+    if plan_items:
+        lines.append(
+            "- plan: candidates="
+            f"{_int_metadata(remediation_plan, 'plan_item_count')} "
+            "included="
+            f"{_int_metadata(remediation_plan, 'included_plan_item_count')} "
+            "truncated="
+            f"{str(bool(remediation_plan.get('truncated'))).lower()}"
+        )
+        lines.extend(
+            f"- plan {_format_quality_remediation_plan_item(item)}"
+            for item in plan_items[:QUALITY_REMEDIATION_PLAN_DISPLAY_LIMIT]
+        )
     for group in _remediation_catalog_observed_gap_groups(summary):
         lines.append(
             "- observed " + _format_quality_remediation_coverage_group(group)
@@ -1414,6 +1787,9 @@ def _collect_fingerprint_topology_next_actions(
             continue
         for hint in hints:
             if isinstance(hint, Mapping):
+                policy_context = _mapping_payload(hint.get("policy_context"))
+                if policy_context.get("actionable") is False:
+                    continue
                 _add_next_action_hint(
                     aggregates,
                     hint,
@@ -1469,6 +1845,9 @@ def _add_next_action_hint(
             rule_id=rule_id,
         ),
     )
+    policy_context = _mapping_payload(hint.get("policy_context"))
+    if policy_context and not aggregate.policy_context:
+        aggregate.policy_context = dict(policy_context)
     aggregate.occurrence_count += 1
     aggregate.source_counts[source] += 1
     aggregate.target_axis_counts[_target_axis_key(target_axis)] += 1
@@ -1509,7 +1888,7 @@ def _next_action_payload(
         aggregate.attention_level_counts,
         _NEXT_ACTION_ATTENTION_RANK,
     )
-    return {
+    payload: dict[str, JSONValue] = {
         "code": aggregate.code,
         "message": aggregate.message,
         "action_kind": aggregate.action_kind,
@@ -1539,6 +1918,9 @@ def _next_action_payload(
         "flag_counts": _counter_payload(aggregate.flag_counts),
         "target_axis_counts": target_axis_counts,
     }
+    if aggregate.policy_context:
+        payload["policy_context"] = dict(aggregate.policy_context)
+    return payload
 
 
 def _next_action_sort_key(
@@ -1660,6 +2042,22 @@ def _format_quality_next_action_line(
         qualifiers.append(f"severity={severity}")
     if attention:
         qualifiers.append(f"attention={attention}")
+    policy = _mapping_payload(action.get("policy_context"))
+    weekend_policy = _optional_string_metadata(
+        policy,
+        "weekend_activity_policy",
+    )
+    closure_policy = _optional_string_metadata(
+        policy,
+        "expected_session_closure_policy",
+    )
+    profile_name = _optional_string_metadata(policy, "profile_name")
+    if weekend_policy:
+        qualifiers.append(f"weekend-policy={weekend_policy}")
+    if closure_policy == "unexpected":
+        qualifiers.append("closure-policy=unexpected")
+    if profile_name:
+        qualifiers.append(f"profile={profile_name}")
     qualifier_text = f", {', '.join(qualifiers)}" if qualifiers else ""
     return (
         f"{_optional_string_metadata(action, 'urgency')} "
@@ -1680,16 +2078,38 @@ def _remediation_coverage_aggregates(
         mapped = bool(remediation_hint_payloads_for_finding(finding))
         rule_id = finding.rule_id or "unknown"
         finding_code = finding.code or "unknown"
+        decision = classify_remediation_actionability(
+            rule_id=rule_id,
+            finding_code=finding_code,
+            severity=finding.severity.value,
+            mapped=mapped,
+            attribution_status=("exact" if finding.rule_id else "unresolved"),
+        )
         aggregate = aggregates.setdefault(
             (mapped, rule_id, finding_code),
             _RemediationCoverageAggregate(
                 rule_id=rule_id,
                 finding_code=finding_code,
                 mapped=mapped,
+                actionability=decision.actionability.value,
+                actionability_reason=decision.reason,
             ),
         )
         aggregate.occurrence_count += 1
         aggregate.severity_counts[finding.severity.value] += 1
+        max_severity = _ranked_counter_max(
+            aggregate.severity_counts,
+            _REMEDIATION_COVERAGE_SEVERITY_RANK,
+        )
+        decision = classify_remediation_actionability(
+            rule_id=rule_id,
+            finding_code=finding_code,
+            severity=max_severity or finding.severity.value,
+            mapped=mapped,
+            attribution_status=("exact" if finding.rule_id else "unresolved"),
+        )
+        aggregate.actionability = decision.actionability.value
+        aggregate.actionability_reason = decision.reason
         aggregate.target_axis_counts[
             _target_axis_key(_target_axis_from_finding(finding))
         ] += 1
@@ -1715,6 +2135,8 @@ def _remediation_coverage_group_payload(
         "rule_id": aggregate.rule_id,
         "finding_code": aggregate.finding_code,
         "mapped": aggregate.mapped,
+        "actionability": aggregate.actionability,
+        "actionability_reason": aggregate.actionability_reason,
         "max_severity": _ranked_counter_max(
             aggregate.severity_counts,
             _REMEDIATION_COVERAGE_SEVERITY_RANK,
@@ -1734,12 +2156,13 @@ def _remediation_coverage_group_payload(
 
 def _remediation_coverage_group_sort_key(
     aggregate: _RemediationCoverageAggregate,
-) -> tuple[int, int, int, str, str]:
+) -> tuple[int, int, int, int, str, str]:
     max_severity = _ranked_counter_max(
         aggregate.severity_counts,
         _REMEDIATION_COVERAGE_SEVERITY_RANK,
     )
     return (
+        _REMEDIATION_ACTIONABILITY_SORT.get(aggregate.actionability, 9),
         -_REMEDIATION_COVERAGE_SEVERITY_RANK.get(max_severity or "", 0),
         -aggregate.occurrence_count,
         -len(aggregate.target_axis_counts),
@@ -1822,13 +2245,34 @@ def _format_quality_remediation_coverage_group(
         f"{_optional_string_metadata(group, 'rule_id')}:"
         f"{_optional_string_metadata(group, 'finding_code')} "
         f"findings={_int_metadata(group, 'occurrence_count')} "
-        f"targets={_int_metadata(group, 'target_axis_count')}"
+        f"targets={_int_metadata(group, 'target_axis_count')} "
+        "actionability="
+        f"{_optional_string_metadata(group, 'actionability')}"
+        f"({_optional_string_metadata(group, 'actionability_reason')})"
     )
 
 
 def _format_quality_remediation_catalog_gap(
     gap: Mapping[str, JSONValue],
 ) -> str:
+    attribution = (
+        _optional_string_metadata(gap, "attribution_status") or "unknown"
+    )
+    attribution_reason = _optional_string_metadata(
+        gap,
+        "attribution_reason",
+    )
+    attribution_text = f"attribution={attribution}"
+    if attribution_reason:
+        attribution_text += f"({attribution_reason})"
+    actionability = _optional_string_metadata(gap, "actionability") or "unknown"
+    actionability_reason = _optional_string_metadata(
+        gap,
+        "actionability_reason",
+    )
+    actionability_text = f"actionability={actionability}"
+    if actionability_reason:
+        actionability_text += f"({actionability_reason})"
     return (
         f"{_optional_string_metadata(gap, 'max_severity')} "
         f"rank={_int_metadata(gap, 'rank')} "
@@ -1837,7 +2281,26 @@ def _format_quality_remediation_catalog_gap(
         "known="
         f"{_int_metadata(gap, 'known_source_occurrence_count')} "
         "observed="
-        f"{_int_metadata(gap, 'report_occurrence_count')}"
+        f"{_int_metadata(gap, 'report_occurrence_count')} "
+        f"{attribution_text} "
+        f"{actionability_text}"
+    )
+
+
+def _format_quality_remediation_plan_item(
+    item: Mapping[str, JSONValue],
+) -> str:
+    selector = _mapping_payload(item.get("suggested_selector"))
+    action = _mapping_payload(item.get("suggested_action"))
+    fixability = _mapping_payload(item.get("fixability"))
+    return (
+        f"rank={_int_metadata(item, 'rank')} "
+        f"{_optional_string_metadata(item, 'rule_id')}:"
+        f"{_optional_string_metadata(item, 'finding_code')} "
+        f"fixability={_optional_string_metadata(fixability, 'level')}"
+        f"/{_int_metadata(fixability, 'score')} "
+        f"selector={_optional_string_metadata(selector, 'shape')} "
+        f"action={_optional_string_metadata(action, 'action_kind')}"
     )
 
 
@@ -1888,6 +2351,24 @@ def _fingerprint_coverage_summary(
     )
 
 
+def _cross_series_fingerprint_summary(
+    report: QualityReport,
+) -> dict[str, JSONValue] | None:
+    """Return run-scoped cross-series fingerprint report metadata."""
+    return _optional_mapping_payload(
+        report.metadata.get(CROSS_SERIES_FINGERPRINT_METADATA_KEY)
+    )
+
+
+def _quality_engine_summary(
+    report: QualityReport,
+) -> dict[str, JSONValue] | None:
+    """Return structured quality-engine metadata when evaluations were skipped."""
+    return _optional_mapping_payload(
+        report.metadata.get(QUALITY_ENGINE_METADATA_KEY)
+    )
+
+
 def _fingerprint_distribution_summary(
     report: QualityReport,
 ) -> dict[str, JSONValue] | None:
@@ -1927,6 +2408,124 @@ def _fingerprint_regime_summary(
         return dict(summary)
     return _optional_mapping_payload(
         series_fingerprint_regime_summary(report.findings)
+    )
+
+
+def _fingerprint_parity_summary(
+    report: QualityReport,
+) -> dict[str, JSONValue] | None:
+    """Return cache/source parity metadata from report or findings."""
+    summary = report.metadata.get(
+        TIME_SERIES_FINGERPRINT_PARITY_SUMMARY_METADATA_KEY
+    )
+    if isinstance(summary, Mapping):
+        return dict(summary)
+    return _optional_mapping_payload(
+        series_fingerprint_parity_summary(report.findings)
+    )
+
+
+def _synthetic_constraint_summary(
+    report: QualityReport,
+) -> dict[str, JSONValue] | None:
+    """Return synthetic constraint metadata from report or findings."""
+    summary = report.metadata.get(SYNTHETIC_CONSTRAINT_SUMMARY_METADATA_KEY)
+    if isinstance(summary, Mapping):
+        return dict(summary)
+    return _optional_mapping_payload(
+        synthetic_constraint_summary(report.findings)
+    )
+
+
+def _classical_baseline_summary(
+    report: QualityReport,
+) -> dict[str, JSONValue] | None:
+    """Return classical baseline metadata from report or findings."""
+    summary = report.metadata.get(CLASSICAL_BASELINE_SUMMARY_METADATA_KEY)
+    if isinstance(summary, Mapping):
+        return dict(summary)
+    return _optional_mapping_payload(
+        classical_baseline_summary(report.findings)
+    )
+
+
+def _classical_model_input_summary(
+    report: QualityReport,
+) -> dict[str, JSONValue] | None:
+    """Return classical model input metadata from report or findings."""
+    summary = report.metadata.get(CLASSICAL_MODEL_INPUT_SUMMARY_METADATA_KEY)
+    if isinstance(summary, Mapping):
+        return dict(summary)
+    return _optional_mapping_payload(
+        classical_model_input_summary(report.findings)
+    )
+
+
+def _exponential_smoothing_summary(
+    report: QualityReport,
+) -> dict[str, JSONValue] | None:
+    """Return exponential-smoothing metadata from report or findings."""
+    summary = report.metadata.get(EXPONENTIAL_SMOOTHING_SUMMARY_METADATA_KEY)
+    if isinstance(summary, Mapping):
+        return dict(summary)
+    return _optional_mapping_payload(
+        exponential_smoothing_summary(report.findings)
+    )
+
+
+def _autoregressive_summary(
+    report: QualityReport,
+) -> dict[str, JSONValue] | None:
+    """Return autoregressive-family metadata from report or findings."""
+    summary = report.metadata.get(AUTOREGRESSIVE_SUMMARY_METADATA_KEY)
+    if isinstance(summary, Mapping):
+        return dict(summary)
+    return _optional_mapping_payload(autoregressive_summary(report.findings))
+
+
+def _seasonal_exogenous_summary(
+    report: QualityReport,
+) -> dict[str, JSONValue] | None:
+    """Return seasonal/exogenous metadata from report or findings."""
+    summary = report.metadata.get(SEASONAL_EXOGENOUS_SUMMARY_METADATA_KEY)
+    if isinstance(summary, Mapping):
+        return dict(summary)
+    return _optional_mapping_payload(
+        seasonal_exogenous_summary(report.findings)
+    )
+
+
+def _state_space_summary(
+    report: QualityReport,
+) -> dict[str, JSONValue] | None:
+    """Return state-space/Kalman metadata from report or findings."""
+    summary = report.metadata.get(STATE_SPACE_SUMMARY_METADATA_KEY)
+    if isinstance(summary, Mapping):
+        return dict(summary)
+    return _optional_mapping_payload(state_space_summary(report.findings))
+
+
+def _volatility_summary(
+    report: QualityReport,
+) -> dict[str, JSONValue] | None:
+    """Return ARCH/GARCH metadata from report or findings."""
+    summary = report.metadata.get(VOLATILITY_SUMMARY_METADATA_KEY)
+    if isinstance(summary, Mapping):
+        return dict(summary)
+    return _optional_mapping_payload(volatility_summary(report.findings))
+
+
+def _classical_model_comparison_summary(
+    report: QualityReport,
+) -> dict[str, JSONValue] | None:
+    """Return family-neutral comparison metadata from report or findings."""
+    summary = report.metadata.get(
+        CLASSICAL_MODEL_COMPARISON_SUMMARY_METADATA_KEY
+    )
+    if isinstance(summary, Mapping):
+        return dict(summary)
+    return _optional_mapping_payload(
+        classical_model_comparison_summary(report.findings)
     )
 
 
@@ -2325,6 +2924,68 @@ def format_fingerprint_regime_summary_lines(
     return lines
 
 
+def format_fingerprint_parity_summary_lines(
+    summary: Mapping[str, JSONValue] | None,
+) -> list[str]:
+    """Return concise human-readable cache/source parity lines."""
+    if not summary:
+        return []
+    lines = [
+        "",
+        "Fingerprint cache/source parity",
+        (
+            "- targets: "
+            f"{_int_metadata(summary, 'target_count')} "
+            f"compared: {_int_metadata(summary, 'compared_target_count')} "
+            f"matching: {_int_metadata(summary, 'matching_target_count')} "
+            f"mismatched: {_int_metadata(summary, 'mismatched_target_count')} "
+            "not-compared: "
+            f"{_int_metadata(summary, 'not_compared_target_count')}"
+        ),
+    ]
+    for label, key in (
+        ("statuses", "status_counts"),
+        ("mismatch codes", "mismatch_code_counts"),
+        ("computed from", "computed_from_counts"),
+        ("cache sources", "cache_source_counts"),
+        ("freshness", "freshness_counts"),
+    ):
+        counts = _format_count_metadata(summary.get(key))
+        if counts:
+            lines.append(f"- {label}: {counts}")
+    targets = summary.get("target_summaries")
+    if isinstance(targets, list):
+        for item in targets:
+            if not isinstance(item, Mapping):
+                continue
+            axis = _mapping_payload(item.get("target_axis"))
+            codes = ",".join(_string_list_metadata(item.get("mismatch_codes")))
+            suffix = f" codes={codes}" if codes else ""
+            lines.append(
+                "- "
+                f"{_format_target_axis(axis)}: "
+                f"{_string_metadata(item, 'status')} "
+                "sections="
+                f"{_int_metadata(item, 'compared_section_count')} "
+                "mismatched="
+                f"{_int_metadata(item, 'mismatched_section_count')}"
+                f"{suffix}"
+            )
+    return lines
+
+
+def _format_target_axis(axis: Mapping[str, JSONValue]) -> str:
+    return " ".join(
+        (
+            _string_metadata(axis, "data_format"),
+            _string_metadata(axis, "symbol"),
+            _string_metadata(axis, "timeframe"),
+            _string_metadata(axis, "period"),
+            _string_metadata(axis, "kind"),
+        )
+    )
+
+
 def _format_fingerprint_regime_target_line(
     summary: Mapping[str, JSONValue],
 ) -> str:
@@ -2461,6 +3122,9 @@ def format_fingerprint_topology_attention_lines(
                 lines.append(
                     f"- {_format_fingerprint_topology_attention_target_line(item)}"
                 )
+                lines.extend(
+                    _format_fingerprint_topology_inspection_context_lines(item)
+                )
     return lines
 
 
@@ -2479,6 +3143,25 @@ def _format_fingerprint_topology_attention_target_line(
     cache_text = f", cache={cache_source}" if cache_source else ""
     hints = _remediation_hint_messages(summary.get("remediation_hints"))
     hint_text = f", next={'; '.join(hints)}" if hints else ""
+    policy = _mapping_payload(summary.get("calendar_policy"))
+    profile = _mapping_payload(policy.get("calendar_profile"))
+    weekend_policy = _optional_string_metadata(
+        policy,
+        "weekend_activity_policy",
+    )
+    closure_policy = _optional_string_metadata(
+        policy,
+        "expected_session_closure_policy",
+    )
+    profile_name = _optional_string_metadata(profile, "name")
+    policy_parts = []
+    if weekend_policy and "weekend_activity" in flags:
+        policy_parts.append(f"weekend={weekend_policy}")
+    if closure_policy and "expected_session_closures" in flags:
+        policy_parts.append(f"closures={closure_policy}")
+    if profile_name and policy_parts:
+        policy_parts.append(f"profile={profile_name}")
+    policy_text = f", policy {' '.join(policy_parts)}" if policy_parts else ""
     return (
         f"{data_format} {symbol} {timeframe} {period} {kind}: "
         f"{_string_metadata(summary, 'attention_level')}, "
@@ -2492,8 +3175,87 @@ def _format_fingerprint_topology_attention_target_line(
         f"{_format_duration_ms(summary.get('max_gap_ms'))}, "
         f"computed_from={_string_metadata(summary, 'computed_from')}"
         f"{cache_text}"
+        f"{policy_text}"
         f"{hint_text}"
     )
+
+
+def _format_fingerprint_topology_inspection_context_lines(
+    summary: Mapping[str, JSONValue],
+) -> list[str]:
+    context = _mapping_payload(summary.get("inspection_context"))
+    if not context:
+        return []
+    lines: list[str] = []
+    for section_name in (
+        "invalid_timestamps",
+        "non_monotonic_timestamps",
+        "duplicate_timestamps",
+        "suspicious_gaps",
+        "expected_session_closures",
+        "weekend_activity",
+    ):
+        section = _mapping_payload(context.get(section_name))
+        if not section:
+            continue
+        samples = _list_metadata(section.get("samples"))
+        evidence = "; ".join(
+            _format_fingerprint_topology_inspection_sample(
+                section_name,
+                sample,
+            )
+            for sample in samples
+        )
+        action = _mapping_payload(section.get("next_action"))
+        policy_note = _mapping_payload(section.get("policy_note"))
+        action_code = _optional_string_metadata(action, "code")
+        note_code = _optional_string_metadata(policy_note, "code")
+        if action_code:
+            action_text = f" action={action_code}"
+        elif note_code:
+            action_text = f" policy-note={note_code}"
+        else:
+            action_text = " contextual"
+        evidence_text = f" {evidence}" if evidence else ""
+        lines.append(
+            "  - context "
+            f"{section_name}: "
+            f"samples={_int_metadata(section, 'included_count')}/"
+            f"{_int_metadata(section, 'total_count')} "
+            f"omitted={_int_metadata(section, 'omitted_count')}"
+            f"{action_text}{evidence_text}"
+        )
+    return lines
+
+
+def _format_fingerprint_topology_inspection_sample(
+    section_name: str,
+    sample: Mapping[str, JSONValue],
+) -> str:
+    timestamp = _optional_string_metadata(sample, "timestamp_source")
+    row_number = _optional_int_text(sample.get("row_number"))
+    if section_name == "invalid_timestamps":
+        return f"row {row_number}={timestamp or 'unknown'}"
+    if section_name == "non_monotonic_timestamps":
+        metadata = _mapping_payload(sample.get("metadata"))
+        previous_row = _optional_int_text(metadata.get("previous_row_number"))
+        return f"rows {previous_row}->{row_number} at {timestamp or 'unknown'}"
+    if section_name == "duplicate_timestamps":
+        occurrences = _optional_int_text(sample.get("occurrence_count"))
+        return f"{timestamp or 'unknown'} x{occurrences}"
+    if section_name in {"suspicious_gaps", "expected_session_closures"}:
+        previous = _optional_string_metadata(
+            sample,
+            "previous_timestamp_source",
+        )
+        expected = bool(sample.get("expected_session_related"))
+        session_text = "expected-session" if expected else "unexpected"
+        return (
+            f"{previous or 'unknown'}->{timestamp or 'unknown'} "
+            f"({_format_duration_ms(sample.get('gap_ms'))}, {session_text})"
+        )
+    session_state = _optional_string_metadata(sample, "session_state")
+    return f"{timestamp or 'unknown'} ({session_state or 'unknown'})"
 
 
 def format_fingerprint_topology_summary_lines(
@@ -2665,11 +3427,53 @@ def format_fingerprint_readiness_summary_lines(
             f"{_int_metadata(summary, 'stationarity_skipped_window_count')}"
         )
         lines.append(stationarity_line)
+    decomposition_counts = _format_count_metadata(
+        summary.get("decomposition_status_counts")
+    )
+    if decomposition_counts:
+        decomposition_line = f"- decomposition: {decomposition_counts}"
+        decomposition_reasons = _format_count_metadata(
+            summary.get("decomposition_reason_counts")
+        )
+        if decomposition_reasons:
+            decomposition_line += f" reasons: {decomposition_reasons}"
+        skipped_window_reasons = _format_count_metadata(
+            summary.get("decomposition_skipped_window_reason_counts")
+        )
+        if skipped_window_reasons:
+            decomposition_line += (
+                f" skipped-window reasons: {skipped_window_reasons}"
+            )
+        basis_counts = _format_count_metadata(
+            summary.get("decomposition_basis_counts")
+        )
+        if basis_counts:
+            decomposition_line += f" basis: {basis_counts}"
+        stationarity_counts = _format_count_metadata(
+            summary.get("decomposition_stationarity_status_counts")
+        )
+        if stationarity_counts:
+            decomposition_line += f" stationarity: {stationarity_counts}"
+        structural_counts = _format_count_metadata(
+            summary.get("decomposition_structural_break_status_counts")
+        )
+        if structural_counts:
+            decomposition_line += f" structural-breaks: {structural_counts}"
+        decomposition_line += (
+            " computed_windows="
+            f"{_int_metadata(summary, 'decomposition_computed_window_count')} "
+            "skipped_windows="
+            f"{_int_metadata(summary, 'decomposition_skipped_window_count')} "
+            "structural_candidates="
+            f"{_int_metadata(summary, 'decomposition_structural_break_candidate_count')}"
+        )
+        lines.append(decomposition_line)
     count_lines = (
         ("topology limitations", "topology_limitation_counts"),
         ("dynamics limitations", "dynamics_limitation_counts"),
         ("dependence limitations", "dependence_limitation_counts"),
         ("stationarity limitations", "stationarity_limitation_counts"),
+        ("decomposition limitations", "decomposition_limitation_counts"),
         ("row order", "row_order_counts"),
         ("computed from", "computed_from_counts"),
         ("cache sources", "cache_source_counts"),
@@ -2751,6 +3555,50 @@ def format_fingerprint_readiness_risk_lines(
     return lines
 
 
+def format_cross_series_fingerprint_lines(
+    summary: Mapping[str, JSONValue] | None,
+) -> list[str]:
+    """Return concise human-readable cross-series fingerprint lines."""
+    if not summary:
+        return []
+    lines = [
+        "",
+        "Cross-series fingerprint",
+        (
+            "- status: "
+            f"{_string_metadata(summary, 'status')} "
+            f"series={_int_metadata(summary, 'fx_series_count')} "
+            f"groups={_int_metadata(summary, 'group_count')} "
+            f"included={_int_metadata(summary, 'included_group_count')} "
+            f"omitted={_int_metadata(summary, 'omitted_group_count')}"
+        ),
+    ]
+    triangular = _mapping_payload(summary.get("triangular_consistency"))
+    inverse = _mapping_payload(summary.get("inverse_consistency"))
+    stale = _mapping_payload(summary.get("stale_join_risk"))
+    lines.append(
+        "- consistency: "
+        f"triangles={_int_metadata(triangular, 'candidate_count')} "
+        f"triangle warnings={_int_metadata(triangular, 'warning_count')} "
+        f"triangle errors={_int_metadata(triangular, 'error_count')} "
+        f"inverse={_int_metadata(inverse, 'candidate_count')} "
+        f"stale joins={_int_metadata(stale, 'risk_count')}"
+    )
+    for group in _list_metadata(summary.get("groups")):
+        grid = _mapping_payload(group.get("timestamp_grid"))
+        ranges = _mapping_payload(group.get("coverage_ranges"))
+        lines.append(
+            "- "
+            f"{_string_metadata(group, 'group_id')}: "
+            f"symbols={','.join(_string_list_metadata(group.get('symbols')))} "
+            f"common={_int_metadata(grid, 'common_timestamp_count')}/"
+            f"{_int_metadata(grid, 'union_timestamp_count')} "
+            f"ratio={_format_rate(grid.get('common_timestamp_ratio'))} "
+            f"unequal_ranges={_bool_text(ranges.get('unequal_ranges'))}"
+        )
+    return lines
+
+
 def _format_fingerprint_readiness_risk_target(
     summary: Mapping[str, JSONValue],
 ) -> str:
@@ -2804,6 +3652,12 @@ def _format_fingerprint_readiness_target_line(
     stationarity_text = (
         f", {stationarity_details}" if stationarity_details else ""
     )
+    decomposition_details = _format_fingerprint_readiness_decomposition_details(
+        _mapping_payload(summary.get("decomposition"))
+    )
+    decomposition_text = (
+        f", {decomposition_details}" if decomposition_details else ""
+    )
     return (
         f"{_string_metadata(axis, 'data_format')} "
         f"{_string_metadata(axis, 'symbol')} "
@@ -2827,6 +3681,7 @@ def _format_fingerprint_readiness_target_line(
         f"{details_text}"
         f"{dependence_text}"
         f"{stationarity_text}"
+        f"{decomposition_text}"
     )
 
 
@@ -2937,6 +3792,44 @@ def _format_fingerprint_readiness_stationarity_details(
         f"{_int_metadata(stationarity, 'skipped_window_count')} "
         f"rounding={_int_metadata(stationarity, 'rounding_digits')} "
         f"transforms={transform_text}"
+        f"{skipped_reason_text}"
+    )
+
+
+def _format_fingerprint_readiness_decomposition_details(
+    decomposition: Mapping[str, JSONValue],
+) -> str:
+    if not decomposition:
+        return ""
+    status = _string_metadata(decomposition, "status")
+    reason = _optional_string_metadata(decomposition, "reason")
+    reason_text = f" reason={reason}" if reason else ""
+    skipped_reasons = _format_count_metadata(
+        decomposition.get("skipped_window_reason_counts")
+    )
+    skipped_reason_text = (
+        f" skipped_reasons={skipped_reasons}" if skipped_reasons else ""
+    )
+    stationarity = _mapping_payload(decomposition.get("stationarity"))
+    structural = _mapping_payload(decomposition.get("structural_break"))
+    trend = _mapping_payload(decomposition.get("trend"))
+    projection = _mapping_payload(decomposition.get("training_projection"))
+    return (
+        f"decomposition={status}{reason_text} "
+        f"basis={_string_metadata(decomposition, 'calculation_basis')} "
+        f"metric={_string_metadata(decomposition, 'metric')} "
+        f"samples={_int_metadata(decomposition, 'level_sample_count')}/"
+        f"{_int_metadata(decomposition, 'return_sample_count')} "
+        f"windows={_format_window_metadata(decomposition)} "
+        "computed_windows="
+        f"{_int_metadata(decomposition, 'computed_window_count')} "
+        "skipped_windows="
+        f"{_int_metadata(decomposition, 'skipped_window_count')} "
+        f"stationarity={_string_metadata(stationarity, 'status')} "
+        f"trend={_string_metadata(trend, 'direction')} "
+        f"structural={_string_metadata(structural, 'status')}/"
+        f"{_int_metadata(structural, 'candidate_count')} "
+        f"projection={_string_metadata(projection, 'grain')}"
         f"{skipped_reason_text}"
     )
 

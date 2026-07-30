@@ -39,14 +39,18 @@ from histdatacom.cli_config import (
     routed_command_from_cli_args,
 )
 from histdatacom.exceptions import (
+    ConfigurationError,
     format_exception_for_cli,
     format_failure_info_for_cli,
     InfluxConfigurationError,
 )
 from histdatacom.data_quality.preflight import (
+    QUALITY_PREFLIGHT_VALIDATION_EVIDENCE_SCHEMA_VERSION,
     format_quality_preflight_console_summary,
     format_quality_run_preflight_warning,
     quality_preflight_to_markdown,
+    quality_preflight_validation_evidence_payload,
+    quality_preflight_validation_evidence_to_json,
     quality_run_preflight_warning,
     register_quality_preflight_evidence_artifact,
     run_cache_quality_preflight,
@@ -57,13 +61,17 @@ from histdatacom.data_quality.preflight import (
 from histdatacom.data_quality.profiles import (
     QualityProfile,
     quality_profile_from_value,
+    quality_profile_resolution_from_value,
+    quality_profile_source_kind,
 )
 from histdatacom.data_quality.reporting import (
+    format_cross_series_fingerprint_lines,
     format_fingerprint_distribution_attention_lines,
     format_fingerprint_distribution_summary_lines,
     format_fingerprint_readiness_risk_lines,
     format_fingerprint_topology_attention_lines,
     format_fingerprint_topology_summary_lines,
+    format_quality_engine_skip_lines,
     format_quality_next_action_lines,
     format_quality_remediation_coverage_lines,
 )
@@ -76,6 +84,11 @@ from histdatacom.histdata_ascii import CACHE_FILENAME
 from histdatacom.publication_safety import publish_safe_path
 from histdatacom.publication_safety import publish_safe_json_mapping
 from histdatacom.records import Record
+from histdatacom.random_windows import (
+    RANDOM_WINDOW_SELECTION_METADATA_KEY,
+    RandomWindowSelectionV1,
+    RandomWindowError,
+)
 from histdatacom.runtime_contracts import (
     FailureInfo,
     JSONValue,
@@ -99,6 +112,7 @@ from histdatacom.operational_health import (
 )
 from histdatacom.utils import (
     load_influx_yaml,
+    normalize_output_timezone,
     set_working_data_dir,
     normalize_api_return_type,
 )
@@ -139,6 +153,7 @@ class RuntimeContext:
     orchestration_keep_runtime: bool
     orchestration_wait_result: bool
     api_return_type: str | None
+    output_timezone: str
     data_quality: bool
     quality_paths: tuple[str, ...]
     quality_check_groups: tuple[str, ...]
@@ -158,8 +173,10 @@ class RuntimeContext:
     quality_preflight_run_validation: bool
     quality_preflight_sample_size: int
     quality_preflight_validation_report_path: str | None
+    quality_preflight_validation_evidence_path: str
     quality_profile_path: str
     quality_profile: Mapping[str, Any]
+    quality_profile_resolution: Mapping[str, Any]
     quality_profile_preview: bool
     quality_profile_preview_format: str
     quality_profile_preview_output_path: str
@@ -305,6 +322,7 @@ class _HistDataCom:  # noqa:R701
             )
         )
         _attach_quality_preflight_profile_preview(payload, self.context)
+        _attach_quality_preflight_validation_evidence(payload, self.context)
         if self.context.quality_preflight_report_path:
             report_path = Path(
                 self.context.quality_preflight_report_path
@@ -429,7 +447,18 @@ class _HistDataCom:  # noqa:R701
         if self._should_materialize_orchestration_api_return(payload):
             records = _cache_records_from_orchestration_payload(payload)
             if records:
-                return self._materialize_orchestration_api_return(records)
+                selection = _random_window_selection_from_orchestration_payload(
+                    payload
+                )
+                if self.context.request.random_window and selection is None:
+                    raise RandomWindowError(
+                        "completed random-window run is missing its resolved "
+                        "selection"
+                    )
+                return self._materialize_orchestration_api_return(
+                    records,
+                    random_selection=selection,
+                )
         if not self.context.from_api:
             print(json.dumps(payload, indent=2, sort_keys=True))  # noqa:T201
         return payload
@@ -516,6 +545,8 @@ class _HistDataCom:  # noqa:R701
     def _materialize_orchestration_api_return(
         self,
         records: list[Record],
+        *,
+        random_selection: RandomWindowSelectionV1 | None = None,
     ) -> list | PolarsDataFrame | DataFrame | Table:
         """Rebuild the legacy API dataframe return from cache artifacts."""
         from histdatacom.api import Api
@@ -523,6 +554,8 @@ class _HistDataCom:  # noqa:R701
         return Api().merge_records(
             records,
             return_type=str(self.context.api_return_type or ""),
+            output_timezone=self.context.output_timezone,
+            random_selection=random_selection,
         )
 
 
@@ -540,6 +573,17 @@ def _resolve_runtime_context(options: Options) -> RuntimeContext:
     args["default_download_dir"] = set_working_data_dir(args["data_directory"])
     args["api_return_type"] = normalize_api_return_type(args["api_return_type"])
     options.api_return_type = args["api_return_type"]
+    configured_output_timezone = str(args.get("output_timezone", "") or "")
+    try:
+        args["output_timezone"] = normalize_output_timezone(
+            configured_output_timezone
+        )
+    except ValueError as err:
+        raise ConfigurationError(
+            str(err),
+            detail={"output_timezone": configured_output_timezone.strip()},
+        ) from err
+    options.output_timezone = args["output_timezone"]
     _attach_influx_config_metadata(options, args)
     try:
         should_submit_to_orchestration(args)
@@ -558,6 +602,7 @@ def _resolve_runtime_context(options: Options) -> RuntimeContext:
         orchestration_keep_runtime=bool(args["orchestration_keep_runtime"]),
         orchestration_wait_result=bool(args["orchestration_wait_result"]),
         api_return_type=args["api_return_type"],
+        output_timezone=args["output_timezone"],
         data_quality=bool(args["data_quality"]),
         quality_paths=tuple(
             str(path) for path in (args.get("quality_paths") or ())
@@ -615,8 +660,14 @@ def _resolve_runtime_context(options: Options) -> RuntimeContext:
             if args.get("quality_preflight_validation_report_path") is None
             else str(args["quality_preflight_validation_report_path"])
         ),
+        quality_preflight_validation_evidence_path=str(
+            args.get("quality_preflight_validation_evidence_path") or ""
+        ),
         quality_profile_path=str(args.get("quality_profile_path") or ""),
         quality_profile=dict(args.get("quality_profile") or {}),
+        quality_profile_resolution=dict(
+            args.get("quality_profile_resolution") or {}
+        ),
         quality_profile_preview=bool(args["quality_profile_preview"]),
         quality_profile_preview_format=str(
             args.get("quality_profile_preview_format") or "json"
@@ -704,6 +755,36 @@ def _attach_quality_preflight_profile_preview(
         "quality_profile_preview",
         artifact,
         legacy_key="quality_profile_preview",
+    )
+
+
+def _attach_quality_preflight_validation_evidence(
+    payload: dict[str, Any],
+    context: RuntimeContext,
+) -> None:
+    """Write optional bounded validation evidence into the artifact map."""
+    destination = context.quality_preflight_validation_evidence_path.strip()
+    if not destination:
+        return
+    validation_payload = quality_preflight_validation_evidence_payload(payload)
+    artifact = write_quality_preflight_evidence_artifact(
+        quality_preflight_validation_evidence_to_json(validation_payload),
+        destination,
+        kind="quality-preflight-validation-evidence",
+        output_format="json",
+        schema_version=(QUALITY_PREFLIGHT_VALIDATION_EVIDENCE_SCHEMA_VERSION),
+        label="Validation evidence",
+        console_label="validation evidence",
+    )
+    artifact["generated_at_utc"] = str(
+        validation_payload.get("generated_at_utc", "")
+    )
+    artifact["validation_state"] = str(validation_payload.get("state", ""))
+    register_quality_preflight_evidence_artifact(
+        payload,
+        "validation_evidence",
+        artifact,
+        legacy_key="validation_evidence",
     )
 
 
@@ -907,6 +988,7 @@ def _preview_channel_detail_text(channel: Mapping[str, JSONValue]) -> str:
         "profile_name",
         "profile_source",
         "source_path",
+        "selected_by",
         "paths",
     ):
         value = channel.get(key)
@@ -947,7 +1029,12 @@ def _preview_value_source_text(row: Mapping[str, JSONValue]) -> str:
     source = str(row.get("source") or "unknown")
     value = _preview_display_value(row.get("value"))
     override = " override" if row.get("override") else ""
-    return f"{path} [{source}{override}]: {value}"
+    previous = ""
+    if row.get("override"):
+        previous_source = str(row.get("previous_source") or "unknown")
+        previous_value = _preview_display_value(row.get("previous_value"))
+        previous = f"; previous={previous_source}:{previous_value}"
+    return f"{path} [{source}{override}]: {value}{previous}"
 
 
 def _preview_display_value(
@@ -993,11 +1080,12 @@ def _quality_profile_preview_payload(
 ) -> dict[str, JSONValue]:
     """Return a deterministic preview of the resolved quality profile."""
     profile = quality_profile_from_value(context.quality_profile)
-    resolved_profile = profile.to_request_payload()
-    if "reporting" not in resolved_profile:
-        resolved_profile["reporting"] = (
-            profile.reporting_profile().to_metadata()
-        )
+    resolution = dict(context.quality_profile_resolution)
+    if not resolution:
+        resolution = quality_profile_resolution_from_value(profile).to_payload()
+    resolved_profile = dict(
+        _preview_mapping(resolution.get("resolved_profile"))
+    )
 
     profile_metadata = profile.to_metadata()
     profile_metadata.setdefault("configured_reporting_keys", [])
@@ -1009,9 +1097,13 @@ def _quality_profile_preview_payload(
     audit_override_enabled = bool(
         context.args.get("quality_remediation_catalog_audit")
     )
-    cli_overrides: dict[str, JSONValue] = {}
-    if audit_override_enabled:
-        cli_overrides["reporting.remediation_catalog_audit.enabled"] = True
+    effective_sources = [
+        dict(item)
+        for item in _preview_mapping_rows(
+            resolution.get("effective_value_sources")
+        )
+    ]
+    cli_overrides = _quality_profile_cli_overrides(effective_sources)
     profile_inputs: dict[str, JSONValue] = {
         "from_api": context.from_api,
         "config_path": str(context.args.get("config_path") or ""),
@@ -1039,8 +1131,7 @@ def _quality_profile_preview_payload(
         "profile_explanation": _quality_profile_preview_explanation(
             profile,
             resolved_profile=resolved_profile,
-            profile_inputs=profile_inputs,
-            cli_overrides=cli_overrides,
+            resolution=resolution,
         ),
         "resolved_profile": resolved_profile,
     }
@@ -1050,17 +1141,17 @@ def _quality_profile_preview_explanation(
     profile: QualityProfile,
     *,
     resolved_profile: Mapping[str, JSONValue],
-    profile_inputs: Mapping[str, JSONValue],
-    cli_overrides: Mapping[str, JSONValue],
+    resolution: Mapping[str, JSONValue],
 ) -> dict[str, JSONValue]:
-    """Return deterministic provenance and default-diff metadata."""
+    """Render provenance retained by the profile resolver."""
     default_profile = _resolved_default_quality_profile_payload()
     source_kind = _quality_profile_source_kind(profile)
-    effective_sources = _quality_profile_value_sources(
-        resolved_profile,
-        profile=profile,
-        cli_overrides=cli_overrides,
-    )
+    effective_sources = [
+        dict(item)
+        for item in _preview_mapping_rows(
+            resolution.get("effective_value_sources")
+        )
+    ]
     effective_diff = _quality_profile_effective_diff(
         default_profile,
         resolved_profile,
@@ -1075,10 +1166,14 @@ def _quality_profile_preview_explanation(
             "source_path": profile.source_path,
             "is_default": profile.is_default,
         },
-        "input_channels": _quality_profile_input_channels(
-            profile,
-            profile_inputs=profile_inputs,
-            cli_overrides=cli_overrides,
+        "input_channels": cast(
+            JSONValue,
+            [
+                dict(item)
+                for item in _preview_mapping_rows(
+                    resolution.get("input_channels")
+                )
+            ],
         ),
         "effective_value_sources": _bounded_source_items(
             effective_sources,
@@ -1096,75 +1191,19 @@ def _resolved_default_quality_profile_payload() -> dict[str, JSONValue]:
     return payload
 
 
-def _quality_profile_input_channels(
-    profile: QualityProfile,
-    *,
-    profile_inputs: Mapping[str, JSONValue],
-    cli_overrides: Mapping[str, JSONValue],
-) -> list[JSONValue]:
-    """Return the input channels that shaped the resolved profile."""
-    config_path = str(profile_inputs.get("config_path") or "")
-    profile_path = str(profile_inputs.get("quality_profile_path") or "")
-    source_kind = _quality_profile_source_kind(profile)
-    channels: list[dict[str, JSONValue]] = [
-        {
-            "kind": "built_in_default",
-            "active": True,
-            "description": "Built-in quality profile defaults.",
-        },
-        {
-            "kind": "yaml_config",
-            "active": bool(config_path),
-            "path": config_path,
-        },
-        {
-            "kind": source_kind,
-            "active": not profile.is_default,
-            "profile_name": profile.name,
-            "profile_source": profile.source,
-            "source_path": profile.source_path or profile_path,
-        },
-        {
-            "kind": "api_options",
-            "active": (
-                bool(profile_inputs.get("from_api"))
-                and source_kind != "api_options"
-            ),
-        },
-        {
-            "kind": "cli_override",
-            "active": bool(cli_overrides),
-            "paths": cast(JSONValue, sorted(cli_overrides)),
-        },
-    ]
-    return [channel for channel in channels if channel["active"]]
-
-
-def _quality_profile_value_sources(
-    resolved_profile: Mapping[str, JSONValue],
-    *,
-    profile: QualityProfile,
-    cli_overrides: Mapping[str, JSONValue],
-) -> list[dict[str, JSONValue]]:
-    """Return per-value provenance for the resolved preview profile."""
-    source_by_path: dict[str, dict[str, JSONValue]] = {}
-    for path, value in _flatten_json_mapping(resolved_profile):
-        source_by_path[path] = {
-            "path": path,
-            "value": value,
-            "source": _quality_profile_path_source(path, profile=profile),
-        }
-    for dotted_path, value in sorted(cli_overrides.items()):
-        pointer = _json_pointer_from_dotted_path(dotted_path)
-        previous = source_by_path.get(pointer, {})
-        source_by_path[pointer] = {
-            "path": pointer,
-            "value": value,
-            "source": "cli_override",
-            "overridden_source": str(previous.get("source") or "unknown"),
-            "override": True,
-        }
-    return [source_by_path[path] for path in sorted(source_by_path)]
+def _quality_profile_cli_overrides(
+    effective_sources: Sequence[Mapping[str, JSONValue]],
+) -> dict[str, JSONValue]:
+    """Return compatibility CLI overrides from resolver provenance."""
+    overrides: dict[str, JSONValue] = {}
+    for item in effective_sources:
+        if item.get("source") != "cli_override" or not item.get("override"):
+            continue
+        path = str(item.get("path") or "")
+        if not path:
+            continue
+        overrides[_dotted_path_from_json_pointer(path)] = item.get("value")
+    return overrides
 
 
 def _quality_profile_effective_diff(
@@ -1224,42 +1263,9 @@ def _prune_expanded_empty_mapping_values(
             del values[path]
 
 
-def _quality_profile_path_source(
-    path: str,
-    *,
-    profile: QualityProfile,
-) -> str:
-    """Return the source label for one resolved profile value path."""
-    if profile.is_default:
-        return "built_in_default"
-    if path.startswith("/rules/") or path.startswith("/modeling_assumptions/"):
-        return _quality_profile_source_kind(profile)
-    if path.startswith("/reporting/"):
-        reporting = profile.reporting
-        if _profile_has_json_pointer(
-            reporting, path.removeprefix("/reporting")
-        ):
-            return _quality_profile_source_kind(profile)
-        return "built_in_default"
-    if path in {"/name", "/source", "/source_path", "/schema_version"}:
-        return _quality_profile_source_kind(profile)
-    return "built_in_default"
-
-
 def _quality_profile_source_kind(profile: QualityProfile) -> str:
     """Return a stable public source kind for a quality profile."""
-    source = str(getattr(profile, "source", "") or "")
-    if source == "default":
-        return "built_in_default"
-    if source == "file":
-        return "profile_file"
-    if source == "api-options":
-        return "api_options"
-    if source == "cli-options":
-        return "cli_options"
-    if source == "operator-config":
-        return "operator_config"
-    return source.replace("-", "_") or "unknown"
+    return str(quality_profile_source_kind(profile))
 
 
 def _bounded_source_items(
@@ -1299,25 +1305,13 @@ def _flatten_json_mapping(
     return flattened
 
 
-def _profile_has_json_pointer(
-    value: Mapping[str, JSONValue],
-    pointer: str,
-) -> bool:
-    """Return whether a profile mapping explicitly contains a pointer path."""
-    if not pointer:
-        return bool(value)
-    current: object = value
-    for raw_token in pointer.strip("/").split("/"):
-        token = _json_pointer_token_unescape(raw_token)
-        if not isinstance(current, Mapping) or token not in current:
-            return False
-        current = current[token]
-    return True
-
-
-def _json_pointer_from_dotted_path(path: str) -> str:
-    """Translate legacy dotted override paths into JSON pointers."""
-    return "/" + "/".join(_json_pointer_token(part) for part in path.split("."))
+def _dotted_path_from_json_pointer(path: str) -> str:
+    """Translate a JSON pointer into the compatibility dotted path form."""
+    return ".".join(
+        _json_pointer_token_unescape(token)
+        for token in path.strip("/").split("/")
+        if token
+    )
 
 
 def _json_pointer_token(value: str) -> str:
@@ -1419,13 +1413,28 @@ def main(
     cli_args = sys.argv[1:] if not options else []
     routed_command = routed_command_from_cli_args(
         cli_args,
-        {"analytics", "cleanup", "groups", "jobs", "quality", "runtime"},
+        {
+            "analytics",
+            "cleanup",
+            "datasets",
+            "groups",
+            "jobs",
+            "quality",
+            "reconstruction",
+            "runtime",
+        },
     )
     if not options and routed_command == "cleanup":
         from histdatacom.cleanup_cli import main as cleanup_main
 
         return cleanup_main(
             remove_routed_command_from_cli_args(cli_args, "cleanup")
+        )
+    if not options and routed_command == "datasets":
+        from histdatacom.dataset_cli import main as dataset_main
+
+        return dataset_main(
+            remove_routed_command_from_cli_args(cli_args, "datasets")
         )
     if not options and routed_command == "jobs":
         from histdatacom.orchestration.cli import jobs_main
@@ -1442,6 +1451,12 @@ def main(
 
         return quality_main(
             remove_routed_command_from_cli_args(cli_args, "quality")
+        )
+    if not options and routed_command == "reconstruction":
+        from histdatacom.reconstruction_cli import main as reconstruction_main
+
+        return reconstruction_main(
+            remove_routed_command_from_cli_args(cli_args, "reconstruction")
         )
     if not options and routed_command == "runtime":
         reexec_code = _maybe_reexec_windows_runtime_cli(cli_args)
@@ -1462,7 +1477,17 @@ def main(
 
     if not options:
         options = Options()
-        _HistDataCom(options).run()
+        try:
+            _HistDataCom(options).run()
+        except ConfigurationError as err:
+            print(  # noqa:T201
+                format_exception_for_cli(
+                    err,
+                    title="HistData configuration invalid",
+                ),
+                file=sys.stderr,
+            )
+            raise SystemExit(1) from err
         return None
     options.from_api = True
     return _HistDataCom(options).run()
@@ -1544,6 +1569,24 @@ def _cache_records_from_orchestration_payload(payload: dict) -> list[Record]:
         seen_paths.add(resolved_path)
         records.append(_record_from_cache_artifact(path, artifact))
     return records
+
+
+def _random_window_selection_from_orchestration_payload(
+    payload: Mapping[str, Any],
+) -> RandomWindowSelectionV1 | None:
+    """Recover and verify one compact selection from a completed run."""
+    selections: dict[str, RandomWindowSelectionV1] = {}
+    for item in _iter_mapping_payloads(payload):
+        candidate = item.get(RANDOM_WINDOW_SELECTION_METADATA_KEY)
+        if not isinstance(candidate, Mapping):
+            continue
+        selection = RandomWindowSelectionV1.from_dict(candidate)
+        selections[selection.selection_id] = selection
+    if len(selections) > 1:
+        raise ValueError(
+            "orchestration payload contains conflicting random windows"
+        )
+    return next(iter(selections.values()), None)
 
 
 def _repository_available_data_from_orchestration_payload(
@@ -1769,6 +1812,11 @@ def _format_orchestration_quality_console_summary(
     if int(summary.get("target_count", 0) or 0) == 0:
         lines.append("No data quality targets discovered.")
     lines.extend(
+        format_quality_engine_skip_lines(
+            _mapping_from_payload(quality_payload.get("quality_engine"))
+        )
+    )
+    lines.extend(
         format_quality_next_action_lines(
             _mapping_from_payload(quality_payload.get("next_actions"))
         )
@@ -1808,6 +1856,13 @@ def _format_orchestration_quality_console_summary(
         format_fingerprint_readiness_risk_lines(
             _mapping_from_payload(
                 quality_payload.get("fingerprint_readiness_risk")
+            )
+        )
+    )
+    lines.extend(
+        format_cross_series_fingerprint_lines(
+            _mapping_from_payload(
+                quality_payload.get("fingerprint_cross_series")
             )
         )
     )

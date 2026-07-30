@@ -1317,10 +1317,10 @@ def _quality_job(
     }
 
 
-def test_check_package_metadata_requires_core_temporal_dependency(
+def test_check_package_metadata_requires_core_runtime_dependencies(
     monkeypatch,
 ) -> None:
-    """Base-install smoke should require temporalio as a core dependency."""
+    """Base-install smoke should require runtime code and timezone data."""
     import histdatacom
 
     module = _module()
@@ -1375,3 +1375,4 @@ def test_check_package_metadata_requires_core_temporal_dependency(
 
     assert report["orchestration_contracts"] == ["RunRequest"]
     assert report["temporalio_version"] == "1.10.0"
+    assert report["tzdata_version"] == "1.10.0"

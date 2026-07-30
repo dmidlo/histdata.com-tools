@@ -1,0 +1,9 @@
+**
+!Dockerfile
+!pyproject.toml
+!README.md
+!LICENSE
+!container
+!container/constraints.txt
+!src
+!src/**

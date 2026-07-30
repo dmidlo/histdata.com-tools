@@ -37,6 +37,7 @@ OPTIONAL_MODULE_FEATURES = {
 }
 
 SUPPORTED_API_RETURN_TYPES = frozenset(API_RETURN_TYPE_MODULES)
+OUTPUT_DATETIME_COLUMN = "datetime_local"
 
 
 def get_month_from_datemonth(
@@ -219,6 +220,25 @@ def normalize_api_return_type(return_type: Optional[str]) -> Optional[str]:
             f"Supported values are: {supported}."
         )
 
+    return normalized
+
+
+def normalize_output_timezone(timezone_name: Optional[str]) -> str:
+    """Normalize and validate an optional IANA output timezone name."""
+    if not timezone_name:
+        return ""
+
+    normalized = timezone_name.strip()
+    if not normalized:
+        return ""
+
+    try:
+        pytz.timezone(normalized)
+    except pytz.UnknownTimeZoneError as err:
+        raise ValueError(
+            f"unsupported output timezone '{timezone_name}'. "
+            "Use an IANA timezone name such as UTC or America/New_York."
+        ) from err
     return normalized
 
 

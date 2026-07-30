@@ -3,17 +3,25 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 from pathlib import Path
 
 import pytest
 
 from histdatacom.data_quality import (
+    DEFAULT_QUALITY_SKIP_COUNT_LIMIT,
+    DEFAULT_QUALITY_SKIP_EVENT_LIMIT,
+    QUALITY_ENGINE_METADATA_KEY,
+    QUALITY_ENGINE_SCHEMA_VERSION,
+    QUALITY_SKIP_EVENTS_SCHEMA_VERSION,
+    QUALITY_SKIP_REASON_DUPLICATE_ARCHIVE_PREFERRED_CSV,
     QualityFinding,
     QualityLocation,
     QualityReport,
     QualityRuleResult,
     QualityRunSummary,
     QualitySeverity,
+    QualitySkipEvent,
     QualityStatus,
     QualityTarget,
     QualityTargetKind,
@@ -90,6 +98,38 @@ def test_quality_target_and_finding_round_trip_preserves_context(
     assert restored_finding.target.timeframe == TICK
     assert restored_finding.location.row_number == 2
     assert restored_finding.location.metadata["source_timezone"] == "EST-no-DST"
+
+
+def test_quality_skip_event_round_trip_is_normalized_and_path_free() -> None:
+    """Skip events should retain stable target identity without local paths."""
+    target = QualityTarget(
+        path="/Users/alice/private/DAT_ASCII_eurusd_t_201202.zip",
+        kind=QualityTargetKind.ZIP,
+        data_format="ASCII",
+        timeframe="t",
+        symbol="eurusd",
+        period="201202",
+    )
+    event = QualitySkipEvent.from_target(
+        reason_code="duplicate-archive preferred csv",
+        rule_id="time.ascii.gaps",
+        target=target,
+    )
+
+    payload = event.to_dict()
+    restored = QualitySkipEvent.from_dict(payload)
+
+    assert event.reason_code == "duplicate_archive_preferred_csv"
+    assert restored == event
+    assert payload["target_kind"] == "zip"
+    assert payload["target_axis"] == {
+        "data_format": "ascii",
+        "timeframe": "T",
+        "symbol": "EURUSD",
+        "period": "201202",
+        "kind": "zip",
+    }
+    assert "/Users/" not in json.dumps(payload, sort_keys=True)
 
 
 def test_quality_engine_runs_multiple_rules_and_aggregates_status(
@@ -234,7 +274,22 @@ def test_quality_engine_skips_duplicate_archive_semantic_scans() -> None:
         ("time.ascii.gaps", QualityTargetKind.CSV),
     ]
     assert report.status is QualityStatus.CLEAN
-    assert report.metadata["quality_engine"] == {
+    engine = report.metadata[QUALITY_ENGINE_METADATA_KEY]
+    assert isinstance(engine, dict)
+    assert engine["schema_version"] == QUALITY_ENGINE_SCHEMA_VERSION
+    assert engine["planned_target_rule_evaluation_count"] == 4
+    assert engine["target_rule_evaluation_count"] == 3
+    assert engine["skipped_rule_evaluation_count"] == 1
+    assert {
+        key: engine[key]
+        for key in (
+            "target_count",
+            "rule_count",
+            "target_rule_evaluation_count",
+            "skipped_duplicate_archive_rule_evaluation_count",
+            "duplicate_archive_scan_policy",
+        )
+    } == {
         "target_count": 2,
         "rule_count": 2,
         "target_rule_evaluation_count": 3,
@@ -243,6 +298,161 @@ def test_quality_engine_skips_duplicate_archive_semantic_scans() -> None:
             "prefer_extracted_csv_for_non_inventory_rules"
         ),
     }
+    skips = engine["skip_events"]
+    assert isinstance(skips, dict)
+    assert skips["schema_version"] == QUALITY_SKIP_EVENTS_SCHEMA_VERSION
+    assert skips["event_count"] == 1
+    assert skips["included_event_count"] == 1
+    assert skips["omitted_event_count"] == 0
+    assert skips["truncated"] is False
+    assert skips["reason_counts"] == {
+        QUALITY_SKIP_REASON_DUPLICATE_ARCHIVE_PREFERRED_CSV: 1,
+    }
+    assert skips["rule_id_counts"] == {"time.ascii.gaps": 1}
+    assert skips["target_kind_counts"] == {"zip": 1}
+    assert skips["events"] == [
+        {
+            "reason_code": (
+                QUALITY_SKIP_REASON_DUPLICATE_ARCHIVE_PREFERRED_CSV
+            ),
+            "rule_id": "time.ascii.gaps",
+            "target_kind": "zip",
+            "target_axis": {
+                "data_format": "ascii",
+                "timeframe": "T",
+                "symbol": "EURUSD",
+                "period": "201202",
+                "kind": "zip",
+            },
+        }
+    ]
+    assert "/tmp/" not in json.dumps(skips, sort_keys=True)
+
+
+def test_quality_engine_skip_events_are_bounded_and_order_independent() -> None:
+    """Large skip sets should retain complete counts and bounded evidence."""
+    targets: list[QualityTarget] = []
+    for index in range(DEFAULT_QUALITY_SKIP_EVENT_LIMIT + 1):
+        period = f"{index:06d}"
+        metadata = {"case": "clean"}
+        targets.extend(
+            (
+                QualityTarget(
+                    path=f"/tmp/DAT_ASCII_EURUSD_T_{period}.zip",
+                    kind=QualityTargetKind.ZIP,
+                    data_format="ascii",
+                    timeframe=TICK,
+                    symbol="EURUSD",
+                    period=period,
+                    metadata=metadata,
+                ),
+                QualityTarget(
+                    path=f"/tmp/DAT_ASCII_EURUSD_T_{period}.csv",
+                    kind=QualityTargetKind.CSV,
+                    data_format="ascii",
+                    timeframe=TICK,
+                    symbol="EURUSD",
+                    period=period,
+                    metadata=metadata,
+                ),
+            )
+        )
+    rule = _StaticRule(
+        rule_id="time.ascii.gaps",
+        description="semantic scans prefer extracted CSVs",
+        severity_by_case={},
+    )
+
+    first = run_quality_assessment(targets=targets, rules=(rule,))
+    second = run_quality_assessment(
+        targets=tuple(reversed(targets)),
+        rules=(rule,),
+    )
+    first_engine = first.metadata[QUALITY_ENGINE_METADATA_KEY]
+    second_engine = second.metadata[QUALITY_ENGINE_METADATA_KEY]
+    assert isinstance(first_engine, dict)
+    assert isinstance(second_engine, dict)
+    first_skips = first_engine["skip_events"]
+    second_skips = second_engine["skip_events"]
+    assert isinstance(first_skips, dict)
+    assert isinstance(second_skips, dict)
+
+    assert first_skips == second_skips
+    assert first_skips["event_count"] == DEFAULT_QUALITY_SKIP_EVENT_LIMIT + 1
+    assert (
+        first_skips["included_event_count"] == DEFAULT_QUALITY_SKIP_EVENT_LIMIT
+    )
+    assert first_skips["omitted_event_count"] == 1
+    assert first_skips["truncated"] is True
+    assert len(first_skips["events"]) == DEFAULT_QUALITY_SKIP_EVENT_LIMIT
+    assert first_skips["reason_counts"] == {
+        QUALITY_SKIP_REASON_DUPLICATE_ARCHIVE_PREFERRED_CSV: (
+            DEFAULT_QUALITY_SKIP_EVENT_LIMIT + 1
+        )
+    }
+    assert first_engine["planned_target_rule_evaluation_count"] == len(targets)
+    assert first_engine["target_rule_evaluation_count"] == (
+        DEFAULT_QUALITY_SKIP_EVENT_LIMIT + 1
+    )
+    assert first_engine["skipped_rule_evaluation_count"] == (
+        DEFAULT_QUALITY_SKIP_EVENT_LIMIT + 1
+    )
+    assert "/tmp/" not in json.dumps(first_skips, sort_keys=True)
+
+
+def test_quality_engine_skip_aggregate_dimensions_are_bounded() -> None:
+    """High-cardinality rule aggregates should expose explicit omission."""
+    archive = QualityTarget(
+        path="/tmp/DAT_ASCII_EURUSD_T_201202.zip",
+        kind=QualityTargetKind.ZIP,
+        data_format="ascii",
+        timeframe=TICK,
+        symbol="EURUSD",
+        period="201202",
+        metadata={"case": "clean"},
+    )
+    csv = QualityTarget(
+        path="/tmp/DAT_ASCII_EURUSD_T_201202.csv",
+        kind=QualityTargetKind.CSV,
+        data_format="ascii",
+        timeframe=TICK,
+        symbol="EURUSD",
+        period="201202",
+        metadata={"case": "clean"},
+    )
+    rules = tuple(
+        _StaticRule(
+            rule_id=f"time.test.rule-{index:03d}",
+            description="bounded aggregate test rule",
+            severity_by_case={},
+        )
+        for index in range(DEFAULT_QUALITY_SKIP_COUNT_LIMIT + 1)
+    )
+
+    report = run_quality_assessment(
+        targets=(archive, csv),
+        rules=rules,
+    )
+    engine = report.metadata[QUALITY_ENGINE_METADATA_KEY]
+    assert isinstance(engine, dict)
+    skips = engine["skip_events"]
+    assert isinstance(skips, dict)
+    rule_counts = skips["rule_id_counts"]
+    assert isinstance(rule_counts, dict)
+    limits = skips["limit_metadata"]
+    assert isinstance(limits, dict)
+    rule_limits = limits["rules"]
+    assert isinstance(rule_limits, dict)
+
+    assert len(rule_counts) == DEFAULT_QUALITY_SKIP_COUNT_LIMIT
+    assert tuple(rule_counts) == tuple(
+        f"time.test.rule-{index:03d}"
+        for index in range(DEFAULT_QUALITY_SKIP_COUNT_LIMIT)
+    )
+    assert rule_limits["total_count"] == DEFAULT_QUALITY_SKIP_COUNT_LIMIT + 1
+    assert rule_limits["included_count"] == DEFAULT_QUALITY_SKIP_COUNT_LIMIT
+    assert rule_limits["omitted_count"] == 1
+    assert rule_limits["truncated"] is True
 
 
 def test_quality_engine_reports_bounded_progress(tmp_path: Path) -> None:

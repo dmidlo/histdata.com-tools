@@ -7,7 +7,14 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+import histdatacom.data_quality.symbols as symbols_module
+import histdatacom.data_quality.fingerprints as fingerprints_module
+import pytest
+
 from histdatacom.data_quality import (
+    CROSS_SERIES_FINGERPRINT_METADATA_KEY,
+    CROSS_SERIES_FINGERPRINT_RULE_ID,
+    CROSS_SERIES_FINGERPRINT_SCHEMA_VERSION,
     DEFAULT_FINGERPRINT_HISTOGRAM_BINS,
     DEFAULT_FINGERPRINT_LAGS,
     DEFAULT_FINGERPRINT_MAX_ROWS,
@@ -15,12 +22,17 @@ from histdatacom.data_quality import (
     DEFAULT_FINGERPRINT_ROLLING_WINDOWS,
     DEFAULT_FINGERPRINT_ROUNDING_DIGITS,
     QUALITY_PROFILE_SCHEMA_VERSION,
+    QUALITY_ENGINE_METADATA_KEY,
+    QUALITY_SKIP_EVENTS_SCHEMA_VERSION,
     SERIES_FINGERPRINT_RULE_ID,
+    SYNTHETIC_CONSTRAINTS_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_AUDIT_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_CALENDAR_REGIMES_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_CONDITIONAL_DISTRIBUTIONS_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_COVERAGE_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_COVERAGE_SCHEMA_VERSION,
+    TIME_SERIES_FINGERPRINT_DECOMPOSITION_SCHEMA_VERSION,
+    TIME_SERIES_FINGERPRINT_DECOMPOSITION_TRAINING_PROJECTION_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_DEPENDENCE_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_DISTRIBUTION_ATTENTION_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_DISTRIBUTION_ATTENTION_SCHEMA_VERSION,
@@ -28,6 +40,7 @@ from histdatacom.data_quality import (
     TIME_SERIES_FINGERPRINT_DISTRIBUTION_SUMMARY_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_DYNAMICS_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_METADATA_KEY,
+    TIME_SERIES_FINGERPRINT_PARITY_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_STATIONARITY_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_TOPOLOGY_ATTENTION_METADATA_KEY,
@@ -35,14 +48,19 @@ from histdatacom.data_quality import (
     TIME_SERIES_FINGERPRINT_TOPOLOGY_SUMMARY_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_TOPOLOGY_SUMMARY_SCHEMA_VERSION,
     HistDataFingerprintDistributionAttentionProfile,
+    HistDataFingerprintParityProfile,
     HistDataFingerprintProfile,
+    HistDataCrossSeriesFingerprintRule,
     HistDataSeriesFingerprintRule,
     QualityFinding,
+    QualityReport,
     QualitySeverity,
     QualityTarget,
     QualityTargetKind,
     discover_quality_targets,
     quality_rules_for_groups,
+    quality_next_actions_summary,
+    quality_report_to_json,
     quality_run_rules_for_groups,
     quality_target_from_path,
     run_quality_assessment,
@@ -52,6 +70,8 @@ from histdatacom.data_quality import (
     series_fingerprint_topology_attention_summary,
     series_fingerprint_topology_summary,
 )
+from histdatacom.data_quality.reporting import quality_report_payload
+from histdatacom.data_quality.training_features import TRAINING_SCHEMA_VERSION
 from histdatacom.histdata_ascii import (
     CACHE_FILENAME,
     TICK,
@@ -77,6 +97,8 @@ TICK_SECTIONS = [
     "microstructure_dynamics",
     "dependence",
     "stationarity_diagnostics",
+    "decomposition",
+    "synthetic_constraints",
 ]
 
 
@@ -89,7 +111,418 @@ def test_fingerprint_group_registers_series_rule_surface() -> None:
     assert SERIES_FINGERPRINT_RULE_ID in {
         rule.rule_id for rule in quality_rules_for_groups(("all",))
     }
-    assert quality_run_rules_for_groups(("fingerprint",)) == ()
+    run_rules = quality_run_rules_for_groups(("fingerprint",))
+    assert [rule.rule_id for rule in run_rules] == [
+        CROSS_SERIES_FINGERPRINT_RULE_ID
+    ]
+    assert isinstance(run_rules[0], HistDataCrossSeriesFingerprintRule)
+    all_run_rules = quality_run_rules_for_groups(("all",))
+    assert CROSS_SERIES_FINGERPRINT_RULE_ID in {
+        rule.rule_id for rule in all_run_rules
+    }
+    shared_domain_rule = next(
+        rule
+        for rule in all_run_rules
+        if rule.rule_id == "domain.cross_instrument_consistency"
+    )
+    shared_fingerprint_rule = next(
+        rule
+        for rule in all_run_rules
+        if rule.rule_id == CROSS_SERIES_FINGERPRINT_RULE_ID
+    )
+    assert shared_domain_rule.scan_provider is not None
+    assert shared_fingerprint_rule.scan_provider is (
+        shared_domain_rule.scan_provider
+    )
+
+
+def test_cross_series_fingerprint_profiles_unequal_triangle_and_identity(
+    tmp_path: Path,
+) -> None:
+    """Triangle fingerprints should preserve identity and limiting ranges."""
+    cases = (
+        _cross_series_case(
+            "EURUSD",
+            (
+                "20120201 000000000,1.200000,1.200200,0",
+                "20120201 000001000,1.210000,1.210200,0",
+                "20120201 000001000,1.211000,1.211200,0",
+                "20120201 000002000,1.220000,1.220200,0",
+                "20120201 000003000,1.240000,1.240200,0",
+            ),
+        ),
+        _cross_series_case(
+            "GBPUSD",
+            (
+                "20120201 000000000,1.500000,1.500200,0",
+                "20120201 000001000,1.510000,1.510200,0",
+                "20120201 000002000,1.525000,1.525200,0",
+                "20120201 000003000,1.540000,1.540200,0",
+            ),
+        ),
+        _cross_series_case(
+            "EURGBP",
+            (
+                "20120201 000001000,0.801000,0.801200,0",
+                "20120201 000002000,0.900000,0.900200,0",
+                "20120201 000003000,0.805000,0.805200,0",
+            ),
+        ),
+    )
+    targets = tuple(
+        _discovered_target(write_ascii_case(tmp_path / case.name, case))
+        for case in cases
+    )
+
+    report = run_quality_assessment(
+        targets,
+        quality_rules_for_groups(("fingerprint",)),
+        run_rules=quality_run_rules_for_groups(("fingerprint",)),
+        metadata={"roots": [str(tmp_path)]},
+    )
+    payload = _mapping(report.metadata[CROSS_SERIES_FINGERPRINT_METADATA_KEY])
+    group = _mapping(_list(payload["groups"])[0])
+    grid = _mapping(group["timestamp_grid"])
+    ranges = _mapping(group["coverage_ranges"])
+    series_by_symbol = {
+        str(item["symbol"]): item
+        for item in (_mapping(value) for value in _list(group["series"]))
+    }
+
+    assert payload["schema_version"] == CROSS_SERIES_FINGERPRINT_SCHEMA_VERSION
+    assert payload["rule_id"] == CROSS_SERIES_FINGERPRINT_RULE_ID
+    assert payload["group_count"] == 1
+    triangular = _mapping(payload["triangular_consistency"])
+    assert triangular["candidate_count"] == 1
+    assert grid["union_timestamp_count"] == 4
+    assert grid["common_timestamp_count"] == 3
+    assert grid["common_timestamp_ratio"] == 0.75
+    assert ranges["unequal_ranges"] is True
+    assert ranges["limiting_start_symbols"] == ["EURGBP"]
+    assert series_by_symbol["EURUSD"]["row_count"] == 5
+    assert series_by_symbol["EURUSD"]["unique_timestamp_count"] == 4
+    assert series_by_symbol["EURUSD"]["duplicate_timestamp_row_count"] == 2
+    assert series_by_symbol["EURUSD"]["identity_columns"] == [
+        "series_id",
+        "period",
+        "row_id",
+        "source_row_number",
+        "event_seq",
+    ]
+    topology = _mapping(group["topology"])
+    assert topology["target_count"] == 3
+    assert topology["duplicate_timestamp_row_count"] == 2
+    correlation = _mapping(group["return_correlation"])
+    assert correlation["pair_count"] == 3
+    assert any(
+        _mapping(pair)["status"] == "valid"
+        for pair in _list(correlation["pairs"])
+    )
+    triangle_samples = [
+        *_list(triangular["warning_samples"]),
+        *_list(triangular["error_samples"]),
+    ]
+    assert triangle_samples
+    direct_identity = _mapping(
+        _mapping(_mapping(triangle_samples[0])["row_identity"])["direct"]
+    )
+    assert direct_identity["series_id"] == "ascii:T:EURGBP:histdata.com"
+    assert direct_identity["period"] == "201202"
+    assert int(direct_identity["row_id"]) > 0
+    cross_finding = next(
+        finding
+        for finding in report.findings
+        if finding.rule_id == CROSS_SERIES_FINGERPRINT_RULE_ID
+    )
+    assert cross_finding.severity is QualitySeverity.INFO
+    assert str(tmp_path) not in str(payload)
+    rerun = quality_run_rules_for_groups(("fingerprint",))[0].evaluate_run(
+        targets,
+        metadata={
+            TIME_SERIES_FINGERPRINT_TOPOLOGY_SUMMARY_METADATA_KEY: (
+                report.metadata[
+                    TIME_SERIES_FINGERPRINT_TOPOLOGY_SUMMARY_METADATA_KEY
+                ]
+            )
+        },
+    )
+    assert rerun.metadata[CROSS_SERIES_FINGERPRINT_METADATA_KEY] == payload
+
+
+def test_all_group_shares_cross_instrument_scan_between_rule_surfaces(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
+    """The all group should not read the same panel twice."""
+    targets = tuple(
+        _discovered_target(
+            write_ascii_case(
+                tmp_path / symbol.lower(),
+                _cross_series_case(
+                    symbol,
+                    (
+                        "20120201 000000000,1.200000,1.200200,0",
+                        "20120201 000001000,1.210000,1.210200,0",
+                    ),
+                ),
+            )
+        )
+        for symbol in ("EURGBP", "EURUSD", "GBPUSD")
+    )
+    calls = 0
+    original_scan = symbols_module._scan_cross_instrument_consistency
+
+    def counted_scan(*args: Any, **kwargs: Any) -> Any:
+        nonlocal calls
+        calls += 1
+        return original_scan(*args, **kwargs)
+
+    monkeypatch.setattr(
+        symbols_module,
+        "_scan_cross_instrument_consistency",
+        counted_scan,
+    )
+    cross_rules = tuple(
+        rule
+        for rule in quality_run_rules_for_groups(("all",))
+        if rule.rule_id
+        in {
+            "domain.cross_instrument_consistency",
+            CROSS_SERIES_FINGERPRINT_RULE_ID,
+        }
+    )
+
+    report = run_quality_assessment(targets, (), run_rules=cross_rules)
+
+    assert calls == 1
+    assert "cross_instrument_consistency" in report.metadata
+    assert CROSS_SERIES_FINGERPRINT_METADATA_KEY in report.metadata
+
+
+def test_cross_series_fingerprint_reports_inverse_sparse_and_stale_risk(
+    tmp_path: Path,
+) -> None:
+    """Inverse and sparse panels should retain descriptive risk summaries."""
+    cases = (
+        _cross_series_case(
+            "EURUSD",
+            (
+                "20120201 000000000,1.250000,1.250000,0",
+                "20120201 000001000,1.260000,1.260000,0",
+                "20120201 000002000,1.270000,1.270000,0",
+                "20120201 000003000,1.280000,1.280000,0",
+            ),
+        ),
+        _cross_series_case(
+            "USDEUR",
+            ("20120201 000000000,0.800000,0.800000,0",),
+        ),
+    )
+    targets = tuple(
+        _discovered_target(write_ascii_case(tmp_path / case.name, case))
+        for case in cases
+    )
+
+    report = run_quality_assessment(
+        targets,
+        (),
+        run_rules=quality_run_rules_for_groups(("fingerprint",)),
+    )
+    payload = _mapping(report.metadata[CROSS_SERIES_FINGERPRINT_METADATA_KEY])
+    group = _mapping(_list(payload["groups"])[0])
+    pair = _mapping(_list(_mapping(group["return_correlation"])["pairs"])[0])
+
+    assert _mapping(payload["inverse_consistency"])["candidate_count"] == 1
+    assert _mapping(payload["stale_join_risk"])["risk_count"] == 1
+    assert _mapping(group["timestamp_grid"])["common_timestamp_ratio"] == 0.25
+    assert pair == {
+        "left_symbol": "EURUSD",
+        "right_symbol": "USDEUR",
+        "overlap_return_count": 0,
+        "status": "unavailable",
+        "reason": "insufficient_overlap",
+    }
+    assert payload["status"] == "limited"
+
+
+def test_cross_series_fingerprint_reports_limiting_triangle_period_range(
+    tmp_path: Path,
+) -> None:
+    """A later-starting triangle leg should limit common panel coverage."""
+    cases = (
+        _cross_series_case(
+            "EURUSD",
+            ("20000501 000000000,1.100000,1.100200,0",),
+            period="200005",
+        ),
+        _cross_series_case(
+            "GBPUSD",
+            ("20000501 000000000,1.500000,1.500200,0",),
+            period="200005",
+        ),
+        _cross_series_case(
+            "EURUSD",
+            ("20020301 000000000,1.200000,1.200200,0",),
+            period="200203",
+        ),
+        _cross_series_case(
+            "GBPUSD",
+            ("20020301 000000000,1.500000,1.500200,0",),
+            period="200203",
+        ),
+        _cross_series_case(
+            "EURGBP",
+            ("20020301 000000000,0.800000,0.800200,0",),
+            period="200203",
+        ),
+    )
+    targets = tuple(
+        _discovered_target(
+            write_ascii_case(tmp_path / f"{case.name}-{index}", case)
+        )
+        for index, case in enumerate(cases)
+    )
+
+    report = run_quality_assessment(
+        targets,
+        (),
+        run_rules=quality_run_rules_for_groups(("fingerprint",)),
+    )
+    payload = _mapping(report.metadata[CROSS_SERIES_FINGERPRINT_METADATA_KEY])
+    panel = _mapping(_list(payload["panel_coverage"])[0])
+    groups = {
+        str(_mapping(group)["group_id"]): _mapping(group)
+        for group in _list(payload["groups"])
+    }
+
+    assert panel["union_period_count"] == 2
+    assert panel["common_period_count"] == 1
+    assert panel["common_first_period"] == "200203"
+    assert panel["unequal_period_ranges"] is True
+    assert panel["limiting_start_symbols"] == ["EURGBP"]
+    assert _mapping(panel["missing_period_count_by_symbol"])["EURGBP"] == 1
+    assert groups["ascii:T:200005"]["complete"] is False
+    assert groups["ascii:T:200005"]["missing_symbols"] == ["EURGBP"]
+    assert groups["ascii:T:200203"]["complete"] is True
+    assert payload["incomplete_group_count"] == 1
+    assert payload["status"] == "limited"
+
+
+def test_cross_series_fingerprint_enriches_legacy_raw_cache_for_report(
+    tmp_path: Path,
+) -> None:
+    """Legacy raw caches should be enriched in memory before projection."""
+    targets: list[QualityTarget] = []
+    for symbol, prices in {
+        "EURUSD": ("1.200000", "1.210000", "1.220000"),
+        "GBPUSD": ("1.500000", "1.510000", "1.520000"),
+    }.items():
+        rows = tuple(
+            f"20120201 00000{index}000,{price},{price},0"
+            for index, price in enumerate(prices)
+        )
+        batch = parse_ascii_lines(TICK, rows)
+        cache_path = tmp_path / symbol.lower() / CACHE_FILENAME
+        cache_path.parent.mkdir(parents=True)
+        write_polars_cache(to_polars_frame(batch), cache_path)
+        targets.append(
+            QualityTarget(
+                path=str(cache_path),
+                kind=QualityTargetKind.CACHE,
+                data_format="ascii",
+                timeframe=TICK,
+                symbol=symbol,
+                period="201202",
+            )
+        )
+
+    report = run_quality_assessment(
+        targets,
+        (),
+        run_rules=quality_run_rules_for_groups(("fingerprint",)),
+    )
+    report_payload = quality_report_payload(report)
+    payload = _mapping(
+        _mapping(report_payload["metadata"])[
+            CROSS_SERIES_FINGERPRINT_METADATA_KEY
+        ]
+    )
+    series = [
+        _mapping(item)
+        for item in _list(_mapping(_list(payload["groups"])[0])["series"])
+    ]
+
+    assert {item["computed_from"] for item in series} == {"direct_cache"}
+    assert {item["cache_source"] for item in series} == {"direct"}
+    assert {item["training_schema_version"] for item in series} == {
+        TRAINING_SCHEMA_VERSION
+    }
+    assert all(str(item["series_id"]).startswith("ascii:T:") for item in series)
+    assert str(tmp_path) not in str(report_payload)
+
+
+def test_cross_series_fingerprint_reports_mixed_cache_provenance(
+    tmp_path: Path,
+) -> None:
+    """Group topology should expose direct, sibling, and text scan bases."""
+    rows = (
+        "20120201 000000000,1.200000,1.200200,0",
+        "20120201 000001000,1.210000,1.210200,0",
+        "20120201 000002000,1.220000,1.220200,0",
+    )
+    batch = parse_ascii_lines(TICK, rows)
+
+    direct_path = tmp_path / "eurusd" / CACHE_FILENAME
+    direct_path.parent.mkdir(parents=True)
+    write_polars_cache(to_polars_frame(batch), direct_path)
+    direct_target = QualityTarget(
+        path=str(direct_path),
+        kind=QualityTargetKind.CACHE,
+        data_format="ascii",
+        timeframe=TICK,
+        symbol="EURUSD",
+        period="201202",
+    )
+
+    sibling_case = _cross_series_case("GBPUSD", rows)
+    sibling_csv = write_ascii_case(tmp_path / "gbpusd", sibling_case)
+    sibling_cache = sibling_csv.with_name(CACHE_FILENAME)
+    write_polars_cache(to_polars_frame(batch), sibling_cache)
+    csv_mtime_ns = sibling_csv.stat().st_mtime_ns
+    os.utime(
+        sibling_cache,
+        ns=(csv_mtime_ns + 1_000_000, csv_mtime_ns + 1_000_000),
+    )
+    sibling_target = _discovered_target(sibling_csv)
+
+    text_target = _discovered_target(
+        write_ascii_case(
+            tmp_path / "eurgbp",
+            _cross_series_case("EURGBP", rows),
+        )
+    )
+
+    report = run_quality_assessment(
+        (direct_target, sibling_target, text_target),
+        quality_rules_for_groups(("fingerprint",)),
+        run_rules=quality_run_rules_for_groups(("fingerprint",)),
+    )
+    payload = _mapping(report.metadata[CROSS_SERIES_FINGERPRINT_METADATA_KEY])
+    topology = _mapping(_mapping(_list(payload["groups"])[0])["topology"])
+
+    assert topology["computed_from_counts"] == {
+        "direct_cache": 1,
+        "fresh_sibling_cache": 1,
+        "text_scan": 1,
+    }
+    assert topology["cache_source_counts"] == {"direct": 1, "sibling": 1}
+    assert topology["topology_computed_from_counts"] == {
+        "direct_cache": 1,
+        "fresh_sibling_cache": 1,
+        "text_scan": 1,
+    }
+    assert topology["mixed_computation_basis"] is True
+    assert topology["mixed_cache_source"] is True
 
 
 def test_fingerprint_rule_emits_tick_csv_payload(tmp_path: Path) -> None:
@@ -153,6 +586,36 @@ def test_fingerprint_rule_emits_tick_csv_payload(tmp_path: Path) -> None:
     assert stationarity["metric"] == "mid_price"
     assert _mapping(stationarity["sample_counts"]) == {"level": 3, "return": 2}
 
+    decomposition = _mapping(payload["decomposition"])
+    assert decomposition["schema_version"] == (
+        TIME_SERIES_FINGERPRINT_DECOMPOSITION_SCHEMA_VERSION
+    )
+    assert decomposition["metric"] == "mid_price"
+    assert _mapping(decomposition["sample_counts"]) == {
+        "level": 3,
+        "return": 2,
+    }
+    projection = _mapping(decomposition["training_projection"])
+    assert projection["schema_version"] == (
+        TIME_SERIES_FINGERPRINT_DECOMPOSITION_TRAINING_PROJECTION_SCHEMA_VERSION
+    )
+    assert projection["grain"] == "period"
+    assert _list(projection["identity_fields"]) == [
+        "series_id",
+        "period",
+        "row_id",
+    ]
+
+    constraints = _mapping(payload["synthetic_constraints"])
+    assert constraints["schema_version"] == SYNTHETIC_CONSTRAINTS_SCHEMA_VERSION
+    assert constraints["status"] == "ready"
+    assert (
+        _mapping(constraints["training_substrate"])[
+            "source_rows_enriched_in_memory"
+        ]
+        is True
+    )
+
     audit = _mapping(payload["fingerprint_audit"])
     assert (
         audit["schema_version"] == TIME_SERIES_FINGERPRINT_AUDIT_SCHEMA_VERSION
@@ -166,6 +629,10 @@ def test_fingerprint_rule_emits_tick_csv_payload(tmp_path: Path) -> None:
     assert statuses["microstructure_dynamics"] == "valid"
     assert statuses["dependence"] == "limited"
     assert statuses["stationarity_diagnostics"] == "limited"
+    assert statuses["decomposition"] == "limited"
+    assert statuses["synthetic_constraints"] == "valid"
+    assert _mapping(audit["decomposition_readiness"])["status"] == "limited"
+    assert _retired_bar_schema_keys(payload) == set()
 
 
 def test_fingerprint_tick_microstructure_dynamics_describe_sequence(
@@ -271,6 +738,149 @@ def test_fingerprint_stationarity_diagnostics_describe_stable_tick_series(
     assert level_mean_drift["first"] == 1.0
     assert level_mean_drift["last"] == 1.0
     assert level_mean_drift["absolute_change"] == 0.0
+
+
+def test_fingerprint_decomposition_handles_flat_and_trending_ticks(
+    tmp_path: Path,
+) -> None:
+    """Decomposition proxies should distinguish flat and linear tick levels."""
+    profile = HistDataFingerprintProfile(
+        rolling_windows=(2, 3), rounding_digits=6
+    )
+    flat = _mapping(
+        _payload_for_case(
+            tmp_path / "flat",
+            _tick_case_from_mid_prices("tick-flat", (1.0,) * 9),
+            profile,
+        )["decomposition"]
+    )
+    trending = _mapping(
+        _payload_for_case(
+            tmp_path / "trend",
+            _tick_case_from_mid_prices(
+                "tick-trend",
+                (1.0, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8),
+            ),
+            profile,
+        )["decomposition"]
+    )
+
+    assert flat["decomposition_status"] == "limited"
+    assert "zero_variance" in _list(flat["limitations"])
+    assert _mapping(flat["trend_proxy"])["direction"] == "flat"
+    assert (
+        _mapping(flat["residual_proxy"])["residual_to_level_variance_ratio"]
+        is None
+    )
+    assert _mapping(flat["stationarity_basis"])["status"] == "valid"
+    assert _mapping(flat["stationarity_basis"])["zero_variance_metrics"]
+
+    trend = _mapping(trending["trend_proxy"])
+    assert trend["direction"] == "increasing"
+    assert trend["slope_per_observation"] == 0.1
+    assert trend["trend_strength"] == 1.0
+    assert trending["computed_window_count"] == 2
+    assert _mapping(trending["stationarity_basis"])["status"] == "valid"
+    assert _retired_bar_schema_keys(trending) == set()
+
+
+def test_fingerprint_decomposition_seasonality_is_calendar_based_and_bounded(
+    tmp_path: Path,
+) -> None:
+    """Seasonality buckets should reuse source-calendar sessions and limits."""
+    case = HistDataAsciiCase(
+        name="tick-decomposition-seasonality",
+        timeframe=TICK,
+        filename="DAT_ASCII_EURUSD_T_201202.csv",
+        rows=(
+            "20120102 010000000,1.000000,1.000000,0",
+            "20120102 090000000,1.100000,1.100000,0",
+            "20120103 170000000,1.200000,1.200000,0",
+            "20120104 230000000,1.300000,1.300000,0",
+        ),
+    )
+    profile = HistDataFingerprintProfile(
+        rolling_windows=(2,), histogram_bins=2, rounding_digits=6
+    )
+    decomposition = _mapping(
+        _payload_for_case(tmp_path, case, profile)["decomposition"]
+    )
+    seasonality = _mapping(decomposition["seasonality_proxy"])
+    by_hour = _mapping(seasonality["by_source_hour"])
+    by_weekday = _mapping(seasonality["by_source_weekday"])
+    by_session = _mapping(seasonality["by_active_session"])
+
+    assert seasonality["grouped_by"] == [
+        "source_hour",
+        "source_weekday",
+        "active_session",
+    ]
+    assert by_hour["bucket_count"] == 4
+    assert by_hour["included_bucket_count"] == 2
+    assert by_hour["truncated"] is True
+    assert by_weekday["bucket_count"] == 3
+    assert by_session["bucket_count"] >= 3
+    assert all(
+        len(_mapping(group)["buckets"]) <= 2
+        for group in (
+            by_hour,
+            by_weekday,
+            by_session,
+        )
+    )
+
+
+def test_fingerprint_decomposition_insufficient_series_is_unavailable(
+    tmp_path: Path,
+) -> None:
+    """A one-row series should report deterministic unavailable proxies."""
+    decomposition = _mapping(
+        _payload_for_case(
+            tmp_path,
+            _tick_case_from_mid_prices("tick-insufficient", (1.0,)),
+            HistDataFingerprintProfile(rolling_windows=(2, 3)),
+        )["decomposition"]
+    )
+
+    assert decomposition["decomposition_status"] == "unavailable"
+    assert decomposition["reason"] == "insufficient_sequence_rows"
+    assert "insufficient_sample_count" in _list(decomposition["limitations"])
+    assert decomposition["computed_window_count"] == 0
+    assert decomposition["skipped_window_count"] == 2
+    assert _mapping(decomposition["structural_break_proxy"])["status"] == (
+        "skipped"
+    )
+    assert _mapping(decomposition["stationarity_basis"])["status"] == (
+        "unavailable"
+    )
+
+
+def test_fingerprint_decomposition_structural_break_proxy_is_deterministic(
+    tmp_path: Path,
+) -> None:
+    """Structural candidates should rank a fixed step change identically."""
+    case = _tick_case_from_mid_prices(
+        "tick-structural-break",
+        (1.0, 1.0, 1.0, 2.0, 2.0, 2.0, 2.0, 2.0),
+    )
+    profile = HistDataFingerprintProfile(
+        rolling_windows=(2,), histogram_bins=3, rounding_digits=6
+    )
+    first = _mapping(
+        _payload_for_case(tmp_path / "first", case, profile)["decomposition"]
+    )
+    second = _mapping(
+        _payload_for_case(tmp_path / "second", case, profile)["decomposition"]
+    )
+    first_structural = _mapping(first["structural_break_proxy"])
+    second_structural = _mapping(second["structural_break_proxy"])
+
+    assert first_structural == second_structural
+    assert first_structural["status"] == "computed"
+    assert first_structural["candidate_count"] == 5
+    assert first_structural["included_candidate_count"] == 3
+    assert first_structural["truncated"] is True
+    assert _mapping(first_structural["strongest_candidate"])["split_index"] == 3
 
 
 def test_fingerprint_calendar_regimes_and_conditioning_are_tick_based(
@@ -484,6 +1094,40 @@ def test_fingerprint_rule_prefers_direct_cache_payload(tmp_path: Path) -> None:
     assert dynamics["row_order"] == "cache_order"
     assert dynamics["computed_from"] == "direct_cache"
     assert dynamics["cache_source"] == "direct"
+    training = _mapping(
+        _mapping(payload["synthetic_constraints"])["training_substrate"]
+    )
+    assert training["legacy_cache_enriched_on_read"] is True
+    assert training["training_schema_version"] == TRAINING_SCHEMA_VERSION
+
+
+def test_direct_cache_topology_inspection_counts_duplicate_timestamps(
+    tmp_path: Path,
+) -> None:
+    """Polars-backed topology should retain bounded duplicate evidence."""
+    cache_path = tmp_path / CACHE_FILENAME
+    rows = (CLEAN_TICK_ROWS[0], CLEAN_TICK_ROWS[0], CLEAN_TICK_ROWS[1])
+    batch = parse_ascii_lines(TICK, rows)
+    write_polars_cache(to_polars_frame(batch), cache_path)
+    target = QualityTarget(
+        path=str(cache_path),
+        kind=QualityTargetKind.CACHE,
+        data_format="ascii",
+        timeframe=TICK,
+        symbol="EURUSD",
+        period="201202",
+    )
+
+    payload = _fingerprint_payload(_fingerprint_finding(target))
+    topology = _mapping(payload["temporal_topology"])
+    duplicate = _mapping(
+        _mapping(topology["inspection_context"])["duplicate_timestamps"]
+    )
+
+    assert topology["computed_from"] == "direct_cache"
+    assert topology["duplicate_timestamp_count"] == 1
+    assert duplicate["duplicate_row_count"] == 1
+    assert _mapping(_list(duplicate["samples"])[0])["occurrence_count"] == 2
 
 
 def test_fingerprint_rule_prefers_fresh_sibling_cache(tmp_path: Path) -> None:
@@ -509,6 +1153,208 @@ def test_fingerprint_rule_prefers_fresh_sibling_cache(tmp_path: Path) -> None:
     topology = _mapping(payload["temporal_topology"])
     assert topology["computed_from"] == "fresh_sibling_cache"
     assert topology["cache_source"] == "sibling"
+
+
+def test_fingerprint_parity_is_opt_in_and_matches_fresh_sibling_cache(
+    tmp_path: Path,
+) -> None:
+    """Opt-in parity should compare source, cache, and training projections."""
+    csv_path = write_ascii_case(tmp_path, CLEAN_TICK_CASE)
+    cache_path = csv_path.with_name(CACHE_FILENAME)
+    batch = parse_ascii_lines(TICK, CLEAN_TICK_ROWS)
+    write_polars_cache(to_polars_frame(batch), cache_path)
+    csv_mtime_ns = csv_path.stat().st_mtime_ns
+    os.utime(
+        cache_path,
+        ns=(csv_mtime_ns + 1_000_000, csv_mtime_ns + 1_000_000),
+    )
+    target = _discovered_target(csv_path)
+
+    default_payload = _fingerprint_payload(_fingerprint_finding(target))
+    parity_payload = _fingerprint_payload(
+        _fingerprint_finding(target, _parity_profile())
+    )
+    parity = _mapping(parity_payload["cache_source_parity"])
+
+    assert "cache_source_parity" not in default_payload
+    assert (
+        parity["schema_version"]
+        == TIME_SERIES_FINGERPRINT_PARITY_SCHEMA_VERSION
+    )
+    assert parity["status"] == "match"
+    assert parity["mismatch_codes"] == []
+    assert _mapping(_mapping(parity["bases"])["raw_cache"])["freshness"] == (
+        "fresh"
+    )
+    enriched = _mapping(_mapping(parity["bases"])["enriched_cache"])
+    assert enriched["legacy_cache_enriched_on_read"] is True
+    assert enriched["training_schema_version"] == TRAINING_SCHEMA_VERSION
+    assert {item["section"] for item in _list(parity["comparisons"])} >= {
+        "coverage",
+        "temporal_topology",
+        "calendar_regimes",
+        "conditional_distributions",
+        "training_columns",
+        "row_identity",
+        "duplicate_timestamps",
+        "quality_report_projection",
+        "influx_projection",
+    }
+    audit = _mapping(parity_payload["fingerprint_audit"])
+    assert "cache_source_parity" in _list(audit["sections_expected"])
+    assert "cache_source_parity" in _list(audit["sections_emitted"])
+    assert _mapping(audit["section_statuses"])["cache_source_parity"] == (
+        "valid"
+    )
+    assert str(tmp_path) not in str(parity)
+
+
+def test_fingerprint_parity_reports_divergent_and_stale_cache(
+    tmp_path: Path,
+) -> None:
+    """Stale and divergent cache evidence should produce stable reason codes."""
+    csv_path = write_ascii_case(tmp_path, CLEAN_TICK_CASE)
+    cache_path = csv_path.with_name(CACHE_FILENAME)
+    divergent = parse_ascii_lines(TICK, CLEAN_TICK_ROWS[:2])
+    write_polars_cache(to_polars_frame(divergent), cache_path)
+    csv_mtime_ns = csv_path.stat().st_mtime_ns
+    os.utime(
+        cache_path,
+        ns=(csv_mtime_ns - 1_000_000, csv_mtime_ns - 1_000_000),
+    )
+
+    payload = _fingerprint_payload(
+        _fingerprint_finding(_discovered_target(csv_path), _parity_profile())
+    )
+    parity = _mapping(payload["cache_source_parity"])
+    codes = set(_list(parity["mismatch_codes"]))
+
+    assert parity["status"] == "mismatch"
+    assert "fingerprint_cache_source_stale_cache" in codes
+    assert "fingerprint_cache_source_row_count_mismatch" in codes
+    assert "fingerprint_cache_source_topology_mismatch" in codes
+    assert "fingerprint_cache_source_calendar_mismatch" in codes
+    assert "fingerprint_cache_source_conditioned_spread_mismatch" in codes
+
+
+def test_fingerprint_parity_detects_same_cardinality_regime_and_spread_drift(
+    tmp_path: Path,
+) -> None:
+    """Calendar and spread drift should not depend on row-count divergence."""
+    csv_path = write_ascii_case(tmp_path, CLEAN_TICK_CASE)
+    cache_path = csv_path.with_name(CACHE_FILENAME)
+    divergent_rows = (
+        CLEAN_TICK_ROWS[0]
+        .replace("000003660", "120003660")
+        .replace("1.306770", "1.307770"),
+        CLEAN_TICK_ROWS[1].replace("000003973", "120003973"),
+        CLEAN_TICK_ROWS[2].replace("000014990", "120014990"),
+    )
+    write_polars_cache(
+        to_polars_frame(parse_ascii_lines(TICK, divergent_rows)),
+        cache_path,
+    )
+    csv_mtime_ns = csv_path.stat().st_mtime_ns
+    os.utime(
+        cache_path,
+        ns=(csv_mtime_ns + 1_000_000, csv_mtime_ns + 1_000_000),
+    )
+
+    payload = _fingerprint_payload(
+        _fingerprint_finding(_discovered_target(csv_path), _parity_profile())
+    )
+    codes = set(
+        _list(_mapping(payload["cache_source_parity"])["mismatch_codes"])
+    )
+
+    assert "fingerprint_cache_source_row_count_mismatch" not in codes
+    assert "fingerprint_cache_source_calendar_mismatch" in codes
+    assert "fingerprint_cache_source_conditioned_spread_mismatch" in codes
+
+
+def test_fingerprint_parity_handles_missing_cache_source_and_zip_member(
+    tmp_path: Path,
+) -> None:
+    """Missing bases should skip safely while ZIP sibling caches compare."""
+    csv_path = write_ascii_case(tmp_path / "csv", CLEAN_TICK_CASE)
+    missing_cache = _fingerprint_payload(
+        _fingerprint_finding(_discovered_target(csv_path), _parity_profile())
+    )
+    missing = _mapping(missing_cache["cache_source_parity"])
+    assert missing["status"] == "not_compared"
+    assert missing["skipped_reasons"] == ["cache_unavailable"]
+
+    direct_target = _cache_target(tmp_path / "direct")
+    missing_source = _fingerprint_payload(
+        _fingerprint_finding(direct_target, _parity_profile())
+    )
+    direct = _mapping(missing_source["cache_source_parity"])
+    assert direct["status"] == "not_compared"
+    assert direct["skipped_reasons"] == ["source_target_unavailable"]
+    assert (
+        _mapping(_mapping(direct["bases"])["raw_cache"])["cache_source"]
+        == "direct"
+    )
+
+    archive = write_zip_case(
+        tmp_path / "zip",
+        CLEAN_TICK_CASE,
+        zip_filename="HISTDATA_COM_ASCII_EURUSD_T201202.zip",
+    )
+    zip_cache = archive.with_name(CACHE_FILENAME)
+    batch = parse_ascii_lines(TICK, CLEAN_TICK_ROWS)
+    write_polars_cache(to_polars_frame(batch), zip_cache)
+    archive_mtime_ns = archive.stat().st_mtime_ns
+    os.utime(
+        zip_cache,
+        ns=(archive_mtime_ns + 1_000_000, archive_mtime_ns + 1_000_000),
+    )
+    zip_payload = _fingerprint_payload(
+        _fingerprint_finding(_discovered_target(archive), _parity_profile())
+    )
+    zip_parity = _mapping(zip_payload["cache_source_parity"])
+    raw_source = _mapping(_mapping(zip_parity["bases"])["raw_source"])
+    assert zip_parity["status"] == "match"
+    assert raw_source["kind"] == "zip_member"
+    assert raw_source["member"] == CLEAN_TICK_CASE.filename
+
+
+def test_fingerprint_parity_detects_market_only_projection_regressions(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Report and Influx bases should reject market-only projections."""
+    csv_path = write_ascii_case(tmp_path, CLEAN_TICK_CASE)
+    cache_path = csv_path.with_name(CACHE_FILENAME)
+    batch = parse_ascii_lines(TICK, CLEAN_TICK_ROWS)
+    write_polars_cache(to_polars_frame(batch), cache_path)
+    csv_mtime_ns = csv_path.stat().st_mtime_ns
+    os.utime(
+        cache_path,
+        ns=(csv_mtime_ns + 1_000_000, csv_mtime_ns + 1_000_000),
+    )
+    monkeypatch.setattr(
+        fingerprints_module,
+        "quality_report_from_training_features",
+        lambda *_args, **_kwargs: QualityReport(),
+    )
+    monkeypatch.setattr(
+        fingerprints_module,
+        "format_influx_line",
+        lambda *_args, **_kwargs: "EURUSD,source=histdata.com bidquote=1.0,askquote=1.1 1",
+    )
+
+    payload = _fingerprint_payload(
+        _fingerprint_finding(_discovered_target(csv_path), _parity_profile())
+    )
+    codes = set(
+        _list(_mapping(payload["cache_source_parity"])["mismatch_codes"])
+    )
+
+    assert (
+        "fingerprint_cache_source_quality_report_projection_mismatch" in codes
+    )
+    assert "fingerprint_cache_source_influx_projection_mismatch" in codes
 
 
 def test_fingerprint_cache_distribution_counts_full_rows_and_fills_sample(
@@ -742,6 +1588,19 @@ def test_fingerprint_coverage_summary_reports_duplicate_archive_skip(
         "duplicate_archive_preferred_csv": 1,
     }
     assert summary["source_kind_counts"] == {"csv_text": 1}
+    engine = _mapping(report.metadata[QUALITY_ENGINE_METADATA_KEY])
+    skips = _mapping(engine["skip_events"])
+    assert skips["schema_version"] == QUALITY_SKIP_EVENTS_SCHEMA_VERSION
+    assert skips["event_count"] == summary["skipped_fingerprint_target_count"]
+    assert skips["reason_counts"] == summary["skipped_reason_counts"]
+    assert skips["rule_id_counts"] == {SERIES_FINGERPRINT_RULE_ID: 1}
+    assert _mapping(_list(skips["events"])[0])["target_axis"] == {
+        "data_format": "ascii",
+        "timeframe": "T",
+        "symbol": "EURUSD",
+        "period": "201202",
+        "kind": "zip",
+    }
 
 
 def test_series_fingerprint_distribution_summary_counts_tick_payloads(
@@ -1025,6 +1884,73 @@ def test_series_fingerprint_topology_attention_orders_mixed_remediation_hints(
     assert "expected_session_closures" in _list(target_summary["flags"])
 
 
+def test_topology_inspection_context_links_bounded_evidence_to_next_actions(
+    tmp_path: Path,
+) -> None:
+    """Attention evidence should link to stable run-level action identities."""
+    case = HistDataAsciiCase(
+        name="tick_topology_inspection",
+        timeframe=TICK,
+        filename="DAT_ASCII_EURUSD_T_201202_INSPECTION.csv",
+        rows=(
+            "20120203 165900000,1.306600,1.306770,0",
+            "bad-timestamp,1.306600,1.306770,0",
+            "20120205 170100000,1.306570,1.306740,17",
+            "20120205 172000000,1.306580,1.306750,18",
+            "20120205 172000000,1.306580,1.306750,18",
+            "20120205 171000000,1.306590,1.306760,19",
+        ),
+    )
+    target = _discovered_target(write_ascii_case(tmp_path, case))
+    report = run_quality_assessment(
+        (target,),
+        quality_rules_for_groups(
+            ("fingerprint",),
+            profile={
+                "schema_version": QUALITY_PROFILE_SCHEMA_VERSION,
+                "name": "inspection-limit",
+                "rules": {
+                    SERIES_FINGERPRINT_RULE_ID: {
+                        "topology_inspection_sample_limit": 1,
+                    }
+                },
+            },
+        ),
+    )
+    attention = _mapping(
+        report.metadata[TIME_SERIES_FINGERPRINT_TOPOLOGY_ATTENTION_METADATA_KEY]
+    )
+    target_summary = _mapping(_list(attention["target_summaries"])[0])
+    context = _mapping(target_summary["inspection_context"])
+    next_actions = _mapping(quality_next_actions_summary(report))
+    action_codes = {
+        _mapping(action)["code"] for action in _list(next_actions["actions"])
+    }
+
+    expected_links = {
+        "invalid_timestamps": "inspect_invalid_timestamp_rows",
+        "non_monotonic_timestamps": "repair_timestamp_order",
+        "duplicate_timestamps": "inspect_duplicate_timestamp_rows",
+        "suspicious_gaps": "inspect_gap_boundaries",
+    }
+    for section_name, action_code in expected_links.items():
+        section = _mapping(context[section_name])
+        next_action = _mapping(section["next_action"])
+        assert section["actionable"] is True
+        assert next_action["code"] == action_code
+        assert next_action["rule_id"] == SERIES_FINGERPRINT_RULE_ID
+        assert next_action["flag"] == section_name
+        assert _mapping(section["target_axis"])["symbol"] == "EURUSD"
+        assert action_code in action_codes
+        assert section["included_count"] <= 1
+    closure = _mapping(context["expected_session_closures"])
+    assert closure["actionable"] is False
+    assert closure["contextual_for"] == "suspicious_gaps"
+    assert "next_action" not in closure
+    assert str(tmp_path) not in str(context)
+    assert "duplicate_row_values" not in str(context)
+
+
 def test_series_fingerprint_topology_attention_ignores_context_only_targets(
     tmp_path: Path,
 ) -> None:
@@ -1049,6 +1975,104 @@ def test_series_fingerprint_topology_attention_ignores_context_only_targets(
     assert attention["topology_target_count"] == 2
     assert attention["attention_target_count"] == 0
     assert attention["target_summaries"] == []
+
+
+def test_weekend_topology_guidance_follows_active_calendar_policy(
+    tmp_path: Path,
+) -> None:
+    """Default, strict, and allowed profiles should produce distinct advice."""
+    cases = (
+        ("default", None, "advisory", "verify", "session", True),
+        (
+            "strict",
+            _calendar_policy_profile(weekend="strict"),
+            "strict",
+            "inspect",
+            "session",
+            True,
+        ),
+        (
+            "allowed",
+            _calendar_policy_profile(weekend="allowed"),
+            "allowed",
+            "context",
+            "contextual",
+            False,
+        ),
+    )
+    for name, profile, policy, action_kind, level, actionable in cases:
+        target = _discovered_target(
+            write_ascii_case(tmp_path / name, _weekend_activity_case())
+        )
+        report = run_quality_assessment(
+            (target,),
+            quality_rules_for_groups(("fingerprint",), profile=profile),
+        )
+        attention = _mapping(
+            report.metadata[
+                TIME_SERIES_FINGERPRINT_TOPOLOGY_ATTENTION_METADATA_KEY
+            ]
+        )
+        target_summary = _mapping(_list(attention["target_summaries"])[0])
+        hint = _mapping(_list(target_summary["remediation_hints"])[0])
+        context = _mapping(hint["policy_context"])
+        inspection = _mapping(target_summary["inspection_context"])
+        weekend = _mapping(inspection["weekend_activity"])
+
+        assert target_summary["attention_level"] == level
+        assert hint["code"] == "verify_weekend_session_policy"
+        assert hint["action_kind"] == action_kind
+        assert context["weekend_activity_policy"] == policy
+        assert context["actionable"] is actionable
+        assert weekend["actionable"] is actionable
+        if actionable:
+            actions = _mapping(quality_next_actions_summary(report))
+            action = _mapping(_list(actions["actions"])[0])
+            assert (
+                _mapping(action["policy_context"])["weekend_activity_policy"]
+                == policy
+            )
+            assert action["action_kind"] == action_kind
+            assert "next_action" in weekend
+        else:
+            assert quality_next_actions_summary(report) is None
+            assert "policy_note" in weekend
+            assert "next_action" not in weekend
+        assert quality_report_to_json(report) == quality_report_to_json(report)
+
+
+def test_expected_closure_becomes_actionable_only_when_profile_marks_unexpected(
+    tmp_path: Path,
+) -> None:
+    """An explicit unexpected-closure policy should create bounded guidance."""
+    target = _discovered_target(
+        write_ascii_case(tmp_path, _expected_weekend_closure_case())
+    )
+    report = run_quality_assessment(
+        (target,),
+        quality_rules_for_groups(
+            ("fingerprint",),
+            profile=_calendar_policy_profile(closures="unexpected"),
+        ),
+    )
+    attention = _mapping(
+        report.metadata[TIME_SERIES_FINGERPRINT_TOPOLOGY_ATTENTION_METADATA_KEY]
+    )
+    target_summary = _mapping(_list(attention["target_summaries"])[0])
+    hint = _mapping(_list(target_summary["remediation_hints"])[0])
+    closure = _mapping(
+        _mapping(target_summary["inspection_context"])[
+            "expected_session_closures"
+        ]
+    )
+
+    assert target_summary["attention_flags"] == ["expected_session_closures"]
+    assert target_summary["attention_level"] == "session"
+    assert hint["code"] == "inspect_unexpected_session_closure"
+    assert closure["actionable"] is True
+    assert _mapping(closure["next_action"])["code"] == (
+        "inspect_unexpected_session_closure"
+    )
 
 
 def test_fingerprint_id_excludes_source_path_volatility(tmp_path: Path) -> None:
@@ -1146,6 +2170,14 @@ def test_fingerprint_constants_are_stable() -> None:
         == "histdatacom.time-series-fingerprint-stationarity.v1"
     )
     assert (
+        TIME_SERIES_FINGERPRINT_DECOMPOSITION_SCHEMA_VERSION
+        == "histdatacom.time-series-fingerprint-decomposition.v1"
+    )
+    assert (
+        TIME_SERIES_FINGERPRINT_DECOMPOSITION_TRAINING_PROJECTION_SCHEMA_VERSION
+        == "histdatacom.time-series-fingerprint-decomposition-training-projection.v1"
+    )
+    assert (
         TIME_SERIES_FINGERPRINT_AUDIT_SCHEMA_VERSION
         == "histdatacom.time-series-fingerprint-audit.v1"
     )
@@ -1172,6 +2204,20 @@ def _payload_for_case(
 ) -> dict[str, Any]:
     target = _discovered_target(write_ascii_case(directory, case))
     return _fingerprint_payload(_fingerprint_finding(target, profile))
+
+
+def _cross_series_case(
+    symbol: str,
+    rows: tuple[str, ...],
+    *,
+    period: str = "201202",
+) -> HistDataAsciiCase:
+    return HistDataAsciiCase(
+        name=f"cross_series_{symbol.lower()}",
+        timeframe=TICK,
+        filename=f"DAT_ASCII_{symbol}_T_{period}.csv",
+        rows=rows,
+    )
 
 
 def _discovered_target(path: Path) -> QualityTarget:
@@ -1209,6 +2255,24 @@ def _mapping(value: Any) -> dict[str, Any]:
 def _list(value: Any) -> list[Any]:
     assert isinstance(value, list)
     return value
+
+
+def _retired_bar_schema_keys(value: Any) -> set[str]:
+    matches: set[str] = set()
+    if isinstance(value, Mapping):
+        for key, nested in value.items():
+            normalized = str(key).lower()
+            if (
+                "m1" in normalized
+                or "ohlc" in normalized
+                or normalized.startswith("bar_")
+            ):
+                matches.add(str(key))
+            matches.update(_retired_bar_schema_keys(nested))
+    elif isinstance(value, list):
+        for nested in value:
+            matches.update(_retired_bar_schema_keys(nested))
+    return matches
 
 
 def _tick_case_from_mid_prices(
@@ -1337,6 +2401,41 @@ def _weekend_activity_case() -> HistDataAsciiCase:
         timeframe=TICK,
         filename="DAT_ASCII_EURUSD_T_201202_WEEKEND_ACTIVITY.csv",
         rows=("20120204 120000000,1.306600,1.306770,0",),
+    )
+
+
+def _calendar_policy_profile(
+    *,
+    weekend: str = "advisory",
+    closures: str = "expected",
+) -> dict[str, Any]:
+    return {
+        "schema_version": QUALITY_PROFILE_SCHEMA_VERSION,
+        "name": f"calendar-{weekend}-{closures}",
+        "rules": {
+            "domain.calendar_sessions": {
+                "calendar_profile": {
+                    "name": f"calendar-{weekend}-{closures}",
+                    "source": "operator-config",
+                    "version": "2026.07",
+                    "complete": True,
+                    "weekend_activity_policy": weekend,
+                    "expected_session_closure_policy": closures,
+                }
+            }
+        },
+    }
+
+
+def _parity_profile(
+    *,
+    mismatch_limit: int = 16,
+) -> HistDataFingerprintProfile:
+    return HistDataFingerprintProfile(
+        cache_source_parity=HistDataFingerprintParityProfile(
+            enabled=True,
+            mismatch_limit=mismatch_limit,
+        )
     )
 
 

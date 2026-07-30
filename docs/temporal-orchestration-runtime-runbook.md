@@ -208,7 +208,7 @@ Override the base directory with `HISTDATACOM_RUNTIME_HOME` or
 
 Each workspace gets a deterministic directory:
 
-```txt
+```text
 <runtime-home>/workspaces/<workspace-name>-<workspace-hash>/
 ```
 
@@ -513,7 +513,7 @@ The workflow ID format is `histdatacom-<request_id>`.
 Job snapshots are persisted under the workspace-scoped orchestration runtime
 manifests directory, not in HistData download/cache directories:
 
-```txt
+```text
 <runtime-home>/<workspace-slug>/manifests/.histdatacom/manifest-status.sqlite3
 ```
 
@@ -584,7 +584,7 @@ Retry and resume are executable control operations, not intent-only labels. The
 client inspects the original job, reads the persisted `RunRequest` snapshot, and
 starts a deterministic replacement `HistDataRunWorkflow` with a workflow ID like:
 
-```txt
+```text
 histdatacom-<request-id>-retry-<stage>-001
 histdatacom-<request-id>-resume-<stage>-001
 ```
@@ -610,7 +610,7 @@ Workers use workspace-scoped task queues. Defaults:
 
 The queue name pattern is:
 
-```txt
+```text
 histdatacom.<workspace-id>.<lane>
 ```
 
@@ -860,7 +860,7 @@ histdatacom --quality \
   --quality-report reports/quality-clean.json
 ```
 
-```txt
+```text
 Data quality assessment
 checks: ingestion
 status: clean
@@ -915,7 +915,7 @@ histdatacom --quality \
   --quality-report reports/quality-failing.json
 ```
 
-```txt
+```text
 Data quality assessment
 checks: ingestion
 status: failed

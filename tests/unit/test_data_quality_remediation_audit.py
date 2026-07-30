@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 from histdatacom.data_quality import (
+    QUALITY_REMEDIATION_PLAN_SCHEMA_VERSION,
     KnownQualityFindingCode,
     QualityFinding,
     QualityReport,
@@ -119,7 +121,19 @@ def test_remediation_catalog_audit_maps_inventory_archive_batch() -> None:
     assert payload["summary"]["unmapped_warning_error_gap_count"] == 1
     assert payload["known_unmapped_codes"] == [
         {
+            "actionability": "unsupported_format_or_capability",
+            "actionability_reason": "unsupported_format_rule",
+            "attribution_reason": "provided_rule_id",
+            "attribution_reason_counts": {"provided_rule_id": 1},
+            "attribution_status": "exact",
+            "attribution_status_counts": {"exact": 1},
             "finding_code": "HISTDATA_FORMAT_UNSUPPORTED",
+            "finding_code_prefix_counts": [
+                {
+                    "count": 1,
+                    "finding_code_prefix": "HISTDATA_FORMAT",
+                },
+            ],
             "included_source_count": 1,
             "mapped": False,
             "max_severity": "error",
@@ -132,6 +146,7 @@ def test_remediation_catalog_audit_maps_inventory_archive_batch() -> None:
             "source_family_counts": [
                 {"count": 1, "source_family": "inventory"},
             ],
+            "source_helper_counts": [],
             "sources": [
                 {
                     "count": 1,
@@ -150,6 +165,158 @@ def test_remediation_catalog_audit_maps_inventory_archive_batch() -> None:
         str(item["finding_code"]) for item in payload["ranked_gaps"]
     }.isdisjoint(inventory_archive_codes)
     assert encoded == remediation_catalog_audit_to_json(payload)
+
+
+def test_remediation_catalog_audit_ranks_actionable_gaps_before_boundaries() -> (
+    None
+):
+    """Actionable defects should outrank more frequent support boundaries."""
+    payload = audit_remediation_catalog(
+        known_findings=(
+            _known(
+                "inventory.format_support",
+                "HISTDATA_FORMAT_UNSUPPORTED",
+                QualitySeverity.ERROR,
+                source_family="inventory",
+            ),
+            _known(
+                "inventory.format_support",
+                "HISTDATA_FORMAT_UNSUPPORTED",
+                QualitySeverity.ERROR,
+                source="data_quality/inventory.py:2",
+                source_family="inventory",
+            ),
+            _known(
+                "inventory.format_support",
+                "HISTDATA_FORMAT_UNSUPPORTED",
+                QualitySeverity.ERROR,
+                source="data_quality/inventory.py:3",
+                source_family="inventory",
+            ),
+            _known(
+                "custom.rule",
+                "CUSTOM_REPAIRABLE_FAILURE",
+                QualitySeverity.WARNING,
+            ),
+            KnownQualityFindingCode(
+                rule_id="time.unresolved",
+                finding_code="CUSTOM_SHARED_FAILURE",
+                severity=QualitySeverity.ERROR,
+                source="data_quality/time.py:1",
+                source_family="time",
+                attribution_status="unresolved",
+                attribution_reason="ambiguous_helper_rules",
+            ),
+            _known(
+                "custom.diagnostics",
+                "DIAGNOSTIC_CONTEXT_MISSING",
+                QualitySeverity.WARNING,
+            ),
+            _known(
+                "modeling.readiness",
+                "MODELING_CALENDAR_REGIME_POLICY_MISSING",
+                QualitySeverity.WARNING,
+            ),
+            _known(
+                "custom.repair",
+                "DESTRUCTIVE_REPAIR_REQUIRED",
+                QualitySeverity.ERROR,
+            ),
+        )
+    )
+
+    ranked = payload["ranked_gaps"]
+    summary = payload["summary"]
+
+    assert ranked[0]["finding_code"] == "CUSTOM_REPAIRABLE_FAILURE"
+    assert ranked[0]["actionability"] == "remediable_defect"
+    assert ranked[1]["actionability"] == "needs_diagnostic_context"
+    assert ranked[2]["actionability"] == "needs_rule_attribution"
+    assert ranked[-1]["actionability"] == ("unsupported_format_or_capability")
+    assert "actionability=remediable_defect" in ranked[0]["rank_reasons"]
+    assert summary["unmapped_actionable_warning_error_code_count"] == 1
+    assert summary["blocked_by_attribution_warning_error_code_count"] == 1
+    assert (
+        summary["blocked_by_missing_diagnostics_warning_error_code_count"] == 1
+    )
+    assert summary["intentionally_unremediable_warning_error_code_count"] == 3
+
+
+def test_remediation_catalog_audit_emits_fixability_ranked_plan() -> None:
+    """Plan items should turn exact actionable gaps into catalog-edit inputs."""
+    payload = audit_remediation_catalog(
+        known_findings=(
+            _known(
+                "custom.rule",
+                "CUSTOM_INVALID_ROW",
+                QualitySeverity.ERROR,
+            ),
+            _known(
+                "inventory.format_support",
+                "HISTDATA_FORMAT_UNSUPPORTED",
+                QualitySeverity.ERROR,
+            ),
+        )
+    )
+
+    plan = payload["remediation_plan"]
+    first = plan["items"][0]
+
+    assert plan["schema_version"] == QUALITY_REMEDIATION_PLAN_SCHEMA_VERSION
+    assert plan["plan_item_count"] == 2
+    assert plan["included_plan_item_count"] == 2
+    assert plan["truncated"] is False
+    assert first["rank"] == 1
+    assert first["catalog_gap_rank"] == 1
+    assert first["finding_code"] == "CUSTOM_INVALID_ROW"
+    assert first["suggested_selector"] == {
+        "shape": "exact_rule_and_finding",
+        "rule_id": "custom.rule",
+        "finding_code": "CUSTOM_INVALID_ROW",
+        "finding_code_prefix": "CUSTOM_INVALID_ROW",
+        "confidence": "high",
+        "basis": "exact_rule_attribution",
+    }
+    assert first["draft_hint_code"] == "repair_custom_invalid_row"
+    assert first["suggested_action"] == {
+        "action_kind": "repair",
+        "confidence": "high",
+        "basis": "finding_code_marker=invalid",
+        "concrete": True,
+    }
+    assert first["fixability"]["level"] == "high"
+    assert first["fixability"]["score"] == 96
+    assert first["missing_fields"] == ["message"]
+    assert plan["items"][1]["fixability"]["level"] == "low"
+    assert "Remediation plan" in format_remediation_catalog_audit(payload)
+
+
+def test_remediation_plan_marks_unresolved_attribution_blocked() -> None:
+    """An unresolved rule must not become an apparently exact catalog plan."""
+    payload = audit_remediation_catalog(
+        known_findings=(
+            KnownQualityFindingCode(
+                rule_id="time.unresolved",
+                finding_code="CUSTOM_INVALID_ROW",
+                severity=QualitySeverity.ERROR,
+                source="data_quality/time.py:1",
+                source_family="time",
+                attribution_status="unresolved",
+                attribution_reason="ambiguous_helper_rules",
+            ),
+        )
+    )
+    item = payload["remediation_plan"]["items"][0]
+
+    assert item["suggested_selector"]["shape"] == "finding_family"
+    assert item["fixability"]["level"] == "blocked"
+    assert item["fixability"]["score"] == 24
+    assert item["missing_fields"] == [
+        "message",
+        "exact_rule_id",
+        "action_kind_confirmation",
+        "blocking_evidence",
+    ]
 
 
 def test_remediation_catalog_audit_keeps_info_only_gaps_advisory() -> None:
@@ -211,6 +378,21 @@ def test_remediation_catalog_audit_truncates_deterministically() -> None:
         default_limit=16,
     )
     assert len(payload["known_code_counts"]["rule_id_counts"]) == 1
+    plan = payload["remediation_plan"]
+    assert plan["plan_item_count"] == 3
+    assert plan["included_plan_item_count"] == 2
+    assert plan["omitted_plan_item_count"] == 1
+    assert plan["truncated"] is True
+    _assert_count_limit_metadata(
+        payload["payload_limits"]["remediation_plan"],
+        limit=2,
+        total_count=3,
+        included_count=2,
+        omitted_count=1,
+        truncated=True,
+        requested_limit=2,
+        default_limit=16,
+    )
 
 
 def test_remediation_catalog_audit_ranks_report_observed_gaps(
@@ -314,6 +496,19 @@ def test_remediation_catalog_audit_ranks_report_only_gaps(
         }
     ]
     assert "report_occurrences=2" in ranked[0]["rank_reasons"]
+    plan_item = payload["remediation_plan"]["items"][0]
+    assert plan_item["catalog_gap_rank"] == 1
+    assert plan_item["suggested_selector"]["shape"] == (
+        "exact_rule_and_finding"
+    )
+    assert plan_item["suggested_selector"]["basis"] == (
+        "reported_rule_and_finding"
+    )
+    assert plan_item["evidence"]["known_source_occurrence_count"] == 0
+    assert plan_item["evidence"]["report_occurrence_count"] == 2
+    assert plan_item["evidence"]["reports"] == [
+        {"count": 1, "source": "reports/quality.json"}
+    ]
 
 
 def test_discover_known_quality_findings_resolves_source_attribution(
@@ -377,12 +572,184 @@ def source_error():
         "ticks.ascii.spread"
     )
     assert findings["ASCII_TICK_BID_ASK_INVALID"].rule_id == (
-        "ticks.unresolved"
+        "ticks.ascii.spread"
+    )
+    assert (
+        findings["ASCII_TICK_BID_ASK_INVALID"].attribution_reason
+        == "finding_code_prefix"
     )
     assert findings["ASCII_TICK_CACHE_SCHEMA_UNSUPPORTED"].rule_id == (
-        "ticks.unresolved"
+        "ticks.ascii.spread"
+    )
+    assert (
+        findings["ASCII_TICK_CACHE_SCHEMA_UNSUPPORTED"].attribution_reason
+        == "unique_module_rule"
     )
     assert {item.source_family for item in findings.values()} == {"ticks"}
+
+
+def test_discovery_infers_constructor_assignments_and_helper_callers(
+    tmp_path: Path,
+) -> None:
+    """Local rule objects and single-rule helper chains should be inferable."""
+    source = tmp_path / "custom.py"
+    source.write_text(
+        """
+CUSTOM_RULE_ID = "custom.rule"
+
+
+class CustomRule:
+    rule_id: str = CUSTOM_RULE_ID
+
+    def evaluate(self, target):
+        return source_error(target)
+
+
+def source_error(target):
+    return _finding(target, code="CUSTOM_SOURCE_UNREADABLE")
+
+
+def local_rule(target):
+    rule = CustomRule()
+    return _finding(
+        target,
+        code="CUSTOM_LOCAL_RULE",
+        rule_id=rule.rule_id,
+    )
+
+
+def typed_rule(target, rule: CustomRule):
+    return _finding(
+        target,
+        code="CUSTOM_TYPED_RULE",
+        rule_id=rule.rule_id,
+    )
+
+
+def default_rule(target, rule_id: str = CUSTOM_RULE_ID):
+    return _finding(
+        target,
+        code="CUSTOM_DEFAULT_RULE",
+        rule_id=rule_id,
+    )
+""",
+        encoding="utf-8",
+    )
+
+    findings = {
+        item.finding_code: item
+        for item in discover_known_quality_findings(tmp_path)
+    }
+
+    assert findings["CUSTOM_SOURCE_UNREADABLE"].rule_id == "custom.rule"
+    assert (
+        findings["CUSTOM_SOURCE_UNREADABLE"].attribution_reason
+        == "unique_helper_rule"
+    )
+    assert findings["CUSTOM_LOCAL_RULE"].rule_id == "custom.rule"
+    assert (
+        findings["CUSTOM_LOCAL_RULE"].attribution_reason == "local_rule_object"
+    )
+    assert findings["CUSTOM_TYPED_RULE"].rule_id == "custom.rule"
+    assert (
+        findings["CUSTOM_TYPED_RULE"].attribution_reason == "local_rule_object"
+    )
+    assert findings["CUSTOM_DEFAULT_RULE"].rule_id == "custom.rule"
+    assert (
+        findings["CUSTOM_DEFAULT_RULE"].attribution_reason
+        == "unique_helper_rule"
+    )
+
+
+def test_discovery_preserves_ambiguous_family_fallback_with_reason(
+    tmp_path: Path,
+) -> None:
+    """Helpers shared by multiple rules should remain explicitly unresolved."""
+    source = tmp_path / "ticks.py"
+    source.write_text(
+        """
+FIRST_RULE_ID = "ticks.first"
+SECOND_RULE_ID = "ticks.second"
+
+
+class FirstRule:
+    rule_id: str = FIRST_RULE_ID
+
+    def evaluate(self, target):
+        return shared_error(target)
+
+
+class SecondRule:
+    rule_id: str = SECOND_RULE_ID
+
+    def evaluate(self, target):
+        return shared_error(target)
+
+
+def shared_error(target):
+    return _finding(target, code="CUSTOM_SHARED_FAILURE")
+""",
+        encoding="utf-8",
+    )
+
+    finding = discover_known_quality_findings(tmp_path)[0]
+    payload = audit_remediation_catalog(known_findings=(finding,))
+    gap = payload["ranked_gaps"][0]
+
+    assert finding.rule_id == "ticks.unresolved"
+    assert finding.attribution_status == "unresolved"
+    assert finding.attribution_reason == "ambiguous_helper_rules"
+    assert gap["attribution_status"] == "unresolved"
+    assert gap["attribution_reason"] == "ambiguous_helper_rules"
+    assert gap["source_helper_counts"] == [
+        {"count": 1, "source_helper": "shared_error"},
+    ]
+    assert payload["summary"]["unresolved_attribution_occurrence_count"] == 1
+    assert payload["known_code_counts"][
+        "unresolved_finding_code_prefix_counts"
+    ] == [{"count": 1, "finding_code_prefix": "CUSTOM_SHARED_FAILURE"}]
+    for key in (
+        "attribution_reason_counts",
+        "unresolved_source_helper_counts",
+        "unresolved_finding_code_prefix_counts",
+    ):
+        _assert_count_limit_metadata(
+            payload["payload_limits"][key],
+            limit=16,
+            total_count=1,
+            included_count=1,
+            omitted_count=0,
+            truncated=False,
+            requested_limit=16,
+            default_limit=16,
+        )
+
+
+def test_current_top_gaps_have_specific_rule_attribution() -> None:
+    """Current high-priority families should not regress to broad rule IDs."""
+    findings = discover_known_quality_findings()
+    by_code = {item.finding_code: item for item in findings}
+
+    assert by_code["ASCII_TICK_SPREAD_CACHE_SCHEMA_UNSUPPORTED"].rule_id == (
+        "ticks.ascii.spread"
+    )
+    assert by_code["DOMAIN_CALENDAR_SOURCE_UNREADABLE"].rule_id == (
+        "domain.calendar_sessions"
+    )
+    assert by_code["PROVENANCE_CACHE_METADATA_MISMATCH"].rule_id == (
+        "provenance.manifest.lineage"
+    )
+    unresolved = [
+        item for item in findings if item.attribution_status == "unresolved"
+    ]
+    assert {item.source_family for item in unresolved} <= {
+        "ingestion",
+        "time",
+    }
+    assert all(
+        item.attribution_reason == "ambiguous_helper_rules"
+        for item in unresolved
+    )
 
 
 def test_remediation_catalog_audit_uses_report_coverage_and_sanitizes_paths(
@@ -451,10 +818,11 @@ def test_remediation_catalog_audit_json_matches_golden_fixture() -> None:
     fixture = Path(
         "tests/fixtures/data_quality_reports/remediation_catalog_audit.json"
     )
+    encoded = remediation_catalog_audit_to_json(payload)
+    if os.environ.get("HISTDATACOM_UPDATE_QUALITY_GOLDENS") == "1":
+        fixture.write_text(encoded, encoding="utf-8")
 
-    assert remediation_catalog_audit_to_json(payload) == fixture.read_text(
-        encoding="utf-8"
-    )
+    assert encoded == fixture.read_text(encoding="utf-8")
 
 
 def _known(

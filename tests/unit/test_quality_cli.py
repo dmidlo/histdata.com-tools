@@ -28,17 +28,27 @@ from histdatacom.data_quality.fingerprint_discovery import (
     TIME_SERIES_FINGERPRINT_SCHEMA_DISCOVERY_SCHEMA_VERSION,
 )
 from histdatacom.data_quality.fingerprints import (
+    HistDataSeriesFingerprintRule,
     SERIES_FINGERPRINT_RULE_ID,
     TIME_SERIES_FINGERPRINT_AUDIT_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_READINESS_RISK_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_SCHEMA_VERSION,
 )
+from histdatacom.data_quality.discovery import quality_target_from_path
 from histdatacom.data_quality.profiles import QUALITY_PROFILE_SCHEMA_VERSION
+from histdatacom.data_quality.synthetic_constraints import (
+    SYNTHETIC_VALIDATION_SCHEMA_VERSION,
+    synthetic_constraints_from_fingerprint,
+)
+from histdatacom.data_quality.synthetic_generation import (
+    SYNTHETIC_TICK_GENERATION_SCHEMA_VERSION,
+)
 from histdatacom.histdata_ascii import (
     CACHE_FILENAME,
     TICK,
     parse_ascii_lines,
+    read_polars_cache,
     to_polars_frame,
     write_polars_cache,
 )
@@ -61,6 +71,90 @@ def test_main_routes_quality_command(
 
     assert histdata_com.main() == 7
     assert captured == ["evidence"]
+
+
+def test_quality_repair_plan_cli_emits_bounded_non_mutating_json(
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    """The repair-plan command should translate a report without changing data."""
+    archive = tmp_path / "DAT_ASCII_EURUSD_T_201202.zip"
+    archive.write_bytes(b"not a zip")
+    target = QualityTarget(
+        path=str(archive),
+        kind=QualityTargetKind.ZIP,
+        data_format="ascii",
+        timeframe="T",
+        symbol="EURUSD",
+        period="201202",
+    )
+    finding = QualityFinding(
+        severity=QualitySeverity.ERROR,
+        code="ZIP_CORRUPT",
+        message="ZIP archive could not be opened.",
+        rule_id="inventory.zip.integrity",
+        target=target,
+        metadata={"error_type": "BadZipFile"},
+    )
+    report = QualityReport(
+        targets=(target,),
+        rule_results=(
+            QualityRuleResult(
+                rule_id="inventory.zip.integrity",
+                target=target,
+                findings=(finding,),
+            ),
+        ),
+    )
+    report_path = tmp_path / "quality.json"
+    write_quality_report(report, report_path)
+    archive_before = archive.read_bytes()
+    report_before = report_path.read_bytes()
+
+    exit_code = main(
+        [
+            "repair-plan",
+            "--report",
+            str(report_path),
+            "--item-limit",
+            "1",
+            "--evidence-limit",
+            "1",
+            "--json",
+        ]
+    )
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+
+    assert exit_code == 0
+    assert payload["schema_version"] == "histdatacom.quality-repair-plan.v1"
+    assert payload["mode"] == "non_mutating"
+    assert payload["apply_supported"] is False
+    assert payload["items"][0]["operation"]["category"] == (
+        "redownload_archive"
+    )
+    assert str(tmp_path) not in captured.out
+    assert archive.read_bytes() == archive_before
+    assert report_path.read_bytes() == report_before
+
+
+def test_quality_repair_plan_cli_human_output_is_concise(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The repair-plan command should explain missing plans without failing."""
+    report_path = Path(
+        "tests/fixtures/data_quality_reports/corrupt_zip_report.json"
+    )
+
+    exit_code = main(["repair-plan", "--report", str(report_path)])
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert "Quality repair plan" in captured.out
+    assert "mode: non_mutating" in captured.out
+    assert "ZIP_CORRUPT" in captured.out
+    assert "redownload_archive" in captured.out
+    assert "error_type" not in captured.out
 
 
 def test_quality_evidence_cli_reports_human_accepted_status(
@@ -247,7 +341,13 @@ def test_quality_remediation_catalog_cli_reports_ranked_human_output(
 
     assert exit_code == 1
     assert "Ranked remediation gaps" in output
+    assert "Remediation plan" in output
+    assert "#1 high/90 CLI_GAP selector=exact_rule_and_finding" in output
     assert "#1 warning CLI_GAP family=time" in output
+    assert "attribution=inferred(unique_helper_rule)" in output
+    assert (
+        "actionability=remediable_defect(unmapped_warning_or_error)" in output
+    )
     assert "report_occurrences=3" in output
 
 
@@ -426,6 +526,135 @@ def test_quality_bounded_payload_contract_cli_reports_human_output(
     assert "No bounded payload contract drift detected." in output
 
 
+def test_quality_synthetic_validate_cli_compares_saved_reports(
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    """Synthetic validation should use the saved quality-report CLI path."""
+    report_path = _write_fingerprint_quality_report(tmp_path)
+
+    exit_code = main(
+        [
+            "synthetic-validate",
+            "--reference-report",
+            str(report_path),
+            "--candidate-report",
+            str(report_path),
+            "--json",
+        ]
+    )
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    assert payload["schema_version"] == SYNTHETIC_VALIDATION_SCHEMA_VERSION
+    assert payload["status"] == "mismatch"
+    assert payload["mismatched_target_count"] == 1
+    assert "synthetic_candidate_avoid_duplicate_timestamps_present" in (
+        payload["mismatch_code_counts"]
+    )
+
+
+def test_quality_synthetic_generate_cli_writes_enriched_validated_cache(
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    """Generation should preserve observations and save validator evidence."""
+    reference_path = _write_tick_cache(
+        tmp_path / "reference",
+        symbol="EURUSD",
+        row_multiplier=8,
+    )
+    target = quality_target_from_path(reference_path)
+    assert target is not None
+    [finding] = HistDataSeriesFingerprintRule().evaluate(target)
+    reference_report = QualityReport(
+        targets=(target,),
+        rule_results=(
+            QualityRuleResult(
+                rule_id=finding.rule_id,
+                target=target,
+                findings=(finding,),
+            ),
+        ),
+    )
+    reference_report_path = tmp_path / "reference-quality.json"
+    write_quality_report(reference_report, reference_report_path)
+    output_path = tmp_path / "generated" / ".data"
+    candidate_report_path = tmp_path / "generated-quality.json"
+
+    exit_code = main(
+        [
+            "synthetic-generate",
+            "--reference-cache",
+            str(reference_path),
+            "--reference-report",
+            str(reference_report_path),
+            "--output-cache",
+            str(output_path),
+            "--candidate-report",
+            str(candidate_report_path),
+            "--minimum-reference-rows",
+            "8",
+            "--block-size",
+            "4",
+            "--json",
+        ]
+    )
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    assert payload["schema_version"] == SYNTHETIC_TICK_GENERATION_SCHEMA_VERSION
+    assert payload["status"] == "ready"
+    assert payload["validation"]["same_fingerprint_path_used"] is True
+    assert output_path.is_file()
+    assert candidate_report_path.is_file()
+    reference = read_polars_cache(reference_path)
+    generated = read_polars_cache(output_path)
+    assert generated.select("datetime", "bid", "ask").to_dicts() == (
+        reference.select("datetime", "bid", "ask").to_dicts()
+    )
+    assert generated.get_column("synth_usable").all()
+    assert generated.get_column("synth_bid").null_count() == 0
+
+    configured_output = tmp_path / "configured-generated" / ".data"
+    config_path = tmp_path / "synthetic-generation.yaml"
+    config_path.write_text(
+        f"""
+histdatacom:
+  quality:
+    command: synthetic_generate
+    reference_cache: {reference_path}
+    reference_report: {reference_report_path}
+    output_cache: {configured_output}
+    minimum_reference_rows: 8
+    block_size: 4
+    seed: 23
+    json: true
+""",
+        encoding="utf-8",
+    )
+    assert main(["--config", str(config_path)]) == 0
+    configured_payload = json.loads(capsys.readouterr().out)
+    assert configured_payload["configuration"]["seed"] == 23
+    assert configured_output.is_file()
+
+    assert (
+        main(
+            [
+                "synthetic-generate",
+                "--reference-cache",
+                str(reference_path),
+                "--reference-report",
+                str(reference_report_path),
+                "--output-cache",
+                str(output_path),
+            ]
+        )
+        == 1
+    )
+    assert "output cache already exists" in capsys.readouterr().err
+
+
 def test_quality_fingerprint_schema_cli_applies_yaml_defaults(
     capsys: pytest.CaptureFixture[str],
     tmp_path: Path,
@@ -554,6 +783,51 @@ def test_quality_fingerprint_readiness_cli_reports_human_output(
     assert "#1 ascii GBPUSD T 201202 csv: high" in output
     assert "invalid_timestamps_skipped" in output
     assert str(tmp_path) not in output
+
+
+def test_quality_fingerprint_readiness_cli_recommends_next_work(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The readiness command should optionally render bounded next work."""
+    report_path = Path(
+        "tests/fixtures/data_quality_reports/fingerprint_report.json"
+    )
+
+    exit_code = main(
+        [
+            "fingerprint-readiness",
+            "--report",
+            str(report_path),
+            "--next-work",
+            "--alternate-limit",
+            "1",
+            "--json",
+        ]
+    )
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    assert payload["next_work"]["schema_version"] == (
+        "histdatacom.fingerprint-next-work.v1"
+    )
+    assert payload["next_work"]["recommendation"]["rank"] == 1
+    assert len(payload["next_work"]["alternates"]) == 1
+    assert payload["next_work"]["basis"]["market_data_rescanned"] is False
+
+    exit_code = main(
+        [
+            "fingerprint-readiness",
+            "--report",
+            str(report_path),
+            "--next-work",
+        ]
+    )
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert "Next fingerprint work" in output
+    assert "suggested acceptance criteria:" in output
+    assert "does not" not in output
 
 
 def test_quality_help_advertises_fingerprint_schema_command() -> None:
@@ -722,6 +996,9 @@ def _write_fingerprint_quality_report(tmp_path: Path) -> Path:
             },
         },
     }
+    payload["synthetic_constraints"] = synthetic_constraints_from_fingerprint(
+        payload
+    )
     finding = QualityFinding(
         severity=QualitySeverity.INFO,
         code="FINGERPRINT_SERIES_SUMMARY",
@@ -769,6 +1046,46 @@ def _catalog_payload(
                 "report_occurrence_count": 3,
                 "rule_id": "time.ascii.sequence",
                 "source_family": "time",
+                "attribution_status": "inferred",
+                "attribution_reason": "unique_helper_rule",
+                "actionability": "remediable_defect",
+                "actionability_reason": "unmapped_warning_or_error",
+            }
+        )
+    remediation_plan: dict[str, object] = {
+        "schema_version": "histdatacom.quality-remediation-plan.v1",
+        "plan_item_count": 0,
+        "included_plan_item_count": 0,
+        "omitted_plan_item_count": 0,
+        "truncated": False,
+        "actionability_counts": {},
+        "fixability_counts": {},
+        "items": [],
+    }
+    if ranked_gap:
+        remediation_plan.update(
+            {
+                "plan_item_count": 1,
+                "included_plan_item_count": 1,
+                "actionability_counts": {"remediable_defect": 1},
+                "fixability_counts": {"high": 1},
+                "items": [
+                    {
+                        "rank": 1,
+                        "finding_code": "CLI_GAP",
+                        "rule_id": "time.ascii.sequence",
+                        "suggested_selector": {
+                            "shape": "exact_rule_and_finding"
+                        },
+                        "suggested_action": {"action_kind": "inspect"},
+                        "fixability": {
+                            "level": "high",
+                            "score": 90,
+                            "confidence": "high",
+                        },
+                        "missing_fields": ["message"],
+                    }
+                ],
             }
         )
     return {
@@ -788,10 +1105,14 @@ def _catalog_payload(
             "unmapped_known_code_count": 1 if gap_count else 0,
             "unmapped_warning_error_code_count": gap_count,
             "unmapped_warning_error_gap_count": gap_count,
+            "exact_attribution_occurrence_count": 0,
+            "inferred_attribution_occurrence_count": 1,
+            "unresolved_attribution_occurrence_count": 0,
         },
         "known_code_counts": {},
         "known_unmapped_codes": [],
         "ranked_gaps": ranked_gaps,
+        "remediation_plan": remediation_plan,
         "report_coverage": [],
         "payload_limits": {},
     }

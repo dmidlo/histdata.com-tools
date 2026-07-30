@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import replace
 from importlib import import_module
 import logging
@@ -76,9 +77,22 @@ from histdatacom.runtime_contracts import (
     WorkStatus,
     derive_work_id,
 )
+from histdatacom.random_windows import random_window_selection_from_metadata
 from histdatacom.source_cleanup import source_artifact_cleanliness_payload
 from histdatacom.verbosity import safe_log_extra
 from histdatacom.utils import set_working_data_dir
+from histdatacom.orchestration.reconstruction import (
+    ReconstructionCheckpointStore,
+    ReconstructionCommitPhase,
+    ReconstructionReportMismatch,
+    ReconstructionWorkflowRequestV1,
+    ReconstructionWindowStateV1,
+    RegisteredReconstructionStageExecutor,
+    cleanup_reconstruction_window_scratch,
+    reconcile_reconstruction_report,
+    run_reconstruction_window,
+    write_reconstruction_report,
+)
 from histdatacom.orchestration.workflow_metadata import TASK_QUEUE_METADATA_KEY
 
 
@@ -193,10 +207,10 @@ def dataset_plan_activity(payload: dict[str, Any]) -> dict[str, Any]:
     repository_ranges = (
         read_repository_data_file(repo_path)
         if (
-            not request.start_yearmonth
-            and not request.end_yearmonth
-            and repo_path.exists()
+            (not request.start_yearmonth and not request.end_yearmonth)
+            or bool(request.random_window)
         )
+        and repo_path.exists()
         else {}
     )
     repository_range_count = len(repository_pair_data(repository_ranges))
@@ -211,6 +225,8 @@ def dataset_plan_activity(payload: dict[str, Any]) -> dict[str, Any]:
         zip_persist=request.zip_persist,
         cache_only=request.build_cache,
         repository_ranges=repository_ranges,
+        random_window=request.random_window,
+        random_seed=request.random_seed,
     )
     plan_id = derive_work_id(
         request.request_id,
@@ -225,6 +241,8 @@ def dataset_plan_activity(payload: dict[str, Any]) -> dict[str, Any]:
         metadata={
             "start_yearmonth": request.start_yearmonth,
             "end_yearmonth": request.end_yearmonth,
+            "random_window": request.random_window,
+            "random_seed": request.random_seed,
             "formats": list(request.formats),
             "pairs": list(request.pairs),
             "timeframes": list(request.timeframes),
@@ -540,6 +558,99 @@ def validate_urls_activity(payload: dict[str, Any]) -> dict[str, Any]:
     return _activity_batch_payload(outputs, aggregate)
 
 
+@activity_defn(name="reconstruction_window")
+async def reconstruction_window_activity(
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    """Run or resume one artifact-backed synthetic reconstruction window."""
+    request = ReconstructionWorkflowRequestV1.from_dict(
+        _mapping(payload.get("request", {}))
+    )
+    if len(request.tasks) != 1:
+        raise ValueError("reconstruction window activity requires one task")
+    task = request.tasks[0]
+    store = ReconstructionCheckpointStore(request.manifest_store_root)
+
+    def emit(heartbeat: Any) -> None:
+        _activity_heartbeat(heartbeat.to_dict())
+
+    try:
+        state = await run_reconstruction_window(
+            request,
+            task,
+            checkpoint_store=store,
+            stage_executor=RegisteredReconstructionStageExecutor(),
+            heartbeat=emit,
+            cancellation_requested=_activity_cancelled,
+        )
+    except (Exception, asyncio.CancelledError) as err:
+        if not _reconstruction_cancellation_error(err):
+            raise
+        stored_state = store.load(task.window)
+        if stored_state is not None and stored_state.checkpoint.phase not in {
+            ReconstructionCommitPhase.COMMITTED,
+            ReconstructionCommitPhase.CANCELLED,
+        }:
+            cancelled = stored_state.interrupted(
+                ReconstructionCommitPhase.CANCELLED,
+                "Temporal cancelled reconstruction window activity",
+            )
+            store.save(cancelled, expected_state_id=stored_state.state_id)
+        cleanup_reconstruction_window_scratch(task.scratch_directory)
+        raise
+    return cast(dict[str, Any], state.to_dict())
+
+
+@activity_defn(name="reconstruction_report")
+def reconstruction_report_activity(
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    """Reconcile workflow checkpoints with committed storage manifests."""
+    request = ReconstructionWorkflowRequestV1.from_dict(
+        _mapping(payload.get("request", {}))
+    )
+    checkpoint_store = ReconstructionCheckpointStore(
+        request.manifest_store_root
+    )
+    loaded_states = tuple(
+        checkpoint_store.load(task.window) for task in request.tasks
+    )
+    if any(state is None for state in loaded_states):
+        raise ReconstructionReportMismatch(
+            "reconstruction report cannot find every durable window checkpoint"
+        )
+    states = tuple(
+        cast(ReconstructionWindowStateV1, state) for state in loaded_states
+    )
+    report = reconcile_reconstruction_report(
+        request,
+        states,
+        progress=lambda metadata: _activity_heartbeat(dict(metadata)),
+    )
+    report_ref = write_reconstruction_report(report, request.report_root)
+    ManifestStatusStore(request.manifest_store_root).write_job_snapshot(
+        {
+            "schema_version": 1,
+            "job_id": f"reconstruction-run-{request.request_id}",
+            "request_id": request.request_id,
+            "workflow_id": f"reconstruction-run-{request.request_id}",
+            "run_id": request.run.run_id,
+            "lifecycle": report.status,
+            "status": (
+                WorkStatus.COMPLETED.value
+                if report.status == "committed"
+                else WorkStatus.FAILED.value
+            ),
+            "artifacts": [report_ref.to_dict()],
+            "reconstruction_report": report.to_dict(),
+        }
+    )
+    return {
+        "report": report.to_dict(),
+        "report_ref": report_ref.to_dict(),
+    }
+
+
 @activity_defn(name="download_archives")
 def download_archives_activity(
     payload: dict[str, Any],
@@ -694,6 +805,7 @@ def merge_cache_activity(
             dict[str, Any],
             result.to_dict(),
         )
+    _require_resolved_random_window(request, work_items)
 
     if _activity_cancelled():
         result = _observe_and_persist_stage_result(
@@ -752,6 +864,7 @@ def import_to_influx_activity(
             dict[str, Any],
             result.to_dict(),
         )
+    _require_resolved_random_window(request, work_items)
 
     total = len(work_items)
     args = _influx_args(request)
@@ -803,7 +916,15 @@ def default_activities() -> tuple[Callable[..., Any], ...]:
         build_cache_activity,
         merge_cache_activity,
         import_to_influx_activity,
+        reconstruction_window_activity,
+        reconstruction_report_activity,
     )
+
+
+def _reconstruction_cancellation_error(err: BaseException) -> bool:
+    """Return whether Temporal or asyncio delivered cancellation."""
+    normalized = type(err).__name__.strip().lower()
+    return normalized in {"cancellederror", "cancelederror"}
 
 
 def _repo_local_path(request: RunRequest) -> Path:
@@ -1014,6 +1135,32 @@ def _influx_args(request: RunRequest) -> dict[str, Any]:
             }
         )
     return args
+
+
+def _require_resolved_random_window(
+    request: RunRequest,
+    work_items: tuple[WorkItem, ...],
+) -> None:
+    """Fail closed when a declared random window lost its resolved metadata."""
+    if not request.random_window:
+        return
+    selections = tuple(
+        random_window_selection_from_metadata(item.metadata)
+        for item in work_items
+    )
+    selection_ids = {
+        selection.selection_id
+        for selection in selections
+        if selection is not None
+    }
+    if (
+        all(selection is not None for selection in selections)
+        and len(selection_ids) == 1
+    ):
+        return
+    raise ValueError(
+        "random-window request is missing its resolved work-item selection"
+    )
 
 
 def _influx_batch_writer(args: Mapping[str, Any]) -> Any:

@@ -30,6 +30,7 @@ class Options:
         "orchestration_start",
         "orchestration_keep_runtime",
         "orchestration_wait_result",
+        "output_timezone",
         "pair_groups",
         "pairs",
         "quality_check_groups",
@@ -48,9 +49,11 @@ class Options:
         "quality_preflight_run_validation",
         "quality_preflight_sample_size",
         "quality_preflight_validation_report_path",
+        "quality_preflight_validation_evidence_path",
         "quality_paths",
         "quality_profile",
         "quality_profile_path",
+        "quality_profile_resolution",
         "quality_profile_preview",
         "quality_profile_preview_format",
         "quality_profile_preview_output_path",
@@ -58,6 +61,8 @@ class Options:
         "quality_report_path",
         "repo_quality_columns",
         "repo_quality_refresh",
+        "random_seed",
+        "random_window",
         "request_bundle_out",
         "request_json_out",
         "schedule_key",
@@ -93,6 +98,8 @@ class Options:
         self.timeframes: set = Timeframe.list_keys()
         self.start_yearmonth: str | None = ""
         self.end_yearmonth: str | None = ""
+        self.random_window: str = ""
+        self.random_seed: int | None = None
         self.data_directory: str = "data"
         self.from_api: bool = False
         self.api_return_type: str | None = None
@@ -120,8 +127,10 @@ class Options:
         self.quality_preflight_report_path: str | None = None
         self.quality_preflight_run_validation: bool = False
         self.quality_preflight_validation_report_path: str | None = None
+        self.quality_preflight_validation_evidence_path: str | None = None
         self.quality_profile_path: str | None = None
         self.quality_profile: dict = {}
+        self.quality_profile_resolution: dict = {}
         self.quality_profile_preview: bool = False
         self.quality_profile_preview_format: str = "json"
         self.quality_profile_preview_output_path: str | None = None
@@ -134,6 +143,7 @@ class Options:
         self.orchestration_start: bool = True
         self.orchestration_keep_runtime: bool = False
         self.orchestration_wait_result: bool = True
+        self.output_timezone: str = ""
         self.no_overlap: bool = False
         self.schedule_key: str = ""
         self.verbosity: int = 0

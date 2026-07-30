@@ -12,7 +12,10 @@ from histdatacom.data_quality.contracts import (
 )
 from histdatacom.data_quality.calendar import calendar_quality_rules
 from histdatacom.data_quality.discovery import normalize_quality_check_groups
-from histdatacom.data_quality.fingerprints import HistDataSeriesFingerprintRule
+from histdatacom.data_quality.fingerprints import (
+    HistDataCrossSeriesFingerprintRule,
+    HistDataSeriesFingerprintRule,
+)
 from histdatacom.data_quality.ingestion import (
     HistDataAsciiRowCountIngestionRule,
     HistDataAsciiSchemaIngestionRule,
@@ -28,6 +31,7 @@ from histdatacom.data_quality.profiles import (
 )
 from histdatacom.data_quality.provenance import provenance_quality_run_rules
 from histdatacom.data_quality.symbols import (
+    CrossInstrumentScanProvider,
     HistDataCrossInstrumentConsistencyRule,
     domain_quality_rules,
 )
@@ -86,16 +90,31 @@ def quality_run_rules_for_groups(
     normalized = normalize_quality_check_groups(groups)
     quality_profile = quality_profile_from_value(profile)
     rules: list[QualityRunRule] = []
+    shared_cross_instrument_scan = (
+        CrossInstrumentScanProvider() if "all" in normalized else None
+    )
     if "all" in normalized or "inventory" in normalized:
         rules.extend(manifest_quality_run_rules())
     if "all" in normalized or "time" in normalized:
         rules.extend(_time_quality_run_rules(quality_profile))
     if "all" in normalized or "domain" in normalized:
-        rules.extend(_domain_quality_run_rules(quality_profile))
+        rules.extend(
+            _domain_quality_run_rules(
+                quality_profile,
+                scan_provider=shared_cross_instrument_scan,
+            )
+        )
     if "all" in normalized or "provenance" in normalized:
         rules.extend(
             provenance_quality_run_rules(
                 explicit="provenance" in normalized and "all" not in normalized
+            )
+        )
+    if "all" in normalized or "fingerprint" in normalized:
+        rules.extend(
+            _fingerprint_quality_run_rules(
+                quality_profile,
+                scan_provider=shared_cross_instrument_scan,
             )
         )
     return tuple(rules)
@@ -269,6 +288,8 @@ def _merged_thresholds(
 
 def _domain_quality_run_rules(
     profile: QualityProfile,
+    *,
+    scan_provider: CrossInstrumentScanProvider | None = None,
 ) -> tuple[QualityRunRule, ...]:
     return (
         HistDataCrossInstrumentConsistencyRule(
@@ -283,6 +304,7 @@ def _domain_quality_run_rules(
                 "error_severity",
                 QualitySeverity.ERROR,
             ),
+            scan_provider=scan_provider,
         ),
     )
 
@@ -308,5 +330,28 @@ def _fingerprint_quality_rules(
     return (
         HistDataSeriesFingerprintRule(
             profile=profile.fingerprint_profile(),
+        ),
+    )
+
+
+def _fingerprint_quality_run_rules(
+    profile: QualityProfile,
+    *,
+    scan_provider: CrossInstrumentScanProvider | None = None,
+) -> tuple[QualityRunRule, ...]:
+    return (
+        HistDataCrossSeriesFingerprintRule(
+            tolerance=profile.cross_instrument_tolerance(),
+            warning_severity=profile.severity(
+                "domain.cross_instrument_consistency",
+                "warning_severity",
+                QualitySeverity.WARNING,
+            ),
+            error_severity=profile.severity(
+                "domain.cross_instrument_consistency",
+                "error_severity",
+                QualitySeverity.ERROR,
+            ),
+            scan_provider=scan_provider,
         ),
     )

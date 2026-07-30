@@ -7,12 +7,13 @@ semantics that must survive the backend migration to Polars.
 from __future__ import annotations
 
 import csv
+import math
 import zipfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
-from typing import Any, Iterable, Sequence
+from typing import Any, Iterable, Mapping, Sequence
 
 EST_NO_DST_OFFSET_MS = 18_000_000
 UNIX_EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
@@ -148,6 +149,8 @@ def parse_ascii_lines(timeframe: str, lines: Iterable[str]) -> ParsedAsciiBatch:
 
 def read_ascii_file(path: Path, timeframe: str) -> ParsedAsciiBatch:
     """Parse a plain CSV file or a ZIP containing one HistData CSV file."""
+    if filename_has_unsupported_raw_dimensions(path):
+        raise ValueError("raw import supports ASCII tick inputs only")
     if path.suffix == ".zip":
         with zipfile.ZipFile(path) as archive:
             names = tuple(
@@ -155,6 +158,8 @@ def read_ascii_file(path: Path, timeframe: str) -> ParsedAsciiBatch:
             )
             if len(names) != 1:
                 raise ValueError("expected ZIP archive to contain one CSV file")
+            if filename_has_unsupported_raw_dimensions(names[0]):
+                raise ValueError("raw import supports ASCII tick inputs only")
             with archive.open(names[0]) as source:
                 text = source.read().decode("utf-8").splitlines()
         return parse_ascii_lines(timeframe, text)
@@ -297,11 +302,50 @@ def _single_csv_member_from_zip(path: Path) -> bytes:
         )
         if len(names) != 1:
             raise ValueError("expected ZIP archive to contain one CSV file")
+        if filename_has_unsupported_raw_dimensions(names[0]):
+            raise ValueError("raw import supports ASCII tick inputs only")
         return archive.read(names[0])
+
+
+def filename_has_unsupported_raw_dimensions(filename: str | Path) -> bool:
+    """Return whether a HistData filename declares a retired raw axis."""
+    name = Path(str(filename)).name.upper()
+    stem = name
+    # Live HistData ASCII archives include a same-stem ``.txt`` status report
+    # beside the CSV data member.  It declares the same supported raw axes and
+    # must not be mistaken for a retired platform or timeframe.
+    for suffix in (".ZIP", ".CSV", ".TXT"):
+        if stem.endswith(suffix):
+            stem = stem[: -len(suffix)]
+    parts = stem.split("_")
+    if stem.startswith("DAT_"):
+        if len(parts) < 5:
+            return True
+        period = parts[4]
+        return (
+            parts[1] != "ASCII"
+            or parts[3] != TICK
+            or len(period) not in {4, 6}
+            or not period.isdigit()
+        )
+    if stem.startswith("HISTDATA_COM_"):
+        if len(parts) != 5:
+            return True
+        timeframe_period = parts[4]
+        period = timeframe_period[1:]
+        is_tick = (
+            len(period) in {4, 6}
+            and timeframe_period.startswith(TICK)
+            and period.isdigit()
+        )
+        return parts[2] != "ASCII" or not is_tick
+    return False
 
 
 def read_ascii_file_to_polars(path: Path, timeframe: str) -> Any:
     """Read a plain CSV file or ZIP archive into a raw Polars dataframe."""
+    if filename_has_unsupported_raw_dimensions(path):
+        raise ValueError("raw import supports ASCII tick inputs only")
     if path.suffix.lower() == ".zip":
         return _read_csv_to_polars(
             BytesIO(_single_csv_member_from_zip(path)),
@@ -313,6 +357,7 @@ def read_ascii_file_to_polars(path: Path, timeframe: str) -> Any:
 
 def write_polars_cache(frame: Any, path: Path) -> None:
     """Write a Polars dataframe cache using Arrow IPC payloads."""
+    _validate_cache_dimensions(frame)
     frame.write_ipc(path)
 
 
@@ -321,9 +366,30 @@ def read_polars_cache(path: Path) -> Any:
     import polars as pl
 
     try:
-        return pl.read_ipc(path)
+        frame = pl.read_ipc(path)
     except Exception as err:
         raise ValueError(LEGACY_CACHE_ERROR) from err
+    _validate_cache_dimensions(frame)
+    return frame
+
+
+def _validate_cache_dimensions(frame: Any) -> None:
+    """Reject enriched caches that declare retired raw dimensions."""
+    columns = set(getattr(frame, "columns", ()))
+    if "format" in columns:
+        formats = {
+            str(value).lower()
+            for value in frame.get_column("format").drop_nulls().unique()
+        }
+        if formats != {"ascii"}:
+            raise ValueError("cache supports ASCII tick inputs only")
+    if "timeframe" in columns:
+        timeframes = {
+            str(value)
+            for value in frame.get_column("timeframe").drop_nulls().unique()
+        }
+        if timeframes != {TICK}:
+            raise ValueError("cache supports ASCII tick inputs only")
 
 
 def to_arrow_table(batch: ParsedAsciiBatch) -> Any:
@@ -390,15 +456,131 @@ def merge_batches(
 
 
 def format_influx_line(
-    pair: str, data_format: str, timeframe: str, row: Sequence[Any]
+    pair: str,
+    data_format: str,
+    timeframe: str,
+    row: Sequence[Any],
+    *,
+    columns: Sequence[str] | None = None,
 ) -> str:
-    """Return the line protocol string currently emitted for a parsed row."""
-    tags = (
-        f"source=histdata.com,format={data_format},timeframe={timeframe}"
-    ).replace(" ", "")
+    """Return line protocol for a raw or enriched ASCII tick cache row."""
+    _validate_influx_dimensions(data_format, timeframe)
 
+    if columns is None:
+        tags = (
+            f"source=histdata.com,format={data_format},timeframe={timeframe}"
+        ).replace(" ", "")
+        fields = f"bidquote={row[1]},askquote={row[2]}".replace(" ", "")
+        return f"{pair},{tags} {fields} {row[0]}"
+
+    values = _row_values(row, columns)
+    _validate_influx_dimensions(
+        str(values.get("format") or data_format),
+        str(values.get("timeframe") or timeframe),
+    )
+    tags = _influx_tags(values, data_format, timeframe)
+    fields = _influx_fields(values)
+    timestamp = values.get("datetime", row[0])
+    return f"{_escape_influx_key(pair)},{tags} {fields} {timestamp}"
+
+
+def _validate_influx_dimensions(data_format: str, timeframe: str) -> None:
+    if str(data_format).lower() != "ascii":
+        raise ValueError("Influx projection supports ASCII tick inputs only")
     if timeframe != TICK:
         raise ValueError(f"unsupported ASCII timeframe: {timeframe}")
-    fields = f"bidquote={row[1]},askquote={row[2]}".replace(" ", "")
 
-    return f"{pair},{tags} {fields} {row[0]}"
+
+def _row_values(
+    row: Sequence[Any],
+    columns: Sequence[str],
+) -> dict[str, Any]:
+    return dict(zip(columns, row, strict=False))
+
+
+def _influx_tags(
+    values: Mapping[str, Any],
+    data_format: str,
+    timeframe: str,
+) -> str:
+    source = str(values.get("source") or "histdata.com")
+    tags = {
+        "source": source,
+        "format": str(values.get("format") or data_format),
+        "timeframe": str(values.get("timeframe") or timeframe),
+    }
+    period = values.get("period")
+    if period not in (None, ""):
+        tags["period"] = str(period)
+    row_id = values.get("row_id")
+    if row_id not in (None, ""):
+        tags["row_id"] = str(row_id)
+    return ",".join(
+        f"{_escape_influx_key(key)}={_escape_influx_key(value)}"
+        for key, value in tags.items()
+    )
+
+
+def _influx_fields(values: Mapping[str, Any]) -> str:
+    fields: list[str] = []
+    _append_influx_field(fields, "bidquote", values.get("bid"))
+    _append_influx_field(fields, "askquote", values.get("ask"))
+    excluded = {
+        "datetime",
+        "bid",
+        "ask",
+        "vol",
+        "training_schema_version",
+        "series_id",
+        "row_id",
+        "symbol",
+        "format",
+        "timeframe",
+        "source",
+        "period",
+    }
+    for name, value in values.items():
+        if name in excluded:
+            continue
+        _append_influx_field(fields, name, value)
+    return ",".join(fields)
+
+
+def _append_influx_field(
+    fields: list[str],
+    name: str,
+    value: Any,
+) -> None:
+    formatted = _format_influx_field_value(value)
+    if formatted is None:
+        return
+    fields.append(f"{_escape_influx_key(name)}={formatted}")
+
+
+def _format_influx_field_value(value: Any) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, int):
+        return f"{value}i"
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            return None
+        return str(value)
+    return _format_influx_string_field(str(value))
+
+
+def _format_influx_string_field(value: str) -> str:
+    escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'
+
+
+def _escape_influx_key(value: Any) -> str:
+    return (
+        str(value)
+        .replace("\\", "\\\\")
+        .replace(" ", "\\ ")
+        .replace(",", "\\,")
+        .replace("=", "\\=")
+    )

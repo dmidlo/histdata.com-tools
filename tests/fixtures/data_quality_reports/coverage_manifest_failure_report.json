@@ -22,6 +22,11 @@
     },
     "operation": "data-quality",
     "remediation_coverage": {
+      "actionability_counts": {
+        "remediable_defect": 1
+      },
+      "blocked_by_attribution_warning_error_finding_count": 0,
+      "blocked_by_missing_diagnostics_warning_error_finding_count": 0,
       "count_limits": {
         "finding_code_counts": {
           "default_limit": 16,
@@ -109,8 +114,10 @@
         }
       ],
       "finding_count": 1,
+      "included_unmapped_actionable_warning_error_group_count": 1,
       "included_unmapped_group_count": 1,
       "included_unmapped_warning_error_group_count": 1,
+      "intentionally_unremediable_warning_error_finding_count": 0,
       "limit_metadata": {
         "groups": {
           "default_limit": 16,
@@ -135,6 +142,7 @@
       "mapped_finding_count": 0,
       "mapped_rule_id_counts": [],
       "mapped_severity_counts": {},
+      "omitted_unmapped_actionable_warning_error_group_count": 0,
       "omitted_unmapped_group_count": 0,
       "omitted_unmapped_warning_error_group_count": 0,
       "rule_id_counts": [
@@ -147,6 +155,8 @@
       "severity_counts": {
         "error": 1
       },
+      "unmapped_actionable_warning_error_finding_count": 1,
+      "unmapped_actionable_warning_error_group_count": 1,
       "unmapped_finding_code_counts": [
         {
           "count": 1,
@@ -157,6 +167,8 @@
       "unmapped_group_count": 1,
       "unmapped_groups": [
         {
+          "actionability": "remediable_defect",
+          "actionability_reason": "unmapped_warning_or_error",
           "finding_code": "COVERAGE_PERIOD_MISSING",
           "included_target_axis_count": 1,
           "limit_metadata": {

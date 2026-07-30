@@ -11,6 +11,8 @@ from collections import Counter
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation, localcontext
+from io import StringIO
+from itertools import islice
 from pathlib import Path
 from typing import Any, cast
 
@@ -26,6 +28,7 @@ from histdatacom.data_quality.calendar import (
     SESSION_MARKET_CLOSED,
     SESSION_NO_ACTIVE_WINDOW,
     SESSION_STATE_WEEKEND_CLOSURE,
+    SOURCE_WEEKDAY_NAMES,
     calendar_regime_payload_for_target,
     classify_histdata_source_timestamp,
     classify_histdata_timestamp,
@@ -34,16 +37,69 @@ from histdatacom.data_quality.calendar_profiles import (
     HistDataCalendarProfile,
     default_calendar_profile,
 )
+from histdatacom.data_quality.classical_baselines import (
+    ClassicalBaselineProfile,
+    classical_baseline_diagnostics_from_training_frame,
+)
+from histdatacom.data_quality.classical_model_contracts import (
+    ClassicalModelInputProfile,
+    build_classical_model_input,
+)
+from histdatacom.data_quality.classical_model_comparison import (
+    ClassicalModelComparisonProfile,
+    classical_model_comparison_from_saved_results,
+)
+from histdatacom.data_quality.autoregressive import (
+    AutoregressiveProfile,
+    autoregressive_from_model_input,
+)
+from histdatacom.data_quality.exponential_smoothing import (
+    ExponentialSmoothingProfile,
+    exponential_smoothing_from_model_input,
+)
 from histdatacom.data_quality.limits import (
     BoundedReportLimit,
     bounded_report_limit,
 )
-from histdatacom.data_quality.polars_cache import read_quality_polars_cache
+from histdatacom.data_quality.polars_cache import (
+    read_fingerprint_parity_polars_cache,
+    read_quality_polars_cache,
+)
+from histdatacom.data_quality.seasonal_exogenous import (
+    SeasonalExogenousProfile,
+    seasonal_exogenous_from_model_input,
+)
+from histdatacom.data_quality.state_space import (
+    StateSpaceProfile,
+    state_space_from_model_input,
+)
+from histdatacom.data_quality.volatility import (
+    VolatilityProfile,
+    volatility_from_model_input,
+)
 from histdatacom.data_quality.remediation import (
     remediation_hint_payloads_for_flags,
 )
-from histdatacom.data_quality.symbols import symbol_metadata_for
-from histdatacom.data_quality.time import timestamp_topology_payload_for_target
+from histdatacom.data_quality.symbols import (
+    CROSS_SERIES_FINGERPRINT_METADATA_KEY as CROSS_SERIES_FINGERPRINT_METADATA_KEY,
+    CROSS_SERIES_FINGERPRINT_RULE_ID as CROSS_SERIES_FINGERPRINT_RULE_ID,
+    CROSS_SERIES_FINGERPRINT_SCHEMA_VERSION as CROSS_SERIES_FINGERPRINT_SCHEMA_VERSION,
+    HistDataCrossSeriesFingerprintRule as HistDataCrossSeriesFingerprintRule,
+    symbol_metadata_for,
+)
+from histdatacom.data_quality.synthetic_constraints import (
+    synthetic_constraints_from_fingerprint,
+)
+from histdatacom.data_quality.time import (
+    DEFAULT_TIMESTAMP_INSPECTION_SAMPLE_LIMIT,
+    timestamp_topology_payload_for_target,
+)
+from histdatacom.data_quality.training_features import (
+    TRAINING_REQUIRED_COLUMNS,
+    TRAINING_SCHEMA_VERSION,
+    ensure_tick_training_features,
+    quality_report_from_training_features,
+)
 from histdatacom.data_quality.ticks import (
     DEFAULT_TICK_MICROSTRUCTURE_THRESHOLDS,
     DEFAULT_TICK_SPREAD_REGIME_THRESHOLDS,
@@ -52,7 +108,10 @@ from histdatacom.histdata_ascii import (
     TICK,
     columns_for_timeframe,
     delimiter_for_timeframe,
+    format_influx_line,
     normalize_ascii_row,
+    parse_ascii_lines,
+    to_polars_frame,
 )
 from histdatacom.publication_safety import publish_safe_path
 from histdatacom.runtime_contracts import JSONValue
@@ -90,6 +149,12 @@ TIME_SERIES_FINGERPRINT_DEPENDENCE_SCHEMA_VERSION = (
 TIME_SERIES_FINGERPRINT_STATIONARITY_SCHEMA_VERSION = (
     "histdatacom.time-series-fingerprint-stationarity.v1"
 )
+TIME_SERIES_FINGERPRINT_DECOMPOSITION_SCHEMA_VERSION = (
+    "histdatacom.time-series-fingerprint-decomposition.v1"
+)
+TIME_SERIES_FINGERPRINT_DECOMPOSITION_TRAINING_PROJECTION_SCHEMA_VERSION = (
+    "histdatacom.time-series-fingerprint-decomposition-training-projection.v1"
+)
 TIME_SERIES_FINGERPRINT_AUDIT_SCHEMA_VERSION = (
     "histdatacom.time-series-fingerprint-audit.v1"
 )
@@ -98,6 +163,12 @@ TIME_SERIES_FINGERPRINT_READINESS_SUMMARY_SCHEMA_VERSION = (
 )
 TIME_SERIES_FINGERPRINT_READINESS_RISK_SCHEMA_VERSION = (
     "histdatacom.time-series-fingerprint-readiness-risk.v1"
+)
+TIME_SERIES_FINGERPRINT_PARITY_SCHEMA_VERSION = (
+    "histdatacom.time-series-fingerprint-cache-source-parity.v1"
+)
+TIME_SERIES_FINGERPRINT_PARITY_SUMMARY_SCHEMA_VERSION = (
+    "histdatacom.time-series-fingerprint-cache-source-parity-summary.v1"
 )
 TIME_SERIES_FINGERPRINT_METADATA_KEY = "time_series_fingerprint"
 TIME_SERIES_FINGERPRINT_COVERAGE_METADATA_KEY = (
@@ -124,8 +195,10 @@ TIME_SERIES_FINGERPRINT_READINESS_SUMMARY_METADATA_KEY = (
 TIME_SERIES_FINGERPRINT_READINESS_RISK_METADATA_KEY = (
     "time_series_fingerprint_readiness_risk"
 )
+TIME_SERIES_FINGERPRINT_PARITY_SUMMARY_METADATA_KEY = (
+    "time_series_fingerprint_cache_source_parity_summary"
+)
 SERIES_FINGERPRINT_RULE_ID = "fingerprint.series"
-CROSS_SERIES_FINGERPRINT_RULE_ID = "fingerprint.cross_series"
 SERIES_FINGERPRINT_SUMMARY_CODE = "FINGERPRINT_SERIES_SUMMARY"
 SERIES_FINGERPRINT_SOURCE_UNAVAILABLE_CODE = "FINGERPRINT_SOURCE_UNAVAILABLE"
 
@@ -143,6 +216,9 @@ DEFAULT_FINGERPRINT_ROLLING_WINDOWS = (60, 240, 1440)
 DEFAULT_FINGERPRINT_HISTOGRAM_BINS = 32
 DEFAULT_FINGERPRINT_MAX_ROWS = 1_000_000
 DEFAULT_FINGERPRINT_ROUNDING_DIGITS = 12
+DEFAULT_FINGERPRINT_TOPOLOGY_INSPECTION_SAMPLE_LIMIT = (
+    DEFAULT_TIMESTAMP_INSPECTION_SAMPLE_LIMIT
+)
 DEFAULT_FINGERPRINT_TOPOLOGY_SUMMARY_LIMIT = 128
 DEFAULT_FINGERPRINT_TOPOLOGY_ATTENTION_LIMIT = 32
 DEFAULT_FINGERPRINT_DISTRIBUTION_SUMMARY_LIMIT = 128
@@ -162,6 +238,9 @@ DEFAULT_FINGERPRINT_DISTRIBUTION_NEGATIVE_SPREAD_MIN_COUNT = 1
 DEFAULT_FINGERPRINT_DISTRIBUTION_NEGATIVE_SPREAD_MIN_RATE = 0.0
 DEFAULT_FINGERPRINT_DISTRIBUTION_FLAG_TRUNCATED = True
 DEFAULT_FINGERPRINT_DISTRIBUTION_FLAG_CACHE_FLOAT_PRECISION = True
+DEFAULT_FINGERPRINT_PARITY_MISMATCH_LIMIT = 16
+DEFAULT_FINGERPRINT_PARITY_SUMMARY_LIMIT = 32
+_CALENDAR_POLICY_CONTEXT_TEXT_LIMIT = 128
 SUPPORTED_SERIES_FINGERPRINT_TIMEFRAMES = (TICK,)
 SUPPORTED_SERIES_FINGERPRINT_KINDS = (
     QualityTargetKind.CSV,
@@ -196,6 +275,17 @@ FINGERPRINT_AUDIT_SECTIONS = (
     "microstructure_dynamics",
     "dependence",
     "stationarity_diagnostics",
+    "decomposition",
+    "cache_source_parity",
+    "classical_baselines",
+    "classical_model_input",
+    "exponential_smoothing",
+    "autoregressive",
+    "seasonal_exogenous",
+    "state_space",
+    "volatility",
+    "classical_model_comparison",
+    "synthetic_constraints",
 )
 FINGERPRINT_DYNAMICS_SECTIONS = ("microstructure_dynamics",)
 
@@ -244,6 +334,21 @@ class HistDataFingerprintDistributionAttentionProfile:
 
 
 @dataclass(frozen=True, slots=True)
+class HistDataFingerprintParityProfile:
+    """Opt-in bounded cache/source parity controls."""
+
+    enabled: bool = False
+    mismatch_limit: int = DEFAULT_FINGERPRINT_PARITY_MISMATCH_LIMIT
+
+    def to_metadata(self) -> dict[str, JSONValue]:
+        """Return a JSON-compatible representation."""
+        return {
+            "enabled": self.enabled,
+            "mismatch_limit": self.mismatch_limit,
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class HistDataFingerprintProfile:
     """Operator-tunable limits for deterministic fingerprint summaries."""
 
@@ -253,6 +358,9 @@ class HistDataFingerprintProfile:
     histogram_bins: int = DEFAULT_FINGERPRINT_HISTOGRAM_BINS
     max_rows: int = DEFAULT_FINGERPRINT_MAX_ROWS
     rounding_digits: int = DEFAULT_FINGERPRINT_ROUNDING_DIGITS
+    topology_inspection_sample_limit: int = (
+        DEFAULT_FINGERPRINT_TOPOLOGY_INSPECTION_SAMPLE_LIMIT
+    )
     calendar_profile: HistDataCalendarProfile = field(
         default_factory=default_calendar_profile,
         repr=False,
@@ -260,6 +368,29 @@ class HistDataFingerprintProfile:
     )
     distribution_attention: HistDataFingerprintDistributionAttentionProfile = (
         field(default_factory=HistDataFingerprintDistributionAttentionProfile)
+    )
+    cache_source_parity: HistDataFingerprintParityProfile = field(
+        default_factory=HistDataFingerprintParityProfile
+    )
+    classical_baselines: ClassicalBaselineProfile = field(
+        default_factory=ClassicalBaselineProfile
+    )
+    classical_model_input: ClassicalModelInputProfile = field(
+        default_factory=ClassicalModelInputProfile
+    )
+    exponential_smoothing: ExponentialSmoothingProfile = field(
+        default_factory=ExponentialSmoothingProfile
+    )
+    autoregressive: AutoregressiveProfile = field(
+        default_factory=AutoregressiveProfile
+    )
+    seasonal_exogenous: SeasonalExogenousProfile = field(
+        default_factory=SeasonalExogenousProfile
+    )
+    state_space: StateSpaceProfile = field(default_factory=StateSpaceProfile)
+    volatility: VolatilityProfile = field(default_factory=VolatilityProfile)
+    classical_model_comparison: ClassicalModelComparisonProfile = field(
+        default_factory=ClassicalModelComparisonProfile
     )
 
     def to_metadata(self) -> dict[str, JSONValue]:
@@ -271,8 +402,22 @@ class HistDataFingerprintProfile:
             "histogram_bins": self.histogram_bins,
             "max_rows": self.max_rows,
             "rounding_digits": self.rounding_digits,
+            "topology_inspection_sample_limit": (
+                self.topology_inspection_sample_limit
+            ),
             "distribution_attention": (
                 self.distribution_attention.to_metadata()
+            ),
+            "cache_source_parity": self.cache_source_parity.to_metadata(),
+            "classical_baselines": self.classical_baselines.to_metadata(),
+            "classical_model_input": (self.classical_model_input.to_metadata()),
+            "exponential_smoothing": self.exponential_smoothing.to_metadata(),
+            "autoregressive": self.autoregressive.to_metadata(),
+            "seasonal_exogenous": self.seasonal_exogenous.to_metadata(),
+            "state_space": self.state_space.to_metadata(),
+            "volatility": self.volatility.to_metadata(),
+            "classical_model_comparison": (
+                self.classical_model_comparison.to_metadata()
             ),
         }
 
@@ -839,6 +984,127 @@ def series_fingerprint_regime_summary(
     }
 
 
+def series_fingerprint_parity_summary(
+    findings: Iterable[QualityFinding],
+    *,
+    target_limit: int | None = DEFAULT_FINGERPRINT_PARITY_SUMMARY_LIMIT,
+) -> dict[str, JSONValue] | None:
+    """Return a bounded cache/source parity rollup from fingerprint findings."""
+    target_limit_state = bounded_report_limit(
+        target_limit,
+        default_limit=DEFAULT_FINGERPRINT_PARITY_SUMMARY_LIMIT,
+    )
+    targets: list[dict[str, JSONValue]] = []
+    status_counts: Counter[str] = Counter()
+    mismatch_code_counts: Counter[str] = Counter()
+    cache_source_counts: Counter[str] = Counter()
+    freshness_counts: Counter[str] = Counter()
+    computed_from_counts: Counter[str] = Counter()
+    for finding in findings:
+        fingerprint = _payload_mapping(
+            finding.metadata.get(TIME_SERIES_FINGERPRINT_METADATA_KEY)
+        )
+        parity = _payload_mapping(fingerprint.get("cache_source_parity"))
+        if not parity:
+            continue
+        bases = _payload_mapping(parity.get("bases"))
+        raw_cache = _payload_mapping(bases.get("raw_cache"))
+        enriched_cache = _payload_mapping(bases.get("enriched_cache"))
+        calendar = _payload_mapping(fingerprint.get("calendar_regimes"))
+        status = _summary_key(parity.get("status"))
+        status_counts[status] += 1
+        mismatch_codes = [
+            str(item) for item in _string_list(parity.get("mismatch_codes"))
+        ]
+        mismatch_code_counts.update(mismatch_codes)
+        cache_source = _optional_summary_key(raw_cache.get("cache_source"))
+        if cache_source:
+            cache_source_counts[cache_source] += 1
+        freshness = _optional_summary_key(raw_cache.get("freshness"))
+        if freshness:
+            freshness_counts[freshness] += 1
+        computed_from = _optional_summary_key(calendar.get("computed_from"))
+        if computed_from:
+            computed_from_counts[computed_from] += 1
+        target_summary: dict[str, JSONValue] = {
+            "target_axis": dict(_payload_mapping(parity.get("target_axis"))),
+            "status": status,
+            "compared_section_count": _int_payload(
+                parity.get("compared_section_count")
+            ),
+            "mismatched_section_count": _int_payload(
+                parity.get("mismatched_section_count")
+            ),
+            "mismatch_codes": cast(JSONValue, mismatch_codes),
+            "skipped_reasons": cast(
+                JSONValue,
+                [
+                    str(item)
+                    for item in _string_list(parity.get("skipped_reasons"))
+                ],
+            ),
+            "cache_source": cache_source,
+            "freshness": freshness,
+            "computed_from": computed_from,
+            "training_substrate": {
+                "status": enriched_cache.get("status"),
+                "training_schema_version": enriched_cache.get(
+                    "training_schema_version"
+                ),
+                "cache_was_enriched": enriched_cache.get("cache_was_enriched"),
+                "legacy_cache_enriched_on_read": enriched_cache.get(
+                    "legacy_cache_enriched_on_read"
+                ),
+            },
+        }
+        targets.append(target_summary)
+    if not targets:
+        return None
+    targets.sort(key=_fingerprint_parity_target_sort_key)
+    included: list[JSONValue] = [
+        dict(item) for item in target_limit_state.slice(targets)
+    ]
+    omitted_count = max(0, len(targets) - len(included))
+    return {
+        "schema_version": TIME_SERIES_FINGERPRINT_PARITY_SUMMARY_SCHEMA_VERSION,
+        "rule_id": SERIES_FINGERPRINT_RULE_ID,
+        "target_count": len(targets),
+        "compared_target_count": sum(
+            count
+            for status, count in status_counts.items()
+            if status in {"match", "mismatch"}
+        ),
+        "matching_target_count": status_counts.get("match", 0),
+        "mismatched_target_count": status_counts.get("mismatch", 0),
+        "not_compared_target_count": status_counts.get("not_compared", 0),
+        "included_target_count": len(included),
+        "omitted_target_count": omitted_count,
+        "truncated": omitted_count > 0,
+        "limit_metadata": {"targets": target_limit_state.limit_payload()},
+        "status_counts": _counter_payload(status_counts),
+        "mismatch_code_counts": _counter_payload(mismatch_code_counts),
+        "computed_from_counts": _counter_payload(computed_from_counts),
+        "cache_source_counts": _counter_payload(cache_source_counts),
+        "freshness_counts": _counter_payload(freshness_counts),
+        "target_summaries": included,
+    }
+
+
+def _fingerprint_parity_target_sort_key(
+    target: Mapping[str, JSONValue],
+) -> tuple[int, str, str, str, str, str]:
+    status_rank = {"mismatch": 0, "not_compared": 1, "match": 2}
+    axis = _payload_mapping(target.get("target_axis"))
+    return (
+        status_rank.get(_summary_key(target.get("status")), 99),
+        _summary_key(axis.get("data_format")),
+        _summary_key(axis.get("timeframe")),
+        _summary_key(axis.get("symbol")),
+        _summary_key(axis.get("period")),
+        _summary_key(axis.get("kind")),
+    )
+
+
 def series_fingerprint_readiness_summary(
     findings: Iterable[QualityFinding],
     *,
@@ -898,6 +1164,16 @@ def series_fingerprint_readiness_summary(
     stationarity_recommended_transform_counts: Counter[str] = Counter()
     stationarity_computed_window_count = 0
     stationarity_skipped_window_count = 0
+    decomposition_status_counts: Counter[str] = Counter()
+    decomposition_reason_counts: Counter[str] = Counter()
+    decomposition_basis_counts: Counter[str] = Counter()
+    decomposition_limitation_counts: Counter[str] = Counter()
+    decomposition_skipped_window_reason_counts: Counter[str] = Counter()
+    decomposition_stationarity_status_counts: Counter[str] = Counter()
+    decomposition_structural_break_status_counts: Counter[str] = Counter()
+    decomposition_computed_window_count = 0
+    decomposition_skipped_window_count = 0
+    decomposition_structural_break_candidate_count = 0
     topology_limitation_counts: Counter[str] = Counter()
     dynamics_limitation_counts: Counter[str] = Counter()
     row_order_counts: Counter[str] = Counter()
@@ -991,6 +1267,53 @@ def series_fingerprint_readiness_summary(
         stationarity_skipped_window_count += _int_payload(
             stationarity.get("skipped_window_count")
         )
+        decomposition = _payload_mapping(item.get("decomposition"))
+        decomposition_status_counts[
+            _summary_key(decomposition.get("status"))
+        ] += 1
+        decomposition_reason = _optional_summary_key(
+            decomposition.get("reason")
+        )
+        if decomposition_reason:
+            decomposition_reason_counts[decomposition_reason] += 1
+        decomposition_basis = _summary_key(
+            decomposition.get("calculation_basis")
+        )
+        if decomposition_basis != "unknown":
+            decomposition_basis_counts[decomposition_basis] += 1
+        decomposition_limitation_counts.update(
+            _summary_key(value)
+            for value in _string_list(decomposition.get("limitations"))
+        )
+        decomposition_skipped_window_reason_counts.update(
+            _counter_from_mapping(
+                _payload_mapping(
+                    decomposition.get("skipped_window_reason_counts")
+                )
+            )
+        )
+        decomposition_computed_window_count += _int_payload(
+            decomposition.get("computed_window_count")
+        )
+        decomposition_skipped_window_count += _int_payload(
+            decomposition.get("skipped_window_count")
+        )
+        decomposition_stationarity_status_counts[
+            _summary_key(
+                _payload_mapping(decomposition.get("stationarity")).get(
+                    "status"
+                )
+            )
+        ] += 1
+        structural_break = _payload_mapping(
+            decomposition.get("structural_break")
+        )
+        decomposition_structural_break_status_counts[
+            _summary_key(structural_break.get("status"))
+        ] += 1
+        decomposition_structural_break_candidate_count += _int_payload(
+            structural_break.get("candidate_count")
+        )
 
     profile_complete_count = sum(
         1
@@ -1066,6 +1389,36 @@ def series_fingerprint_readiness_summary(
         ),
         "stationarity_skipped_window_count": (
             stationarity_skipped_window_count
+        ),
+        "decomposition_status_counts": _counter_payload(
+            decomposition_status_counts
+        ),
+        "decomposition_reason_counts": _counter_payload(
+            decomposition_reason_counts
+        ),
+        "decomposition_basis_counts": _counter_payload(
+            decomposition_basis_counts
+        ),
+        "decomposition_limitation_counts": _counter_payload(
+            decomposition_limitation_counts
+        ),
+        "decomposition_skipped_window_reason_counts": _counter_payload(
+            decomposition_skipped_window_reason_counts
+        ),
+        "decomposition_stationarity_status_counts": _counter_payload(
+            decomposition_stationarity_status_counts
+        ),
+        "decomposition_structural_break_status_counts": _counter_payload(
+            decomposition_structural_break_status_counts
+        ),
+        "decomposition_computed_window_count": (
+            decomposition_computed_window_count
+        ),
+        "decomposition_skipped_window_count": (
+            decomposition_skipped_window_count
+        ),
+        "decomposition_structural_break_candidate_count": (
+            decomposition_structural_break_candidate_count
         ),
         "topology_limitation_counts": _counter_payload(
             topology_limitation_counts
@@ -1249,6 +1602,7 @@ def _fingerprint_readiness_risk_target(
             "conditional_distributions",
             "dependence",
             "stationarity_diagnostics",
+            "decomposition",
             "temporal_topology",
             *FINGERPRINT_DYNAMICS_SECTIONS,
         }:
@@ -1269,6 +1623,7 @@ def _fingerprint_readiness_risk_target(
     _add_dynamics_risks(section_risks, reason_counts, target, axis)
     _add_dependence_risks(section_risks, reason_counts, target)
     _add_stationarity_risks(section_risks, reason_counts, target)
+    _add_decomposition_risks(section_risks, reason_counts, target)
     _add_regime_risks(section_risks, reason_counts, regime or {})
     compact_sections = _bounded_section_risks(
         section_risks,
@@ -1365,6 +1720,8 @@ def _fingerprint_section_is_non_applicable(
         and timeframe != TICK
         or section == "stationarity_diagnostics"
         and timeframe not in SUPPORTED_SERIES_FINGERPRINT_TIMEFRAMES
+        or section == "decomposition"
+        and timeframe not in SUPPORTED_SERIES_FINGERPRINT_TIMEFRAMES
     )
 
 
@@ -1446,6 +1803,53 @@ def _add_stationarity_risks(
         section_risks,
         reason_counts,
         section="stationarity_diagnostics",
+        status=status,
+        reasons=tuple(_ordered_unique(reasons)),
+        base_score=(
+            _fingerprint_status_risk_score(status)
+            + min(20, skipped_window_count * 2)
+        ),
+    )
+
+
+def _add_decomposition_risks(
+    section_risks: list[dict[str, JSONValue]],
+    reason_counts: Counter[str],
+    target: Mapping[str, JSONValue],
+) -> None:
+    section_statuses = _payload_mapping(target.get("section_statuses"))
+    if "decomposition" not in section_statuses:
+        return
+    decomposition = _payload_mapping(target.get("decomposition"))
+    status = _summary_key(decomposition.get("status"))
+    reasons: list[str] = []
+    primary_reason = _optional_summary_key(decomposition.get("reason"))
+    if primary_reason:
+        reasons.append(primary_reason)
+    reasons.extend(
+        _summary_key(reason)
+        for reason in _string_list(decomposition.get("limitations"))
+    )
+    skipped_window_count = _int_payload(
+        decomposition.get("skipped_window_count")
+    )
+    if skipped_window_count:
+        reasons.append("skipped_rolling_windows")
+        reasons.extend(
+            _counter_from_mapping(
+                _payload_mapping(
+                    decomposition.get("skipped_window_reason_counts")
+                )
+            ).elements()
+        )
+    if status in {"valid", "ok"} and not reasons:
+        return
+    if status == "skipped" and not reasons:
+        reasons.append("not_emitted")
+    _add_section_risk(
+        section_risks,
+        reason_counts,
+        section="decomposition",
         status=status,
         reasons=tuple(_ordered_unique(reasons)),
         base_score=(
@@ -1779,6 +2183,12 @@ def _fingerprint_readiness_target_summary(
         section_statuses=section_statuses,
         skipped_sections=skipped_sections,
     )
+    decomposition_readiness = _fingerprint_readiness_decomposition_summary(
+        finding,
+        payload,
+        section_statuses=section_statuses,
+        skipped_sections=skipped_sections,
+    )
 
     return {
         "target_axis": target_axis,
@@ -1816,6 +2226,7 @@ def _fingerprint_readiness_target_summary(
         ),
         "dependence": dependence_readiness,
         "stationarity_diagnostics": stationarity_readiness,
+        "decomposition": decomposition_readiness,
     }
 
 
@@ -2287,6 +2698,156 @@ def _empty_stationarity_readiness(
     }
 
 
+def _fingerprint_readiness_decomposition_summary(
+    finding: QualityFinding,
+    payload: Mapping[str, JSONValue],
+    *,
+    section_statuses: Mapping[str, JSONValue],
+    skipped_sections: Mapping[str, JSONValue],
+) -> dict[str, JSONValue]:
+    decomposition = _payload_mapping(payload.get("decomposition"))
+    if not decomposition:
+        status = _summary_key(
+            section_statuses.get("decomposition") or "skipped"
+        )
+        if status not in {"skipped", "unavailable"}:
+            status = "skipped"
+        skipped = _payload_mapping(skipped_sections.get("decomposition"))
+        reason = _optional_summary_key(skipped.get("reason"))
+        if reason is None:
+            reason = _fingerprint_section_skip_reason(
+                "decomposition",
+                payload,
+                target=finding.target,
+            )
+        return _empty_decomposition_readiness(status=status, reason=reason)
+
+    sample_counts = _payload_mapping(decomposition.get("sample_counts"))
+    stationarity_basis = _payload_mapping(
+        decomposition.get("stationarity_basis")
+    )
+    structural_break = _payload_mapping(
+        decomposition.get("structural_break_proxy")
+    )
+    trend = _payload_mapping(decomposition.get("trend_proxy"))
+    strongest = _payload_mapping(structural_break.get("strongest_candidate"))
+    return {
+        "status": _decomposition_section_status(decomposition),
+        "reason": _optional_summary_key(decomposition.get("reason")),
+        "basis": _summary_key(decomposition.get("basis")),
+        "calculation_basis": _summary_key(
+            decomposition.get("calculation_basis")
+        ),
+        "row_order": _summary_key(decomposition.get("row_order")),
+        "computed_from": _summary_key(decomposition.get("computed_from")),
+        "cache_source": _optional_summary_key(
+            decomposition.get("cache_source")
+        ),
+        "regular_grid": decomposition.get("regular_grid") is True,
+        "metric": _summary_key(decomposition.get("metric")),
+        "limitations": _string_list(decomposition.get("limitations")),
+        "row_count": _int_payload(decomposition.get("row_count")),
+        "sampled_row_count": _int_payload(
+            decomposition.get("sampled_row_count")
+        ),
+        "usable_row_count": _int_payload(decomposition.get("usable_row_count")),
+        "invalid_row_count": _int_payload(
+            decomposition.get("invalid_row_count")
+        ),
+        "partial_row_count": _int_payload(
+            decomposition.get("partial_row_count")
+        ),
+        "truncated": decomposition.get("truncated") is True,
+        "level_sample_count": _int_payload(sample_counts.get("level")),
+        "return_sample_count": _int_payload(sample_counts.get("return")),
+        "windows": list(_int_sequence_payload(decomposition.get("windows"))),
+        "rounding_digits": _int_payload(decomposition.get("rounding_digits")),
+        "computed_window_count": _int_payload(
+            decomposition.get("computed_window_count")
+        ),
+        "skipped_window_count": _int_payload(
+            decomposition.get("skipped_window_count")
+        ),
+        "skipped_window_reason_counts": _counter_payload(
+            _counter_from_mapping(
+                _payload_mapping(
+                    decomposition.get("skipped_window_reason_counts")
+                )
+            )
+        ),
+        "stationarity": {
+            "status": _summary_key(stationarity_basis.get("status")),
+            "reason": _optional_summary_key(stationarity_basis.get("reason")),
+            "stationarity_status": _summary_key(
+                stationarity_basis.get("stationarity_status")
+            ),
+            "zero_variance_metrics": _string_list(
+                stationarity_basis.get("zero_variance_metrics")
+            ),
+            "recommended_transforms": _string_list(
+                stationarity_basis.get("recommended_transforms")
+            ),
+        },
+        "trend": {
+            "status": _summary_key(trend.get("status")),
+            "direction": _summary_key(trend.get("direction")),
+            "trend_strength": _optional_float_payload(
+                trend.get("trend_strength")
+            ),
+        },
+        "structural_break": {
+            "status": _summary_key(structural_break.get("status")),
+            "candidate_count": _int_payload(
+                structural_break.get("candidate_count")
+            ),
+            "strongest_score": (
+                _optional_float_payload(strongest.get("score"))
+                if strongest
+                else None
+            ),
+        },
+        "training_projection": dict(
+            _payload_mapping(decomposition.get("training_projection"))
+        ),
+    }
+
+
+def _empty_decomposition_readiness(
+    *,
+    status: str,
+    reason: str | None,
+) -> dict[str, JSONValue]:
+    return {
+        "status": status,
+        "reason": reason,
+        "basis": "unknown",
+        "calculation_basis": "unknown",
+        "row_order": "unknown",
+        "computed_from": "unknown",
+        "cache_source": None,
+        "regular_grid": False,
+        "metric": "unknown",
+        "limitations": [],
+        "row_count": 0,
+        "sampled_row_count": 0,
+        "usable_row_count": 0,
+        "invalid_row_count": 0,
+        "partial_row_count": 0,
+        "truncated": False,
+        "level_sample_count": 0,
+        "return_sample_count": 0,
+        "windows": [],
+        "rounding_digits": 0,
+        "computed_window_count": 0,
+        "skipped_window_count": 0,
+        "skipped_window_reason_counts": {},
+        "stationarity": {},
+        "trend": {},
+        "structural_break": {},
+        "training_projection": {},
+    }
+
+
 def _compact_stationarity_window_summary(
     value: JSONValue,
 ) -> dict[str, JSONValue]:
@@ -2415,33 +2976,6 @@ def _compact_numeric_summary(value: JSONValue) -> dict[str, JSONValue]:
     }
 
 
-def _compact_flatline_summary(value: JSONValue) -> dict[str, JSONValue]:
-    flatline = _payload_mapping(value)
-    if not flatline:
-        return {}
-    return {
-        "zero_return_count": _int_payload(flatline.get("zero_return_count")),
-        "zero_return_rate": _optional_float_payload(
-            flatline.get("zero_return_rate")
-        ),
-        "zero_return_run_count": _int_payload(
-            flatline.get("zero_return_run_count")
-        ),
-        "ohlc_flatline_row_count": _int_payload(
-            flatline.get("ohlc_flatline_row_count")
-        ),
-        "ohlc_flatline_rate": _optional_float_payload(
-            flatline.get("ohlc_flatline_rate")
-        ),
-        "ohlc_flatline_run_count": _int_payload(
-            flatline.get("ohlc_flatline_run_count")
-        ),
-        "ohlc_flatline_affected_row_count": _int_payload(
-            flatline.get("ohlc_flatline_affected_row_count")
-        ),
-    }
-
-
 def _compact_event_summary(
     value: JSONValue,
     *,
@@ -2470,6 +3004,7 @@ def _fingerprint_readiness_target_sort_key(
     axis = _payload_mapping(target.get("target_axis"))
     dependence = _payload_mapping(target.get("dependence"))
     stationarity = _payload_mapping(target.get("stationarity_diagnostics"))
+    decomposition = _payload_mapping(target.get("decomposition"))
     readiness_rank = min(
         _fingerprint_readiness_status_rank(
             _summary_key(target.get("applicable_dynamics_status"))
@@ -2479,6 +3014,9 @@ def _fingerprint_readiness_target_sort_key(
         ),
         _fingerprint_readiness_status_rank(
             _summary_key(stationarity.get("status"))
+        ),
+        _fingerprint_readiness_status_rank(
+            _summary_key(decomposition.get("status"))
         ),
     )
     return (
@@ -3096,7 +3634,10 @@ def _series_fingerprint_payload(
         "schema_version": TIME_SERIES_FINGERPRINT_SCHEMA_VERSION,
         "target_axis": _target_axis(target),
         "coverage": _empty_coverage(parsed_row_count=None),
-        "temporal_topology": timestamp_topology_payload_for_target(target),
+        "temporal_topology": timestamp_topology_payload_for_target(
+            target,
+            inspection_sample_limit=profile.topology_inspection_sample_limit,
+        ),
         "source": _unavailable_source(
             target,
             reason=_unsupported_reason(target),
@@ -3149,6 +3690,7 @@ def _series_fingerprint_payload(
             payload,
             target=target,
             profile=profile,
+            training_frame=cache.frame,
         )
 
     if target.kind is QualityTargetKind.CACHE:
@@ -3229,10 +3771,16 @@ def _series_fingerprint_payload(
             "kind": "csv_text",
             "path": publish_safe_path(target.path),
         }
+    training_frame = _training_frame_from_text(
+        text_payload.text,
+        target=target,
+        profile=profile,
+    )
     return _finalize_fingerprint_payload(
         payload,
         target=target,
         profile=profile,
+        training_frame=training_frame,
     )
 
 
@@ -3241,14 +3789,823 @@ def _finalize_fingerprint_payload(
     *,
     target: QualityTarget,
     profile: HistDataFingerprintProfile,
+    training_frame: Any | None = None,
 ) -> dict[str, JSONValue]:
+    if profile.cache_source_parity.enabled:
+        payload["cache_source_parity"] = _cache_source_parity_payload(
+            target,
+            profile=profile,
+        )
     payload["fingerprint_audit"] = _fingerprint_audit_payload(
         payload,
         target=target,
         profile=profile,
     )
+    if not _unsupported_reason(target):
+        payload["synthetic_constraints"] = (
+            synthetic_constraints_from_fingerprint(
+                payload,
+                training_frame=training_frame,
+                target=target,
+            )
+        )
+        if profile.classical_baselines.enabled:
+            payload["classical_baselines"] = (
+                classical_baseline_diagnostics_from_training_frame(
+                    training_frame,
+                    payload,
+                    profile=profile.classical_baselines,
+                    target=target,
+                )
+            )
+        model_input_result = None
+        if (
+            profile.classical_model_input.enabled
+            or profile.exponential_smoothing.enabled
+            or profile.autoregressive.enabled
+            or profile.seasonal_exogenous.enabled
+            or profile.state_space.enabled
+            or profile.volatility.enabled
+            or profile.classical_model_comparison.enabled
+        ):
+            model_input_result = build_classical_model_input(
+                training_frame,
+                payload,
+                profile=profile.classical_model_input,
+                target=target,
+            )
+        if (
+            profile.classical_model_input.enabled
+            and model_input_result is not None
+        ):
+            payload["classical_model_input"] = dict(model_input_result.contract)
+        if (
+            profile.exponential_smoothing.enabled
+            and model_input_result is not None
+        ):
+            payload["exponential_smoothing"] = dict(
+                exponential_smoothing_from_model_input(
+                    training_frame,
+                    model_input_result,
+                    payload,
+                    input_profile=profile.classical_model_input,
+                    profile=profile.exponential_smoothing,
+                    target=target,
+                ).diagnostics
+            )
+        if profile.autoregressive.enabled and model_input_result is not None:
+            payload["autoregressive"] = dict(
+                autoregressive_from_model_input(
+                    training_frame,
+                    model_input_result,
+                    payload,
+                    input_profile=profile.classical_model_input,
+                    profile=profile.autoregressive,
+                    exponential_smoothing=_payload_mapping(
+                        payload.get("exponential_smoothing")
+                    ),
+                    target=target,
+                ).diagnostics
+            )
+        if (
+            profile.seasonal_exogenous.enabled
+            and model_input_result is not None
+        ):
+            payload["seasonal_exogenous"] = dict(
+                seasonal_exogenous_from_model_input(
+                    training_frame,
+                    model_input_result,
+                    payload,
+                    input_profile=profile.classical_model_input,
+                    profile=profile.seasonal_exogenous,
+                    calendar_profile=profile.calendar_profile,
+                    exponential_smoothing=_payload_mapping(
+                        payload.get("exponential_smoothing")
+                    ),
+                    autoregressive=_payload_mapping(
+                        payload.get("autoregressive")
+                    ),
+                    target=target,
+                ).diagnostics
+            )
+        if profile.state_space.enabled and model_input_result is not None:
+            payload["state_space"] = dict(
+                state_space_from_model_input(
+                    training_frame,
+                    model_input_result,
+                    payload,
+                    input_profile=profile.classical_model_input,
+                    profile=profile.state_space,
+                    exponential_smoothing=_payload_mapping(
+                        payload.get("exponential_smoothing")
+                    ),
+                    autoregressive=_payload_mapping(
+                        payload.get("autoregressive")
+                    ),
+                    seasonal_exogenous=_payload_mapping(
+                        payload.get("seasonal_exogenous")
+                    ),
+                    target=target,
+                ).diagnostics
+            )
+        if profile.volatility.enabled and model_input_result is not None:
+            payload["volatility"] = dict(
+                volatility_from_model_input(
+                    training_frame,
+                    model_input_result,
+                    payload,
+                    input_profile=profile.classical_model_input,
+                    profile=profile.volatility,
+                    exponential_smoothing=_payload_mapping(
+                        payload.get("exponential_smoothing")
+                    ),
+                    autoregressive=_payload_mapping(
+                        payload.get("autoregressive")
+                    ),
+                    seasonal_exogenous=_payload_mapping(
+                        payload.get("seasonal_exogenous")
+                    ),
+                    state_space=_payload_mapping(payload.get("state_space")),
+                    target=target,
+                ).diagnostics
+            )
+        if profile.classical_model_comparison.enabled:
+            payload["classical_model_comparison"] = dict(
+                classical_model_comparison_from_saved_results(
+                    training_frame,
+                    payload,
+                    model_input=(
+                        model_input_result.contract
+                        if model_input_result is not None
+                        else _payload_mapping(
+                            payload.get("classical_model_input")
+                        )
+                    ),
+                    classical_baselines=_payload_mapping(
+                        payload.get("classical_baselines")
+                    ),
+                    exponential_smoothing=_payload_mapping(
+                        payload.get("exponential_smoothing")
+                    ),
+                    autoregressive=_payload_mapping(
+                        payload.get("autoregressive")
+                    ),
+                    seasonal_exogenous=_payload_mapping(
+                        payload.get("seasonal_exogenous")
+                    ),
+                    state_space=_payload_mapping(payload.get("state_space")),
+                    volatility=_payload_mapping(payload.get("volatility")),
+                    profile=profile.classical_model_comparison,
+                    target=target,
+                ).diagnostics
+            )
+        payload["fingerprint_audit"] = _fingerprint_audit_payload(
+            payload,
+            target=target,
+            profile=profile,
+        )
     payload["fingerprint_id"] = _fingerprint_id(payload)
     return payload
+
+
+def _training_frame_from_text(
+    text: str,
+    *,
+    target: QualityTarget,
+    profile: HistDataFingerprintProfile,
+) -> Any | None:
+    try:
+        batch = parse_ascii_lines(
+            target.timeframe,
+            islice(StringIO(text), max(1, _profile_max_rows(profile))),
+        )
+        return to_polars_frame(batch)
+    except (OSError, TypeError, ValueError):
+        return None
+
+
+def _cache_source_parity_payload(
+    target: QualityTarget,
+    *,
+    profile: HistDataFingerprintProfile,
+) -> dict[str, JSONValue]:
+    mismatch_limit = bounded_report_limit(
+        profile.cache_source_parity.mismatch_limit,
+        default_limit=DEFAULT_FINGERPRINT_PARITY_MISMATCH_LIMIT,
+    )
+    bases: dict[str, JSONValue] = {
+        "raw_source": _parity_unavailable_basis("source_unavailable"),
+        "raw_cache": _parity_unavailable_basis("cache_unavailable"),
+        "enriched_cache": _parity_unavailable_basis(
+            "cache_enrichment_unavailable"
+        ),
+        "quality_report": _parity_unavailable_basis(
+            "quality_report_projection_unavailable"
+        ),
+        "influx_projection": _parity_unavailable_basis(
+            "influx_projection_unavailable"
+        ),
+    }
+    unsupported_reason = _unsupported_reason(target)
+    if unsupported_reason:
+        return _finalize_parity_payload(
+            target,
+            bases=bases,
+            comparisons=[],
+            skipped_reasons=[unsupported_reason],
+            mismatch_limit=mismatch_limit,
+        )
+    required_columns = columns_for_timeframe(target.timeframe)
+    cache = read_fingerprint_parity_polars_cache(
+        target,
+        required_columns=required_columns,
+    )
+    if cache is not None:
+        raw_cache_columns = set(getattr(cache.frame, "columns", ()))
+        bases["raw_cache"] = {
+            "status": "available",
+            "path": publish_safe_path(str(cache.path)),
+            "cache_source": cache.source,
+            "fresh": cache.fresh,
+            "freshness": _parity_freshness_status(cache.fresh),
+            "row_count": int(getattr(cache.frame, "height", 0) or 0),
+            "column_count": len(raw_cache_columns),
+            "training_schema_present": (
+                "training_schema_version" in raw_cache_columns
+            ),
+            "training_required_columns_present": set(
+                TRAINING_REQUIRED_COLUMNS
+            ).issubset(raw_cache_columns),
+        }
+    if target.kind not in {QualityTargetKind.CSV, QualityTargetKind.ZIP}:
+        return _finalize_parity_payload(
+            target,
+            bases=bases,
+            comparisons=[],
+            skipped_reasons=["source_target_unavailable"],
+            mismatch_limit=mismatch_limit,
+        )
+    try:
+        text_payload = _read_text_payload(target)
+    except (OSError, UnicodeDecodeError, ValueError, zipfile.BadZipFile) as exc:
+        bases["raw_source"] = _parity_unavailable_basis(
+            "source_unreadable",
+            detail=type(exc).__name__,
+        )
+        return _finalize_parity_payload(
+            target,
+            bases=bases,
+            comparisons=[],
+            skipped_reasons=["source_unreadable"],
+            mismatch_limit=mismatch_limit,
+        )
+
+    source_coverage = _coverage_from_text(
+        text_payload.text,
+        timeframe=target.timeframe,
+    )
+    bases["raw_source"] = {
+        "status": "available",
+        "kind": (
+            "zip_member" if target.kind is QualityTargetKind.ZIP else "csv_text"
+        ),
+        "path": publish_safe_path(target.path),
+        "member": text_payload.source_member or None,
+        "row_count": _int_payload(source_coverage.get("row_count")),
+    }
+    if cache is None:
+        return _finalize_parity_payload(
+            target,
+            bases=bases,
+            comparisons=[],
+            skipped_reasons=["cache_unavailable"],
+            mismatch_limit=mismatch_limit,
+        )
+
+    cache_target = QualityTarget(
+        path=str(cache.path),
+        kind=QualityTargetKind.CACHE,
+        data_format=target.data_format,
+        timeframe=target.timeframe,
+        symbol=target.symbol,
+        period=target.period,
+        metadata=dict(target.metadata),
+    )
+    source_sections: dict[str, Mapping[str, JSONValue]] = {
+        "coverage": source_coverage,
+        "temporal_topology": timestamp_topology_payload_for_target(
+            target,
+            inspection_sample_limit=0,
+            prefer_cache=False,
+        ),
+        "calendar_regimes": calendar_regime_payload_for_target(
+            target,
+            calendar_profile=profile.calendar_profile,
+            prefer_cache=False,
+        ),
+        "conditional_distributions": _conditional_distributions(
+            target,
+            frame=None,
+            text=text_payload.text,
+            profile=profile,
+        ),
+    }
+    cache_sections: dict[str, Mapping[str, JSONValue]] = {
+        "coverage": _coverage_from_frame(cache.frame),
+        "temporal_topology": timestamp_topology_payload_for_target(
+            cache_target,
+            inspection_sample_limit=0,
+        ),
+        "calendar_regimes": calendar_regime_payload_for_target(
+            cache_target,
+            calendar_profile=profile.calendar_profile,
+        ),
+        "conditional_distributions": _conditional_distributions(
+            cache_target,
+            frame=cache.frame,
+            text=None,
+            profile=profile,
+        ),
+    }
+    comparisons = _fingerprint_section_parity_comparisons(
+        source_sections,
+        cache_sections,
+        mismatch_limit=mismatch_limit,
+    )
+    training_comparisons, training_bases = _training_projection_parity(
+        target,
+        cache_target=cache_target,
+        source_text=text_payload.text,
+        cache_frame=cache.frame,
+        profile=profile,
+        mismatch_limit=mismatch_limit,
+    )
+    comparisons.extend(training_comparisons)
+    bases.update(training_bases)
+    if cache.fresh is False:
+        comparisons.insert(
+            0,
+            {
+                "section": "cache_freshness",
+                "status": "mismatch",
+                "compared_field_count": 1,
+                "mismatch_field_count": 1,
+                "mismatch_fields": ["mtime_ns"],
+                "mismatch_codes": ["fingerprint_cache_source_stale_cache"],
+            },
+        )
+    return _finalize_parity_payload(
+        target,
+        bases=bases,
+        comparisons=comparisons,
+        skipped_reasons=[],
+        mismatch_limit=mismatch_limit,
+    )
+
+
+def _fingerprint_section_parity_comparisons(
+    source: Mapping[str, Mapping[str, JSONValue]],
+    cache: Mapping[str, Mapping[str, JSONValue]],
+    *,
+    mismatch_limit: BoundedReportLimit,
+) -> list[dict[str, JSONValue]]:
+    specifications = (
+        (
+            "coverage",
+            (
+                "row_count",
+                "parsed_row_count",
+                "start_timestamp_utc_ms",
+                "end_timestamp_utc_ms",
+            ),
+        ),
+        (
+            "temporal_topology",
+            (
+                "row_count",
+                "parsed_row_count",
+                "invalid_timestamp_count",
+                "non_monotonic_count",
+                "duplicate_timestamp_count",
+                "suspicious_gap_count",
+                "expected_session_closure_count",
+                "weekend_activity_count",
+                "gap_bucket_counts",
+            ),
+        ),
+        (
+            "calendar_regimes",
+            (
+                "row_count",
+                "parsed_row_count",
+                "invalid_timestamp_count",
+                "session_state_counts",
+                "active_session_counts",
+                "clock_session_counts",
+                "overlap_counts",
+                "special_tag_counts",
+                "holiday_tag_counts",
+                "event_tag_counts",
+                "hour_of_day_counts",
+                "day_of_week_counts",
+            ),
+        ),
+        (
+            "conditional_distributions",
+            (
+                "row_count",
+                "sampled_row_count",
+                "usable_row_count",
+                "invalid_row_count",
+                "by_active_session",
+                "by_special_tag",
+            ),
+        ),
+    )
+    return [
+        _parity_section_comparison(
+            section,
+            source.get(section, {}),
+            cache.get(section, {}),
+            fields=fields,
+            mismatch_limit=mismatch_limit,
+        )
+        for section, fields in specifications
+    ]
+
+
+def _parity_section_comparison(
+    section: str,
+    source: Mapping[str, JSONValue],
+    cache: Mapping[str, JSONValue],
+    *,
+    fields: tuple[str, ...],
+    mismatch_limit: BoundedReportLimit,
+) -> dict[str, JSONValue]:
+    if not source or not cache:
+        return {
+            "section": section,
+            "status": "skipped",
+            "reason": "section_unavailable",
+            "compared_field_count": 0,
+            "mismatch_field_count": 0,
+            "mismatch_fields": [],
+            "mismatch_codes": [],
+        }
+    mismatches = [
+        field for field in fields if source.get(field) != cache.get(field)
+    ]
+    codes = _parity_section_mismatch_codes(section, mismatches)
+    included = mismatch_limit.slice(mismatches)
+    return {
+        "section": section,
+        "status": "mismatch" if mismatches else "match",
+        "compared_field_count": len(fields),
+        "mismatch_field_count": len(mismatches),
+        "included_mismatch_field_count": len(included),
+        "omitted_mismatch_field_count": max(0, len(mismatches) - len(included)),
+        "truncated": len(included) < len(mismatches),
+        "mismatch_fields": cast(JSONValue, included),
+        "mismatch_codes": cast(JSONValue, codes),
+    }
+
+
+def _parity_section_mismatch_codes(
+    section: str,
+    fields: list[str],
+) -> list[str]:
+    if not fields:
+        return []
+    if section == "coverage":
+        codes = []
+        if set(fields) & {"row_count", "parsed_row_count"}:
+            codes.append("fingerprint_cache_source_row_count_mismatch")
+        if set(fields) & {"start_timestamp_utc_ms", "end_timestamp_utc_ms"}:
+            codes.append("fingerprint_cache_source_coverage_bounds_mismatch")
+        return codes
+    return [
+        {
+            "temporal_topology": "fingerprint_cache_source_topology_mismatch",
+            "calendar_regimes": "fingerprint_cache_source_calendar_mismatch",
+            "conditional_distributions": (
+                "fingerprint_cache_source_conditioned_spread_mismatch"
+            ),
+        }[section]
+    ]
+
+
+def _training_projection_parity(
+    target: QualityTarget,
+    *,
+    cache_target: QualityTarget,
+    source_text: str,
+    cache_frame: Any,
+    profile: HistDataFingerprintProfile,
+    mismatch_limit: BoundedReportLimit,
+) -> tuple[list[dict[str, JSONValue]], dict[str, JSONValue]]:
+    sample_limit = max(1, _profile_max_rows(profile))
+    try:
+        source_batch = parse_ascii_lines(
+            target.timeframe,
+            islice(StringIO(source_text), sample_limit),
+        )
+        source_frame = to_polars_frame(source_batch)
+        cache_sample = cache_frame.head(sample_limit)
+        enriched_source = ensure_tick_training_features(
+            source_frame,
+            target=target,
+        )
+        enriched_cache = ensure_tick_training_features(
+            cache_sample,
+            target=target,
+        )
+    except (OSError, TypeError, ValueError) as exc:
+        comparison: dict[str, JSONValue] = {
+            "section": "training_substrate",
+            "status": "skipped",
+            "reason": "training_enrichment_unavailable",
+            "error_type": type(exc).__name__,
+            "compared_field_count": 0,
+            "mismatch_field_count": 0,
+            "mismatch_fields": [],
+            "mismatch_codes": [],
+        }
+        return [comparison], {}
+
+    required = set(TRAINING_REQUIRED_COLUMNS)
+    source_columns = set(enriched_source.columns)
+    cache_columns = set(enriched_cache.columns)
+    missing_columns = sorted(
+        (required - source_columns) | (required - cache_columns)
+    )
+    column_comparison = _bounded_training_comparison(
+        "training_columns",
+        missing_columns,
+        code="fingerprint_cache_source_training_columns_mismatch",
+        compared_count=len(required),
+        mismatch_limit=mismatch_limit,
+    )
+    identity_mismatches = _identity_mismatch_columns(
+        enriched_source,
+        enriched_cache,
+    )
+    identity_comparison = _bounded_training_comparison(
+        "row_identity",
+        identity_mismatches,
+        code="fingerprint_cache_source_row_identity_mismatch",
+        compared_count=5,
+        mismatch_limit=mismatch_limit,
+    )
+    source_duplicates = _duplicate_timestamp_row_count(enriched_source)
+    cache_duplicates = _duplicate_timestamp_row_count(enriched_cache)
+    duplicate_fields = (
+        []
+        if source_duplicates == cache_duplicates
+        else ["duplicate_timestamp_row_count"]
+    )
+    duplicate_comparison = _bounded_training_comparison(
+        "duplicate_timestamps",
+        duplicate_fields,
+        code="fingerprint_cache_source_duplicate_timestamp_mismatch",
+        compared_count=1,
+        mismatch_limit=mismatch_limit,
+    )
+
+    report = quality_report_from_training_features(
+        enriched_cache,
+        target=cache_target,
+    )
+    report_fields = []
+    if (
+        report.metadata.get("training_schema_version")
+        != TRAINING_SCHEMA_VERSION
+    ):
+        report_fields.append("training_schema_version")
+    if _int_payload(report.metadata.get("row_count")) != enriched_cache.height:
+        report_fields.append("row_count")
+    report_comparison = _bounded_training_comparison(
+        "quality_report_projection",
+        report_fields,
+        code="fingerprint_cache_source_quality_report_projection_mismatch",
+        compared_count=2,
+        mismatch_limit=mismatch_limit,
+    )
+    influx_fields = _influx_projection_missing_fields(
+        enriched_cache,
+        target=target,
+    )
+    influx_comparison = _bounded_training_comparison(
+        "influx_projection",
+        influx_fields,
+        code="fingerprint_cache_source_influx_projection_mismatch",
+        compared_count=6,
+        mismatch_limit=mismatch_limit,
+    )
+    raw_cache_columns = set(getattr(cache_frame, "columns", ()))
+    cache_was_enriched = required.issubset(raw_cache_columns)
+    sampled_count = min(int(cache_frame.height), sample_limit)
+    bases: dict[str, JSONValue] = {
+        "enriched_cache": {
+            "status": "available",
+            "training_schema_version": TRAINING_SCHEMA_VERSION,
+            "cache_was_enriched": cache_was_enriched,
+            "legacy_cache_enriched_on_read": not cache_was_enriched,
+            "required_column_count": len(required),
+            "column_count": len(cache_columns),
+            "sampled_row_count": sampled_count,
+            "source_row_count": int(cache_frame.height),
+            "truncated": sampled_count < int(cache_frame.height),
+        },
+        "quality_report": {
+            "status": "available",
+            "projection_kind": "audit_from_enriched_rows",
+            "training_schema_version": report.metadata.get(
+                "training_schema_version"
+            ),
+            "row_count": report.metadata.get("row_count"),
+        },
+        "influx_projection": {
+            "status": "available" if not influx_fields else "limited",
+            "projection_kind": "same_point_enriched_fields",
+            "missing_required_field_count": len(influx_fields),
+        },
+    }
+    return (
+        [
+            column_comparison,
+            identity_comparison,
+            duplicate_comparison,
+            report_comparison,
+            influx_comparison,
+        ],
+        bases,
+    )
+
+
+def _bounded_training_comparison(
+    section: str,
+    mismatches: list[str],
+    *,
+    code: str,
+    compared_count: int,
+    mismatch_limit: BoundedReportLimit,
+) -> dict[str, JSONValue]:
+    included = mismatch_limit.slice(mismatches)
+    return {
+        "section": section,
+        "status": "mismatch" if mismatches else "match",
+        "compared_field_count": compared_count,
+        "mismatch_field_count": len(mismatches),
+        "included_mismatch_field_count": len(included),
+        "omitted_mismatch_field_count": max(0, len(mismatches) - len(included)),
+        "truncated": len(included) < len(mismatches),
+        "mismatch_fields": cast(JSONValue, included),
+        "mismatch_codes": cast(JSONValue, [code] if mismatches else []),
+    }
+
+
+def _identity_mismatch_columns(source: Any, cache: Any) -> list[str]:
+    identity_columns = (
+        "series_id",
+        "period",
+        "row_id",
+        "source_row_number",
+        "event_seq",
+    )
+    mismatches = []
+    for column in identity_columns:
+        if column not in source.columns or column not in cache.columns:
+            mismatches.append(column)
+            continue
+        source_values = source.get_column(column).to_list()
+        cache_values = cache.get_column(column).to_list()
+        if source_values != cache_values:
+            mismatches.append(column)
+    return mismatches
+
+
+def _duplicate_timestamp_row_count(frame: Any) -> int:
+    if "datetime" not in frame.columns or frame.is_empty():
+        return 0
+    return max(
+        0,
+        int(frame.height) - int(frame.get_column("datetime").n_unique()),
+    )
+
+
+def _influx_projection_missing_fields(
+    frame: Any,
+    *,
+    target: QualityTarget,
+) -> list[str]:
+    if frame.is_empty():
+        return ["sample_row"]
+    columns = tuple(frame.columns)
+    row = frame.row(0)
+    line = format_influx_line(
+        target.symbol,
+        target.data_format,
+        target.timeframe,
+        row,
+        columns=columns,
+    )
+    try:
+        field_text = line.split(" ", 2)[1]
+    except IndexError:
+        return ["line_protocol_fields"]
+    emitted = {
+        item.split("=", 1)[0] for item in field_text.split(",") if "=" in item
+    }
+    required = (
+        "source_row_number",
+        "event_seq",
+        "quality_status_code",
+        "quality_finding_count",
+        "training_usable",
+        "training_weight",
+    )
+    return [field for field in required if field not in emitted]
+
+
+def _finalize_parity_payload(
+    target: QualityTarget,
+    *,
+    bases: Mapping[str, JSONValue],
+    comparisons: list[dict[str, JSONValue]],
+    skipped_reasons: list[str],
+    mismatch_limit: BoundedReportLimit,
+) -> dict[str, JSONValue]:
+    mismatch_codes = sorted(
+        {
+            code
+            for comparison in comparisons
+            for code in (
+                str(item)
+                for item in _string_list(comparison.get("mismatch_codes"))
+            )
+        }
+    )
+    included_codes = mismatch_limit.slice(mismatch_codes)
+    mismatch_count = sum(
+        1 for item in comparisons if item.get("status") == "mismatch"
+    )
+    compared_count = sum(
+        1 for item in comparisons if item.get("status") in {"match", "mismatch"}
+    )
+    status = "not_compared"
+    if compared_count:
+        status = "mismatch" if mismatch_count else "match"
+    return {
+        "schema_version": TIME_SERIES_FINGERPRINT_PARITY_SCHEMA_VERSION,
+        "status": status,
+        "advisory": True,
+        "target_axis": _target_axis(target),
+        "base_grain": {
+            "data_format": target.data_format,
+            "timeframe": target.timeframe,
+        },
+        "compared_section_count": compared_count,
+        "matching_section_count": sum(
+            1 for item in comparisons if item.get("status") == "match"
+        ),
+        "mismatched_section_count": mismatch_count,
+        "skipped_section_count": sum(
+            1 for item in comparisons if item.get("status") == "skipped"
+        ),
+        "mismatch_code_count": len(mismatch_codes),
+        "included_mismatch_code_count": len(included_codes),
+        "omitted_mismatch_code_count": max(
+            0, len(mismatch_codes) - len(included_codes)
+        ),
+        "truncated": len(included_codes) < len(mismatch_codes),
+        "limit_metadata": {"mismatches": mismatch_limit.limit_payload()},
+        "mismatch_codes": cast(JSONValue, included_codes),
+        "skipped_reasons": cast(JSONValue, sorted(set(skipped_reasons))),
+        "bases": dict(bases),
+        "comparisons": cast(JSONValue, comparisons),
+    }
+
+
+def _parity_unavailable_basis(
+    reason: str,
+    *,
+    detail: str = "",
+) -> dict[str, JSONValue]:
+    payload: dict[str, JSONValue] = {
+        "status": "unavailable",
+        "reason": reason,
+    }
+    if detail:
+        payload["detail"] = detail
+    return payload
+
+
+def _parity_freshness_status(fresh: bool | None) -> str:
+    if fresh is True:
+        return "fresh"
+    if fresh is False:
+        return "stale"
+    return "not_applicable"
 
 
 def _fingerprint_audit_payload(
@@ -3258,6 +4615,24 @@ def _fingerprint_audit_payload(
     profile: HistDataFingerprintProfile,
 ) -> dict[str, JSONValue]:
     expected = _fingerprint_expected_sections(target)
+    if profile.cache_source_parity.enabled:
+        expected = (*expected, "cache_source_parity")
+    if profile.classical_baselines.enabled:
+        expected = (*expected, "classical_baselines")
+    if profile.classical_model_input.enabled:
+        expected = (*expected, "classical_model_input")
+    if profile.exponential_smoothing.enabled:
+        expected = (*expected, "exponential_smoothing")
+    if profile.autoregressive.enabled:
+        expected = (*expected, "autoregressive")
+    if profile.seasonal_exogenous.enabled:
+        expected = (*expected, "seasonal_exogenous")
+    if profile.state_space.enabled:
+        expected = (*expected, "state_space")
+    if profile.volatility.enabled:
+        expected = (*expected, "volatility")
+    if profile.classical_model_comparison.enabled:
+        expected = (*expected, "classical_model_comparison")
     emitted = [
         section for section in FINGERPRINT_AUDIT_SECTIONS if section in payload
     ]
@@ -3305,6 +4680,10 @@ def _fingerprint_audit_payload(
         payload,
         target=target,
     )
+    decomposition_readiness = _fingerprint_decomposition_readiness(
+        payload,
+        target=target,
+    )
     audit_payload: dict[str, JSONValue] = {
         "schema_version": TIME_SERIES_FINGERPRINT_AUDIT_SCHEMA_VERSION,
         "sections_expected": [section for section in expected],
@@ -3322,6 +4701,7 @@ def _fingerprint_audit_payload(
         ),
         "dynamics_readiness": dynamics_readiness,
         "stationarity_readiness": stationarity_readiness,
+        "decomposition_readiness": decomposition_readiness,
     }
     return audit_payload
 
@@ -3340,6 +4720,8 @@ def _fingerprint_expected_sections(
                 "microstructure_dynamics",
                 "dependence",
                 "stationarity_diagnostics",
+                "decomposition",
+                "synthetic_constraints",
             )
         )
     return tuple(sections)
@@ -3388,6 +4770,16 @@ def _fingerprint_section_skip_details(
         "microstructure_dynamics",
         "dependence",
         "stationarity_diagnostics",
+        "decomposition",
+        "classical_baselines",
+        "classical_model_input",
+        "exponential_smoothing",
+        "autoregressive",
+        "seasonal_exogenous",
+        "state_space",
+        "volatility",
+        "classical_model_comparison",
+        "synthetic_constraints",
     }:
         return {"timeframe": target.timeframe}
     return {}
@@ -3432,6 +4824,15 @@ def _section_timeframe_mismatch(
                 "tick_distribution",
                 "conditional_distributions",
                 "microstructure_dynamics",
+                "synthetic_constraints",
+                "classical_baselines",
+                "classical_model_input",
+                "exponential_smoothing",
+                "autoregressive",
+                "seasonal_exogenous",
+                "state_space",
+                "volatility",
+                "classical_model_comparison",
             }
             and target.timeframe != TICK
         )
@@ -3441,6 +4842,10 @@ def _section_timeframe_mismatch(
         )
         or (
             section == "stationarity_diagnostics"
+            and target.timeframe not in SUPPORTED_SERIES_FINGERPRINT_TIMEFRAMES
+        )
+        or (
+            section == "decomposition"
             and target.timeframe not in SUPPORTED_SERIES_FINGERPRINT_TIMEFRAMES
         )
     )
@@ -3482,6 +4887,98 @@ def _fingerprint_section_status(
         return _dependence_section_status(_payload_mapping(payload[section]))
     if section == "stationarity_diagnostics":
         return _stationarity_section_status(_payload_mapping(payload[section]))
+    if section == "decomposition":
+        return _decomposition_section_status(_payload_mapping(payload[section]))
+    if section == "cache_source_parity":
+        parity_status = _summary_key(
+            _payload_mapping(payload[section]).get("status")
+        )
+        if parity_status == "match":
+            return "valid"
+        if parity_status == "mismatch":
+            return "limited"
+        return "unavailable"
+    if section == "synthetic_constraints":
+        constraint_status = _summary_key(
+            _payload_mapping(payload[section]).get("status")
+        )
+        if constraint_status == "ready":
+            return "valid"
+        if constraint_status == "limited":
+            return "limited"
+        return "unavailable"
+    if section == "classical_baselines":
+        baseline_status = _summary_key(
+            _payload_mapping(payload[section]).get("status")
+        )
+        if baseline_status == "ready":
+            return "valid"
+        if baseline_status == "limited":
+            return "limited"
+        return "unavailable"
+    if section == "classical_model_input":
+        input_status = _summary_key(
+            _payload_mapping(payload[section]).get("status")
+        )
+        if input_status == "ready":
+            return "valid"
+        if input_status == "limited":
+            return "limited"
+        return "unavailable"
+    if section == "exponential_smoothing":
+        model_status = _summary_key(
+            _payload_mapping(payload[section]).get("status")
+        )
+        if model_status == "ready":
+            return "valid"
+        if model_status == "limited":
+            return "limited"
+        return "unavailable"
+    if section == "autoregressive":
+        model_status = _summary_key(
+            _payload_mapping(payload[section]).get("status")
+        )
+        if model_status == "ready":
+            return "valid"
+        if model_status == "limited":
+            return "limited"
+        return "unavailable"
+    if section == "seasonal_exogenous":
+        model_status = _summary_key(
+            _payload_mapping(payload[section]).get("status")
+        )
+        if model_status == "ready":
+            return "valid"
+        if model_status == "limited":
+            return "limited"
+        return "unavailable"
+    if section == "state_space":
+        model_status = _summary_key(
+            _payload_mapping(payload[section]).get("status")
+        )
+        if model_status == "ready":
+            return "valid"
+        if model_status == "limited":
+            return "limited"
+        return "unavailable"
+    if section == "volatility":
+        model_status = _summary_key(
+            _payload_mapping(payload[section]).get("status")
+        )
+        if model_status == "ready":
+            return "valid"
+        if model_status == "limited":
+            return "limited"
+        return "unavailable"
+    if section == "classical_model_comparison":
+        model_status = _summary_key(
+            _payload_mapping(payload[section]).get("status")
+        )
+        if model_status == "ready":
+            return "valid"
+        if model_status == "limited":
+            return "limited"
+        return "unavailable"
     return "valid"
 
 
@@ -3566,6 +5063,17 @@ def _stationarity_section_status(
     stationarity: Mapping[str, JSONValue],
 ) -> str:
     status = _summary_key(stationarity.get("stationarity_status"))
+    if status == "ok":
+        return "valid"
+    if status == "unavailable":
+        return "unavailable"
+    return "limited"
+
+
+def _decomposition_section_status(
+    decomposition: Mapping[str, JSONValue],
+) -> str:
+    status = _summary_key(decomposition.get("decomposition_status"))
     if status == "ok":
         return "valid"
     if status == "unavailable":
@@ -3780,6 +5288,120 @@ def _fingerprint_stationarity_readiness(
     return readiness
 
 
+def _fingerprint_decomposition_readiness(
+    payload: Mapping[str, JSONValue],
+    *,
+    target: QualityTarget,
+) -> dict[str, JSONValue]:
+    section = "decomposition"
+    if section not in payload:
+        return {
+            "status": "skipped",
+            "reason": _fingerprint_section_skip_reason(
+                section,
+                payload,
+                target=target,
+            ),
+        }
+    decomposition = _payload_mapping(payload.get(section))
+    sample_counts = _payload_mapping(decomposition.get("sample_counts"))
+    stationarity = _payload_mapping(decomposition.get("stationarity_basis"))
+    structural_break = _payload_mapping(
+        decomposition.get("structural_break_proxy")
+    )
+    trend = _payload_mapping(decomposition.get("trend_proxy"))
+    readiness: dict[str, JSONValue] = {
+        "status": _decomposition_section_status(decomposition),
+        "reason": _optional_summary_key(decomposition.get("reason")),
+        "basis": _summary_key(decomposition.get("basis")),
+        "calculation_basis": _summary_key(
+            decomposition.get("calculation_basis")
+        ),
+        "row_order": _summary_key(decomposition.get("row_order")),
+        "computed_from": _summary_key(decomposition.get("computed_from")),
+        "cache_source": _optional_summary_key(
+            decomposition.get("cache_source")
+        ),
+        "regular_grid": decomposition.get("regular_grid") is True,
+        "metric": _summary_key(decomposition.get("metric")),
+        "limitations": _string_list(decomposition.get("limitations")),
+        "row_count": _int_payload(decomposition.get("row_count")),
+        "sampled_row_count": _int_payload(
+            decomposition.get("sampled_row_count")
+        ),
+        "usable_row_count": _int_payload(decomposition.get("usable_row_count")),
+        "invalid_row_count": _int_payload(
+            decomposition.get("invalid_row_count")
+        ),
+        "partial_row_count": _int_payload(
+            decomposition.get("partial_row_count")
+        ),
+        "truncated": decomposition.get("truncated") is True,
+        "level_sample_count": _int_payload(sample_counts.get("level")),
+        "return_sample_count": _int_payload(sample_counts.get("return")),
+        "windows": list(_int_sequence_payload(decomposition.get("windows"))),
+        "rounding_digits": _int_payload(decomposition.get("rounding_digits")),
+        "computed_window_count": _int_payload(
+            decomposition.get("computed_window_count")
+        ),
+        "skipped_window_count": _int_payload(
+            decomposition.get("skipped_window_count")
+        ),
+        "skipped_window_reason_counts": _counter_payload(
+            _counter_from_mapping(
+                _payload_mapping(
+                    decomposition.get("skipped_window_reason_counts")
+                )
+            )
+        ),
+        "stationarity": {
+            "status": _summary_key(stationarity.get("status")),
+            "stationarity_status": _summary_key(
+                stationarity.get("stationarity_status")
+            ),
+            "computed_window_count": _int_payload(
+                stationarity.get("computed_window_count")
+            ),
+            "skipped_window_count": _int_payload(
+                stationarity.get("skipped_window_count")
+            ),
+            "zero_variance_metrics": _string_list(
+                stationarity.get("zero_variance_metrics")
+            ),
+            "recommended_transforms": _string_list(
+                stationarity.get("recommended_transforms")
+            ),
+        },
+        "trend": {
+            "status": _summary_key(trend.get("status")),
+            "direction": _summary_key(trend.get("direction")),
+            "slope_per_observation": trend.get("slope_per_observation"),
+            "trend_strength": trend.get("trend_strength"),
+        },
+        "structural_break": {
+            "status": _summary_key(structural_break.get("status")),
+            "candidate_count": _int_payload(
+                structural_break.get("candidate_count")
+            ),
+            "strongest_candidate": dict(
+                _payload_mapping(structural_break.get("strongest_candidate"))
+            ),
+        },
+        "training_projection": dict(
+            _payload_mapping(decomposition.get("training_projection"))
+        ),
+    }
+    if readiness["status"] in {"limited", "unavailable"} and not readiness.get(
+        "reason"
+    ):
+        readiness["reason"] = _summary_key(
+            _string_list(decomposition.get("limitations"))[0]
+            if _string_list(decomposition.get("limitations"))
+            else decomposition.get("decomposition_status")
+        )
+    return readiness
+
+
 def _string_list(value: object) -> list[JSONValue]:
     if not isinstance(value, list):
         return []
@@ -3868,8 +5490,17 @@ def _series_fingerprint_topology_target_summaries(
         if not topology:
             continue
         target_axis = _payload_mapping(payload.get("target_axis"))
+        calendar = _payload_mapping(payload.get("calendar_regimes"))
+        calendar_policy = _compact_calendar_policy(
+            _payload_mapping(calendar.get("calendar_policy"))
+        )
         target_summaries.append(
-            _topology_target_summary(finding, target_axis, topology)
+            _topology_target_summary(
+                finding,
+                target_axis,
+                topology,
+                calendar_policy=calendar_policy,
+            )
         )
     return target_summaries
 
@@ -3878,9 +5509,11 @@ def _topology_target_summary(
     finding: QualityFinding,
     target_axis: Mapping[str, JSONValue],
     topology: Mapping[str, JSONValue],
+    *,
+    calendar_policy: Mapping[str, JSONValue],
 ) -> dict[str, JSONValue]:
     flags = _topology_flags(topology)
-    return {
+    summary: dict[str, JSONValue] = {
         "target_axis": _topology_target_axis(finding, target_axis),
         "row_count": _int_payload(topology.get("row_count")),
         "parsed_row_count": _optional_int_payload(
@@ -3914,6 +5547,56 @@ def _topology_target_summary(
         "status": _topology_status(topology),
         "flags": flags,
     }
+    inspection_context = _payload_mapping(topology.get("inspection_context"))
+    if inspection_context:
+        summary["inspection_context"] = dict(inspection_context)
+    if calendar_policy:
+        summary["calendar_policy"] = dict(calendar_policy)
+    return summary
+
+
+def _compact_calendar_policy(
+    policy: Mapping[str, JSONValue],
+) -> dict[str, JSONValue]:
+    """Return bounded calendar policy fields needed by remediation guidance."""
+    if not policy:
+        return {}
+    compact: dict[str, JSONValue] = {}
+    for key in (
+        "source_timezone",
+        "canonical_timezone",
+        "holiday_calendar_source",
+        "holiday_calendar_complete",
+        "holiday_calendar_static_advisory",
+        "weekend_activity_policy",
+        "expected_session_closure_policy",
+    ):
+        value = policy.get(key)
+        if value is not None:
+            compact[key] = _bounded_calendar_policy_value(value)
+    profile = _payload_mapping(policy.get("calendar_profile"))
+    compact_profile: dict[str, JSONValue] = {}
+    for key in (
+        "name",
+        "source",
+        "version",
+        "complete",
+        "static_advisory",
+        "weekend_activity_policy",
+        "expected_session_closure_policy",
+    ):
+        value = profile.get(key)
+        if value is not None:
+            compact_profile[key] = _bounded_calendar_policy_value(value)
+    if compact_profile:
+        compact["calendar_profile"] = compact_profile
+    return compact
+
+
+def _bounded_calendar_policy_value(value: JSONValue) -> JSONValue:
+    if isinstance(value, str):
+        return value[:_CALENDAR_POLICY_CONTEXT_TEXT_LIMIT]
+    return value
 
 
 def _topology_target_axis(
@@ -4026,18 +5709,29 @@ def _topology_attention_target_summary(
 ) -> dict[str, JSONValue] | None:
     flags = _topology_summary_flags(target.get("flags"))
     flag_set = set(flags)
+    calendar_policy = _payload_mapping(target.get("calendar_policy"))
     attention_flags = [
         flag for flag in ACTIONABLE_TOPOLOGY_FLAGS if flag in flag_set
     ]
+    if (
+        "expected_session_closures" in flag_set
+        and _summary_key(calendar_policy.get("expected_session_closure_policy"))
+        == "unexpected"
+    ):
+        attention_flags.append("expected_session_closures")
     if not attention_flags:
         return None
-    attention_level = _topology_attention_level(attention_flags)
-    return {
+    attention_level = _topology_attention_level(
+        attention_flags,
+        calendar_policy=calendar_policy,
+    )
+    summary: dict[str, JSONValue] = {
         "target_axis": _topology_attention_axis(target),
         "attention_level": attention_level,
         "attention_flags": list(attention_flags),
         "remediation_hints": remediation_hint_payloads_for_flags(
-            attention_flags
+            attention_flags,
+            calendar_policy=calendar_policy,
         ),
         "flags": list(flags),
         "status": _summary_key(target.get("status")),
@@ -4061,6 +5755,78 @@ def _topology_attention_target_summary(
         "computed_from": _summary_key(target.get("computed_from")),
         "cache_source": _optional_summary_key(target.get("cache_source")),
     }
+    if calendar_policy:
+        summary["calendar_policy"] = dict(calendar_policy)
+    inspection_context = _topology_attention_inspection_context(
+        target,
+        attention_flags,
+        calendar_policy=calendar_policy,
+    )
+    if inspection_context:
+        summary["inspection_context"] = inspection_context
+    return summary
+
+
+def _topology_attention_inspection_context(
+    target: Mapping[str, JSONValue],
+    attention_flags: list[str],
+    *,
+    calendar_policy: Mapping[str, JSONValue],
+) -> dict[str, JSONValue]:
+    raw = _payload_mapping(target.get("inspection_context"))
+    if not raw:
+        return {}
+    context: dict[str, JSONValue] = {}
+    schema_version = raw.get("schema_version")
+    if schema_version is not None:
+        context["schema_version"] = schema_version
+    section_flags = (
+        ("invalid_timestamps", "invalid_timestamps"),
+        ("non_monotonic_timestamps", "non_monotonic_timestamps"),
+        ("duplicate_timestamps", "duplicate_timestamps"),
+        ("suspicious_gaps", "suspicious_gaps"),
+        ("weekend_activity", "weekend_activity"),
+    )
+    attention_flag_set = set(attention_flags)
+    target_axis = _topology_attention_axis(target)
+    for section_name, flag in section_flags:
+        section = _payload_mapping(raw.get(section_name))
+        if flag not in attention_flag_set or not section:
+            continue
+        hints = remediation_hint_payloads_for_flags(
+            (flag,),
+            calendar_policy=calendar_policy,
+        )
+        linked = dict(section)
+        hint = hints[0] if hints and isinstance(hints[0], Mapping) else {}
+        policy_context = _payload_mapping(hint.get("policy_context"))
+        actionable = policy_context.get("actionable") is not False
+        linked["actionable"] = actionable
+        linked["target_axis"] = target_axis
+        if hints:
+            linked["next_action" if actionable else "policy_note"] = hints[0]
+        context[section_name] = linked
+    expected_closures = _payload_mapping(raw.get("expected_session_closures"))
+    if "expected_session_closures" in attention_flag_set and expected_closures:
+        linked = dict(expected_closures)
+        hints = remediation_hint_payloads_for_flags(
+            ("expected_session_closures",),
+            calendar_policy=calendar_policy,
+        )
+        linked["actionable"] = True
+        linked["target_axis"] = target_axis
+        if hints:
+            linked["next_action"] = hints[0]
+        context["expected_session_closures"] = linked
+    elif "suspicious_gaps" in attention_flag_set and expected_closures:
+        contextual = dict(expected_closures)
+        contextual["actionable"] = False
+        contextual["contextual_for"] = "suspicious_gaps"
+        contextual["target_axis"] = target_axis
+        context["expected_session_closures"] = contextual
+    if len(context) == int("schema_version" in context):
+        return {}
+    return context
 
 
 def _topology_attention_axis(
@@ -4087,7 +5853,11 @@ def _topology_summary_flags(value: object) -> tuple[str, ...]:
     return tuple(flags)
 
 
-def _topology_attention_level(flags: list[str]) -> str:
+def _topology_attention_level(
+    flags: list[str],
+    *,
+    calendar_policy: Mapping[str, JSONValue],
+) -> str:
     flag_set = set(flags)
     if "unavailable_topology" in flag_set:
         return "unavailable"
@@ -4095,6 +5865,12 @@ def _topology_attention_level(flags: list[str]) -> str:
         return "structural"
     if flag_set & {"duplicate_timestamps", "suspicious_gaps"}:
         return "sequence"
+    if (
+        flag_set == {"weekend_activity"}
+        and _summary_key(calendar_policy.get("weekend_activity_policy"))
+        == "allowed"
+    ):
+        return "contextual"
     return "session"
 
 
@@ -4126,6 +5902,7 @@ def _topology_attention_level_rank(level: str) -> int:
         "structural": 1,
         "sequence": 2,
         "session": 3,
+        "contextual": 4,
     }
     return ranks.get(level, 99)
 
@@ -4280,9 +6057,10 @@ def _add_dynamics_payload(
     profile: HistDataFingerprintProfile,
 ) -> None:
     if target.timeframe == TICK:
-        microstructure_dynamics, dependence, stationarity = (
+        microstructure_dynamics, dependence, stationarity, decomposition = (
             _tick_sequence_payloads(
                 payload,
+                target=target,
                 frame=frame,
                 text=text,
                 profile=profile,
@@ -4291,15 +6069,22 @@ def _add_dynamics_payload(
         payload["microstructure_dynamics"] = microstructure_dynamics
         payload["dependence"] = dependence
         payload["stationarity_diagnostics"] = stationarity
+        payload["decomposition"] = decomposition
 
 
 def _tick_sequence_payloads(
     payload: Mapping[str, JSONValue],
     *,
+    target: QualityTarget,
     frame: Any | None,
     text: str | None,
     profile: HistDataFingerprintProfile,
-) -> tuple[dict[str, JSONValue], dict[str, JSONValue], dict[str, JSONValue]]:
+) -> tuple[
+    dict[str, JSONValue],
+    dict[str, JSONValue],
+    dict[str, JSONValue],
+    dict[str, JSONValue],
+]:
     if frame is not None:
         rows, row_count, usable_row_count, invalid_row_count = (
             _tick_dynamics_rows_from_frame(frame, profile)
@@ -4333,6 +6118,11 @@ def _tick_sequence_payloads(
         partial_row_count=partial_row_count,
         profile=profile,
     )
+    stationarity = _tick_stationarity_payload(
+        rows,
+        base=base,
+        profile=profile,
+    )
     return (
         _tick_microstructure_dynamics_payload(
             rows,
@@ -4340,7 +6130,14 @@ def _tick_sequence_payloads(
             profile=profile,
         ),
         _tick_dependence_payload(rows, base=base, profile=profile),
-        _tick_stationarity_payload(rows, base=base, profile=profile),
+        stationarity,
+        _tick_decomposition_payload(
+            rows,
+            base=base,
+            stationarity=stationarity,
+            target=target,
+            profile=profile,
+        ),
     )
 
 
@@ -4796,6 +6593,745 @@ def _tick_stationarity_payload(
         level_values=mids,
         return_values=returns,
     )
+
+
+def _tick_decomposition_payload(
+    rows: list[_TickDynamicsRow],
+    *,
+    base: dict[str, JSONValue],
+    stationarity: Mapping[str, JSONValue],
+    target: QualityTarget,
+    profile: HistDataFingerprintProfile,
+) -> dict[str, JSONValue]:
+    mids = [(row.bid + row.ask) / 2.0 for row in rows]
+    returns: list[float] = []
+    absolute_returns_by_row: list[float | None] = []
+    previous_mid: float | None = None
+    for mid in mids:
+        row_return: float | None = None
+        if previous_mid is not None and previous_mid > 0.0 and mid > 0.0:
+            row_return = math.log(mid / previous_mid)
+            returns.append(row_return)
+        absolute_returns_by_row.append(
+            abs(row_return) if row_return is not None else None
+        )
+        previous_mid = mid
+    return _decomposition_payload(
+        base,
+        profile=profile,
+        target=target,
+        metric="mid_price",
+        timestamps=[row.timestamp_utc_ms for row in rows],
+        level_values=mids,
+        return_values=returns,
+        absolute_returns_by_row=absolute_returns_by_row,
+        stationarity=stationarity,
+    )
+
+
+def _decomposition_payload(
+    base: Mapping[str, JSONValue],
+    *,
+    profile: HistDataFingerprintProfile,
+    target: QualityTarget,
+    metric: str,
+    timestamps: list[int],
+    level_values: Iterable[float],
+    return_values: Iterable[float],
+    absolute_returns_by_row: list[float | None],
+    stationarity: Mapping[str, JSONValue],
+) -> dict[str, JSONValue]:
+    levels = _finite_values(level_values)
+    returns = _finite_values(return_values)
+    trend = _decomposition_trend_payload(levels, profile)
+    residual = _decomposition_residual_payload(levels, profile)
+    seasonality = _decomposition_seasonality_payload(
+        timestamps,
+        levels,
+        absolute_returns_by_row,
+        target=target,
+        profile=profile,
+    )
+    smoothing_windows, computed_window_count, skipped_reason_counts = (
+        _decomposition_smoothing_windows_payload(levels, returns, profile)
+    )
+    structural_break = _decomposition_structural_break_payload(levels, profile)
+    stationarity_basis = _decomposition_stationarity_basis(stationarity)
+    skipped_window_count = sum(skipped_reason_counts.values())
+    limitations = _decomposition_limitations(
+        base,
+        stationarity_basis=stationarity_basis,
+        level_count=len(levels),
+        return_count=len(returns),
+        computed_window_count=computed_window_count,
+        skipped_window_count=skipped_window_count,
+    )
+    decomposition_status = _decomposition_status(
+        base,
+        stationarity_basis=stationarity_basis,
+        level_count=len(levels),
+        return_count=len(returns),
+        limitations=limitations,
+    )
+
+    result = dict(base)
+    result.update(
+        {
+            "schema_version": (
+                TIME_SERIES_FINGERPRINT_DECOMPOSITION_SCHEMA_VERSION
+            ),
+            "decomposition_status": decomposition_status,
+            "calculation_basis": "observed_sequence",
+            "metric": metric,
+            "sample_counts": {
+                "level": len(levels),
+                "return": len(returns),
+            },
+            "windows": [int(window) for window in profile.rolling_windows],
+            "rounding_digits": int(profile.rounding_digits),
+            "stationarity_basis": stationarity_basis,
+            "trend_proxy": trend,
+            "seasonality_proxy": seasonality,
+            "residual_proxy": residual,
+            "smoothing_windows": smoothing_windows,
+            "computed_window_count": computed_window_count,
+            "skipped_window_count": skipped_window_count,
+            "skipped_window_reason_counts": _counter_payload(
+                skipped_reason_counts
+            ),
+            "structural_break_proxy": structural_break,
+            "limitations": [value for value in limitations],
+        }
+    )
+    if decomposition_status in {"limited", "unavailable"}:
+        result["reason"] = _decomposition_status_reason(
+            limitations,
+            stationarity_basis=stationarity_basis,
+        )
+    result["training_projection"] = decomposition_training_projection(result)
+    return result
+
+
+def _decomposition_stationarity_basis(
+    stationarity: Mapping[str, JSONValue],
+) -> dict[str, JSONValue]:
+    if not stationarity:
+        return {
+            "status": "unavailable",
+            "reason": "stationarity_unavailable",
+            "stationarity_status": "unavailable",
+            "calculation_basis": "unknown",
+            "computed_window_count": 0,
+            "skipped_window_count": 0,
+            "skipped_window_reason_counts": {},
+            "zero_variance_metrics": [],
+            "recommended_transforms": [],
+            "limitations": ["stationarity_unavailable"],
+        }
+    return {
+        "status": _stationarity_section_status(stationarity),
+        "reason": _optional_summary_key(stationarity.get("reason")),
+        "stationarity_status": _summary_key(
+            stationarity.get("stationarity_status")
+        ),
+        "calculation_basis": _summary_key(
+            stationarity.get("calculation_basis")
+        ),
+        "computed_window_count": _int_payload(
+            stationarity.get("computed_window_count")
+        ),
+        "skipped_window_count": _int_payload(
+            stationarity.get("skipped_window_count")
+        ),
+        "skipped_window_reason_counts": _counter_payload(
+            _counter_from_mapping(
+                _payload_mapping(
+                    stationarity.get("skipped_window_reason_counts")
+                )
+            )
+        ),
+        "zero_variance_metrics": _string_list(
+            stationarity.get("zero_variance_metrics")
+        ),
+        "recommended_transforms": _string_list(
+            stationarity.get("recommended_transforms")
+        ),
+        "limitations": _string_list(stationarity.get("limitations")),
+    }
+
+
+def _decomposition_trend_payload(
+    levels: list[float],
+    profile: HistDataFingerprintProfile,
+) -> dict[str, JSONValue]:
+    components = _linear_trend_components(levels)
+    if components is None:
+        return {
+            "status": "skipped",
+            "reason": "insufficient_sample_count",
+            "sample_count": len(levels),
+            "required_sample_count": 2,
+        }
+    slope, intercept, fitted_values, _residuals, trend_strength = components
+    first_fitted = fitted_values[0]
+    last_fitted = fitted_values[-1]
+    return {
+        "status": "computed",
+        "index_basis": "observation_index",
+        "sample_count": len(levels),
+        "slope_per_observation": _rounded(slope, profile),
+        "intercept": _rounded(intercept, profile),
+        "fitted_first": _rounded(first_fitted, profile),
+        "fitted_last": _rounded(last_fitted, profile),
+        "direction": _trend_direction(slope, profile),
+        "trend_strength": _rounded(trend_strength, profile),
+        "fitted_change_first_to_last": _stationarity_change_payload(
+            first_fitted,
+            last_fitted,
+            profile,
+        ),
+    }
+
+
+def _decomposition_residual_payload(
+    levels: list[float],
+    profile: HistDataFingerprintProfile,
+) -> dict[str, JSONValue]:
+    components = _linear_trend_components(levels)
+    if components is None:
+        return {
+            "status": "skipped",
+            "reason": "insufficient_sample_count",
+            "sample_count": len(levels),
+            "required_sample_count": 2,
+        }
+    _slope, _intercept, _fitted_values, residuals, _trend_strength = components
+    level_variance = _population_variance(levels)
+    residual_variance = _population_variance(residuals)
+    return {
+        "status": "computed",
+        "basis": "linear_trend_residual",
+        "sample_count": len(levels),
+        "level_variance": _rounded(level_variance, profile),
+        "residual_variance": _rounded(residual_variance, profile),
+        "residual_to_level_variance_ratio": (
+            _rounded(residual_variance / level_variance, profile)
+            if level_variance > 0.0
+            else None
+        ),
+        "residual": _numeric_summary(residuals, profile),
+        "absolute_residual": _numeric_summary(
+            [abs(value) for value in residuals],
+            profile,
+        ),
+    }
+
+
+def _linear_trend_components(
+    values: list[float],
+) -> tuple[float, float, list[float], list[float], float] | None:
+    sample_count = len(values)
+    if sample_count < 2:
+        return None
+    x_mean = (sample_count - 1) / 2.0
+    y_mean = _mean(values)
+    denominator = sum((index - x_mean) ** 2 for index in range(sample_count))
+    if denominator <= 0.0:
+        return None
+    slope = (
+        sum(
+            (index - x_mean) * (value - y_mean)
+            for index, value in enumerate(values)
+        )
+        / denominator
+    )
+    intercept = y_mean - slope * x_mean
+    fitted_values = [intercept + slope * index for index in range(sample_count)]
+    residuals = [
+        value - fitted
+        for value, fitted in zip(values, fitted_values, strict=True)
+    ]
+    total_variance = _population_variance(values)
+    residual_variance = _population_variance(residuals)
+    if total_variance > 0.0:
+        trend_strength = max(
+            0.0, min(1.0, 1.0 - residual_variance / total_variance)
+        )
+    else:
+        trend_strength = 1.0 if residual_variance <= 0.0 else 0.0
+    return slope, intercept, fitted_values, residuals, trend_strength
+
+
+def _trend_direction(
+    slope: float,
+    profile: HistDataFingerprintProfile,
+) -> str:
+    tolerance = 10 ** (-max(0, int(profile.rounding_digits)))
+    if slope > tolerance:
+        return "increasing"
+    if slope < -tolerance:
+        return "decreasing"
+    return "flat"
+
+
+def _decomposition_seasonality_payload(
+    timestamps: list[int],
+    levels: list[float],
+    absolute_returns_by_row: list[float | None],
+    *,
+    target: QualityTarget,
+    profile: HistDataFingerprintProfile,
+) -> dict[str, JSONValue]:
+    by_hour: dict[str, list[float]] = {}
+    returns_by_hour: dict[str, list[float]] = {}
+    by_weekday: dict[str, list[float]] = {}
+    returns_by_weekday: dict[str, list[float]] = {}
+    by_session: dict[str, list[float]] = {}
+    returns_by_session: dict[str, list[float]] = {}
+    usable_count = min(
+        len(timestamps), len(levels), len(absolute_returns_by_row)
+    )
+
+    for index in range(usable_count):
+        classification = classify_histdata_timestamp(
+            timestamps[index],
+            calendar_profile=profile.calendar_profile,
+            asset_class=_target_asset_class(target),
+        )
+        source_datetime = classification.source_datetime
+        hour_key = f"{source_datetime.hour:02d}"
+        weekday_key = SOURCE_WEEKDAY_NAMES[source_datetime.weekday()]
+        active_sessions = tuple(classification.active_sessions) or (
+            (SESSION_MARKET_CLOSED,)
+            if classification.session_state == SESSION_STATE_WEEKEND_CLOSURE
+            else (SESSION_NO_ACTIVE_WINDOW,)
+        )
+        _record_decomposition_bucket(
+            by_hour,
+            returns_by_hour,
+            hour_key,
+            level=levels[index],
+            absolute_return=absolute_returns_by_row[index],
+        )
+        _record_decomposition_bucket(
+            by_weekday,
+            returns_by_weekday,
+            weekday_key,
+            level=levels[index],
+            absolute_return=absolute_returns_by_row[index],
+        )
+        for session in active_sessions:
+            _record_decomposition_bucket(
+                by_session,
+                returns_by_session,
+                str(session),
+                level=levels[index],
+                absolute_return=absolute_returns_by_row[index],
+            )
+
+    status = "computed" if usable_count else "skipped"
+    result: dict[str, JSONValue] = {
+        "status": status,
+        "sample_count": usable_count,
+        "grouped_by": ["source_hour", "source_weekday", "active_session"],
+        "by_source_hour": _decomposition_bucket_group_payload(
+            by_hour,
+            returns_by_hour,
+            profile,
+        ),
+        "by_source_weekday": _decomposition_bucket_group_payload(
+            by_weekday,
+            returns_by_weekday,
+            profile,
+        ),
+        "by_active_session": _decomposition_bucket_group_payload(
+            by_session,
+            returns_by_session,
+            profile,
+        ),
+    }
+    if status == "skipped":
+        result["reason"] = "insufficient_sample_count"
+    return result
+
+
+def _record_decomposition_bucket(
+    level_buckets: dict[str, list[float]],
+    return_buckets: dict[str, list[float]],
+    bucket: str,
+    *,
+    level: float,
+    absolute_return: float | None,
+) -> None:
+    level_buckets.setdefault(bucket, []).append(level)
+    if absolute_return is not None:
+        return_buckets.setdefault(bucket, []).append(absolute_return)
+
+
+def _decomposition_bucket_group_payload(
+    level_buckets: Mapping[str, list[float]],
+    return_buckets: Mapping[str, list[float]],
+    profile: HistDataFingerprintProfile,
+) -> dict[str, JSONValue]:
+    limit = max(1, int(profile.histogram_bins))
+    bucket_names = sorted(level_buckets)
+    included_names = bucket_names[:limit]
+    buckets: dict[str, JSONValue] = {}
+    level_means: list[float] = []
+    return_means: list[float] = []
+    for bucket in included_names:
+        bucket_levels = _finite_values(level_buckets.get(bucket, ()))
+        bucket_returns = _finite_values(return_buckets.get(bucket, ()))
+        level_mean = _mean(bucket_levels) if bucket_levels else None
+        return_mean = _mean(bucket_returns) if bucket_returns else None
+        if level_mean is not None:
+            level_means.append(level_mean)
+        if return_mean is not None:
+            return_means.append(return_mean)
+        buckets[bucket] = {
+            "level_count": len(bucket_levels),
+            "level_mean": (
+                _rounded(level_mean, profile)
+                if level_mean is not None
+                else None
+            ),
+            "absolute_return_count": len(bucket_returns),
+            "absolute_return_mean": (
+                _rounded(return_mean, profile)
+                if return_mean is not None
+                else None
+            ),
+        }
+    dominant_bucket = None
+    if bucket_names:
+        dominant_bucket = max(
+            bucket_names,
+            key=lambda item: (len(level_buckets.get(item, ())), item),
+        )
+    return {
+        "bucket_count": len(bucket_names),
+        "included_bucket_count": len(included_names),
+        "omitted_bucket_count": max(0, len(bucket_names) - len(included_names)),
+        "truncated": len(included_names) < len(bucket_names),
+        "dominant_bucket": dominant_bucket,
+        "buckets": buckets,
+        "level_mean_dispersion": _numeric_summary(level_means, profile),
+        "absolute_return_mean_dispersion": _numeric_summary(
+            return_means,
+            profile,
+        ),
+    }
+
+
+def _decomposition_smoothing_windows_payload(
+    levels: list[float],
+    returns: list[float],
+    profile: HistDataFingerprintProfile,
+) -> tuple[dict[str, JSONValue], int, Counter[str]]:
+    windows: dict[str, JSONValue] = {}
+    skipped_reason_counts: Counter[str] = Counter()
+    computed_window_count = 0
+    for window in profile.rolling_windows:
+        window_payload = _decomposition_smoothing_window_payload(
+            levels,
+            returns,
+            window=int(window),
+            profile=profile,
+        )
+        windows[str(window)] = window_payload
+        if _summary_key(window_payload.get("status")) == "computed":
+            computed_window_count += 1
+        else:
+            reason = _optional_summary_key(window_payload.get("reason"))
+            if reason:
+                skipped_reason_counts[reason] += 1
+    return windows, computed_window_count, skipped_reason_counts
+
+
+def _decomposition_smoothing_window_payload(
+    levels: list[float],
+    returns: list[float],
+    *,
+    window: int,
+    profile: HistDataFingerprintProfile,
+) -> dict[str, JSONValue]:
+    sample_counts: dict[str, JSONValue] = {
+        "level": len(levels),
+        "return": len(returns),
+    }
+    required_sample_count = max(2, window * 2)
+    if (
+        window <= 0
+        or len(levels) < required_sample_count
+        or len(returns) < required_sample_count
+    ):
+        return {
+            "status": "skipped",
+            "reason": "insufficient_sample_count",
+            "window": window,
+            "sample_counts": sample_counts,
+            "required_sample_count": required_sample_count,
+        }
+    level_means = _rolling_stat_values(levels, window, statistic="mean")
+    level_variances = _rolling_stat_values(
+        levels,
+        window,
+        statistic="variance",
+    )
+    absolute_return_means = _rolling_stat_values(
+        [abs(value) for value in returns],
+        window,
+        statistic="mean",
+    )
+    return {
+        "status": "computed",
+        "window": window,
+        "sample_counts": sample_counts,
+        "required_sample_count": required_sample_count,
+        "level_smoothed_mean": _numeric_summary(level_means, profile),
+        "level_smoothed_variance": _numeric_summary(level_variances, profile),
+        "level_smoothed_mean_drift": _stationarity_change_payload(
+            level_means[0],
+            level_means[-1],
+            profile,
+        ),
+        "absolute_return_smoothed_mean": _numeric_summary(
+            absolute_return_means,
+            profile,
+        ),
+        "absolute_return_smoothed_mean_drift": _stationarity_change_payload(
+            absolute_return_means[0],
+            absolute_return_means[-1],
+            profile,
+        ),
+    }
+
+
+def _rolling_stat_values(
+    values: list[float],
+    window: int,
+    *,
+    statistic: str,
+) -> list[float]:
+    if window <= 0 or len(values) < window:
+        return []
+    return [
+        _stationarity_statistic(values[index : index + window], statistic)
+        for index in range(0, len(values) - window + 1)
+    ]
+
+
+def _decomposition_structural_break_payload(
+    levels: list[float],
+    profile: HistDataFingerprintProfile,
+) -> dict[str, JSONValue]:
+    sample_count = len(levels)
+    minimum_segment_size = 2
+    if sample_count < minimum_segment_size * 2:
+        return {
+            "status": "skipped",
+            "reason": "insufficient_sample_count",
+            "sample_count": sample_count,
+            "required_sample_count": minimum_segment_size * 2,
+            "minimum_segment_size": minimum_segment_size,
+            "candidate_count": 0,
+            "candidates": [],
+        }
+    candidates: list[dict[str, JSONValue]] = []
+    for split_index in range(
+        minimum_segment_size,
+        sample_count - minimum_segment_size + 1,
+    ):
+        before = levels[:split_index]
+        after = levels[split_index:]
+        before_mean = _mean(before)
+        after_mean = _mean(after)
+        mean_shift = after_mean - before_mean
+        pooled_variance = (
+            _population_variance(before) + _population_variance(after)
+        ) / 2.0
+        if pooled_variance > 0.0:
+            score = abs(mean_shift) / math.sqrt(pooled_variance)
+            score_basis = "absolute_mean_shift_over_pooled_std"
+        else:
+            score = abs(mean_shift) * sample_count
+            score_basis = "scaled_absolute_mean_shift_zero_variance"
+        candidates.append(
+            {
+                "split_index": split_index,
+                "before_count": len(before),
+                "after_count": len(after),
+                "before_mean": _rounded(before_mean, profile),
+                "after_mean": _rounded(after_mean, profile),
+                "mean_shift": _rounded(mean_shift, profile),
+                "absolute_mean_shift": _rounded(abs(mean_shift), profile),
+                "score": _rounded(score, profile),
+                "score_basis": score_basis,
+            }
+        )
+    ranked = sorted(
+        candidates,
+        key=lambda item: (
+            -(_optional_float_payload(item.get("score")) or 0.0),
+            _int_payload(item.get("split_index")),
+        ),
+    )
+    limit = max(1, int(profile.histogram_bins))
+    included = ranked[:limit]
+    included_candidates: list[JSONValue] = [dict(item) for item in included]
+    return {
+        "status": "computed",
+        "basis": "two_segment_mean_shift",
+        "sample_count": sample_count,
+        "minimum_segment_size": minimum_segment_size,
+        "candidate_count": len(candidates),
+        "included_candidate_count": len(included),
+        "omitted_candidate_count": max(0, len(candidates) - len(included)),
+        "truncated": len(included) < len(candidates),
+        "strongest_candidate": (
+            included_candidates[0] if included_candidates else None
+        ),
+        "candidates": included_candidates,
+    }
+
+
+def _decomposition_limitations(
+    base: Mapping[str, JSONValue],
+    *,
+    stationarity_basis: Mapping[str, JSONValue],
+    level_count: int,
+    return_count: int,
+    computed_window_count: int,
+    skipped_window_count: int,
+) -> tuple[str, ...]:
+    limitations = [
+        str(value) for value in _string_list(base.get("limitations"))
+    ]
+    if level_count < 3 or return_count < 1:
+        limitations.append("insufficient_sample_count")
+    stationarity_status = _summary_key(stationarity_basis.get("status"))
+    if stationarity_status == "unavailable":
+        limitations.append("stationarity_unavailable")
+    elif stationarity_status == "limited":
+        limitations.append("stationarity_limited")
+    if _string_list(stationarity_basis.get("zero_variance_metrics")):
+        limitations.append("zero_variance")
+    if skipped_window_count > 0 or _int_payload(
+        stationarity_basis.get("skipped_window_count")
+    ):
+        limitations.append("skipped_rolling_windows")
+    if computed_window_count <= 0:
+        limitations.append("insufficient_sample_count")
+    return _ordered_unique(limitations)
+
+
+def _decomposition_status(
+    base: Mapping[str, JSONValue],
+    *,
+    stationarity_basis: Mapping[str, JSONValue],
+    level_count: int,
+    return_count: int,
+    limitations: tuple[str, ...],
+) -> str:
+    if _summary_key(base.get("sequence_status")) == "unavailable":
+        return "unavailable"
+    if level_count < 3 or return_count < 1:
+        return "unavailable"
+    if _summary_key(stationarity_basis.get("status")) == "unavailable":
+        return "unavailable"
+    if limitations:
+        return "limited"
+    return "ok"
+
+
+def _decomposition_status_reason(
+    limitations: tuple[str, ...],
+    *,
+    stationarity_basis: Mapping[str, JSONValue],
+) -> str:
+    if limitations:
+        return _summary_key(limitations[0])
+    reason = _optional_summary_key(stationarity_basis.get("reason"))
+    if reason:
+        return reason
+    return "limited"
+
+
+def decomposition_training_projection(
+    decomposition: Mapping[str, JSONValue],
+) -> dict[str, JSONValue]:
+    """Return flat period-grain decomposition scalars for training rows."""
+    trend = _payload_mapping(decomposition.get("trend_proxy"))
+    residual = _payload_mapping(decomposition.get("residual_proxy"))
+    structural = _payload_mapping(decomposition.get("structural_break_proxy"))
+    strongest = _payload_mapping(structural.get("strongest_candidate"))
+    stationarity = _payload_mapping(decomposition.get("stationarity_basis"))
+    status = _summary_key(decomposition.get("decomposition_status"))
+    direction = _summary_key(trend.get("direction"))
+    stationarity_status = _summary_key(stationarity.get("status"))
+    return {
+        "schema_version": (
+            TIME_SERIES_FINGERPRINT_DECOMPOSITION_TRAINING_PROJECTION_SCHEMA_VERSION
+        ),
+        "grain": "period",
+        "identity_fields": ["series_id", "period", "row_id"],
+        "values": {
+            "decomposition_status_code": {
+                "unavailable": 1,
+                "limited": 2,
+                "ok": 3,
+            }.get(status, 0),
+            "decomposition_training_ready": status in {"limited", "ok"},
+            "decomposition_trend_direction_code": {
+                "decreasing": -1,
+                "flat": 0,
+                "increasing": 1,
+            }.get(direction, 0),
+            "decomposition_trend_slope": trend.get("slope_per_observation"),
+            "decomposition_trend_strength": trend.get("trend_strength"),
+            "decomposition_residual_variance_ratio": residual.get(
+                "residual_to_level_variance_ratio"
+            ),
+            "decomposition_computed_window_count": _int_payload(
+                decomposition.get("computed_window_count")
+            ),
+            "decomposition_structural_break_candidate_count": _int_payload(
+                structural.get("candidate_count")
+            ),
+            "decomposition_structural_break_split_index": (
+                _int_payload(strongest.get("split_index"))
+                if strongest
+                else None
+            ),
+            "decomposition_structural_break_score": strongest.get("score"),
+            "decomposition_stationarity_status_code": {
+                "unavailable": 1,
+                "limited": 2,
+                "valid": 3,
+            }.get(stationarity_status, 0),
+        },
+    }
+
+
+def project_decomposition_onto_training_frame(
+    frame: Any,
+    decomposition: Mapping[str, JSONValue],
+) -> Any:
+    """Project period-grain decomposition scalars onto enriched tick rows."""
+    required = {"series_id", "period", "row_id"}
+    columns = set(getattr(frame, "columns", ()))
+    missing = sorted(required - columns)
+    if missing:
+        raise ValueError(
+            "decomposition training projection requires enriched ASCII tick "
+            f"identity columns: {', '.join(missing)}"
+        )
+    import polars as pl
+
+    projection = decomposition_training_projection(decomposition)
+    values = _payload_mapping(projection.get("values"))
+    expressions = [pl.lit(value).alias(name) for name, value in values.items()]
+    return frame.with_columns(expressions)
 
 
 def _stationarity_payload(

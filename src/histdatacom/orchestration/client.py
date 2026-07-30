@@ -11,7 +11,7 @@ from inspect import isawaitable
 import json
 import logging
 from pathlib import Path
-from typing import Any, Mapping, cast
+from typing import TYPE_CHECKING, Any, Mapping, cast
 
 from histdatacom.cancellation import (
     PartialArtifactDisposition,
@@ -57,12 +57,18 @@ from histdatacom.orchestration.workflow_metadata import (
     TOPOLOGY_SCHEMA_VERSION,
 )
 
+if TYPE_CHECKING:
+    from histdatacom.orchestration.reconstruction import (
+        ReconstructionWorkflowRequestV1,
+    )
+
 TEMPORAL_EXTRA_HINT = (
     "Temporal support requires temporalio. Base histdatacom installs include "
     "this dependency; reinstall histdatacom with dependencies enabled or "
     "install the temporal compatibility extra."
 )
 DEFAULT_RUN_WORKFLOW_NAME = "HistDataRunWorkflow"
+DEFAULT_RECONSTRUCTION_WORKFLOW_NAME = "ReconstructionRunWorkflow"
 RUN_REQUEST_METADATA_KEY = "run_request"
 CONTROL_ATTEMPTS_METADATA_KEY = "control_attempts"
 CONTROL_EXECUTION_METADATA_KEY = "control_execution"
@@ -353,8 +359,7 @@ async def submit_run_request(
         status_store=status_store,
     )
     LOGGER.info(
-        "Submitted HistData orchestration job request_id=%s workflow_id=%s "
-        "run_id=%s",
+        "Submitted HistData orchestration job request_id=%s workflow_id=%s run_id=%s",
         request.request_id,
         job_handle.workflow_id,
         job_handle.run_id,
@@ -366,6 +371,84 @@ async def submit_run_request(
             namespace=job_handle.namespace,
             status="submitted",
         ),
+    )
+    return job_handle
+
+
+async def submit_reconstruction_request(
+    request: ReconstructionWorkflowRequestV1,
+    *,
+    config: OrchestrationWorkerConfig | None = None,
+    supervisor: OrchestrationSupervisor | None = None,
+    client: Any | None = None,
+    client_class: Any | None = None,
+    status_store: ManifestStatusStore | None = None,
+    workflow: Any = DEFAULT_RECONSTRUCTION_WORKFLOW_NAME,
+    workflow_id: str = "",
+    execution_attempt_id: str = "",
+) -> OrchestrationJobHandle:
+    """Submit an artifact-only synthetic reconstruction workflow.
+
+    ``execution_attempt_id`` is deliberately outside the immutable scientific
+    request.  A recovery submission can therefore use fresh parent/child
+    Temporal identities while reusing the exact request and durable window
+    checkpoints.  Empty attempt IDs preserve the original workflow IDs.
+    """
+    execution_attempt_id = _normalized_reconstruction_attempt_id(
+        execution_attempt_id
+    )
+    resolved_config = resolve_orchestration_worker_config(
+        config=config,
+        supervisor=supervisor,
+        require_running=config is None,
+    )
+    request = replace(
+        request,
+        task_queues=resolved_config.task_queues.to_dict(),
+        request_fingerprint="",
+    )
+    temporal_client = client or await connect_temporal_client(
+        config=resolved_config,
+        supervisor=supervisor,
+        client_class=client_class,
+    )
+    resolved_workflow_id = workflow_id or _reconstruction_workflow_id(request)
+    payload: dict[str, Any] = {"request": request.to_dict()}
+    if execution_attempt_id:
+        payload["execution_attempt_id"] = execution_attempt_id
+    handle = await _maybe_await(
+        temporal_client.start_workflow(
+            workflow,
+            payload,
+            id=resolved_workflow_id,
+            task_queue=resolved_config.task_queues.orchestration,
+        )
+    )
+    job_handle = OrchestrationJobHandle(
+        request_id=request.request_id,
+        workflow_id=str(getattr(handle, "id", resolved_workflow_id)),
+        run_id=str(getattr(handle, "run_id", "")),
+        task_queue=resolved_config.task_queues.orchestration,
+        namespace=resolved_config.namespace,
+    )
+    store = status_store or ManifestStatusStore(request.manifest_store_root)
+    store.write_job_snapshot(
+        {
+            "schema_version": 1,
+            "job_id": resolved_workflow_id,
+            "request_id": request.request_id,
+            "workflow_id": resolved_workflow_id,
+            "run_id": job_handle.run_id,
+            "lifecycle": "submitted",
+            "status": WorkStatus.PLANNED.value,
+            "task_queue": job_handle.task_queue,
+            "metadata": {
+                "reconstruction_run_id": request.run.run_id,
+                "request_fingerprint": request.request_fingerprint,
+                "window_count": len(request.tasks),
+                "execution_attempt_id": execution_attempt_id,
+            },
+        }
     )
     return job_handle
 
@@ -427,8 +510,7 @@ async def submit_run_request_and_observe(
         )
         workflow_id = workflow_id_for_request(request)
         LOGGER.info(
-            "Submitting HistData orchestration job request_id=%s "
-            "workflow_id=%s",
+            "Submitting HistData orchestration job request_id=%s workflow_id=%s",
             request.request_id,
             workflow_id,
             extra=_request_log_context(
@@ -504,8 +586,7 @@ async def submit_run_request_and_observe(
 
         _notify_progress_observer(progress_observer, submitted_snapshot)
         LOGGER.info(
-            "Waiting for HistData orchestration job request_id=%s "
-            "workflow_id=%s",
+            "Waiting for HistData orchestration job request_id=%s workflow_id=%s",
             request.request_id,
             handle.workflow_id,
             extra=_request_log_context(
@@ -1349,6 +1430,28 @@ def workflow_id_for_request(request: RunRequest) -> str:
     """Return the stable Temporal workflow ID for a run request."""
     request_id = request.request_id.strip() or "request"
     return f"histdatacom-{request_id}"
+
+
+def _reconstruction_workflow_id(
+    request: ReconstructionWorkflowRequestV1,
+) -> str:
+    """Return a bounded deterministic workflow ID for reconstruction."""
+    digest = hashlib.sha256(
+        f"{request.run.run_id}|{request.request_fingerprint}".encode("utf-8")
+    ).hexdigest()[:24]
+    return f"histdatacom-reconstruction-{request.request_id}-{digest}"
+
+
+def _normalized_reconstruction_attempt_id(value: str) -> str:
+    """Return one bounded non-secret Temporal attempt discriminator."""
+    attempt = str(value or "").strip()
+    if len(attempt) > 64:
+        raise ValueError("reconstruction execution_attempt_id exceeds 64 chars")
+    if any(not (char.isalnum() or char in {"-", "_", "."}) for char in attempt):
+        raise ValueError(
+            "reconstruction execution_attempt_id contains unsupported characters"
+        )
+    return attempt
 
 
 def resolve_orchestration_worker_config(
@@ -2322,8 +2425,7 @@ def _ensure_orchestration_available(
     except RuntimeError as err:
         if _is_missing_temporal_dependency_error(err):
             LOGGER.warning(
-                "Temporal orchestration startup dependency unavailable "
-                "error=%s",
+                "Temporal orchestration startup dependency unavailable error=%s",
                 str(err),
                 extra=_status_log_context(
                     status,
@@ -2364,7 +2466,7 @@ def _ensure_orchestration_available(
         ),
     )
     raise OrchestrationUnavailableError(
-        "Temporal orchestration could not be started: " f"{started.message}"
+        f"Temporal orchestration could not be started: {started.message}"
     )
 
 

@@ -406,6 +406,8 @@ class RunRequest:
     timeframes: tuple[str, ...] = ()
     start_yearmonth: str = ""
     end_yearmonth: str = ""
+    random_window: str = ""
+    random_seed: int | None = None
     data_directory: str = "data"
     api_return_type: str = ""
     cpu_utilization: str = "medium"
@@ -453,6 +455,11 @@ class RunRequest:
         schedule_key = str(getattr(options, "schedule_key", "") or "").strip()
         if schedule_key:
             metadata["schedule_key"] = schedule_key
+        output_timezone = str(
+            getattr(options, "output_timezone", "") or ""
+        ).strip()
+        if output_timezone:
+            metadata["output_timezone"] = output_timezone
         verbosity = max(0, int(getattr(options, "verbosity", 0) or 0))
         return cls(
             request_id=request_id or new_request_id(),
@@ -464,6 +471,12 @@ class RunRequest:
             timeframes=tuple(sorted(getattr(options, "timeframes", ()) or ())),
             start_yearmonth=str(getattr(options, "start_yearmonth", "") or ""),
             end_yearmonth=str(getattr(options, "end_yearmonth", "") or ""),
+            random_window=str(getattr(options, "random_window", "") or ""),
+            random_seed=(
+                int(options.random_seed)
+                if getattr(options, "random_seed", None) is not None
+                else None
+            ),
             data_directory=str(
                 getattr(options, "data_directory", "data") or "data"
             ),
@@ -539,6 +552,8 @@ class RunRequest:
             "timeframes": list(self.timeframes),
             "start_yearmonth": self.start_yearmonth,
             "end_yearmonth": self.end_yearmonth,
+            "random_window": self.random_window,
+            "random_seed": self.random_seed,
             "data_directory": self.data_directory,
             "api_return_type": self.api_return_type,
             "cpu_utilization": self.cpu_utilization,
@@ -577,6 +592,12 @@ class RunRequest:
             timeframes=tuple(str(item) for item in data.get("timeframes", [])),
             start_yearmonth=str(data.get("start_yearmonth", "") or ""),
             end_yearmonth=str(data.get("end_yearmonth", "") or ""),
+            random_window=str(data.get("random_window", "") or ""),
+            random_seed=(
+                int(data["random_seed"])
+                if data.get("random_seed") is not None
+                else None
+            ),
             data_directory=str(data.get("data_directory", "data") or "data"),
             api_return_type=str(data.get("api_return_type", "") or ""),
             cpu_utilization=str(

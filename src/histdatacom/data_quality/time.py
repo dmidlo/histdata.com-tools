@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from collections import OrderedDict, defaultdict
+from collections import Counter, OrderedDict, defaultdict
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 import zipfile
 
 from histdatacom.data_quality.contracts import (
@@ -21,11 +21,16 @@ from histdatacom.data_quality.contracts import (
     QualityTarget,
     QualityTargetKind,
 )
+from histdatacom.data_quality.limits import (
+    BoundedReportLimit,
+    bounded_report_limit,
+)
 from histdatacom.data_quality.polars_cache import (
     read_quality_polars_cache,
 )
 from histdatacom.histdata_ascii import (
     EST_NO_DST_OFFSET_MS,
+    TICK,
     columns_for_timeframe,
     delimiter_for_timeframe,
     parse_histdata_datetime_to_utc_ms,
@@ -54,6 +59,11 @@ FX_SUNDAY_OPEN_WEEKDAY = 6
 FX_CLOSE_OPEN_MINUTE = 17 * 60
 FX_CLOSE_OPEN_TIME_OF_DAY_MS = FX_CLOSE_OPEN_MINUTE * ONE_MINUTE_MS
 MAX_TIMESTAMP_SAMPLES = 5
+MAX_TIMESTAMP_INSPECTION_TEXT_CHARS = 80
+DEFAULT_TIMESTAMP_INSPECTION_SAMPLE_LIMIT = MAX_TIMESTAMP_SAMPLES
+TIMESTAMP_TOPOLOGY_INSPECTION_SCHEMA_VERSION = (
+    "histdatacom.timestamp-topology-inspection.v1"
+)
 TIMESTAMP_SCAN_CACHE_MAX_ENTRIES = 4
 TIMESTAMP_BOUNDARY_CACHE_MAX_ENTRIES = 2_048
 UNIX_EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
@@ -80,6 +90,7 @@ class _TimestampScanCacheKey:
     period: str
     size_bytes: int
     mtime_ns: int
+    prefer_cache: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -134,6 +145,9 @@ class _TimestampScan:
     row_count: int = 0
     parsed_row_count: int = 0
     invalid_timestamp_count: int = 0
+    invalid_timestamps: list["_TimestampIssueSample"] = field(
+        default_factory=list
+    )
     field_count_error_count: int = 0
     header_row_count: int = 0
     valid_rows: list[_TimestampSample] = field(default_factory=list)
@@ -195,6 +209,32 @@ class _TimestampSequenceScan:
     tick_duplicate_rows: list[_TimestampIssueSample] = field(
         default_factory=list
     )
+    tick_duplicate_timestamp_count: int = 0
+    tick_duplicate_timestamps: list["_DuplicateTimestampSample"] = field(
+        default_factory=list
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class _DuplicateTimestampSample:
+    row_number: int
+    timestamp_source: str
+    timestamp_utc_ms: int
+    occurrence_count: int
+    exact_row_group_count: int
+    source_member: str = ""
+
+    def to_dict(self) -> dict[str, JSONValue]:
+        """Return publish-safe duplicate timestamp evidence."""
+        return {
+            "row_number": self.row_number,
+            "timestamp_source": self.timestamp_source,
+            "timestamp_utc_ms": self.timestamp_utc_ms,
+            "utc_timestamp": _utc_iso_from_ms(self.timestamp_utc_ms),
+            "occurrence_count": self.occurrence_count,
+            "exact_row_group_count": self.exact_row_group_count,
+            "source_member": self.source_member,
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -675,6 +715,10 @@ def timestamp_topology_payload_for_target(
     target: QualityTarget,
     *,
     tolerance: HistDataGapTolerance | None = None,
+    inspection_sample_limit: int | None = (
+        DEFAULT_TIMESTAMP_INSPECTION_SAMPLE_LIMIT
+    ),
+    prefer_cache: bool = True,
 ) -> dict[str, JSONValue]:
     """Return a bounded timestamp topology payload for one quality target."""
     resolved_tolerance = tolerance or HistDataGapTolerance()
@@ -685,7 +729,10 @@ def timestamp_topology_payload_for_target(
         )
 
     try:
-        scan = _timestamp_scan_for_target(target)
+        scan = _timestamp_scan_for_target(
+            target,
+            prefer_cache=prefer_cache,
+        )
     except ValueError as exc:
         return _empty_timestamp_topology_payload(
             reason="unsupported_timeframe",
@@ -712,7 +759,7 @@ def timestamp_topology_payload_for_target(
     interval_summary = _timestamp_interval_summary(scan)
     tick_duplicate_count = sequence.tick_duplicate_row_count
 
-    return {
+    payload: dict[str, JSONValue] = {
         "row_count": scan.row_count,
         "parsed_row_count": scan.parsed_row_count,
         "invalid_timestamp_count": scan.invalid_timestamp_count,
@@ -740,14 +787,28 @@ def timestamp_topology_payload_for_target(
         "cache_source": scan.cache_source or None,
         "gap_tolerance": resolved_tolerance.to_metadata(),
     }
+    inspection_context = _timestamp_inspection_context(
+        scan,
+        sequence,
+        gap_scan,
+        sample_limit=inspection_sample_limit,
+    )
+    if inspection_context:
+        payload["inspection_context"] = inspection_context
+    return payload
 
 
 def _is_ascii_text_target(target: QualityTarget) -> bool:
-    return target.data_format == "ascii" and target.kind in {
-        QualityTargetKind.CSV,
-        QualityTargetKind.ZIP,
-        QualityTargetKind.CACHE,
-    }
+    return (
+        target.data_format == "ascii"
+        and target.timeframe == TICK
+        and target.kind
+        in {
+            QualityTargetKind.CSV,
+            QualityTargetKind.ZIP,
+            QualityTargetKind.CACHE,
+        }
+    )
 
 
 def _read_text_payload(target: QualityTarget) -> _TextPayload:
@@ -810,14 +871,20 @@ def _source_error(
     )
 
 
-def _timestamp_scan_for_target(target: QualityTarget) -> _TimestampScan:
-    key = _timestamp_scan_cache_key(target)
+def _timestamp_scan_for_target(
+    target: QualityTarget,
+    *,
+    prefer_cache: bool = True,
+) -> _TimestampScan:
+    key = _timestamp_scan_cache_key(target, prefer_cache=prefer_cache)
     cached = _TIMESTAMP_SCAN_CACHE.get(key)
     if cached is not None:
         _TIMESTAMP_SCAN_CACHE.move_to_end(key)
         return cached
 
-    cache_scan = _timestamp_scan_from_polars_cache(target)
+    cache_scan = (
+        _timestamp_scan_from_polars_cache(target) if prefer_cache else None
+    )
     if cache_scan is not None:
         _cache_timestamp_scan(key, cache_scan)
         boundary = _continuity_boundary_from_scan(
@@ -1129,11 +1196,63 @@ def _scan_timestamp_sequence_polars(
                     },
                 ),
             )
+        duplicate_groups = (
+            frame.group_by(duplicate_columns, maintain_order=True)
+            .agg(
+                [
+                    pl.len().alias("_occurrence_count"),
+                    pl.col("_row_number").first().alias("_first_row_number"),
+                    pl.col("datetime").first().alias("_first_datetime"),
+                ]
+            )
+            .filter(pl.col("_occurrence_count") > 1)
+        )
+        grouped_by_timestamp: dict[str, dict[str, int]] = {}
+        for row in duplicate_groups.iter_rows(named=True):
+            timestamp_source = str(row["_source_timestamp"])
+            aggregate = grouped_by_timestamp.setdefault(
+                timestamp_source,
+                {
+                    "row_number": int(row["_first_row_number"]),
+                    "timestamp_utc_ms": int(row["_first_datetime"]),
+                    "occurrence_count": 0,
+                    "exact_row_group_count": 0,
+                },
+            )
+            aggregate["row_number"] = min(
+                aggregate["row_number"],
+                int(row["_first_row_number"]),
+            )
+            aggregate["occurrence_count"] += int(row["_occurrence_count"])
+            aggregate["exact_row_group_count"] += 1
+        duplicate_timestamp_samples = [
+            _DuplicateTimestampSample(
+                row_number=values["row_number"],
+                timestamp_source=timestamp_source,
+                timestamp_utc_ms=values["timestamp_utc_ms"],
+                occurrence_count=values["occurrence_count"],
+                exact_row_group_count=values["exact_row_group_count"],
+            )
+            for timestamp_source, values in grouped_by_timestamp.items()
+        ]
+        duplicate_timestamp_samples.sort(
+            key=lambda sample: (
+                sample.row_number,
+                sample.timestamp_utc_ms,
+                sample.timestamp_source,
+            )
+        )
+        scan.tick_duplicate_timestamp_count = len(duplicate_timestamp_samples)
+        scan.tick_duplicate_timestamps.extend(
+            duplicate_timestamp_samples[:MAX_TIMESTAMP_SAMPLES]
+        )
     return scan
 
 
 def _timestamp_scan_cache_key(
     target: QualityTarget,
+    *,
+    prefer_cache: bool,
 ) -> _TimestampScanCacheKey:
     path = Path(target.path)
     try:
@@ -1151,6 +1270,7 @@ def _timestamp_scan_cache_key(
         period=target.period,
         size_bytes=stat.st_size,
         mtime_ns=stat.st_mtime_ns,
+        prefer_cache=prefer_cache,
     )
 
 
@@ -1238,6 +1358,18 @@ def _scan_timestamp_rows(
             )
         except ValueError:
             scan.invalid_timestamp_count += 1
+            _append_issue_sample(
+                scan.invalid_timestamps,
+                _TimestampIssueSample(
+                    row_number=row_number,
+                    timestamp_source=timestamp_source,
+                    timestamp_utc_ms=None,
+                    source_member=source_member,
+                    metadata={
+                        "reason_code": "timestamp_parse_failure",
+                    },
+                ),
+            )
 
         _record_raw_timestamp_shape(
             scan,
@@ -1357,6 +1489,7 @@ def _scan_timestamp_sequence(
     scan = _TimestampSequenceScan()
     previous: _TimestampSample | None = None
     seen_tick_rows: dict[tuple[str, ...], _TimestampSample] = {}
+    tick_row_counts: Counter[tuple[str, ...]] = Counter()
 
     for row in rows:
         if (
@@ -1382,6 +1515,7 @@ def _scan_timestamp_sequence(
         previous = row
 
         if target.timeframe == "T":
+            tick_row_counts[row.row_values] += 1
             duplicate = seen_tick_rows.get(row.row_values)
             if duplicate is not None:
                 scan.tick_duplicate_row_count += 1
@@ -1401,6 +1535,16 @@ def _scan_timestamp_sequence(
                 )
             else:
                 seen_tick_rows[row.row_values] = row
+
+    if target.timeframe == "T":
+        duplicate_timestamps = _duplicate_timestamp_samples(
+            seen_tick_rows,
+            tick_row_counts,
+        )
+        scan.tick_duplicate_timestamp_count = len(duplicate_timestamps)
+        scan.tick_duplicate_timestamps.extend(
+            duplicate_timestamps[:MAX_TIMESTAMP_SAMPLES]
+        )
 
     return scan
 
@@ -2149,7 +2293,7 @@ def _timestamp_boundary_for_target(
     target: QualityTarget,
 ) -> _ContinuityBoundary | None:
     try:
-        key = _timestamp_scan_cache_key(target)
+        key = _timestamp_scan_cache_key(target, prefer_cache=True)
     except _SourceReadError:
         return None
     cached_boundary = _cached_timestamp_boundary(key)
@@ -3193,8 +3337,16 @@ def _append_gap_sample(
     samples: list[_TimestampGapSample],
     sample: _TimestampGapSample,
 ) -> None:
-    if len(samples) < MAX_TIMESTAMP_SAMPLES:
-        samples.append(sample)
+    samples.append(sample)
+    samples.sort(
+        key=lambda item: (
+            -item.gap_ms,
+            item.current.row_number,
+            item.previous.row_number,
+            item.current.timestamp_utc_ms,
+        )
+    )
+    del samples[MAX_TIMESTAMP_SAMPLES:]
 
 
 def _append_weekend_activity_sample(
@@ -3229,6 +3381,280 @@ def _weekend_activity_samples(
     samples: list[_WeekendActivitySample],
 ) -> list[JSONValue]:
     return [sample.to_dict() for sample in samples]
+
+
+def _duplicate_timestamp_samples(
+    first_rows: Mapping[tuple[str, ...], _TimestampSample],
+    row_counts: Mapping[tuple[str, ...], int],
+) -> list[_DuplicateTimestampSample]:
+    grouped: dict[str, dict[str, int | str]] = {}
+    for row_values, occurrence_count in row_counts.items():
+        if occurrence_count <= 1:
+            continue
+        first = first_rows[row_values]
+        aggregate = grouped.setdefault(
+            first.timestamp_source,
+            {
+                "row_number": first.row_number,
+                "timestamp_utc_ms": first.timestamp_utc_ms,
+                "occurrence_count": 0,
+                "exact_row_group_count": 0,
+                "source_member": first.source_member,
+            },
+        )
+        aggregate["row_number"] = min(
+            int(aggregate["row_number"]),
+            first.row_number,
+        )
+        aggregate["occurrence_count"] = int(
+            aggregate["occurrence_count"]
+        ) + int(occurrence_count)
+        aggregate["exact_row_group_count"] = (
+            int(aggregate["exact_row_group_count"]) + 1
+        )
+    samples = [
+        _DuplicateTimestampSample(
+            row_number=int(values["row_number"]),
+            timestamp_source=timestamp_source,
+            timestamp_utc_ms=int(values["timestamp_utc_ms"]),
+            occurrence_count=int(values["occurrence_count"]),
+            exact_row_group_count=int(values["exact_row_group_count"]),
+            source_member=str(values["source_member"]),
+        )
+        for timestamp_source, values in grouped.items()
+    ]
+    samples.sort(
+        key=lambda sample: (
+            sample.row_number,
+            sample.timestamp_utc_ms,
+            sample.timestamp_source,
+        )
+    )
+    return samples
+
+
+def _timestamp_inspection_context(
+    scan: _TimestampScan,
+    sequence: _TimestampSequenceScan,
+    gap_scan: _TimestampGapScan,
+    *,
+    sample_limit: int | None,
+) -> dict[str, JSONValue]:
+    limit = bounded_report_limit(
+        sample_limit,
+        default_limit=DEFAULT_TIMESTAMP_INSPECTION_SAMPLE_LIMIT,
+        minimum_limit=0,
+        maximum_limit=MAX_TIMESTAMP_SAMPLES,
+        allow_unbounded=False,
+    )
+    context: dict[str, JSONValue] = {
+        "schema_version": TIMESTAMP_TOPOLOGY_INSPECTION_SCHEMA_VERSION,
+    }
+    if scan.invalid_timestamp_count:
+        context["invalid_timestamps"] = _bounded_inspection_section(
+            total_count=scan.invalid_timestamp_count,
+            samples=[
+                _inspection_issue_sample(sample)
+                for sample in scan.invalid_timestamps
+            ],
+            limit=limit,
+            extra={"parse_failure_count": scan.invalid_timestamp_count},
+        )
+    if sequence.non_monotonic_count:
+        context["non_monotonic_timestamps"] = _bounded_inspection_section(
+            total_count=sequence.non_monotonic_count,
+            samples=[
+                _inspection_issue_sample(sample)
+                for sample in sequence.non_monotonic_rows
+            ],
+            limit=limit,
+        )
+    if sequence.tick_duplicate_row_count:
+        context["duplicate_timestamps"] = _bounded_inspection_section(
+            total_count=sequence.tick_duplicate_timestamp_count,
+            samples=[
+                _inspection_duplicate_timestamp_sample(sample)
+                for sample in sequence.tick_duplicate_timestamps
+            ],
+            limit=limit,
+            extra={
+                "duplicate_row_count": sequence.tick_duplicate_row_count,
+            },
+        )
+    if gap_scan.suspicious_gap_count:
+        context["suspicious_gaps"] = _bounded_inspection_section(
+            total_count=gap_scan.suspicious_gap_count,
+            samples=[
+                _inspection_gap_sample(
+                    sample,
+                    expected_session_related=False,
+                )
+                for sample in gap_scan.suspicious_gaps
+            ],
+            limit=limit,
+        )
+    if gap_scan.expected_session_closure_count:
+        context["expected_session_closures"] = _bounded_inspection_section(
+            total_count=gap_scan.expected_session_closure_count,
+            samples=[
+                _inspection_gap_sample(
+                    sample,
+                    expected_session_related=True,
+                )
+                for sample in gap_scan.expected_session_closures
+            ],
+            limit=limit,
+            extra={"actionable": False},
+        )
+    if gap_scan.weekend_activity_count:
+        context["weekend_activity"] = _bounded_inspection_section(
+            total_count=gap_scan.weekend_activity_count,
+            samples=[
+                _inspection_weekend_sample(sample)
+                for sample in gap_scan.weekend_activity
+            ],
+            limit=limit,
+            extra={
+                "session_bucket_counts": {
+                    "weekend_closure": gap_scan.weekend_activity_count,
+                }
+            },
+        )
+    if len(context) == 1:
+        return {}
+    return context
+
+
+def _inspection_issue_sample(
+    sample: _TimestampIssueSample,
+) -> dict[str, JSONValue]:
+    timestamp_source, truncated = _inspection_timestamp_text(
+        sample.timestamp_source
+    )
+    metadata: dict[str, JSONValue] = {}
+    reason_code = sample.metadata.get("reason_code")
+    if reason_code is not None:
+        metadata["reason_code"] = str(reason_code)
+    previous_row_number = sample.metadata.get("previous_row_number")
+    if previous_row_number is not None:
+        metadata["previous_row_number"] = _metadata_int(previous_row_number)
+    previous_timestamp = sample.metadata.get("previous_timestamp_source")
+    if previous_timestamp is not None:
+        previous_text, previous_truncated = _inspection_timestamp_text(
+            str(previous_timestamp)
+        )
+        metadata["previous_timestamp_source"] = previous_text
+        metadata["previous_timestamp_source_truncated"] = previous_truncated
+    for key in ("previous_timestamp_utc_ms", "previous_utc_timestamp"):
+        value = sample.metadata.get(key)
+        if value is not None:
+            metadata[key] = value
+    return {
+        "row_number": sample.row_number,
+        "timestamp_source": timestamp_source,
+        "timestamp_source_truncated": truncated,
+        "timestamp_utc_ms": sample.timestamp_utc_ms,
+        "utc_timestamp": sample.utc_timestamp,
+        "metadata": metadata,
+    }
+
+
+def _inspection_duplicate_timestamp_sample(
+    sample: _DuplicateTimestampSample,
+) -> dict[str, JSONValue]:
+    timestamp_source, truncated = _inspection_timestamp_text(
+        sample.timestamp_source
+    )
+    return {
+        "row_number": sample.row_number,
+        "timestamp_source": timestamp_source,
+        "timestamp_source_truncated": truncated,
+        "timestamp_utc_ms": sample.timestamp_utc_ms,
+        "utc_timestamp": _utc_iso_from_ms(sample.timestamp_utc_ms),
+        "occurrence_count": sample.occurrence_count,
+        "exact_row_group_count": sample.exact_row_group_count,
+    }
+
+
+def _inspection_gap_sample(
+    sample: _TimestampGapSample,
+    *,
+    expected_session_related: bool,
+) -> dict[str, JSONValue]:
+    previous_timestamp, previous_truncated = _inspection_timestamp_text(
+        sample.previous.timestamp_source
+    )
+    timestamp_source, truncated = _inspection_timestamp_text(
+        sample.current.timestamp_source
+    )
+    return {
+        "previous_row_number": sample.previous.row_number,
+        "previous_timestamp_source": previous_timestamp,
+        "previous_timestamp_source_truncated": previous_truncated,
+        "previous_timestamp_utc_ms": sample.previous.timestamp_utc_ms,
+        "previous_utc_timestamp": sample.previous.utc_timestamp,
+        "row_number": sample.current.row_number,
+        "timestamp_source": timestamp_source,
+        "timestamp_source_truncated": truncated,
+        "timestamp_utc_ms": sample.current.timestamp_utc_ms,
+        "utc_timestamp": sample.current.utc_timestamp,
+        "gap_ms": sample.gap_ms,
+        "classification": sample.classification,
+        "expected_session_related": expected_session_related,
+    }
+
+
+def _inspection_weekend_sample(
+    sample: _WeekendActivitySample,
+) -> dict[str, JSONValue]:
+    timestamp_source, truncated = _inspection_timestamp_text(
+        sample.row.timestamp_source
+    )
+    return {
+        "row_number": sample.row.row_number,
+        "timestamp_source": timestamp_source,
+        "timestamp_source_truncated": truncated,
+        "timestamp_utc_ms": sample.row.timestamp_utc_ms,
+        "utc_timestamp": sample.row.utc_timestamp,
+        "session_state": sample.session_state,
+    }
+
+
+def _inspection_timestamp_text(value: str) -> tuple[str, bool]:
+    normalized = str(value).replace("\r", " ").replace("\n", " ")
+    truncated = len(normalized) > MAX_TIMESTAMP_INSPECTION_TEXT_CHARS
+    return normalized[:MAX_TIMESTAMP_INSPECTION_TEXT_CHARS], truncated
+
+
+def _bounded_inspection_section(
+    *,
+    total_count: int,
+    samples: list[dict[str, JSONValue]],
+    limit: BoundedReportLimit,
+    extra: Mapping[str, JSONValue] | None = None,
+) -> dict[str, JSONValue]:
+    included = limit.slice(samples)
+    included_count = len(included)
+    normalized_total = max(0, int(total_count))
+    omitted_count = max(0, normalized_total - included_count)
+    payload: dict[str, JSONValue] = {
+        "total_count": normalized_total,
+        "included_count": included_count,
+        "omitted_count": omitted_count,
+        "truncated": omitted_count > 0,
+        "limit_metadata": {
+            "samples": {
+                **limit.limit_payload(),
+                "total_count": normalized_total,
+                "included_count": included_count,
+                "omitted_count": omitted_count,
+                "truncated": omitted_count > 0,
+            }
+        },
+        "samples": cast(JSONValue, included),
+    }
+    payload.update(dict(extra or {}))
+    return payload
 
 
 def _continuity_samples(

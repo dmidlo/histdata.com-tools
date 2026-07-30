@@ -3,6 +3,7 @@ venv/
 *.csv
 *.txt
 !whitelist.txt
+!container/constraints.txt
 *.zip
 !tests/fixtures/**/*.csv
 .info
@@ -24,6 +25,7 @@ output.pstats
 result.json
 out.gv
 htmlcov/
+docs/_build/
 coverage.xml
 pip-audit.json
 .coverage
