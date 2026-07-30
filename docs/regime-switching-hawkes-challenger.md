@@ -191,7 +191,8 @@ members, and anchors:
 - three static marked-Hawkes ablations; and
 - two regime-Hawkes ablations.
 
-The five established controls remain present separately. Each regime report
+The four established baseline/control reports remain present separately. Each
+regime report
 adds configuration, fit, calibration/context digest, convergence, likelihood,
 bin/event/window, resource, state occupancy, activity contrast, transition,
 technological-transition, and stability evidence to the existing stream
@@ -200,6 +201,11 @@ metrics. Reports and campaigns retain `automatic_winner: false`.
 Promotion requires consistent evidence across all three symbols and multiple
 technological epochs or transition strata. Likelihood, one symbol, one
 window, or one high-activity episode cannot promote a challenger.
+
+Issue #453 adds one separate dependency-free RMTPP challenger after this
+registry. Supplying its fixed config as well produces 11 challengers and 15
+total reports without changing either regime ablation. See [Bounded recurrent
+marked temporal point-process challenger](neural-tpp-challenger.md).
 
 ## Scientific nonclaims
 

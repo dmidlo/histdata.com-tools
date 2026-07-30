@@ -33,6 +33,7 @@ Empirical reconstruction pipeline
    classical-event-clock-challengers
    marked-hawkes-challenger
    regime-switching-hawkes-challenger
+   neural-tpp-challenger
    historical-carving-contracts
    cross-currency-reconciliation-contracts
    reconstruction-ensemble-calibration-contracts

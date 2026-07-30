@@ -89,6 +89,17 @@ from histdatacom.synthetic.motifs import (
     build_reference_motif_index,
     reference_motif_condition_from_quotes,
 )
+from histdatacom.synthetic.neural_tpp import (
+    FittedNeuralTPPBenchmarkGeneratorV1,
+    NeuralTPPConfigV1,
+    NeuralTPPFitResultV1,
+    NeuralTPPFitStatus,
+    NeuralTPPWindowContextV1,
+    build_fitted_neural_tpp_generator,
+    build_neural_tpp_benchmark_candidate,
+    build_neural_tpp_protected_window,
+    fit_neural_tpp_challenger,
+)
 from histdatacom.synthetic.observation import ObservationOperatorV1
 from histdatacom.synthetic.observation_calibration import (
     read_observation_calibration_campaign,
@@ -1759,6 +1770,14 @@ def _validated_regime_hawkes_configs(
     return configs
 
 
+def _validated_neural_tpp_config(
+    value: NeuralTPPConfigV1 | None,
+) -> NeuralTPPConfigV1 | None:
+    if value is not None and not isinstance(value, NeuralTPPConfigV1):
+        raise TypeError("neural TPP campaign received an invalid config")
+    return value
+
+
 def _regime_hawkes_window_context(
     partition: BenchmarkWindowPartitionV1,
     *,
@@ -1809,6 +1828,56 @@ def _regime_hawkes_window_context(
     )
 
 
+def _neural_tpp_window_context(
+    partition: BenchmarkWindowPartitionV1,
+    *,
+    feed_epoch_definition: FeedEpochDefinitionV2,
+) -> NeuralTPPWindowContextV1:
+    """Bind one corpus window to the neural challenger's v2 context."""
+    assignment = feed_epoch_definition.assign(
+        symbol="EURUSD",
+        timestamp_utc_ms=(partition.start_ns + partition.end_ns)
+        // 2
+        // NANOSECONDS_PER_MILLISECOND,
+    )
+    if assignment.assignment_kind not in {"epoch", "transition"}:
+        raise ValueError("benchmark window is outside feed epoch scope")
+    if assignment.label != partition.epoch_label:
+        raise ValueError("benchmark window feed epoch label differs")
+    if assignment.assignment_kind == "epoch":
+        if assignment.epoch_id is None:
+            raise ValueError("stable benchmark epoch lacks identity")
+        return NeuralTPPWindowContextV1(
+            window_id=partition.window_id,
+            session=partition.session,
+            technology_assignment_kind="epoch",
+            technology_label=assignment.label,
+            feed_epoch_definition_id=feed_epoch_definition.definition_id,
+            epoch_id=assignment.epoch_id,
+        )
+    boundary = next(
+        (
+            item
+            for item in feed_epoch_definition.boundaries
+            if item.boundary_id == assignment.boundary_id
+        ),
+        None,
+    )
+    if boundary is None:
+        raise ValueError("transition benchmark window lacks boundary evidence")
+    return NeuralTPPWindowContextV1(
+        window_id=partition.window_id,
+        session=partition.session,
+        technology_assignment_kind="transition",
+        technology_label=assignment.label,
+        feed_epoch_definition_id=feed_epoch_definition.definition_id,
+        boundary_id=boundary.boundary_id,
+        boundary_support=boundary.support,
+        uncertainty_start_period=boundary.uncertainty_start_period,
+        uncertainty_end_period=boundary.uncertainty_end_period,
+    )
+
+
 def run_reverse_degradation_benchmark_campaign(
     corpus: ReverseDegradationBenchmarkCorpusV1,
     source_root: str | Path,
@@ -1818,8 +1887,9 @@ def run_reverse_degradation_benchmark_campaign(
     event_clock_configs: Sequence[EventClockConfigurationV1] = (),
     marked_hawkes_configs: Sequence[MarkedHawkesConfigV1] = (),
     regime_hawkes_configs: Sequence[RegimeHawkesConfigV1] = (),
+    neural_tpp_config: NeuralTPPConfigV1 | None = None,
 ) -> tuple[ReverseDegradationBenchmarkCampaignV1, ReferenceMotifIndexV1]:
-    """Run controls, motif, clocks, static Hawkes, and regime Hawkes."""
+    """Run controls and every explicitly configured challenger family."""
     if not isinstance(corpus, ReverseDegradationBenchmarkCorpusV1):
         raise ValueError("benchmark campaign requires a v1 corpus")
     started_wall = datetime.now(timezone.utc)
@@ -1863,8 +1933,11 @@ def run_reverse_degradation_benchmark_campaign(
     clock_configs = _validated_event_clock_configs(event_clock_configs)
     hawkes_configs = _validated_marked_hawkes_configs(marked_hawkes_configs)
     regime_configs = _validated_regime_hawkes_configs(regime_hawkes_configs)
+    neural_config = _validated_neural_tpp_config(neural_tpp_config)
     regime_contexts: tuple[RegimeHawkesWindowContextV1, ...] = ()
-    if regime_configs:
+    neural_contexts: tuple[NeuralTPPWindowContextV1, ...] = ()
+    feed_epoch_definition: FeedEpochDefinitionV2 | None = None
+    if regime_configs or neural_config is not None:
         feed_epoch_definition = read_active_time_feed_epoch_definition(
             corpus.dependency_artifacts["feed_epochs"].path
         )
@@ -1873,15 +1946,27 @@ def run_reverse_degradation_benchmark_campaign(
             != corpus.feed_epoch_definition_id
         ):
             raise ValueError("campaign feed epoch definition identity differs")
-        regime_contexts = tuple(
-            _regime_hawkes_window_context(
-                partition,
-                feed_epoch_definition=feed_epoch_definition,
+        if regime_configs:
+            regime_contexts = tuple(
+                _regime_hawkes_window_context(
+                    partition,
+                    feed_epoch_definition=feed_epoch_definition,
+                )
+                for partition in corpus.windows
             )
-            for partition in corpus.windows
-        )
+        if neural_config is not None:
+            neural_contexts = tuple(
+                _neural_tpp_window_context(
+                    partition,
+                    feed_epoch_definition=feed_epoch_definition,
+                )
+                for partition in corpus.windows
+            )
     regime_context_by_window = {
         item.window_id: item for item in regime_contexts
+    }
+    neural_context_by_window = {
+        item.window_id: item for item in neural_contexts
     }
     reconstruction_run = ReconstructionRunV1(
         symbols=corpus.profile.symbols,
@@ -1891,6 +1976,7 @@ def run_reverse_degradation_benchmark_campaign(
             *(item.config_id for item in clock_configs),
             *(item.config_id for item in hawkes_configs),
             *(item.config_id for item in regime_configs),
+            *((neural_config.config_id,) if neural_config is not None else ()),
         ),
         ensemble_member_ids=corpus.profile.ensemble_member_ids,
         base_seed=463,
@@ -2053,6 +2139,66 @@ def run_reverse_degradation_benchmark_campaign(
         for config in regime_configs
         if regime_fits[config.modulation].status is RegimeHawkesFitStatus.FITTED
     }
+    neural_fit: NeuralTPPFitResultV1 | None = None
+    neural_candidate: BenchmarkCandidateV1 | None = None
+    neural_generator: FittedNeuralTPPBenchmarkGeneratorV1 | None = None
+    if neural_config is not None:
+        neural_calibration_contexts = tuple(
+            neural_context_by_window[item.window_id]
+            for item in corpus.windows
+            if item.split_kind == "calibration"
+        )
+        neural_protected_windows = tuple(
+            build_neural_tpp_protected_window(
+                EventClockCalibrationWindowV1(
+                    window_id=partition.window_id,
+                    start_ns=partition.start_ns,
+                    end_ns=partition.end_ns,
+                    events=events_by_window[partition.window_id],
+                ),
+                neural_context_by_window[partition.window_id],
+                role=partition.split_kind,
+                symbols=corpus.profile.symbols,
+            )
+            for partition in corpus.windows
+            if partition.split_kind in {"validation", "final_holdout"}
+        )
+        neural_fit = fit_neural_tpp_challenger(
+            neural_config,
+            calibration_windows,
+            window_contexts=neural_calibration_contexts,
+            protected_windows=neural_protected_windows,
+            information_mode=InformationMode.EX_POST_RECONSTRUCTION,
+        )
+        neural_candidate = build_neural_tpp_benchmark_candidate(
+            neural_config,
+            neural_fit,
+            ensemble_member_ids=corpus.profile.ensemble_member_ids,
+        )
+        if neural_fit.status is NeuralTPPFitStatus.FITTED:
+            neural_generation_contexts = tuple(
+                replace(
+                    neural_context_by_window[partition.window_id],
+                    window_id=ReconstructionWindowV1(
+                        run_id=reconstruction_run.run_id,
+                        ensemble_member_id=member_id,
+                        symbols=corpus.profile.symbols,
+                        core_start_ns=partition.start_ns,
+                        core_end_ns=partition.end_ns,
+                    ).window_id,
+                    context_id="",
+                )
+                for partition in corpus.windows
+                for member_id in corpus.profile.ensemble_member_ids
+            )
+            neural_generator = build_fitted_neural_tpp_generator(
+                neural_config,
+                neural_fit,
+                ensemble_member_ids=corpus.profile.ensemble_member_ids,
+                window_contexts={
+                    item.window_id: item for item in neural_generation_contexts
+                },
+            )
 
     degradation_coverage = dict.fromkeys(_degradation_config_names(), 0)
     degradation_effect_coverage = dict.fromkeys(_degradation_config_names(), 0)
@@ -2133,6 +2279,9 @@ def run_reverse_degradation_benchmark_campaign(
         modulation: f"regime_hawkes_{modulation.value}"
         for modulation in regime_candidates
     }
+    neural_key = (
+        "neural_tpp_rmtpp_cpu_v1" if neural_candidate is not None else None
+    )
     accumulators = {
         "dense_identity": _CandidateAccumulator(),
         "degraded_identity": _CandidateAccumulator(),
@@ -2142,6 +2291,11 @@ def run_reverse_degradation_benchmark_campaign(
         **{key: _CandidateAccumulator() for key in clock_keys.values()},
         **{key: _CandidateAccumulator() for key in hawkes_keys.values()},
         **{key: _CandidateAccumulator() for key in regime_keys.values()},
+        **(
+            {neural_key: _CandidateAccumulator()}
+            if neural_key is not None
+            else {}
+        ),
     }
     evaluated = tuple(
         item
@@ -2353,6 +2507,40 @@ def run_reverse_degradation_benchmark_campaign(
                         partition,
                     )
                 )
+            if neural_key is not None and neural_candidate is not None:
+                accumulator = accumulators[neural_key]
+                if neural_generator is None:
+                    accumulator.failures += 1
+                else:
+                    try:
+                        candidate_window = generate_benchmark_candidate_window(
+                            neural_generator,
+                            neural_candidate,
+                            degraded,
+                            scenario=scenario,
+                            window=reconstruction_window,
+                            ensemble_member_id=member_id,
+                            execution=BenchmarkExecutionEvidenceV1(
+                                attempted=True,
+                                converged=True,
+                                peak_memory_bytes=_peak_memory_bytes(),
+                            ),
+                        )
+                    except (RuntimeError, ValueError):
+                        accumulator.failures += 1
+                    else:
+                        if not any(
+                            item.sparsity.startswith("neural-tpp-")
+                            for item in candidate_window.events
+                        ):
+                            accumulator.refusals += 1
+                        accumulator.consume(
+                            _compare_streams(
+                                reference,
+                                candidate_window.events,
+                                partition,
+                            )
+                        )
         _enforce_runtime(started, corpus.profile.max_runtime_seconds)
 
     subject_ids = {
@@ -2368,6 +2556,8 @@ def run_reverse_degradation_benchmark_campaign(
         subject_ids[key] = hawkes_candidates[structure].candidate_id
     for modulation, key in regime_keys.items():
         subject_ids[key] = regime_candidates[modulation].candidate_id
+    if neural_key is not None and neural_candidate is not None:
+        subject_ids[neural_key] = neural_candidate.candidate_id
     roles = {
         "dense_identity": "baseline",
         "degraded_identity": "baseline",
@@ -2377,6 +2567,7 @@ def run_reverse_degradation_benchmark_campaign(
         **{key: "candidate" for key in clock_keys.values()},
         **{key: "candidate" for key in hawkes_keys.values()},
         **{key: "candidate" for key in regime_keys.values()},
+        **({neural_key: "candidate"} if neural_key is not None else {}),
     }
     method_names = dict.fromkeys(accumulators, "")
     for name in method_names:
@@ -2387,6 +2578,8 @@ def run_reverse_degradation_benchmark_campaign(
         method_names[key] = f"marked_hawkes_{structure.value}"
     for modulation, key in regime_keys.items():
         method_names[key] = f"regime_hawkes_{modulation.value}"
+    if neural_key is not None:
+        method_names[neural_key] = "neural_tpp_rmtpp_cpu_v1"
     fit_by_key = {clock_keys[family]: fit for family, fit in clock_fits.items()}
     hawkes_fit_by_key = {
         hawkes_keys[structure]: fit for structure, fit in hawkes_fits.items()
@@ -2394,6 +2587,11 @@ def run_reverse_degradation_benchmark_campaign(
     regime_fit_by_key = {
         regime_keys[modulation]: fit for modulation, fit in regime_fits.items()
     }
+    neural_fit_by_key = (
+        {neural_key: neural_fit}
+        if neural_key is not None and neural_fit is not None
+        else {}
+    )
     reports = tuple(
         _candidate_report(
             subject_id=subject_ids[name],
@@ -2407,6 +2605,7 @@ def run_reverse_degradation_benchmark_campaign(
                 or name in fit_by_key
                 or name in hawkes_fit_by_key
                 or name in regime_fit_by_key
+                or name in neural_fit_by_key
                 else 1
             ),
             evaluated_window_count=len(evaluated),
@@ -2422,7 +2621,11 @@ def run_reverse_degradation_benchmark_campaign(
                     else (
                         _regime_hawkes_fit_metrics(regime_fit_by_key[name])
                         if name in regime_fit_by_key
-                        else None
+                        else (
+                            _neural_tpp_fit_metrics(neural_fit_by_key[name])
+                            if name in neural_fit_by_key
+                            else None
+                        )
                     )
                 )
             ),
@@ -2499,6 +2702,10 @@ def run_reverse_degradation_benchmark_campaign(
     if regime_configs:
         base_campaign_metrics["point_process_diagnostic_status"] = (
             "available-two-state-mmhp-delta-regime-ablations"
+        )
+    if neural_config is not None:
+        base_campaign_metrics["point_process_diagnostic_status"] = (
+            "available-bounded-rmtpp-cpu-challenger"
         )
     base_campaign_metrics.update(
         {
@@ -2814,6 +3021,109 @@ def _regime_hawkes_fit_metrics(
         ),
         "point_process_diagnostic_status": (
             "available-two-state-mmhp-delta-filtered-and-smoothed"
+        ),
+        "automatic_winner": False,
+    }
+
+
+def _neural_tpp_fit_metrics(
+    fit: NeuralTPPFitResultV1,
+) -> dict[str, JSONScalar]:
+    """Expose split, leakage, likelihood, checkpoint, and resource evidence."""
+    dataset = fit.dataset_manifest
+    training = fit.training_manifest
+    checkpoint = fit.checkpoint
+    return {
+        "neural_tpp_architecture": "rmtpp_cpu_v1",
+        "neural_tpp_config_id": fit.config_id,
+        "neural_tpp_fit_id": fit.fit_id,
+        "neural_tpp_fit_status": fit.status.value,
+        "neural_tpp_fit_converged": fit.converged,
+        "neural_tpp_training_event_count": fit.training_event_count,
+        "neural_tpp_tuning_event_count": fit.tuning_event_count,
+        "neural_tpp_training_window_count": fit.training_window_count,
+        "neural_tpp_tuning_window_count": fit.tuning_window_count,
+        "neural_tpp_selected_epoch": fit.selected_epoch,
+        "neural_tpp_train_negative_log_likelihood": (
+            fit.train_negative_log_likelihood
+        ),
+        "neural_tpp_tune_negative_log_likelihood": (
+            fit.tune_negative_log_likelihood
+        ),
+        "neural_tpp_train_time_negative_log_likelihood": (
+            checkpoint.train_time_negative_log_likelihood
+            if checkpoint is not None
+            else None
+        ),
+        "neural_tpp_train_mark_negative_log_likelihood": (
+            checkpoint.train_mark_negative_log_likelihood
+            if checkpoint is not None
+            else None
+        ),
+        "neural_tpp_tune_time_negative_log_likelihood": (
+            checkpoint.tune_time_negative_log_likelihood
+            if checkpoint is not None
+            else None
+        ),
+        "neural_tpp_tune_mark_negative_log_likelihood": (
+            checkpoint.tune_mark_negative_log_likelihood
+            if checkpoint is not None
+            else None
+        ),
+        "neural_tpp_fit_failure_reason": fit.failure_reason,
+        "neural_tpp_fit_estimated_peak_memory_bytes": (
+            fit.estimated_peak_memory_bytes
+        ),
+        "neural_tpp_dataset_content_sha256": fit.dataset_content_sha256,
+        "neural_tpp_context_content_sha256": fit.context_content_sha256,
+        "neural_tpp_dataset_id": (
+            dataset.dataset_id if dataset is not None else None
+        ),
+        "neural_tpp_exact_duplicate_count": (
+            dataset.exact_duplicate_count if dataset is not None else None
+        ),
+        "neural_tpp_near_duplicate_collision_count": (
+            dataset.near_duplicate_collision_count
+            if dataset is not None
+            else None
+        ),
+        "neural_tpp_overlap_count": (
+            dataset.overlap_count if dataset is not None else None
+        ),
+        "neural_tpp_training_id": (
+            training.training_id if training is not None else None
+        ),
+        "neural_tpp_completed_epoch_count": (
+            training.completed_epoch_count if training is not None else None
+        ),
+        "neural_tpp_maximum_gradient_norm": (
+            training.maximum_gradient_norm if training is not None else None
+        ),
+        "neural_tpp_gradient_work": (
+            training.gradient_work if training is not None else None
+        ),
+        "neural_tpp_checkpoint_id": (
+            checkpoint.checkpoint_id if checkpoint is not None else None
+        ),
+        "neural_tpp_parameter_count": (
+            checkpoint.parameter_count if checkpoint is not None else None
+        ),
+        "neural_tpp_parameter_bytes": (
+            checkpoint.parameter_bytes if checkpoint is not None else None
+        ),
+        "neural_tpp_tune_mark_accuracy": (
+            checkpoint.tune_mark_accuracy if checkpoint is not None else None
+        ),
+        "neural_tpp_tune_log_duration_rmse": (
+            checkpoint.tune_log_duration_rmse
+            if checkpoint is not None
+            else None
+        ),
+        "neural_tpp_tune_mean_pit": (
+            checkpoint.tune_mean_pit if checkpoint is not None else None
+        ),
+        "point_process_diagnostic_status": (
+            "available-exact-rmtpp-intensity-compensator-and-inverse-cdf"
         ),
         "automatic_winner": False,
     }

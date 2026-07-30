@@ -2797,6 +2797,29 @@ automatic winner or production-default change. See
 for the approximation, information boundaries, diagnostics, lineage,
 resource limits, carving seam, nonclaims, and primary references.
 
+#### Recurrent Marked Temporal Point-Process Challenger
+
+`histdatacom.synthetic.neural_tpp` adds one opt-in, dependency-free CPU RMTPP
+after the empirical, classical event-clock, static Hawkes, and regime-Hawkes
+comparisons. It uses an explicit start token, deterministic full-batch BPTT,
+whole-window train/tune splits, row-free protected-split leakage evidence, an
+immutable checkpoint, an exact closed-form intensity compensator, and exact
+inverse-CDF event-time sampling over 12 joint symbol/quote-transition marks.
+
+One synchronized recurrent state consumes observed anchors only when their
+time is reached. Generated events remain strictly inside immutable
+destination-symbol anchor pairs, retain exact state/intensity/mark lineage,
+and enter the same generator-neutral historical-carving path. Independent
+fit, gradient-work, checkpoint, history, step, amplification, memory, output,
+and wall-time limits fail closed without partial parameters or rows.
+
+The full optional campaign now contains 11 challengers and 15 total reports,
+while continuing to declare `automatic_winner: false` and leaving the
+certified empirical default unchanged. See
+[`docs/neural-tpp-challenger.md`](docs/neural-tpp-challenger.md) for the model,
+dataset/leakage boundary, exact likelihood and sampler, checkpoint/replay
+contracts, carving seam, nonclaims, and primary references.
+
 #### Empirical Reference-Motif Index
 
 `ReferenceMotifIndexV1` projects bounded windows from the augmented ASCII tick

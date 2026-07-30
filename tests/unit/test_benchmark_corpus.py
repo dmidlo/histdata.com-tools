@@ -24,6 +24,7 @@ from histdatacom.synthetic.benchmark_gates import (
 from histdatacom.synthetic.contracts import canonical_contract_json
 from histdatacom.synthetic.event_clock import default_event_clock_configs
 from histdatacom.synthetic.marked_hawkes import default_marked_hawkes_configs
+from histdatacom.synthetic.neural_tpp import default_neural_tpp_config
 from histdatacom.synthetic.regime_hawkes import default_regime_hawkes_configs
 
 
@@ -369,3 +370,12 @@ def test_regime_hawkes_campaign_requires_one_config_per_ablation() -> None:
         corpus_module._validated_regime_hawkes_configs(configs[:-1])
     with pytest.raises(ValueError, match="exactly one config per ablation"):
         corpus_module._validated_regime_hawkes_configs((*configs, configs[0]))
+
+
+def test_neural_tpp_campaign_accepts_none_or_the_fixed_config() -> None:
+    config = default_neural_tpp_config()
+
+    assert corpus_module._validated_neural_tpp_config(None) is None
+    assert corpus_module._validated_neural_tpp_config(config) == config
+    with pytest.raises(TypeError, match="invalid config"):
+        corpus_module._validated_neural_tpp_config(object())
