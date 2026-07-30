@@ -1099,7 +1099,8 @@ def fit_regime_hawkes_challenger(
                     model["log_likelihood"], "log_likelihood"
                 )
             maximum_iterations = max(
-                maximum_iterations, int(model["iteration_count"])
+                maximum_iterations,
+                _strict_int(model["iteration_count"], "iteration_count"),
             )
             if (
                 round((time.perf_counter() - started) * 1000)
