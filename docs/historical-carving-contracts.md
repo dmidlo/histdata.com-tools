@@ -9,11 +9,12 @@ reconciliation, broker conditioning, or final persistence.
 `ReconstructionCandidateBatchV1` is the generator-neutral structural surface
 used by `carve_reconstruction_candidates()`. The original
 `carve_empirical_motif_candidates()` entry point remains a strict compatible
-wrapper. `EventClockCandidateBatchV1` and `MarkedHawkesCandidateBatchV1`
-therefore reach the same hard carving and output contracts without weakening
-the empirical API; see
-[`classical-event-clock-challengers.md`](classical-event-clock-challengers.md)
-and [`marked-hawkes-challenger.md`](marked-hawkes-challenger.md).
+wrapper. `EventClockCandidateBatchV1`, `MarkedHawkesCandidateBatchV1`, and
+`RegimeHawkesCandidateBatchV1` therefore reach the same hard carving and
+output contracts without weakening the empirical API; see
+[`classical-event-clock-challengers.md`](classical-event-clock-challengers.md),
+[`marked-hawkes-challenger.md`](marked-hawkes-challenger.md), and
+[`regime-switching-hawkes-challenger.md`](regime-switching-hawkes-challenger.md).
 
 ## Bound inputs
 

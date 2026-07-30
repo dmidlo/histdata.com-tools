@@ -1947,16 +1947,16 @@ def _fit_conditioning_model(
     model: dict[str, JSONValue] = {
         "symbols": list(symbols),
         "decay_per_second": decay,
-        "baseline_rates_per_second": baseline,
-        "excitation_matrix": excitation,
+        "baseline_rates_per_second": cast(JSONValue, baseline),
+        "excitation_matrix": cast(JSONValue, excitation),
         "spectral_radius": radius,
         "stability_margin": 1.0 - radius,
         "log_likelihood": likelihood,
         "fit_event_count": event_count,
         "fit_window_count": len(indexed_windows),
         "exposure_seconds": exposure_seconds,
-        "immigrant_mark_probabilities": mark_parameters[0],
-        "excitation_mark_probabilities": mark_parameters[1],
+        "immigrant_mark_probabilities": cast(JSONValue, mark_parameters[0]),
+        "excitation_mark_probabilities": cast(JSONValue, mark_parameters[1]),
     }
     uncertainty = _fit_uncertainty(
         baseline,
@@ -2334,8 +2334,8 @@ def _fit_uncertainty(
         excitation_intervals.append(values)
     return {
         "method": "responsibility-count-wald-95-v1",
-        "baseline_rates_per_second": baseline_intervals,
-        "excitation_matrix": excitation_intervals,
+        "baseline_rates_per_second": cast(JSONValue, baseline_intervals),
+        "excitation_matrix": cast(JSONValue, excitation_intervals),
         "nonclaim": "descriptive-curvature-approximation-not-exact-coverage",
     }
 

@@ -48,6 +48,7 @@ Works on macOS, Linux, and Windows.
     - [Reverse-Degradation Benchmark](#reverse-degradation-benchmark)
     - [Classical Event-Clock Challengers](#classical-event-clock-challengers)
     - [Marked Hawkes Challenger](#marked-hawkes-challenger)
+    - [Regime-Switching Hawkes Challenger](#regime-switching-hawkes-challenger)
     - [Empirical Reference-Motif Index](#empirical-reference-motif-index)
     - [Real Modern Reference-Motif Library](#real-modern-reference-motif-library)
     - [Empirical Motif Candidate Generation](#empirical-motif-candidate-generation)
@@ -2766,6 +2767,35 @@ but continues to declare `automatic_winner: false`. See
 [`docs/marked-hawkes-challenger.md`](docs/marked-hawkes-challenger.md) for fit,
 stability, mark, synchronized-generation, lineage, resource, and benchmark
 semantics.
+
+#### Regime-Switching Hawkes Challenger
+
+`histdatacom.synthetic.regime_hawkes` adds two opt-in, two-state MMHP-delta
+ablations beyond the static Hawkes comparison: state-specific baseline/mark
+behavior with shared excitation, and state-specific baseline/excitation/mark
+behavior. The state is shared across the synchronized triangle, canonicalized
+as `calm`/`active` by expected activity, and never treated as an observed
+economic truth.
+
+Fixed-bin scaled forward-backward inference and bounded, likelihood-monotone
+generalized EM keep filtered and smoothed probabilities separate. Low
+occupancy, collapsed activity, unsupported transitions, label switching,
+instability, structural tampering, or any fit/generation resource violation
+fails closed without usable partial state. Events within a bin affect
+excitation only from the next bin.
+
+Technological feed epochs remain a separate context axis. Stable epochs bind
+their v2 epoch identity; transition windows bind boundary support and
+uncertainty periods. The real campaign reloads the corpus-bound feed-epoch
+artifact and rejects context mismatch. Candidate batches retain exact
+context/anchor digests and use the shared historical-carving protocol.
+
+The full optional comparison contains the empirical baseline, four event
+clocks, three static Hawkes models, and both regime challengers, with no
+automatic winner or production-default change. See
+[`docs/regime-switching-hawkes-challenger.md`](docs/regime-switching-hawkes-challenger.md)
+for the approximation, information boundaries, diagnostics, lineage,
+resource limits, carving seam, nonclaims, and primary references.
 
 #### Empirical Reference-Motif Index
 

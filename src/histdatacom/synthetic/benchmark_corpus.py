@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from histdatacom.data_analytics.feed_epochs_v2 import (
+    FeedEpochDefinitionV2,
     read_active_time_feed_epoch_definition,
 )
 from histdatacom.resource_usage import peak_rss_bytes
@@ -91,6 +92,17 @@ from histdatacom.synthetic.motifs import (
 from histdatacom.synthetic.observation import ObservationOperatorV1
 from histdatacom.synthetic.observation_calibration import (
     read_observation_calibration_campaign,
+)
+from histdatacom.synthetic.regime_hawkes import (
+    FittedRegimeHawkesBenchmarkGeneratorV1,
+    RegimeHawkesConfigV1,
+    RegimeHawkesFitResultV1,
+    RegimeHawkesFitStatus,
+    RegimeHawkesModulation,
+    RegimeHawkesWindowContextV1,
+    build_fitted_regime_hawkes_generator,
+    build_regime_hawkes_benchmark_candidate,
+    fit_regime_hawkes_challenger,
 )
 from histdatacom.synthetic.streaming import (
     ReconstructionRunV1,
@@ -1729,6 +1741,74 @@ def _validated_marked_hawkes_configs(
     return configs
 
 
+def _validated_regime_hawkes_configs(
+    values: Sequence[RegimeHawkesConfigV1],
+) -> tuple[RegimeHawkesConfigV1, ...]:
+    configs = tuple(values)
+    if any(not isinstance(item, RegimeHawkesConfigV1) for item in configs):
+        raise TypeError("regime Hawkes campaign received an invalid config")
+    if configs and (
+        len(configs) != len(RegimeHawkesModulation)
+        or {item.modulation for item in configs} != set(RegimeHawkesModulation)
+    ):
+        raise ValueError(
+            "regime Hawkes campaign requires exactly one config per ablation"
+        )
+    if len({item.config_id for item in configs}) != len(configs):
+        raise ValueError("regime Hawkes campaign config identities collide")
+    return configs
+
+
+def _regime_hawkes_window_context(
+    partition: BenchmarkWindowPartitionV1,
+    *,
+    feed_epoch_definition: FeedEpochDefinitionV2,
+) -> RegimeHawkesWindowContextV1:
+    """Bind one corpus window to v2 epoch/transition evidence."""
+    assignment = feed_epoch_definition.assign(
+        symbol="EURUSD",
+        timestamp_utc_ms=(partition.start_ns + partition.end_ns)
+        // 2
+        // NANOSECONDS_PER_MILLISECOND,
+    )
+    if assignment.assignment_kind not in {"epoch", "transition"}:
+        raise ValueError("benchmark window is outside feed epoch scope")
+    if assignment.label != partition.epoch_label:
+        raise ValueError("benchmark window feed epoch label differs")
+    if assignment.assignment_kind == "epoch":
+        if assignment.epoch_id is None:
+            raise ValueError("stable benchmark epoch lacks identity")
+        return RegimeHawkesWindowContextV1(
+            window_id=partition.window_id,
+            session=partition.session,
+            technology_assignment_kind="epoch",
+            technology_label=assignment.label,
+            feed_epoch_definition_id=feed_epoch_definition.definition_id,
+            epoch_id=assignment.epoch_id,
+        )
+    boundary = next(
+        (
+            item
+            for item in feed_epoch_definition.boundaries
+            if item.boundary_id == assignment.boundary_id
+        ),
+        None,
+    )
+    if boundary is None:
+        raise ValueError("transition benchmark window lacks boundary evidence")
+    return RegimeHawkesWindowContextV1(
+        window_id=partition.window_id,
+        session=partition.session,
+        technology_assignment_kind="transition",
+        technology_label=assignment.label,
+        feed_epoch_definition_id=feed_epoch_definition.definition_id,
+        boundary_id=boundary.boundary_id,
+        boundary_support=boundary.support,
+        uncertainty_start_period=boundary.uncertainty_start_period,
+        uncertainty_end_period=boundary.uncertainty_end_period,
+    )
+
+
 def run_reverse_degradation_benchmark_campaign(
     corpus: ReverseDegradationBenchmarkCorpusV1,
     source_root: str | Path,
@@ -1737,8 +1817,9 @@ def run_reverse_degradation_benchmark_campaign(
     motif_candidate_provisional: bool = True,
     event_clock_configs: Sequence[EventClockConfigurationV1] = (),
     marked_hawkes_configs: Sequence[MarkedHawkesConfigV1] = (),
+    regime_hawkes_configs: Sequence[RegimeHawkesConfigV1] = (),
 ) -> tuple[ReverseDegradationBenchmarkCampaignV1, ReferenceMotifIndexV1]:
-    """Run controls, motif, event-clock, and optional Hawkes challengers."""
+    """Run controls, motif, clocks, static Hawkes, and regime Hawkes."""
     if not isinstance(corpus, ReverseDegradationBenchmarkCorpusV1):
         raise ValueError("benchmark campaign requires a v1 corpus")
     started_wall = datetime.now(timezone.utc)
@@ -1781,6 +1862,27 @@ def run_reverse_degradation_benchmark_campaign(
     )
     clock_configs = _validated_event_clock_configs(event_clock_configs)
     hawkes_configs = _validated_marked_hawkes_configs(marked_hawkes_configs)
+    regime_configs = _validated_regime_hawkes_configs(regime_hawkes_configs)
+    regime_contexts: tuple[RegimeHawkesWindowContextV1, ...] = ()
+    if regime_configs:
+        feed_epoch_definition = read_active_time_feed_epoch_definition(
+            corpus.dependency_artifacts["feed_epochs"].path
+        )
+        if (
+            feed_epoch_definition.definition_id
+            != corpus.feed_epoch_definition_id
+        ):
+            raise ValueError("campaign feed epoch definition identity differs")
+        regime_contexts = tuple(
+            _regime_hawkes_window_context(
+                partition,
+                feed_epoch_definition=feed_epoch_definition,
+            )
+            for partition in corpus.windows
+        )
+    regime_context_by_window = {
+        item.window_id: item for item in regime_contexts
+    }
     reconstruction_run = ReconstructionRunV1(
         symbols=corpus.profile.symbols,
         source_version_ids=tuple(item.partition_id for item in corpus.sources),
@@ -1788,6 +1890,7 @@ def run_reverse_degradation_benchmark_campaign(
             generator_config.config_id,
             *(item.config_id for item in clock_configs),
             *(item.config_id for item in hawkes_configs),
+            *(item.config_id for item in regime_configs),
         ),
         ensemble_member_ids=corpus.profile.ensemble_member_ids,
         base_seed=463,
@@ -1893,6 +1996,63 @@ def run_reverse_degradation_benchmark_campaign(
         if hawkes_fits[config.excitation_structure].status
         is MarkedHawkesFitStatus.FITTED
     }
+    calibration_contexts = (
+        tuple(
+            regime_context_by_window[item.window_id]
+            for item in corpus.windows
+            if item.split_kind == "calibration"
+        )
+        if regime_configs
+        else ()
+    )
+    regime_generation_contexts = (
+        tuple(
+            replace(
+                regime_context_by_window[partition.window_id],
+                window_id=ReconstructionWindowV1(
+                    run_id=reconstruction_run.run_id,
+                    ensemble_member_id=member_id,
+                    symbols=corpus.profile.symbols,
+                    core_start_ns=partition.start_ns,
+                    core_end_ns=partition.end_ns,
+                ).window_id,
+                context_id="",
+            )
+            for partition in corpus.windows
+            for member_id in corpus.profile.ensemble_member_ids
+        )
+        if regime_configs
+        else ()
+    )
+    regime_fits = {
+        config.modulation: fit_regime_hawkes_challenger(
+            config,
+            calibration_windows,
+            window_contexts=calibration_contexts,
+            information_mode=InformationMode.EX_POST_RECONSTRUCTION,
+        )
+        for config in regime_configs
+    }
+    regime_candidates = {
+        config.modulation: build_regime_hawkes_benchmark_candidate(
+            config,
+            regime_fits[config.modulation],
+            ensemble_member_ids=corpus.profile.ensemble_member_ids,
+        )
+        for config in regime_configs
+    }
+    regime_generators: dict[
+        RegimeHawkesModulation, FittedRegimeHawkesBenchmarkGeneratorV1
+    ] = {
+        config.modulation: build_fitted_regime_hawkes_generator(
+            config,
+            regime_fits[config.modulation],
+            ensemble_member_ids=corpus.profile.ensemble_member_ids,
+            window_contexts=regime_generation_contexts,
+        )
+        for config in regime_configs
+        if regime_fits[config.modulation].status is RegimeHawkesFitStatus.FITTED
+    }
 
     degradation_coverage = dict.fromkeys(_degradation_config_names(), 0)
     degradation_effect_coverage = dict.fromkeys(_degradation_config_names(), 0)
@@ -1969,6 +2129,10 @@ def run_reverse_degradation_benchmark_campaign(
         structure: f"marked_hawkes_{structure.value}"
         for structure in hawkes_candidates
     }
+    regime_keys = {
+        modulation: f"regime_hawkes_{modulation.value}"
+        for modulation in regime_candidates
+    }
     accumulators = {
         "dense_identity": _CandidateAccumulator(),
         "degraded_identity": _CandidateAccumulator(),
@@ -1977,6 +2141,7 @@ def run_reverse_degradation_benchmark_campaign(
         "negative_anchor_drop": _CandidateAccumulator(),
         **{key: _CandidateAccumulator() for key in clock_keys.values()},
         **{key: _CandidateAccumulator() for key in hawkes_keys.values()},
+        **{key: _CandidateAccumulator() for key in regime_keys.values()},
     }
     evaluated = tuple(
         item
@@ -2085,13 +2250,13 @@ def run_reverse_degradation_benchmark_campaign(
                 )
             for family, candidate in clock_candidates.items():
                 accumulator = accumulators[clock_keys[family]]
-                generator = clock_generators.get(family)
-                if generator is None:
+                clock_generator = clock_generators.get(family)
+                if clock_generator is None:
                     accumulator.failures += 1
                     continue
                 try:
                     candidate_window = generate_benchmark_candidate_window(
-                        generator,
+                        clock_generator,
                         candidate,
                         degraded,
                         scenario=scenario,
@@ -2120,13 +2285,13 @@ def run_reverse_degradation_benchmark_campaign(
                 )
             for structure, candidate in hawkes_candidates.items():
                 accumulator = accumulators[hawkes_keys[structure]]
-                generator = hawkes_generators.get(structure)
-                if generator is None:
+                hawkes_generator = hawkes_generators.get(structure)
+                if hawkes_generator is None:
                     accumulator.failures += 1
                     continue
                 try:
                     candidate_window = generate_benchmark_candidate_window(
-                        generator,
+                        hawkes_generator,
                         candidate,
                         degraded,
                         scenario=scenario,
@@ -2153,6 +2318,41 @@ def run_reverse_degradation_benchmark_campaign(
                         partition,
                     )
                 )
+            for modulation, candidate in regime_candidates.items():
+                accumulator = accumulators[regime_keys[modulation]]
+                regime_generator = regime_generators.get(modulation)
+                if regime_generator is None:
+                    accumulator.failures += 1
+                    continue
+                try:
+                    candidate_window = generate_benchmark_candidate_window(
+                        regime_generator,
+                        candidate,
+                        degraded,
+                        scenario=scenario,
+                        window=reconstruction_window,
+                        ensemble_member_id=member_id,
+                        execution=BenchmarkExecutionEvidenceV1(
+                            attempted=True,
+                            converged=True,
+                            peak_memory_bytes=_peak_memory_bytes(),
+                        ),
+                    )
+                except (RuntimeError, ValueError):
+                    accumulator.failures += 1
+                    continue
+                if not any(
+                    item.sparsity.startswith("regime-hawkes-")
+                    for item in candidate_window.events
+                ):
+                    accumulator.refusals += 1
+                accumulator.consume(
+                    _compare_streams(
+                        reference,
+                        candidate_window.events,
+                        partition,
+                    )
+                )
         _enforce_runtime(started, corpus.profile.max_runtime_seconds)
 
     subject_ids = {
@@ -2166,6 +2366,8 @@ def run_reverse_degradation_benchmark_campaign(
         subject_ids[key] = clock_candidates[family].candidate_id
     for structure, key in hawkes_keys.items():
         subject_ids[key] = hawkes_candidates[structure].candidate_id
+    for modulation, key in regime_keys.items():
+        subject_ids[key] = regime_candidates[modulation].candidate_id
     roles = {
         "dense_identity": "baseline",
         "degraded_identity": "baseline",
@@ -2174,6 +2376,7 @@ def run_reverse_degradation_benchmark_campaign(
         "negative_anchor_drop": "negative_control",
         **{key: "candidate" for key in clock_keys.values()},
         **{key: "candidate" for key in hawkes_keys.values()},
+        **{key: "candidate" for key in regime_keys.values()},
     }
     method_names = dict.fromkeys(accumulators, "")
     for name in method_names:
@@ -2182,9 +2385,14 @@ def run_reverse_degradation_benchmark_campaign(
         method_names[key] = family.value
     for structure, key in hawkes_keys.items():
         method_names[key] = f"marked_hawkes_{structure.value}"
+    for modulation, key in regime_keys.items():
+        method_names[key] = f"regime_hawkes_{modulation.value}"
     fit_by_key = {clock_keys[family]: fit for family, fit in clock_fits.items()}
     hawkes_fit_by_key = {
         hawkes_keys[structure]: fit for structure, fit in hawkes_fits.items()
+    }
+    regime_fit_by_key = {
+        regime_keys[modulation]: fit for modulation, fit in regime_fits.items()
     }
     reports = tuple(
         _candidate_report(
@@ -2198,6 +2406,7 @@ def run_reverse_degradation_benchmark_campaign(
                 if name == "empirical_motif"
                 or name in fit_by_key
                 or name in hawkes_fit_by_key
+                or name in regime_fit_by_key
                 else 1
             ),
             evaluated_window_count=len(evaluated),
@@ -2210,7 +2419,11 @@ def run_reverse_degradation_benchmark_campaign(
                 else (
                     _marked_hawkes_fit_metrics(hawkes_fit_by_key[name])
                     if name in hawkes_fit_by_key
-                    else None
+                    else (
+                        _regime_hawkes_fit_metrics(regime_fit_by_key[name])
+                        if name in regime_fit_by_key
+                        else None
+                    )
                 )
             ),
         )
@@ -2282,6 +2495,10 @@ def run_reverse_degradation_benchmark_campaign(
     if hawkes_configs:
         base_campaign_metrics["point_process_diagnostic_status"] = (
             "available-marked-hawkes-zero-diagonal-full-ablations"
+        )
+    if regime_configs:
+        base_campaign_metrics["point_process_diagnostic_status"] = (
+            "available-two-state-mmhp-delta-regime-ablations"
         )
     base_campaign_metrics.update(
         {
@@ -2529,6 +2746,74 @@ def _marked_hawkes_fit_metrics(
         ),
         "point_process_diagnostic_status": (
             "available-marked-multivariate-conditional-intensity"
+        ),
+        "automatic_winner": False,
+    }
+
+
+def _regime_hawkes_fit_metrics(
+    fit: RegimeHawkesFitResultV1,
+) -> dict[str, JSONScalar]:
+    """Expose fit, stability, state, and technology-stratum evidence."""
+    return {
+        "regime_hawkes_modulation": fit.modulation.value,
+        "regime_hawkes_config_id": fit.config_id,
+        "regime_hawkes_fit_id": fit.fit_id,
+        "regime_hawkes_fit_status": fit.status.value,
+        "regime_hawkes_fit_converged": fit.converged,
+        "regime_hawkes_fit_iteration_count": fit.iteration_count,
+        "regime_hawkes_fitted_event_count": fit.fitted_event_count,
+        "regime_hawkes_fitted_window_count": fit.fitted_window_count,
+        "regime_hawkes_fitted_bin_count": fit.fitted_bin_count,
+        "regime_hawkes_fit_log_likelihood": fit.log_likelihood,
+        "regime_hawkes_fit_failure_reason": fit.failure_reason,
+        "regime_hawkes_fit_estimated_peak_memory_bytes": (
+            fit.estimated_peak_memory_bytes
+        ),
+        "regime_hawkes_fit_diagnostic_bytes": fit.diagnostics.get(
+            "diagnostic_bytes"
+        ),
+        "regime_hawkes_calibration_content_sha256": (
+            fit.calibration_content_sha256
+        ),
+        "regime_hawkes_calibration_context_sha256": (
+            fit.calibration_context_sha256
+        ),
+        "regime_hawkes_maximum_spectral_radius": fit.diagnostics.get(
+            "maximum_spectral_radius"
+        ),
+        "regime_hawkes_stability_margin": fit.diagnostics.get(
+            "stability_margin"
+        ),
+        "regime_hawkes_minimum_state_occupancy": fit.diagnostics.get(
+            "minimum_state_occupancy"
+        ),
+        "regime_hawkes_minimum_calm_state_occupancy": fit.diagnostics.get(
+            "minimum_calm_state_occupancy"
+        ),
+        "regime_hawkes_minimum_active_state_occupancy": fit.diagnostics.get(
+            "minimum_active_state_occupancy"
+        ),
+        "regime_hawkes_minimum_activity_contrast": fit.diagnostics.get(
+            "minimum_activity_contrast"
+        ),
+        "regime_hawkes_minimum_expected_transition_count": (
+            fit.diagnostics.get("minimum_expected_transition_count")
+        ),
+        "regime_hawkes_technology_transition_cell_count": (
+            fit.diagnostics.get("technology_transition_cell_count")
+        ),
+        "regime_hawkes_minimum_mean_dwell_bins": fit.diagnostics.get(
+            "minimum_mean_dwell_bins"
+        ),
+        "regime_hawkes_maximum_mean_dwell_bins": fit.diagnostics.get(
+            "maximum_mean_dwell_bins"
+        ),
+        "regime_hawkes_mean_posterior_entropy": fit.diagnostics.get(
+            "mean_posterior_entropy"
+        ),
+        "point_process_diagnostic_status": (
+            "available-two-state-mmhp-delta-filtered-and-smoothed"
         ),
         "automatic_winner": False,
     }
