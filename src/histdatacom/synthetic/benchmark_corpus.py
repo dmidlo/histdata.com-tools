@@ -67,6 +67,16 @@ from histdatacom.synthetic.generation import (
     EmpiricalMotifGeneratorConfigV1,
 )
 from histdatacom.synthetic.information import InformationMode
+from histdatacom.synthetic.marked_hawkes import (
+    FittedMarkedHawkesBenchmarkGeneratorV1,
+    HawkesExcitationStructure,
+    MarkedHawkesConfigV1,
+    MarkedHawkesFitResultV1,
+    MarkedHawkesFitStatus,
+    build_fitted_marked_hawkes_generator,
+    build_marked_hawkes_benchmark_candidate,
+    fit_marked_hawkes_challenger,
+)
 from histdatacom.synthetic.motifs import (
     ReferenceMotifConditionV1,
     ReferenceMotifIndexConfigV1,
@@ -1700,6 +1710,25 @@ def _validated_event_clock_configs(
     return configs
 
 
+def _validated_marked_hawkes_configs(
+    values: Sequence[MarkedHawkesConfigV1],
+) -> tuple[MarkedHawkesConfigV1, ...]:
+    configs = tuple(values)
+    if any(not isinstance(item, MarkedHawkesConfigV1) for item in configs):
+        raise TypeError("marked Hawkes campaign received an invalid config")
+    if configs and (
+        len(configs) != len(HawkesExcitationStructure)
+        or {item.excitation_structure for item in configs}
+        != set(HawkesExcitationStructure)
+    ):
+        raise ValueError(
+            "marked Hawkes campaign requires exactly one config per ablation"
+        )
+    if len({item.config_id for item in configs}) != len(configs):
+        raise ValueError("marked Hawkes campaign config identities collide")
+    return configs
+
+
 def run_reverse_degradation_benchmark_campaign(
     corpus: ReverseDegradationBenchmarkCorpusV1,
     source_root: str | Path,
@@ -1707,8 +1736,9 @@ def run_reverse_degradation_benchmark_campaign(
     motif_index: ReferenceMotifIndexV1 | None = None,
     motif_candidate_provisional: bool = True,
     event_clock_configs: Sequence[EventClockConfigurationV1] = (),
+    marked_hawkes_configs: Sequence[MarkedHawkesConfigV1] = (),
 ) -> tuple[ReverseDegradationBenchmarkCampaignV1, ReferenceMotifIndexV1]:
-    """Run controls, the motif baseline, and optional event-clock challengers."""
+    """Run controls, motif, event-clock, and optional Hawkes challengers."""
     if not isinstance(corpus, ReverseDegradationBenchmarkCorpusV1):
         raise ValueError("benchmark campaign requires a v1 corpus")
     started_wall = datetime.now(timezone.utc)
@@ -1750,12 +1780,14 @@ def run_reverse_degradation_benchmark_campaign(
         max_transformations_per_interval=64,
     )
     clock_configs = _validated_event_clock_configs(event_clock_configs)
+    hawkes_configs = _validated_marked_hawkes_configs(marked_hawkes_configs)
     reconstruction_run = ReconstructionRunV1(
         symbols=corpus.profile.symbols,
         source_version_ids=tuple(item.partition_id for item in corpus.sources),
         configuration_ids=(
             generator_config.config_id,
             *(item.config_id for item in clock_configs),
+            *(item.config_id for item in hawkes_configs),
         ),
         ensemble_member_ids=corpus.profile.ensemble_member_ids,
         base_seed=463,
@@ -1833,6 +1865,34 @@ def run_reverse_degradation_benchmark_campaign(
         for config in clock_configs
         if clock_fits[config.family].status is EventClockFitStatus.FITTED
     }
+    hawkes_fits = {
+        config.excitation_structure: fit_marked_hawkes_challenger(
+            config,
+            calibration_windows,
+            information_mode=InformationMode.EX_POST_RECONSTRUCTION,
+        )
+        for config in hawkes_configs
+    }
+    hawkes_candidates = {
+        config.excitation_structure: build_marked_hawkes_benchmark_candidate(
+            config,
+            hawkes_fits[config.excitation_structure],
+            ensemble_member_ids=corpus.profile.ensemble_member_ids,
+        )
+        for config in hawkes_configs
+    }
+    hawkes_generators: dict[
+        HawkesExcitationStructure, FittedMarkedHawkesBenchmarkGeneratorV1
+    ] = {
+        config.excitation_structure: build_fitted_marked_hawkes_generator(
+            config,
+            hawkes_fits[config.excitation_structure],
+            ensemble_member_ids=corpus.profile.ensemble_member_ids,
+        )
+        for config in hawkes_configs
+        if hawkes_fits[config.excitation_structure].status
+        is MarkedHawkesFitStatus.FITTED
+    }
 
     degradation_coverage = dict.fromkeys(_degradation_config_names(), 0)
     degradation_effect_coverage = dict.fromkeys(_degradation_config_names(), 0)
@@ -1905,6 +1965,10 @@ def run_reverse_degradation_benchmark_campaign(
     clock_keys = {
         family: f"event_clock_{family.value}" for family in clock_candidates
     }
+    hawkes_keys = {
+        structure: f"marked_hawkes_{structure.value}"
+        for structure in hawkes_candidates
+    }
     accumulators = {
         "dense_identity": _CandidateAccumulator(),
         "degraded_identity": _CandidateAccumulator(),
@@ -1912,6 +1976,7 @@ def run_reverse_degradation_benchmark_campaign(
         "empirical_motif": _CandidateAccumulator(),
         "negative_anchor_drop": _CandidateAccumulator(),
         **{key: _CandidateAccumulator() for key in clock_keys.values()},
+        **{key: _CandidateAccumulator() for key in hawkes_keys.values()},
     }
     evaluated = tuple(
         item
@@ -2053,6 +2118,41 @@ def run_reverse_degradation_benchmark_campaign(
                         partition,
                     )
                 )
+            for structure, candidate in hawkes_candidates.items():
+                accumulator = accumulators[hawkes_keys[structure]]
+                generator = hawkes_generators.get(structure)
+                if generator is None:
+                    accumulator.failures += 1
+                    continue
+                try:
+                    candidate_window = generate_benchmark_candidate_window(
+                        generator,
+                        candidate,
+                        degraded,
+                        scenario=scenario,
+                        window=reconstruction_window,
+                        ensemble_member_id=member_id,
+                        execution=BenchmarkExecutionEvidenceV1(
+                            attempted=True,
+                            converged=True,
+                            peak_memory_bytes=_peak_memory_bytes(),
+                        ),
+                    )
+                except (RuntimeError, ValueError):
+                    accumulator.failures += 1
+                    continue
+                if not any(
+                    item.sparsity.startswith("marked-hawkes-")
+                    for item in candidate_window.events
+                ):
+                    accumulator.refusals += 1
+                accumulator.consume(
+                    _compare_streams(
+                        reference,
+                        candidate_window.events,
+                        partition,
+                    )
+                )
         _enforce_runtime(started, corpus.profile.max_runtime_seconds)
 
     subject_ids = {
@@ -2064,6 +2164,8 @@ def run_reverse_degradation_benchmark_campaign(
     subject_ids["empirical_motif"] = motif_candidate.candidate_id
     for family, key in clock_keys.items():
         subject_ids[key] = clock_candidates[family].candidate_id
+    for structure, key in hawkes_keys.items():
+        subject_ids[key] = hawkes_candidates[structure].candidate_id
     roles = {
         "dense_identity": "baseline",
         "degraded_identity": "baseline",
@@ -2071,13 +2173,19 @@ def run_reverse_degradation_benchmark_campaign(
         "empirical_motif": "candidate",
         "negative_anchor_drop": "negative_control",
         **{key: "candidate" for key in clock_keys.values()},
+        **{key: "candidate" for key in hawkes_keys.values()},
     }
     method_names = dict.fromkeys(accumulators, "")
     for name in method_names:
         method_names[name] = name
     for family, key in clock_keys.items():
         method_names[key] = family.value
+    for structure, key in hawkes_keys.items():
+        method_names[key] = f"marked_hawkes_{structure.value}"
     fit_by_key = {clock_keys[family]: fit for family, fit in clock_fits.items()}
+    hawkes_fit_by_key = {
+        hawkes_keys[structure]: fit for structure, fit in hawkes_fits.items()
+    }
     reports = tuple(
         _candidate_report(
             subject_id=subject_ids[name],
@@ -2087,7 +2195,9 @@ def run_reverse_degradation_benchmark_campaign(
             policy=policy,
             ensemble_member_count=(
                 len(corpus.profile.ensemble_member_ids)
-                if name == "empirical_motif" or name in fit_by_key
+                if name == "empirical_motif"
+                or name in fit_by_key
+                or name in hawkes_fit_by_key
                 else 1
             ),
             evaluated_window_count=len(evaluated),
@@ -2097,7 +2207,11 @@ def run_reverse_degradation_benchmark_campaign(
             extra_metrics=(
                 _event_clock_fit_metrics(fit_by_key[name])
                 if name in fit_by_key
-                else None
+                else (
+                    _marked_hawkes_fit_metrics(hawkes_fit_by_key[name])
+                    if name in hawkes_fit_by_key
+                    else None
+                )
             ),
         )
         for name, accumulator in accumulators.items()
@@ -2164,6 +2278,10 @@ def run_reverse_degradation_benchmark_campaign(
     if clock_configs:
         base_campaign_metrics["point_process_diagnostic_status"] = (
             "available-four-classical-event-clock-families"
+        )
+    if hawkes_configs:
+        base_campaign_metrics["point_process_diagnostic_status"] = (
+            "available-marked-hawkes-zero-diagonal-full-ablations"
         )
     base_campaign_metrics.update(
         {
@@ -2375,6 +2493,43 @@ def _event_clock_fit_metrics(
             fit.calibration_content_sha256
         ),
         "point_process_diagnostic_status": diagnostic_status,
+        "automatic_winner": False,
+    }
+
+
+def _marked_hawkes_fit_metrics(
+    fit: MarkedHawkesFitResultV1,
+) -> dict[str, JSONScalar]:
+    """Expose bounded stability/convergence evidence beside stream metrics."""
+    return {
+        "marked_hawkes_excitation_structure": fit.excitation_structure.value,
+        "marked_hawkes_config_id": fit.config_id,
+        "marked_hawkes_fit_id": fit.fit_id,
+        "marked_hawkes_fit_status": fit.status.value,
+        "marked_hawkes_fit_converged": fit.converged,
+        "marked_hawkes_fit_iteration_count": fit.iteration_count,
+        "marked_hawkes_fitted_event_count": fit.fitted_event_count,
+        "marked_hawkes_fitted_window_count": fit.fitted_window_count,
+        "marked_hawkes_fit_log_likelihood": fit.log_likelihood,
+        "marked_hawkes_fit_failure_reason": fit.failure_reason,
+        "marked_hawkes_fit_estimated_peak_memory_bytes": (
+            fit.estimated_peak_memory_bytes
+        ),
+        "marked_hawkes_calibration_content_sha256": (
+            fit.calibration_content_sha256
+        ),
+        "marked_hawkes_maximum_spectral_radius": fit.diagnostics.get(
+            "maximum_spectral_radius"
+        ),
+        "marked_hawkes_stability_margin": fit.diagnostics.get(
+            "stability_margin"
+        ),
+        "marked_hawkes_conditioning_cell_count": fit.diagnostics.get(
+            "conditioning_cell_count"
+        ),
+        "point_process_diagnostic_status": (
+            "available-marked-multivariate-conditional-intensity"
+        ),
         "automatic_winner": False,
     }
 

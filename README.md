@@ -47,6 +47,7 @@ Works on macOS, Linux, and Windows.
     - [Historical Feed-Observation Operators](#historical-feed-observation-operators)
     - [Reverse-Degradation Benchmark](#reverse-degradation-benchmark)
     - [Classical Event-Clock Challengers](#classical-event-clock-challengers)
+    - [Marked Hawkes Challenger](#marked-hawkes-challenger)
     - [Empirical Reference-Motif Index](#empirical-reference-motif-index)
     - [Real Modern Reference-Motif Library](#real-modern-reference-motif-library)
     - [Empirical Motif Candidate Generation](#empirical-motif-candidate-generation)
@@ -2741,6 +2742,30 @@ passed the frozen candidate gates. See
 [`docs/classical-event-clock-challengers.md`](docs/classical-event-clock-challengers.md)
 for likelihoods, conditioning/backoff semantics, deterministic lineage,
 resource bounds, carving integration, retained evidence, and primary sources.
+
+#### Marked Hawkes Challenger
+
+`histdatacom.synthetic.marked_hawkes` adds separate zero-excitation,
+self-excitation, and full self/cross-excitation ablations without changing the
+fixed #450 event-clock registry. Calibration-only exponential-kernel fits use
+explicit epoch/session support, exact bounded-window likelihoods, versioned
+approximate uncertainty, source/destination quote-transition marks, and
+fail-closed spectral-radius checks.
+
+Generation uses one deterministic bounded Ogata timeline for the synchronized
+symbol group. Observed anchors and generated events update intensity strictly
+after their timestamps; prior carry is explicit and bounded; proposals remain
+inside immutable anchor intervals. Proposal, output, amplification, history,
+parameter, memory, and runtime limits refuse the complete attempt without
+partial rows. Hawkes batches satisfy the same generator-neutral carving
+protocol as empirical and event-clock candidates.
+
+The real reverse-degradation campaign can evaluate all three Hawkes ablations
+beside the qualified empirical baseline and all four classical challengers,
+but continues to declare `automatic_winner: false`. See
+[`docs/marked-hawkes-challenger.md`](docs/marked-hawkes-challenger.md) for fit,
+stability, mark, synchronized-generation, lineage, resource, and benchmark
+semantics.
 
 #### Empirical Reference-Motif Index
 

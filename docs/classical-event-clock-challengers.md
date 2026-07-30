@@ -233,8 +233,10 @@ winner declaration.
 - Ogata, *On Lewis' Simulation Method for Point Processes* (1981),
   [DOI 10.1109/TIT.1981.1056305](https://doi.org/10.1109/TIT.1981.1056305).
 
-The Hawkes references define the boundary for the separate marked-excitation
-challenger; this module does not claim to implement that model.
+The Hawkes references apply to the separate implemented marked-excitation
+challenger. See [Bounded marked Hawkes reconstruction
+challenger](marked-hawkes-challenger.md); the four classical families in this
+module remain unchanged.
 
 ## Nonclaims
 

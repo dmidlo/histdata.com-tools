@@ -23,6 +23,7 @@ from histdatacom.synthetic.benchmark_gates import (
 )
 from histdatacom.synthetic.contracts import canonical_contract_json
 from histdatacom.synthetic.event_clock import default_event_clock_configs
+from histdatacom.synthetic.marked_hawkes import default_marked_hawkes_configs
 
 
 def _corpus() -> ReverseDegradationBenchmarkCorpusV1:
@@ -347,3 +348,13 @@ def test_event_clock_campaign_requires_one_config_per_family() -> None:
         corpus_module._validated_event_clock_configs(configs[:-1])
     with pytest.raises(ValueError, match="exactly one config per family"):
         corpus_module._validated_event_clock_configs((*configs, configs[0]))
+
+
+def test_marked_hawkes_campaign_requires_one_config_per_ablation() -> None:
+    configs = default_marked_hawkes_configs()
+
+    assert corpus_module._validated_marked_hawkes_configs(configs) == configs
+    with pytest.raises(ValueError, match="exactly one config per ablation"):
+        corpus_module._validated_marked_hawkes_configs(configs[:-1])
+    with pytest.raises(ValueError, match="exactly one config per ablation"):
+        corpus_module._validated_marked_hawkes_configs((*configs, configs[0]))

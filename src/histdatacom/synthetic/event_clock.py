@@ -550,7 +550,9 @@ class EventClockCalibrationWindowV1:
             "start_ns": self.start_ns,
             "end_ns": self.end_ns,
             "event_count": len(self.events),
-            "symbols": sorted({item.symbol for item in self.events}),
+            "symbols": cast(
+                JSONValue, sorted({item.symbol for item in self.events})
+            ),
             "content_sha256": self.content_sha256,
             "events_inline": False,
         }
@@ -1302,7 +1304,9 @@ def fit_event_clock_challenger(
             config, windows
         )
         conditioning_support = _conditioning_support(windows)
-        parameters["conditioning_support"] = conditioning_support
+        parameters["conditioning_support"] = cast(
+            JSONValue, conditioning_support
+        )
         diagnostics["conditioning_cell_count"] = len(conditioning_support)
     except (ArithmeticError, StatisticsError, ValueError) as err:
         return EventClockFitResultV1(
@@ -1610,7 +1614,8 @@ def _fit_family(
             for symbol in sorted(by_symbol)
         }
         likelihood = sum(
-            float(model["log_likelihood"]) for model in models.values()
+            _finite_float(model["log_likelihood"], "log_likelihood")
+            for model in models.values()
         )
         parameters: dict[str, JSONValue] = {
             "model": "piecewise_constant_nhpp",
@@ -1636,7 +1641,8 @@ def _fit_family(
             for symbol in sorted(by_symbol)
         }
         likelihood = sum(
-            float(model["log_likelihood"]) for model in models.values()
+            _finite_float(model["log_likelihood"], "log_likelihood")
+            for model in models.values()
         )
         parameters = {
             "model": "gamma_mixed_cox",
@@ -1662,10 +1668,14 @@ def _fit_family(
             for symbol in sorted(by_symbol)
         }
         likelihood = sum(
-            float(model["log_likelihood"]) for model in models.values()
+            _finite_float(model["log_likelihood"], "log_likelihood")
+            for model in models.values()
         )
         iterations = max(
-            int(model["coefficient_candidate_count"])
+            _strict_int(
+                model["coefficient_candidate_count"],
+                "coefficient_candidate_count",
+            )
             for model in models.values()
         )
         parameters = {
@@ -1691,9 +1701,13 @@ def _fit_family(
         for symbol in sorted(by_symbol)
     }
     likelihood = sum(
-        float(model["log_likelihood"]) for model in models.values()
+        _finite_float(model["log_likelihood"], "log_likelihood")
+        for model in models.values()
     )
-    iterations = max(int(model["iteration_count"]) for model in models.values())
+    iterations = max(
+        _strict_int(model["iteration_count"], "iteration_count")
+        for model in models.values()
+    )
     parameters = {
         "model": "two_state_log_duration_categorical_mark_hard_em",
         "symbols": {
@@ -1749,9 +1763,9 @@ def _fit_nhpp_symbol(
         for count, rate, seconds in zip(counts, rates, exposure)
     )
     return {
-        "rates_per_second": rates,
-        "bin_exposure_seconds": exposure,
-        "bin_event_counts": counts,
+        "rates_per_second": cast(JSONValue, rates),
+        "bin_exposure_seconds": cast(JSONValue, exposure),
+        "bin_event_counts": cast(JSONValue, counts),
         "global_rate_per_second": global_rate,
         "log_likelihood": likelihood,
     }
@@ -1792,8 +1806,8 @@ def _fit_cox_symbol(
         "rate_variance": variance,
         "gamma_shape": shape,
         "gamma_scale": scale,
-        "window_event_counts": counts,
-        "window_exposure_seconds": durations,
+        "window_event_counts": cast(JSONValue, counts),
+        "window_exposure_seconds": cast(JSONValue, durations),
         "log_likelihood": likelihood,
     }
 
@@ -1974,11 +1988,11 @@ def _fit_hidden_markov_symbol(
         )
     )
     return {
-        "log_duration_means": centers,
-        "log_duration_variances": variances,
-        "transition_matrix": transitions,
-        "initial_probabilities": initial,
-        "mark_probabilities": mark_probabilities,
+        "log_duration_means": cast(JSONValue, centers),
+        "log_duration_variances": cast(JSONValue, variances),
+        "transition_matrix": cast(JSONValue, transitions),
+        "initial_probabilities": cast(JSONValue, initial),
+        "mark_probabilities": cast(JSONValue, mark_probabilities),
         "last_state": state_sequences[-1][-1],
         "calibration_sequence_count": len(state_sequences),
         "transition_reset_at_window_boundary": True,
@@ -2472,7 +2486,7 @@ def _quote_profile_sequences(
     probabilities = {name: (counts[name] + 1) / total for name in names}
     return {
         "mean_spread": statistics.fmean(spreads),
-        "mark_probabilities": probabilities,
+        "mark_probabilities": cast(JSONValue, probabilities),
     }
 
 

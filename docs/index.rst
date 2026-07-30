@@ -31,6 +31,7 @@ Empirical reconstruction pipeline
    modern-reference-motif-library
    empirical-motif-generation-contracts
    classical-event-clock-challengers
+   marked-hawkes-challenger
    historical-carving-contracts
    cross-currency-reconciliation-contracts
    reconstruction-ensemble-calibration-contracts
