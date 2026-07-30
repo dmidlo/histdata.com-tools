@@ -1739,7 +1739,7 @@ class NeuralTPPFitResultV1:
             dataset_content_sha256=str(data.get("dataset_content_sha256", "")),
             context_content_sha256=str(data.get("context_content_sha256", "")),
             information_mode=InformationMode.from_value(
-                data.get("information_mode")
+                _required_text(data.get("information_mode"))
             ),
             as_of_ns=cast(int | None, data.get("as_of_ns")),
             symbols=tuple(
@@ -2265,7 +2265,7 @@ def _time_base(
     parameters: Mapping[str, JSONValue], hidden: Sequence[float]
 ) -> float:
     weights = cast(Sequence[float], parameters["time_weights"])
-    value = float(parameters["time_bias"]) + sum(
+    value = _finite_float(parameters["time_bias"], "time_bias") + sum(
         weight * state for weight, state in zip(weights, hidden)
     )
     if not -60.0 <= value <= 60.0:
@@ -2563,7 +2563,7 @@ def _apply_gradients(
                                 -limit,
                                 min(
                                     limit,
-                                    float(item)
+                                    _finite_float(item, name)
                                     - learning_scale
                                     * gradient[row_index][column],
                                 ),
@@ -2577,7 +2577,7 @@ def _apply_gradients(
                             -limit,
                             min(
                                 limit,
-                                float(row)
+                                _finite_float(row, name)
                                 - learning_scale * gradient[row_index],
                             ),
                         )
@@ -2586,7 +2586,11 @@ def _apply_gradients(
         else:
             parameters[name] = max(
                 -limit,
-                min(limit, float(value) - learning_scale * float(gradient)),
+                min(
+                    limit,
+                    _finite_float(value, name)
+                    - learning_scale * float(gradient),
+                ),
             )
     return norm, clipped
 

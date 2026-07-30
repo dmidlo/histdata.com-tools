@@ -49,6 +49,8 @@ Works on macOS, Linux, and Windows.
     - [Classical Event-Clock Challengers](#classical-event-clock-challengers)
     - [Marked Hawkes Challenger](#marked-hawkes-challenger)
     - [Regime-Switching Hawkes Challenger](#regime-switching-hawkes-challenger)
+    - [Recurrent Marked Temporal Point-Process Challenger](#recurrent-marked-temporal-point-process-challenger)
+    - [Marked Add-Thin Sequence Challenger](#marked-add-thin-sequence-challenger)
     - [Empirical Reference-Motif Index](#empirical-reference-motif-index)
     - [Real Modern Reference-Motif Library](#real-modern-reference-motif-library)
     - [Empirical Motif Candidate Generation](#empirical-motif-candidate-generation)
@@ -2819,6 +2821,32 @@ certified empirical default unchanged. See
 [`docs/neural-tpp-challenger.md`](docs/neural-tpp-challenger.md) for the model,
 dataset/leakage boundary, exact likelihood and sampler, checkpoint/replay
 contracts, carving seam, nonclaims, and primary references.
+
+#### Marked Add-Thin Sequence Challenger
+
+`histdatacom.synthetic.add_thin` adds one opt-in, dependency-free CPU
+point-process diffusion challenger. It uses the Add-Thin forward law and exact
+B/C/D/E reverse coefficients with a deliberately bounded, non-neural
+piecewise-constant time-bin × joint-mark posterior approximation. The fixed
+12 marks are a declared project extension; the reference paper models arrival
+times and leaves marks to future work.
+
+Whole Asia/London/New York windows split before fit. Validation and final
+holdout rows are reduced to row-free leakage evidence, while deterministic
+training/tuning corruptions select one additive-smoothing checkpoint.
+Generation begins from bounded homogeneous-Poisson noise, keeps observed
+anchors outside the denoising state, emits only core-owned points strictly
+inside destination-symbol anchor pairs, and records every B/C/D/E, thinning,
+collision, resource, and lineage decision.
+
+The full optional campaign contains 12 challengers and 16 total reports. The
+real closure comparison records no Add-Thin fit/generation failure, refusal,
+leakage, or anchor violation, but the challenger fails multiple promotion
+gates. It declares `automatic_winner: false` and leaves the certified
+empirical default unchanged. See
+[`docs/add-thin-challenger.md`](docs/add-thin-challenger.md) for the equations,
+approximation boundary, marked extension, strict contracts, resource limits,
+carving seam, retained evidence, nonclaims, and primary references.
 
 #### Empirical Reference-Motif Index
 

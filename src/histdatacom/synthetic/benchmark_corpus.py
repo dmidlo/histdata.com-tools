@@ -30,6 +30,18 @@ from histdatacom.data_analytics.feed_epochs_v2 import (
 )
 from histdatacom.resource_usage import peak_rss_bytes
 from histdatacom.runtime_contracts import ArtifactRef, JSONScalar, JSONValue
+from histdatacom.synthetic.add_thin import (
+    AddThinConfigV1,
+    AddThinFitResultV1,
+    AddThinFitStatus,
+    AddThinGenerationStatus,
+    AddThinWindowContextV1,
+    FittedAddThinBenchmarkGeneratorV1,
+    build_add_thin_benchmark_candidate,
+    build_add_thin_protected_window,
+    build_fitted_add_thin_generator,
+    fit_add_thin_challenger,
+)
 from histdatacom.synthetic.benchmark import (
     BenchmarkCandidateKind,
     BenchmarkCandidateV1,
@@ -1778,6 +1790,14 @@ def _validated_neural_tpp_config(
     return value
 
 
+def _validated_add_thin_config(
+    value: AddThinConfigV1 | None,
+) -> AddThinConfigV1 | None:
+    if value is not None and not isinstance(value, AddThinConfigV1):
+        raise TypeError("Add-Thin campaign received an invalid config")
+    return value
+
+
 def _regime_hawkes_window_context(
     partition: BenchmarkWindowPartitionV1,
     *,
@@ -1878,6 +1898,56 @@ def _neural_tpp_window_context(
     )
 
 
+def _add_thin_window_context(
+    partition: BenchmarkWindowPartitionV1,
+    *,
+    feed_epoch_definition: FeedEpochDefinitionV2,
+) -> AddThinWindowContextV1:
+    """Bind one corpus window to the Add-Thin v2 context seam."""
+    assignment = feed_epoch_definition.assign(
+        symbol="EURUSD",
+        timestamp_utc_ms=(partition.start_ns + partition.end_ns)
+        // 2
+        // NANOSECONDS_PER_MILLISECOND,
+    )
+    if assignment.assignment_kind not in {"epoch", "transition"}:
+        raise ValueError("benchmark window is outside feed epoch scope")
+    if assignment.label != partition.epoch_label:
+        raise ValueError("benchmark window feed epoch label differs")
+    if assignment.assignment_kind == "epoch":
+        if assignment.epoch_id is None:
+            raise ValueError("stable benchmark epoch lacks identity")
+        return AddThinWindowContextV1(
+            window_id=partition.window_id,
+            session=partition.session,
+            technology_assignment_kind="epoch",
+            technology_label=assignment.label,
+            feed_epoch_definition_id=feed_epoch_definition.definition_id,
+            epoch_id=assignment.epoch_id,
+        )
+    boundary = next(
+        (
+            item
+            for item in feed_epoch_definition.boundaries
+            if item.boundary_id == assignment.boundary_id
+        ),
+        None,
+    )
+    if boundary is None:
+        raise ValueError("transition benchmark window lacks boundary evidence")
+    return AddThinWindowContextV1(
+        window_id=partition.window_id,
+        session=partition.session,
+        technology_assignment_kind="transition",
+        technology_label=assignment.label,
+        feed_epoch_definition_id=feed_epoch_definition.definition_id,
+        boundary_id=boundary.boundary_id,
+        boundary_support=boundary.support,
+        uncertainty_start_period=boundary.uncertainty_start_period,
+        uncertainty_end_period=boundary.uncertainty_end_period,
+    )
+
+
 def run_reverse_degradation_benchmark_campaign(
     corpus: ReverseDegradationBenchmarkCorpusV1,
     source_root: str | Path,
@@ -1888,6 +1958,7 @@ def run_reverse_degradation_benchmark_campaign(
     marked_hawkes_configs: Sequence[MarkedHawkesConfigV1] = (),
     regime_hawkes_configs: Sequence[RegimeHawkesConfigV1] = (),
     neural_tpp_config: NeuralTPPConfigV1 | None = None,
+    add_thin_config: AddThinConfigV1 | None = None,
 ) -> tuple[ReverseDegradationBenchmarkCampaignV1, ReferenceMotifIndexV1]:
     """Run controls and every explicitly configured challenger family."""
     if not isinstance(corpus, ReverseDegradationBenchmarkCorpusV1):
@@ -1934,10 +2005,16 @@ def run_reverse_degradation_benchmark_campaign(
     hawkes_configs = _validated_marked_hawkes_configs(marked_hawkes_configs)
     regime_configs = _validated_regime_hawkes_configs(regime_hawkes_configs)
     neural_config = _validated_neural_tpp_config(neural_tpp_config)
+    add_thin_selected_config = _validated_add_thin_config(add_thin_config)
     regime_contexts: tuple[RegimeHawkesWindowContextV1, ...] = ()
     neural_contexts: tuple[NeuralTPPWindowContextV1, ...] = ()
+    add_thin_contexts: tuple[AddThinWindowContextV1, ...] = ()
     feed_epoch_definition: FeedEpochDefinitionV2 | None = None
-    if regime_configs or neural_config is not None:
+    if (
+        regime_configs
+        or neural_config is not None
+        or add_thin_selected_config is not None
+    ):
         feed_epoch_definition = read_active_time_feed_epoch_definition(
             corpus.dependency_artifacts["feed_epochs"].path
         )
@@ -1962,11 +2039,22 @@ def run_reverse_degradation_benchmark_campaign(
                 )
                 for partition in corpus.windows
             )
+        if add_thin_selected_config is not None:
+            add_thin_contexts = tuple(
+                _add_thin_window_context(
+                    partition,
+                    feed_epoch_definition=feed_epoch_definition,
+                )
+                for partition in corpus.windows
+            )
     regime_context_by_window = {
         item.window_id: item for item in regime_contexts
     }
     neural_context_by_window = {
         item.window_id: item for item in neural_contexts
+    }
+    add_thin_context_by_window = {
+        item.window_id: item for item in add_thin_contexts
     }
     reconstruction_run = ReconstructionRunV1(
         symbols=corpus.profile.symbols,
@@ -1977,6 +2065,11 @@ def run_reverse_degradation_benchmark_campaign(
             *(item.config_id for item in hawkes_configs),
             *(item.config_id for item in regime_configs),
             *((neural_config.config_id,) if neural_config is not None else ()),
+            *(
+                (add_thin_selected_config.config_id,)
+                if add_thin_selected_config is not None
+                else ()
+            ),
         ),
         ensemble_member_ids=corpus.profile.ensemble_member_ids,
         base_seed=463,
@@ -2200,6 +2293,68 @@ def run_reverse_degradation_benchmark_campaign(
                 },
             )
 
+    add_thin_fit: AddThinFitResultV1 | None = None
+    add_thin_candidate: BenchmarkCandidateV1 | None = None
+    add_thin_generator: FittedAddThinBenchmarkGeneratorV1 | None = None
+    if add_thin_selected_config is not None:
+        add_thin_calibration_contexts = tuple(
+            add_thin_context_by_window[item.window_id]
+            for item in corpus.windows
+            if item.split_kind == "calibration"
+        )
+        add_thin_protected_windows = tuple(
+            build_add_thin_protected_window(
+                EventClockCalibrationWindowV1(
+                    window_id=partition.window_id,
+                    start_ns=partition.start_ns,
+                    end_ns=partition.end_ns,
+                    events=events_by_window[partition.window_id],
+                ),
+                add_thin_context_by_window[partition.window_id],
+                role=partition.split_kind,
+                symbols=corpus.profile.symbols,
+            )
+            for partition in corpus.windows
+            if partition.split_kind in {"validation", "final_holdout"}
+        )
+        add_thin_fit = fit_add_thin_challenger(
+            add_thin_selected_config,
+            calibration_windows,
+            window_contexts=add_thin_calibration_contexts,
+            protected_windows=add_thin_protected_windows,
+            information_mode=InformationMode.EX_POST_RECONSTRUCTION,
+        )
+        add_thin_candidate = build_add_thin_benchmark_candidate(
+            add_thin_selected_config,
+            add_thin_fit,
+            ensemble_member_ids=corpus.profile.ensemble_member_ids,
+        )
+        if add_thin_fit.status is AddThinFitStatus.FITTED:
+            add_thin_generation_contexts = tuple(
+                replace(
+                    add_thin_context_by_window[partition.window_id],
+                    window_id=ReconstructionWindowV1(
+                        run_id=reconstruction_run.run_id,
+                        ensemble_member_id=member_id,
+                        symbols=corpus.profile.symbols,
+                        core_start_ns=partition.start_ns,
+                        core_end_ns=partition.end_ns,
+                    ).window_id,
+                    context_id="",
+                )
+                for partition in corpus.windows
+                for member_id in corpus.profile.ensemble_member_ids
+            )
+            add_thin_generator = build_fitted_add_thin_generator(
+                add_thin_selected_config,
+                add_thin_fit,
+                ensemble_member_ids=corpus.profile.ensemble_member_ids,
+                window_contexts={
+                    item.window_id: item
+                    for item in add_thin_generation_contexts
+                },
+            )
+
     degradation_coverage = dict.fromkeys(_degradation_config_names(), 0)
     degradation_effect_coverage = dict.fromkeys(_degradation_config_names(), 0)
     degradation_failures: Counter[str] = Counter()
@@ -2282,6 +2437,12 @@ def run_reverse_degradation_benchmark_campaign(
     neural_key = (
         "neural_tpp_rmtpp_cpu_v1" if neural_candidate is not None else None
     )
+    add_thin_key = (
+        "add_thin_histogram_marked_cpu_v1"
+        if add_thin_candidate is not None
+        else None
+    )
+    add_thin_generation_totals: dict[str, float] = defaultdict(float)
     accumulators = {
         "dense_identity": _CandidateAccumulator(),
         "degraded_identity": _CandidateAccumulator(),
@@ -2294,6 +2455,11 @@ def run_reverse_degradation_benchmark_campaign(
         **(
             {neural_key: _CandidateAccumulator()}
             if neural_key is not None
+            else {}
+        ),
+        **(
+            {add_thin_key: _CandidateAccumulator()}
+            if add_thin_key is not None
             else {}
         ),
     }
@@ -2541,6 +2707,70 @@ def run_reverse_degradation_benchmark_campaign(
                                 partition,
                             )
                         )
+            if add_thin_key is not None and add_thin_candidate is not None:
+                accumulator = accumulators[add_thin_key]
+                if add_thin_generator is None:
+                    accumulator.failures += 1
+                else:
+                    result = add_thin_generator.generate_with_evidence(
+                        degraded,
+                        scenario=scenario,
+                        window=reconstruction_window,
+                        ensemble_member_id=member_id,
+                    )
+                    evidence = result.evidence
+                    add_thin_generation_totals["attempt_count"] += 1
+                    add_thin_generation_totals[
+                        "initial_noise_count"
+                    ] += evidence.initial_noise_count
+                    add_thin_generation_totals[
+                        "final_point_count"
+                    ] += evidence.final_point_count
+                    add_thin_generation_totals[
+                        "generated_event_count"
+                    ] += evidence.generated_event_count
+                    add_thin_generation_totals[
+                        "skipped_unsupported_count"
+                    ] += evidence.skipped_unsupported_count
+                    add_thin_generation_totals[
+                        "collision_count"
+                    ] += evidence.collision_count
+                    add_thin_generation_totals[
+                        "poisson_draw_work"
+                    ] += evidence.poisson_draw_work
+                    add_thin_generation_totals[
+                        "wall_time_ms"
+                    ] += evidence.wall_time_ms
+                    add_thin_generation_totals["peak_memory_bytes"] = max(
+                        add_thin_generation_totals["peak_memory_bytes"],
+                        evidence.peak_memory_bytes,
+                    )
+                    for step in evidence.step_evidence:
+                        for name in (
+                            "b_count",
+                            "c_count",
+                            "d_count",
+                            "e_count",
+                            "thinned_count",
+                            "collision_count",
+                        ):
+                            add_thin_generation_totals[
+                                f"step_{name}"
+                            ] += getattr(step, name)
+                    if evidence.status is AddThinGenerationStatus.FAILED:
+                        accumulator.failures += 1
+                    elif evidence.status is AddThinGenerationStatus.REFUSED:
+                        accumulator.refusals += 1
+                    else:
+                        if evidence.status is AddThinGenerationStatus.EMPTY:
+                            accumulator.refusals += 1
+                        accumulator.consume(
+                            _compare_streams(
+                                reference,
+                                result.events,
+                                partition,
+                            )
+                        )
         _enforce_runtime(started, corpus.profile.max_runtime_seconds)
 
     subject_ids = {
@@ -2558,6 +2788,8 @@ def run_reverse_degradation_benchmark_campaign(
         subject_ids[key] = regime_candidates[modulation].candidate_id
     if neural_key is not None and neural_candidate is not None:
         subject_ids[neural_key] = neural_candidate.candidate_id
+    if add_thin_key is not None and add_thin_candidate is not None:
+        subject_ids[add_thin_key] = add_thin_candidate.candidate_id
     roles = {
         "dense_identity": "baseline",
         "degraded_identity": "baseline",
@@ -2568,6 +2800,7 @@ def run_reverse_degradation_benchmark_campaign(
         **{key: "candidate" for key in hawkes_keys.values()},
         **{key: "candidate" for key in regime_keys.values()},
         **({neural_key: "candidate"} if neural_key is not None else {}),
+        **({add_thin_key: "candidate"} if add_thin_key is not None else {}),
     }
     method_names = dict.fromkeys(accumulators, "")
     for name in method_names:
@@ -2580,6 +2813,8 @@ def run_reverse_degradation_benchmark_campaign(
         method_names[key] = f"regime_hawkes_{modulation.value}"
     if neural_key is not None:
         method_names[neural_key] = "neural_tpp_rmtpp_cpu_v1"
+    if add_thin_key is not None:
+        method_names[add_thin_key] = "add_thin_histogram_marked_cpu_v1"
     fit_by_key = {clock_keys[family]: fit for family, fit in clock_fits.items()}
     hawkes_fit_by_key = {
         hawkes_keys[structure]: fit for structure, fit in hawkes_fits.items()
@@ -2592,6 +2827,33 @@ def run_reverse_degradation_benchmark_campaign(
         if neural_key is not None and neural_fit is not None
         else {}
     )
+    add_thin_fit_by_key = (
+        {add_thin_key: add_thin_fit}
+        if add_thin_key is not None and add_thin_fit is not None
+        else {}
+    )
+    extra_metrics_by_key: dict[str, Mapping[str, JSONScalar]] = {
+        **{
+            key: _event_clock_fit_metrics(fit)
+            for key, fit in fit_by_key.items()
+        },
+        **{
+            key: _marked_hawkes_fit_metrics(fit)
+            for key, fit in hawkes_fit_by_key.items()
+        },
+        **{
+            key: _regime_hawkes_fit_metrics(fit)
+            for key, fit in regime_fit_by_key.items()
+        },
+        **{
+            key: _neural_tpp_fit_metrics(fit)
+            for key, fit in neural_fit_by_key.items()
+        },
+        **{
+            key: _add_thin_fit_metrics(fit, add_thin_generation_totals)
+            for key, fit in add_thin_fit_by_key.items()
+        },
+    }
     reports = tuple(
         _candidate_report(
             subject_id=subject_ids[name],
@@ -2606,29 +2868,14 @@ def run_reverse_degradation_benchmark_campaign(
                 or name in hawkes_fit_by_key
                 or name in regime_fit_by_key
                 or name in neural_fit_by_key
+                or name in add_thin_fit_by_key
                 else 1
             ),
             evaluated_window_count=len(evaluated),
             provisional=(
                 name == "empirical_motif" and motif_candidate_provisional
             ),
-            extra_metrics=(
-                _event_clock_fit_metrics(fit_by_key[name])
-                if name in fit_by_key
-                else (
-                    _marked_hawkes_fit_metrics(hawkes_fit_by_key[name])
-                    if name in hawkes_fit_by_key
-                    else (
-                        _regime_hawkes_fit_metrics(regime_fit_by_key[name])
-                        if name in regime_fit_by_key
-                        else (
-                            _neural_tpp_fit_metrics(neural_fit_by_key[name])
-                            if name in neural_fit_by_key
-                            else None
-                        )
-                    )
-                )
-            ),
+            extra_metrics=extra_metrics_by_key.get(name),
         )
         for name, accumulator in accumulators.items()
     )
@@ -2706,6 +2953,10 @@ def run_reverse_degradation_benchmark_campaign(
     if neural_config is not None:
         base_campaign_metrics["point_process_diagnostic_status"] = (
             "available-bounded-rmtpp-cpu-challenger"
+        )
+    if add_thin_selected_config is not None:
+        base_campaign_metrics["point_process_diagnostic_status"] = (
+            "available-bounded-marked-add-thin-cpu-challenger"
         )
     base_campaign_metrics.update(
         {
@@ -3127,6 +3378,123 @@ def _neural_tpp_fit_metrics(
         ),
         "automatic_winner": False,
     }
+
+
+def _add_thin_fit_metrics(
+    fit: AddThinFitResultV1,
+    generation_totals: Mapping[str, float],
+) -> dict[str, JSONScalar]:
+    """Expose Add-Thin split, denoising, resource, and B/C/D/E evidence."""
+    dataset = fit.dataset_manifest
+    checkpoint = fit.checkpoint
+    runtime = fit.runtime_metadata
+    metrics: dict[str, JSONScalar] = {
+        "add_thin_architecture": "histogram_marked_add_thin_cpu_v1",
+        "add_thin_config_id": fit.config_id,
+        "add_thin_fit_id": fit.fit_id,
+        "add_thin_fit_status": fit.status.value,
+        "add_thin_fit_converged": fit.converged,
+        "add_thin_fit_failure_reason": fit.failure_reason,
+        "add_thin_training_window_count": fit.training_window_count,
+        "add_thin_tuning_window_count": fit.tuning_window_count,
+        "add_thin_training_event_count": fit.training_event_count,
+        "add_thin_tuning_event_count": fit.tuning_event_count,
+        "add_thin_fit_wall_time_ms": fit.fit_wall_time_ms,
+        "add_thin_fit_peak_memory_bytes": fit.fit_peak_memory_bytes,
+        "add_thin_runtime_os": cast(
+            JSONScalar, runtime.get("operating_system")
+        ),
+        "add_thin_runtime_machine": cast(JSONScalar, runtime.get("machine")),
+        "add_thin_python_implementation": cast(
+            JSONScalar, runtime.get("python_implementation")
+        ),
+        "add_thin_python_version": cast(
+            JSONScalar, runtime.get("python_version")
+        ),
+        "add_thin_accelerator_policy": cast(
+            JSONScalar, runtime.get("accelerator_policy")
+        ),
+        "add_thin_dataset_id": (
+            dataset.dataset_id if dataset is not None else None
+        ),
+        "add_thin_protected_window_count": (
+            dataset.protected_window_count if dataset is not None else None
+        ),
+        "add_thin_exact_duplicate_count": (
+            dataset.exact_duplicate_count if dataset is not None else None
+        ),
+        "add_thin_near_duplicate_collision_count": (
+            dataset.near_duplicate_collision_count
+            if dataset is not None
+            else None
+        ),
+        "add_thin_interval_overlap_count": (
+            dataset.interval_overlap_count if dataset is not None else None
+        ),
+        "add_thin_checkpoint_id": (
+            checkpoint.checkpoint_id if checkpoint is not None else None
+        ),
+        "add_thin_selected_smoothing": (
+            checkpoint.selected_smoothing if checkpoint is not None else None
+        ),
+        "add_thin_train_classifier_bce": (
+            checkpoint.train_classifier_bce if checkpoint is not None else None
+        ),
+        "add_thin_train_missing_poisson_nll": (
+            checkpoint.train_missing_poisson_nll
+            if checkpoint is not None
+            else None
+        ),
+        "add_thin_train_objective": (
+            checkpoint.train_objective if checkpoint is not None else None
+        ),
+        "add_thin_tune_classifier_bce": (
+            checkpoint.tune_classifier_bce if checkpoint is not None else None
+        ),
+        "add_thin_tune_missing_poisson_nll": (
+            checkpoint.tune_missing_poisson_nll
+            if checkpoint is not None
+            else None
+        ),
+        "add_thin_tune_objective": (
+            checkpoint.tune_objective if checkpoint is not None else None
+        ),
+        "add_thin_baseline_tune_objective": (
+            checkpoint.baseline_tune_objective
+            if checkpoint is not None
+            else None
+        ),
+        "add_thin_tune_count_relative_error": (
+            checkpoint.tune_count_relative_error
+            if checkpoint is not None
+            else None
+        ),
+        "add_thin_tune_mark_l1": (
+            checkpoint.tune_mark_l1 if checkpoint is not None else None
+        ),
+        "add_thin_parameter_count": (
+            checkpoint.parameter_count if checkpoint is not None else None
+        ),
+        "add_thin_parameter_bytes": (
+            checkpoint.parameter_bytes if checkpoint is not None else None
+        ),
+        "add_thin_smoothing_candidate_count": (
+            len(checkpoint.candidate_objectives)
+            if checkpoint is not None
+            else None
+        ),
+        "point_process_diagnostic_status": (
+            "available-add-thin-forward-and-b-c-d-e-reverse-accounting"
+        ),
+        "automatic_winner": False,
+    }
+    metrics.update(
+        {
+            f"add_thin_generation_{name}": int(value)
+            for name, value in generation_totals.items()
+        }
+    )
+    return metrics
 
 
 def _gate_observations(

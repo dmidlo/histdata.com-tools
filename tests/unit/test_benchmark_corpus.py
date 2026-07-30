@@ -9,6 +9,7 @@ import pytest
 
 import histdatacom.synthetic.benchmark_corpus as corpus_module
 from histdatacom.runtime_contracts import ArtifactRef
+from histdatacom.synthetic.add_thin import default_add_thin_config
 from histdatacom.synthetic.benchmark import BenchmarkEventV1
 from histdatacom.synthetic.benchmark_corpus import (
     PREDECLARED_GATE_COMMIT,
@@ -379,3 +380,12 @@ def test_neural_tpp_campaign_accepts_none_or_the_fixed_config() -> None:
     assert corpus_module._validated_neural_tpp_config(config) == config
     with pytest.raises(TypeError, match="invalid config"):
         corpus_module._validated_neural_tpp_config(object())
+
+
+def test_add_thin_campaign_accepts_none_or_the_fixed_config() -> None:
+    config = default_add_thin_config()
+
+    assert corpus_module._validated_add_thin_config(None) is None
+    assert corpus_module._validated_add_thin_config(config) == config
+    with pytest.raises(TypeError, match="invalid config"):
+        corpus_module._validated_add_thin_config(object())

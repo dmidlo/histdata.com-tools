@@ -234,3 +234,7 @@ and `173eb81b97f612a5937e3d8b29ddbbaf99c4ea584924a30e84e2362325c0f265`.
 - Shchur et al., [*Intensity-Free Learning of Temporal Point
   Processes*](https://openreview.net/forum?id=HygOjhEYDH), context for the
   limits of intensity-based parameterizations.
+
+The next independent comparison is the [bounded marked Add-Thin
+challenger](add-thin-challenger.md); it does not modify this RMTPP contract or
+its retained 15-report closure campaign.
