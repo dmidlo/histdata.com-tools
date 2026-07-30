@@ -9,16 +9,19 @@ large analytical frames in flags or workflow control metadata.
 
 ## Supported input and scientific acknowledgement
 
-Version 2.1 accepts only:
+The current v2.4 compatibility boundary accepts only:
 
 - HistData ASCII tick caches below an `ASCII/T` source root;
 - the complete `EURGBP`, `EURUSD`, `GBPUSD` synchronized triangle;
 - `ex_post_reconstruction` or `ex_ante_simulation`, selected explicitly; and
-- modern-reference delivery by default, or broker-conditioned delivery only
-  when a strong `broker_delivery_artifact_v1` reference is supplied.
+- modern-reference delivery.
 
-M1, OHLC, bar, partial-triangle, and broker-only requests are unsupported and
-exit as invalid plans. Every execution request must also carry the exact
+Provider-neutral domain contracts remain the architectural foundation, but
+alternate providers, OANDA, live broker inputs, and broker-conditioned
+delivery are later-milestone work and are non-executable here. Existing broker
+research contracts are not current dataset qualification. M1, OHLC, bar, and
+partial-triangle requests are unsupported and exit as invalid plans. Every
+execution request must also carry the exact
 machine-readable scientific nonclaim and a true acknowledgement:
 
 > Output is a plausible counterfactual ensemble conditioned on declared
@@ -28,6 +31,19 @@ The acknowledgement records operator intent. It does not weaken information
 audits, validation, immutable-anchor checks, or certification gates.
 
 ## Construct a plan and request
+
+Discover the installed substrate and audit a JSON plan before constructing it:
+
+```sh
+histdatacom reconstruction schemas --json
+histdatacom reconstruction compatibility --plan plan-spec.json --json
+```
+
+Both commands use the same registry and compatibility engine consumed by
+`ReconstructionClient.construct_plan()`. See
+[`reconstruction-schema-compatibility.md`](reconstruction-schema-compatibility.md)
+for field metadata, cache translations, compatibility states, and future
+reserved contracts.
 
 Planning starts from a JSON `ReconstructionPlanSpecV1`. Paths point to strong,
 qualified artifacts; data rows remain in their source artifacts.

@@ -1887,8 +1887,7 @@ class SchrodingerBridgeFitResultV1:
                 self, name, _bounded_int(getattr(self, name), name, 0, 10**15)
             )
         runtime = {
-            str(name): cast(JSONValue, value)
-            for name, value in self.runtime_metadata.items()
+            str(name): value for name, value in self.runtime_metadata.items()
         }
         object.__setattr__(
             self, "runtime_metadata", dict(sorted(runtime.items()))

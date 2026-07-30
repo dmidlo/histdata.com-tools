@@ -37,6 +37,14 @@ from histdatacom.orchestration.reconstruction import (
     write_reconstruction_report,
 )
 from histdatacom.orchestration.supervisor import OrchestrationSupervisor
+from histdatacom.reconstruction_schema import (
+    ReconstructionCompatibilityReportV1,
+    ReconstructionCompatibilityStatus,
+    ReconstructionSchemaRegistryV1,
+    evaluate_reconstruction_compatibility,
+    read_compatibility_plan,
+    reconstruction_schema_registry,
+)
 from histdatacom.runtime_contracts import ArtifactRef, JSONValue
 from histdatacom.synthetic.certification import (
     ReconstructionCertificationDossierV2,
@@ -904,6 +912,29 @@ class ReconstructionClient:
         self.supervisor = supervisor
         self.temporal_client = temporal_client
 
+    def schemas(self) -> ReconstructionSchemaRegistryV1:
+        """Return the installed deterministic reconstruction schema registry."""
+        return reconstruction_schema_registry()
+
+    def compatibility(
+        self,
+        plan: ReconstructionPlanSpecV1 | Mapping[str, Any] | str | Path,
+        *,
+        inspect_source: bool = True,
+        inspect_artifacts: bool = True,
+    ) -> ReconstructionCompatibilityReportV1:
+        """Evaluate one plan without mutating its dataset or artifacts."""
+        payload = (
+            read_compatibility_plan(plan)
+            if isinstance(plan, (str, Path))
+            else plan
+        )
+        return evaluate_reconstruction_compatibility(
+            payload,
+            inspect_source=inspect_source,
+            inspect_artifacts=inspect_artifacts,
+        )
+
     def construct_plan(self, spec: ReconstructionPlanSpecV1) -> ArtifactRef:
         """Build, execution-validate, and persist one content-addressed plan."""
         plan = self._construct_plan_model(spec)
@@ -913,6 +944,39 @@ class ReconstructionClient:
         self, spec: ReconstructionPlanSpecV1
     ) -> SyntheticInfillPlanV1:
         """Build one validated plan without a redundant persistence readback."""
+        compatibility = self.compatibility(
+            spec,
+            inspect_source=True,
+            # Contract-specific loaders below verify every strong input.  The
+            # public compatibility command additionally inspects their wire
+            # schema before construction.
+            inspect_artifacts=False,
+        )
+        if not compatibility.executable:
+            blocking = next(
+                (
+                    item
+                    for item in compatibility.findings
+                    if item.status
+                    not in {
+                        ReconstructionCompatibilityStatus.EXACT,
+                        ReconstructionCompatibilityStatus.COMPATIBLE_TRANSLATION,
+                        ReconstructionCompatibilityStatus.DEPRECATED,
+                    }
+                ),
+                None,
+            )
+            message = (
+                f"{blocking.code}: {blocking.message}"
+                if blocking is not None
+                else "reconstruction compatibility refused execution"
+            )
+            if (
+                compatibility.status
+                is ReconstructionCompatibilityStatus.RESEARCH_ONLY
+            ):
+                raise ReconstructionRefusedError(message)
+            raise ReconstructionUnsupportedError(message)
         try:
             plan = build_synthetic_infill_plan(
                 spec.source_root,
@@ -1564,9 +1628,13 @@ class ReconstructionClient:
         ModernReferenceCertificationCampaignResultV1,
     ]:
         """Run the public hash-verified modern-reference evidence campaign."""
-        return run_modern_reference_certification_campaign(
+        result: tuple[
+            ReconstructionCertificationDossierV2,
+            ModernReferenceCertificationCampaignResultV1,
+        ] = run_modern_reference_certification_campaign(
             spec_path, output_directory=output_directory
         )
+        return result
 
     def _executable_plan(
         self, request: ReconstructionExecutionRequestV1
@@ -2105,6 +2173,8 @@ __all__ = [
     "RECONSTRUCTION_SYMBOLS",
     "RECONSTRUCTION_TIMEFRAME",
     "ReconstructionClient",
+    "ReconstructionCompatibilityReportV1",
+    "ReconstructionCompatibilityStatus",
     "ReconstructionExecutionRequestV1",
     "ReconstructionExitCode",
     "ReconstructionOperationReceiptV1",
@@ -2116,6 +2186,7 @@ __all__ = [
     "ReconstructionPreflightV1",
     "ReconstructionPublicError",
     "ReconstructionRefusedError",
+    "ReconstructionSchemaRegistryV1",
     "ReconstructionUnsupportedError",
     "ReconstructionValidationError",
     "ModernReferenceCertificationCampaignResultV1",

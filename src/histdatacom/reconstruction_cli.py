@@ -27,6 +27,7 @@ from histdatacom.reconstruction import (
     write_execution_request,
     write_operation_receipt,
 )
+from histdatacom.reconstruction_schema import ReconstructionCompatibilityStatus
 from histdatacom.synthetic.information import InformationMode
 from histdatacom.synthetic.certification import CertificationState
 
@@ -58,6 +59,23 @@ def build_parser() -> argparse.ArgumentParser:
     )
     subparsers = parser.add_subparsers(
         dest="reconstruction_command", required=True
+    )
+
+    schemas = subparsers.add_parser(
+        "schemas",
+        help="discover installed reconstruction and evidence contracts",
+    )
+    schemas.add_argument(
+        "--json", action="store_true", default=argparse.SUPPRESS
+    )
+
+    compatibility = subparsers.add_parser(
+        "compatibility",
+        help="audit a proposed plan against installed executable contracts",
+    )
+    compatibility.add_argument("--plan", required=True, metavar="PATH")
+    compatibility.add_argument(
+        "--json", action="store_true", default=argparse.SUPPRESS
     )
 
     plan = subparsers.add_parser(
@@ -232,6 +250,17 @@ def _run_command(
     client: ReconstructionClient, args: argparse.Namespace
 ) -> tuple[Mapping[str, Any], ReconstructionExitCode]:
     command = args.reconstruction_command
+    if command == "schemas":
+        return client.schemas().to_dict(), ReconstructionExitCode.SUCCESS
+    if command == "compatibility":
+        report = client.compatibility(args.plan)
+        if report.executable:
+            code = ReconstructionExitCode.SUCCESS
+        elif report.status is ReconstructionCompatibilityStatus.RESEARCH_ONLY:
+            code = ReconstructionExitCode.REFUSED
+        else:
+            code = ReconstructionExitCode.INVALID_PLAN
+        return report.to_dict(), code
     if command == "plan":
         ref = client.construct_plan(read_plan_spec(args.spec))
         return ref.to_dict(), ReconstructionExitCode.SUCCESS
@@ -348,6 +377,44 @@ def _certification_exit_code(
 def _write_result(result: Mapping[str, Any], *, as_json: bool) -> None:
     if as_json:
         print(json.dumps(result, indent=2, sort_keys=True))  # noqa:T201
+        return
+    schema_version = result.get("schema_version")
+    if schema_version == "histdatacom.reconstruction-schema-registry.v1":
+        print(  # noqa:T201
+            "Reconstruction schemas "
+            f"({result.get('registry_id', '')}): "
+            f"{result.get('contract_count', 0)} contracts"
+        )
+        scope = result.get("current_scope", {})
+        if isinstance(scope, Mapping):
+            print(  # noqa:T201
+                "executable scope: "
+                f"{scope.get('provider')}/"
+                f"{scope.get('source_format')}/"
+                f"{scope.get('timeframe')}"
+            )
+            print("broker/OANDA: later milestone")  # noqa:T201
+        counts = result.get("status_counts", {})
+        if isinstance(counts, Mapping):
+            summary = ", ".join(
+                f"{key}={counts[key]}" for key in sorted(counts)
+            )
+            print(f"contract status: {summary}")  # noqa:T201
+        return
+    if schema_version == "histdatacom.reconstruction-compatibility-report.v1":
+        print(  # noqa:T201
+            "Reconstruction compatibility "
+            f"{result.get('status')} ({result.get('report_id', '')})"
+        )
+        print(
+            f"executable: {str(bool(result.get('executable'))).lower()}"
+        )  # noqa:T201
+        for finding in result.get("findings", ()):  # type: ignore[union-attr]
+            if isinstance(finding, Mapping):
+                print(  # noqa:T201
+                    f"{finding.get('status')} {finding.get('code')}: "
+                    f"{finding.get('message')}"
+                )
         return
     status = result.get("status") or result.get("kind") or "complete"
     identity = (

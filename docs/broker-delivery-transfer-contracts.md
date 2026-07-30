@@ -1,5 +1,10 @@
 # Broker delivery transfer contracts
 
+> **Later milestone:** this implemented research boundary is not admitted by
+> the v2.4 public compatibility policy. Current reconstruction uses only
+> HistData.com ASCII/T datasets and `modern_reference` delivery; OANDA and
+> broker-conditioned execution remain blocked on a qualified broker feed.
+
 `histdatacom.synthetic.broker_transfer` applies an effective-dated broker
 delivery fingerprint as a bounded observation-style transform. It does not
 generate historical price paths, mutate observed anchors, or persist augmented

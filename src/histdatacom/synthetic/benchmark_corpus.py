@@ -2966,13 +2966,13 @@ def run_reverse_degradation_benchmark_campaign(
                 if bridge_generator is None:
                     accumulator.failures += 1
                 else:
-                    result = bridge_generator.generate_with_evidence(
+                    bridge_result = bridge_generator.generate_with_evidence(
                         degraded,
                         scenario=scenario,
                         window=reconstruction_window,
                         ensemble_member_id=member_id,
                     )
-                    evidence = result.evidence
+                    bridge_evidence = bridge_result.evidence
                     bridge_generation_totals["attempt_count"] += 1
                     for name in (
                         "input_event_count",
@@ -2990,36 +2990,36 @@ def run_reverse_degradation_benchmark_campaign(
                         "wall_time_ms",
                     ):
                         bridge_generation_totals[name] += getattr(
-                            evidence, name
+                            bridge_evidence, name
                         )
                     bridge_generation_totals["peak_memory_bytes"] = max(
                         bridge_generation_totals["peak_memory_bytes"],
-                        evidence.peak_memory_bytes,
+                        bridge_evidence.peak_memory_bytes,
                     )
-                    if evidence.failure_reason is not None:
+                    if bridge_evidence.failure_reason is not None:
                         bridge_generation_totals[
-                            f"reason_count.{evidence.failure_reason}"
+                            f"reason_count.{bridge_evidence.failure_reason}"
                         ] += 1
                     if (
-                        evidence.status
+                        bridge_evidence.status
                         is SchrodingerBridgeGenerationStatus.FAILED
                     ):
                         accumulator.failures += 1
                     elif (
-                        evidence.status
+                        bridge_evidence.status
                         is SchrodingerBridgeGenerationStatus.REFUSED
                     ):
                         accumulator.refusals += 1
                     else:
                         if (
-                            evidence.status
+                            bridge_evidence.status
                             is SchrodingerBridgeGenerationStatus.EMPTY
                         ):
                             accumulator.refusals += 1
                         accumulator.consume(
                             _compare_streams(
                                 reference,
-                                result.events,
+                                bridge_result.events,
                                 partition,
                             )
                         )

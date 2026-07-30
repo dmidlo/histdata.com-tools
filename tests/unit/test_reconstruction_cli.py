@@ -57,6 +57,8 @@ def test_installed_help_lists_complete_reconstruction_family(
     assert exc_info.value.code == 0
     output = capsys.readouterr().out
     for command in (
+        "schemas",
+        "compatibility",
         "plan",
         "plan-set",
         "preflight-set",

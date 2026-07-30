@@ -2985,6 +2985,10 @@ for calibration, confidence, diversity, retention, and replay semantics.
 
 #### Live Broker Delivery Capture
 
+> **Later milestone:** no live broker or OANDA feed is selected for the current
+> HistData-only reconstruction path. The contracts below preserve a future
+> capture seam; they do not qualify a v2.4 execution dataset.
+
 `histdatacom.broker_capture` records a broker feed as versioned measurement
 evidence rather than guessing modern delivery style from historical vendor
 data. Adapter messages retain optional broker/exchange timestamps with explicit
@@ -3007,6 +3011,10 @@ See [`docs/broker-capture-contracts.md`](docs/broker-capture-contracts.md) for
 clock, security, storage, replay, fixture, and fingerprint eligibility gates.
 
 #### Broker Delivery Fingerprints
+
+> **Later milestone:** broker/OANDA feed adaptation is not part of the current
+> HistData-only executable path. These contracts preserve the future seam, but
+> no broker dataset or profile is admitted by v2.4 compatibility.
 
 Qualified broker captures are converted into compact immutable delivery
 profiles with `fit_broker_delivery_fingerprint()`. Fitting verifies capture
@@ -3031,6 +3039,10 @@ for eligibility, streaming, condition, drift, persistence, and #445 handoff
 semantics.
 
 #### Broker-Conditioned Reconstruction
+
+> **Later milestone:** this research implementation remains non-executable in
+> the current public planner until a qualified broker feed exists. The v2.4
+> path accepts only HistData.com ASCII/T data and `modern_reference` delivery.
 
 `condition_broker_proposal()` applies a versioned, bounded broker-delivery
 strength to cadence, burst/quiet/outage, spread, and precision coordinates before
@@ -3305,10 +3317,25 @@ supported window is retained as a refusal-only shard with zero workflows and
 zero output estimates; acknowledging refusals makes that no-op safe to skip,
 but never turns the unsupported span into reconstructed output.
 
-Only ASCII/T and the complete EURGBP/EURUSD/GBPUSD triangle are accepted. M1,
-bar, partial-triangle, and broker-only requests fail before execution. Temporal
-is the production path; `--local` is an explicit first-party handler smoke and
-checkpoint-recovery mode, never an automatic fallback. Operation receipts bind
+Schema discovery and compatibility admission are also first-party:
+
+```sh
+histdatacom reconstruction schemas --json
+histdatacom reconstruction compatibility --plan plan-spec.json --json
+```
+
+The registry audits public contracts, explicitly accounts for internal-only
+schemas, distinguishes legacy raw and enriched HistData caches, and reserves
+later portfolio contracts without making them executable. The planner consumes
+the same compatibility engine. Provider-neutral identity is the architectural
+foundation, while alternate providers, OANDA, and broker conditioning remain
+later-milestone work.
+
+Only HistData.com ASCII/T and the complete EURGBP/EURUSD/GBPUSD triangle are
+accepted. M1, bar, partial-triangle, alternate-provider, OANDA, and broker
+requests fail before execution. Temporal is the production path; `--local` is
+an explicit first-party handler smoke and checkpoint-recovery mode, never an
+automatic fallback. Operation receipts bind
 each workflow handle to its actual reconstruction status store, and resumed
 attempts preserve scientific/checkpoint identity while using fresh parent and
 child Temporal IDs.
@@ -3321,7 +3348,9 @@ and success exit codes.
 See
 [`docs/reconstruction-public-interfaces.md`](docs/reconstruction-public-interfaces.md)
 for exact JSON contracts, commands, Python examples, recovery semantics, and
-the exit-code table.
+the exit-code table, and
+[`docs/reconstruction-schema-compatibility.md`](docs/reconstruction-schema-compatibility.md)
+for discovery and admission semantics.
 
 ---
 
