@@ -121,8 +121,11 @@ and partition counts; they never expose local paths or row values.
 | `unsupported` | Outside the qualified provider or contract boundary. |
 | `invalid` | Malformed, unversioned, unknown-field, wrong-grain, or otherwise unsafe. |
 
-The reserved v2 portfolio plan and proposal-engine descriptor document the
-handoff to issue #489. Point-in-time evidence, synchronized cross-series
-constraint windows, and experiment manifests similarly reserve the contract
-seams for issues #483, #484, and #486 without falsely claiming that those
+The point-in-time evidence policy, record, projection, and use contracts are
+implemented by issue #483 and are consumed by the first-party HistData plan
+and runtime. See
+[Point-in-time reconstruction evidence contracts](reconstruction-evidence-contracts.md).
+The reserved synchronized cross-series constraint window, experiment manifest,
+v2 portfolio plan, and proposal-engine descriptor preserve the still-future
+handoffs to issues #484, #486, and #489 without falsely claiming that those
 implementations already exist.

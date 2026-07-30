@@ -9,12 +9,13 @@ bounded metadata and strong references.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, replace
-from datetime import datetime, timezone
-from enum import IntEnum
 import hashlib
 import json
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass, field, replace
+from datetime import datetime, timezone
+from enum import IntEnum
+from itertools import pairwise
 from pathlib import Path
 from typing import Any, cast
 
@@ -37,6 +38,10 @@ from histdatacom.orchestration.reconstruction import (
     write_reconstruction_report,
 )
 from histdatacom.orchestration.supervisor import OrchestrationSupervisor
+from histdatacom.reconstruction_evidence import (
+    CURRENT_EVIDENCE_SOURCE_PROVIDER_ID,
+    ReconstructionEvidencePolicyV1,
+)
 from histdatacom.reconstruction_schema import (
     ReconstructionCompatibilityReportV1,
     ReconstructionCompatibilityStatus,
@@ -190,6 +195,9 @@ class ReconstructionPlanSpecV1:
     delivery_mode: ReconstructionDeliveryMode = (
         ReconstructionDeliveryMode.MODERN_REFERENCE
     )
+    evidence_policy: ReconstructionEvidencePolicyV1 = field(
+        default_factory=ReconstructionEvidencePolicyV1
+    )
     broker_delivery_artifact: ArtifactRef | None = None
     source_format: str = RECONSTRUCTION_SOURCE_FORMAT
     timeframe: str = RECONSTRUCTION_TIMEFRAME
@@ -229,6 +237,16 @@ class ReconstructionPlanSpecV1:
             "delivery_mode",
             ReconstructionDeliveryMode.from_value(self.delivery_mode),
         )
+        if not isinstance(self.evidence_policy, ReconstructionEvidencePolicyV1):
+            raise ReconstructionUnsupportedError(
+                "evidence_policy must use the installed v1 contract"
+            )
+        if self.evidence_policy.supported_provider_ids != (
+            CURRENT_EVIDENCE_SOURCE_PROVIDER_ID,
+        ):
+            raise ReconstructionUnsupportedError(
+                "the current evidence policy supports only HistData.com"
+            )
         _validate_public_input_contract(
             source_format=self.source_format,
             timeframe=self.timeframe,
@@ -304,6 +322,7 @@ class ReconstructionPlanSpecV1:
             "requested_end_ns": self.requested_end_ns,
             "window_size_ns": self.window_size_ns,
             "delivery_mode": self.delivery_mode.value,
+            "evidence_policy": self.evidence_policy.to_dict(),
             "broker_delivery_artifact": (
                 self.broker_delivery_artifact.to_dict()
                 if self.broker_delivery_artifact is not None
@@ -316,13 +335,21 @@ class ReconstructionPlanSpecV1:
         }
 
     @classmethod
-    def from_dict(cls, data: Mapping[str, Any]) -> "ReconstructionPlanSpecV1":
+    def from_dict(cls, data: Mapping[str, Any]) -> ReconstructionPlanSpecV1:
         """Restore a strict public plan specification."""
         broker_payload = data.get("broker_delivery_artifact")
         broker_ref = (
             ArtifactRef.from_dict(_mapping(broker_payload))
             if broker_payload is not None
             else None
+        )
+        evidence_payload = data.get("evidence_policy")
+        evidence_policy = (
+            ReconstructionEvidencePolicyV1()
+            if evidence_payload is None
+            else ReconstructionEvidencePolicyV1.from_dict(
+                _mapping(evidence_payload)
+            )
         )
         return cls(
             source_root=str(data.get("source_root", "")),
@@ -377,6 +404,7 @@ class ReconstructionPlanSpecV1:
             delivery_mode=ReconstructionDeliveryMode.from_value(
                 str(data.get("delivery_mode", "modern_reference"))
             ),
+            evidence_policy=evidence_policy,
             broker_delivery_artifact=broker_ref,
             source_format=str(data.get("source_format", "ascii")),
             timeframe=str(data.get("timeframe", "T")),
@@ -480,7 +508,7 @@ class ReconstructionPlanShardV1:
         return {**self.identity_payload(), "shard_id": self.shard_id}
 
     @classmethod
-    def from_dict(cls, data: Mapping[str, Any]) -> "ReconstructionPlanShardV1":
+    def from_dict(cls, data: Mapping[str, Any]) -> ReconstructionPlanShardV1:
         """Restore and identity-check one plan shard."""
         return cls(
             start_period=str(data.get("start_period", "")),
@@ -529,7 +557,7 @@ class ReconstructionPlanSetV1:
             )
         if len({item.shard_id for item in shards}) != len(shards):
             raise ReconstructionPlanError("plan set contains duplicate shards")
-        for previous, current in zip(shards, shards[1:], strict=False):
+        for previous, current in pairwise(shards):
             if previous.requested_end_ns != current.requested_start_ns:
                 raise ReconstructionPlanError(
                     "plan set shards are not contiguous"
@@ -597,7 +625,7 @@ class ReconstructionPlanSetV1:
         return {**self.identity_payload(), "plan_set_id": self.plan_set_id}
 
     @classmethod
-    def from_dict(cls, data: Mapping[str, Any]) -> "ReconstructionPlanSetV1":
+    def from_dict(cls, data: Mapping[str, Any]) -> ReconstructionPlanSetV1:
         """Restore and identity-check one full-range plan set."""
         if data.get("scientific_nonclaim") != SCIENTIFIC_NONCLAIM:
             raise ReconstructionPlanError(
@@ -731,7 +759,7 @@ class ReconstructionExecutionRequestV1:
     @classmethod
     def from_dict(
         cls, data: Mapping[str, Any]
-    ) -> "ReconstructionExecutionRequestV1":
+    ) -> ReconstructionExecutionRequestV1:
         """Restore and identity-check an operator execution request."""
         nonclaim = str(data.get("scientific_nonclaim", ""))
         if nonclaim != SCIENTIFIC_NONCLAIM:
@@ -856,7 +884,7 @@ class ReconstructionOperationReceiptV1:
     @classmethod
     def from_dict(
         cls, data: Mapping[str, Any]
-    ) -> "ReconstructionOperationReceiptV1":
+    ) -> ReconstructionOperationReceiptV1:
         """Restore an identity-checked public operation receipt."""
         return cls(
             operation=str(data.get("operation", "")),
@@ -1001,6 +1029,7 @@ class ReconstructionClient:
                 window_size_ns=spec.window_size_ns,
                 information_mode=spec.information_mode,
                 delivery_mode=spec.delivery_mode,
+                evidence_policy=spec.evidence_policy,
                 broker_delivery_artifact=spec.broker_delivery_artifact,
             )
             validate_synthetic_infill_plan_for_execution(plan)
@@ -1295,6 +1324,7 @@ class ReconstructionClient:
                     "benchmark",
                     "certification",
                     "information",
+                    "policy",
                     "qualification",
                     "validation",
                 )
@@ -1784,7 +1814,7 @@ def _attempt_workflow_id(
     digest = hashlib.sha256(
         (
             f"{request.run.run_id}|{request.request_fingerprint}|{execution_attempt_id}"
-        ).encode("utf-8")
+        ).encode()
     ).hexdigest()[:24]
     return f"histdatacom-reconstruction-{request.request_id}-{digest}"
 
@@ -2160,7 +2190,6 @@ __all__ = [
     "DEFAULT_PREVIEW_LIMIT",
     "MAX_PREVIEW_LIMIT",
     "MAX_RECONSTRUCTION_PLAN_SHARDS",
-    "InformationMode",
     "RECONSTRUCTION_EXECUTION_REQUEST_SCHEMA_VERSION",
     "RECONSTRUCTION_PLAN_SET_PREFLIGHT_SCHEMA_VERSION",
     "RECONSTRUCTION_PLAN_SET_SCHEMA_VERSION",
@@ -2172,9 +2201,14 @@ __all__ = [
     "RECONSTRUCTION_SOURCE_FORMAT",
     "RECONSTRUCTION_SYMBOLS",
     "RECONSTRUCTION_TIMEFRAME",
+    "InformationMode",
+    "ModernReferenceCertificationCampaignResultV1",
+    "ModernReferenceCertificationCampaignSpecV1",
+    "ReconstructionCertificationDossierV2",
     "ReconstructionClient",
     "ReconstructionCompatibilityReportV1",
     "ReconstructionCompatibilityStatus",
+    "ReconstructionEvidencePolicyV1",
     "ReconstructionExecutionRequestV1",
     "ReconstructionExitCode",
     "ReconstructionOperationReceiptV1",
@@ -2189,9 +2223,6 @@ __all__ = [
     "ReconstructionSchemaRegistryV1",
     "ReconstructionUnsupportedError",
     "ReconstructionValidationError",
-    "ModernReferenceCertificationCampaignResultV1",
-    "ModernReferenceCertificationCampaignSpecV1",
-    "ReconstructionCertificationDossierV2",
     "read_execution_request",
     "read_modern_reference_certification_campaign_spec",
     "read_operation_receipt",

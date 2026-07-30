@@ -22,6 +22,9 @@ from histdatacom.reconstruction import (
     ReconstructionPlanSpecV1,
     ReconstructionRefusedError,
 )
+from histdatacom.reconstruction_evidence import (
+    ReconstructionEvidencePolicyV1,
+)
 from histdatacom.reconstruction_schema import (
     _AUDITED_MODULES,
     CURRENT_PLAN_SCHEMA_VERSION,
@@ -197,6 +200,7 @@ def test_registry_explains_legacy_training_event_and_future_seams() -> None:
     legacy = contracts[LEGACY_HISTDATA_CACHE_SCHEMA_VERSION]
     training = contracts[TRAINING_SCHEMA_VERSION]
     event = contracts["histdatacom.synthetic-event.v1"]
+    evidence = contracts["histdatacom.reconstruction-evidence-projection.v1"]
     portfolio = contracts[PORTFOLIO_PLAN_SCHEMA_VERSION]
 
     assert "histdatacom.time-series-fingerprint.v1" in contracts
@@ -229,6 +233,16 @@ def test_registry_explains_legacy_training_event_and_future_seams() -> None:
     event_fields = {item.name: item for item in event.fields}
     assert "Immutable for observed origin" in event_fields["bid"].description
     assert event_fields["event_sequence"].identity_role != "not_identity"
+    assert evidence.family == "evidence"
+    assert evidence.status is ReconstructionContractStatus.OPTIONAL
+    assert evidence.consumer_stages == (
+        "source_enrichment",
+        "evidence_qualification",
+        "proposal",
+        "carving",
+        "validation",
+        "audit",
+    )
     assert portfolio.status is ReconstructionContractStatus.RESERVED
     assert "#489" in portfolio.audit_note
     for contract in contracts.values():
@@ -280,6 +294,20 @@ def test_legacy_and_enriched_histdata_caches_have_explicit_compatibility(
             {"source_provider_id": "oanda"},
             "alternate_provider_later_milestone",
             ReconstructionCompatibilityStatus.UNSUPPORTED,
+        ),
+        (
+            {
+                "evidence_policy": ReconstructionEvidencePolicyV1(
+                    supported_provider_ids=("histdata.com", "oanda")
+                ).to_dict()
+            },
+            "alternate_evidence_provider_later_milestone",
+            ReconstructionCompatibilityStatus.UNSUPPORTED,
+        ),
+        (
+            {"evidence_policy": {"schema_version": "invalid"}},
+            "invalid_evidence_policy",
+            ReconstructionCompatibilityStatus.INVALID,
         ),
         (
             {"source_format": "csv"},

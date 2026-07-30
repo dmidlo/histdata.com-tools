@@ -26,6 +26,9 @@ from histdatacom.data_quality.training_features import (
     TRAINING_SCHEMA_VERSION,
     training_feature_definitions,
 )
+from histdatacom.reconstruction_evidence import (
+    ReconstructionEvidencePolicyV1,
+)
 
 RECONSTRUCTION_SCHEMA_REGISTRY_VERSION = (
     "histdatacom.reconstruction-schema-registry.v1"
@@ -356,6 +359,7 @@ _AUDITED_MODULES = (
     "histdatacom.market_context.positioning",
     "histdatacom.orchestration.reconstruction",
     "histdatacom.reconstruction",
+    "histdatacom.reconstruction_evidence",
     "histdatacom.synthetic.contracts",
     "histdatacom.synthetic.streaming",
     "histdatacom.synthetic.information",
@@ -415,13 +419,6 @@ _REQUIRED_SCHEMA_TOKENS = (
 
 _RESERVED_CONTRACTS = (
     (
-        "histdatacom.reconstruction-evidence-projection.v1",
-        "PointInTimeEvidenceProjectionV1",
-        "evidence",
-        "Reserved for #483 point-in-time quality evidence.",
-        ("evidence_window_id", "available_at_ns", "source_partition_id"),
-    ),
-    (
         "histdatacom.cross-series-constraint-window.v1",
         "CrossSeriesConstraintWindowV1",
         "cross_series",
@@ -478,6 +475,7 @@ _PLAN_FIELDS = frozenset(
         "requested_end_ns",
         "window_size_ns",
         "delivery_mode",
+        "evidence_policy",
         "broker_delivery_artifact",
         "source_format",
         "timeframe",
@@ -970,6 +968,43 @@ def _check_current_scope(
             "v2.4 execution is qualified only for HistData.com data.",
             "Use source_provider_id=histdata.com; defer other providers.",
         )
+    evidence_policy = payload.get("evidence_policy")
+    if evidence_policy is not None and not isinstance(evidence_policy, Mapping):
+        _finding(
+            findings,
+            "invalid_evidence_policy",
+            ReconstructionCompatibilityStatus.INVALID,
+            "evidence_policy",
+            "The reconstruction evidence policy must be a v1 JSON object.",
+            "Supply a serialized ReconstructionEvidencePolicyV1.",
+        )
+    elif isinstance(evidence_policy, Mapping):
+        try:
+            validated_evidence_policy = (
+                ReconstructionEvidencePolicyV1.from_dict(evidence_policy)
+            )
+        except (TypeError, ValueError) as err:
+            _finding(
+                findings,
+                "invalid_evidence_policy",
+                ReconstructionCompatibilityStatus.INVALID,
+                "evidence_policy",
+                str(err),
+                "Supply a valid serialized ReconstructionEvidencePolicyV1.",
+            )
+            validated_evidence_policy = None
+        providers = evidence_policy.get("supported_provider_ids")
+        if validated_evidence_policy is not None and providers != [
+            HISTDATA_PROVIDER_ID
+        ]:
+            _finding(
+                findings,
+                "alternate_evidence_provider_later_milestone",
+                ReconstructionCompatibilityStatus.UNSUPPORTED,
+                "evidence_policy.supported_provider_ids",
+                "v2.4 evidence compilation is qualified only for HistData.com.",
+                "Use only histdata.com; defer broker/OANDA evidence adapters.",
+            )
     source_format = str(payload.get("source_format", "")).strip().lower()
     if source_format != SUPPORTED_SOURCE_FORMAT:
         _finding(
@@ -1396,6 +1431,8 @@ def _family(module_name: str, version: str) -> str:
         return "dataset"
     if "training" in module_name:
         return "training"
+    if "reconstruction_evidence" in module_name:
+        return "evidence"
     if "feed_epoch" in module_name:
         return "feed_epoch"
     if "market_context" in module_name:
@@ -1433,7 +1470,14 @@ def _consumer_stages(family: str) -> tuple[str, ...]:
         "training": ("source_enrichment", "evidence_qualification", "proposal"),
         "feed_epoch": ("evidence_qualification", "proposal", "validation"),
         "context": ("evidence_qualification", "proposal", "validation"),
-        "evidence": ("evidence_qualification", "proposal", "validation"),
+        "evidence": (
+            "source_enrichment",
+            "evidence_qualification",
+            "proposal",
+            "carving",
+            "validation",
+            "audit",
+        ),
         "benchmark": ("evidence_qualification", "certification"),
         "proposal": ("proposal",),
         "carving": ("carving",),

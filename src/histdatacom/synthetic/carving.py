@@ -280,7 +280,7 @@ class HistoricalCarvingConditionPolicyV1:
     @classmethod
     def from_dict(
         cls, data: Mapping[str, Any]
-    ) -> "HistoricalCarvingConditionPolicyV1":
+    ) -> HistoricalCarvingConditionPolicyV1:
         """Restore and verify one condition policy."""
         return cls(
             name=str(data.get("name", "")),
@@ -294,7 +294,7 @@ class HistoricalCarvingConditionPolicyV1:
         )
 
     @classmethod
-    def from_json(cls, text: str) -> "HistoricalCarvingConditionPolicyV1":
+    def from_json(cls, text: str) -> HistoricalCarvingConditionPolicyV1:
         """Restore a condition policy from deterministic JSON."""
         return cls.from_dict(_json_mapping(text))
 
@@ -354,7 +354,7 @@ class HistoricalCarvingQuarantineV1:
     @classmethod
     def from_dict(
         cls, data: Mapping[str, Any]
-    ) -> "HistoricalCarvingQuarantineV1":
+    ) -> HistoricalCarvingQuarantineV1:
         """Restore and verify one quarantine interval."""
         return cls(
             symbol=str(data.get("symbol", "")),
@@ -367,7 +367,7 @@ class HistoricalCarvingQuarantineV1:
         )
 
     @classmethod
-    def from_json(cls, text: str) -> "HistoricalCarvingQuarantineV1":
+    def from_json(cls, text: str) -> HistoricalCarvingQuarantineV1:
         """Restore a quarantine from deterministic JSON."""
         return cls.from_dict(_json_mapping(text))
 
@@ -537,7 +537,7 @@ class HistoricalCarvingConstraintSetV1:
     @classmethod
     def from_dict(
         cls, data: Mapping[str, Any]
-    ) -> "HistoricalCarvingConstraintSetV1":
+    ) -> HistoricalCarvingConstraintSetV1:
         """Restore and verify a version-one constraint set."""
         return cls(
             fingerprint_constraint_id=str(
@@ -580,7 +580,7 @@ class HistoricalCarvingConstraintSetV1:
         )
 
     @classmethod
-    def from_json(cls, text: str) -> "HistoricalCarvingConstraintSetV1":
+    def from_json(cls, text: str) -> HistoricalCarvingConstraintSetV1:
         """Restore a constraint set from deterministic JSON."""
         return cls.from_dict(_json_mapping(text))
 
@@ -646,9 +646,7 @@ class CarvingFingerprintEvidenceV1:
         return str(canonical_contract_json(self.to_dict()))
 
     @classmethod
-    def from_dict(
-        cls, data: Mapping[str, Any]
-    ) -> "CarvingFingerprintEvidenceV1":
+    def from_dict(cls, data: Mapping[str, Any]) -> CarvingFingerprintEvidenceV1:
         """Restore and verify fingerprint evidence."""
         return cls(
             validation_payload=_mapping(data.get("validation_payload")),
@@ -660,7 +658,7 @@ class CarvingFingerprintEvidenceV1:
         )
 
     @classmethod
-    def from_json(cls, text: str) -> "CarvingFingerprintEvidenceV1":
+    def from_json(cls, text: str) -> CarvingFingerprintEvidenceV1:
         """Restore fingerprint evidence from deterministic JSON."""
         return cls.from_dict(_json_mapping(text))
 
@@ -738,7 +736,7 @@ class HistoricalCarvingRejectionExampleV1:
     @classmethod
     def from_dict(
         cls, data: Mapping[str, Any]
-    ) -> "HistoricalCarvingRejectionExampleV1":
+    ) -> HistoricalCarvingRejectionExampleV1:
         """Restore and verify one bounded example."""
         return cls(
             candidate_event_id=str(data.get("candidate_event_id", "")),
@@ -885,7 +883,7 @@ class HistoricalCarvingEventLineageV1:
     @classmethod
     def from_dict(
         cls, data: Mapping[str, Any]
-    ) -> "HistoricalCarvingEventLineageV1":
+    ) -> HistoricalCarvingEventLineageV1:
         """Restore and verify accepted lineage."""
         return cls(
             output_event_id=str(data.get("output_event_id", "")),
@@ -980,7 +978,7 @@ class HistoricalCarvingValidationEvidenceV1:
     @classmethod
     def from_dict(
         cls, data: Mapping[str, Any]
-    ) -> "HistoricalCarvingValidationEvidenceV1":
+    ) -> HistoricalCarvingValidationEvidenceV1:
         """Restore and verify validation evidence."""
         return cls(
             fingerprint_evidence_id=_mapping_optional_text(
@@ -1083,7 +1081,7 @@ class HistoricalCarvedCandidateBatchV1:
         object.__setattr__(self, "accepted_events", events)
         object.__setattr__(self, "accepted_lineage", lineage)
         if not isinstance(self.rejection_summary, RejectionSummaryV1):
-            raise ValueError("carved batch requires a rejection summary")
+            raise TypeError("carved batch requires a rejection summary")
         if self.rejection_summary.run_id != self.run_id:
             raise ValueError("rejection summary run differs")
         if self.rejection_summary.window_id != self.window_id:
@@ -1102,9 +1100,9 @@ class HistoricalCarvedCandidateBatchV1:
         if not isinstance(
             self.validation_evidence, HistoricalCarvingValidationEvidenceV1
         ):
-            raise ValueError("carved batch requires validation evidence")
+            raise TypeError("carved batch requires validation evidence")
         if not isinstance(self.carry_state, CarryStateV1):
-            raise ValueError("carved batch requires carry state")
+            raise TypeError("carved batch requires carry state")
         if (
             self.carry_state.run_id != self.run_id
             or self.carry_state.ensemble_member_id != self.ensemble_member_id
@@ -1203,7 +1201,7 @@ class HistoricalCarvedCandidateBatchV1:
     @classmethod
     def from_dict(
         cls, data: Mapping[str, Any]
-    ) -> "HistoricalCarvedCandidateBatchV1":
+    ) -> HistoricalCarvedCandidateBatchV1:
         """Restore accepted rows and verify every derived identity."""
         refusal = data.get("refusal_reason")
         return cls(
@@ -1260,7 +1258,7 @@ class HistoricalCarvedCandidateBatchV1:
         )
 
     @classmethod
-    def from_json(cls, text: str) -> "HistoricalCarvedCandidateBatchV1":
+    def from_json(cls, text: str) -> HistoricalCarvedCandidateBatchV1:
         """Restore a carved batch from deterministic JSON."""
         return cls.from_dict(_json_mapping(text))
 
@@ -1287,6 +1285,8 @@ def carve_empirical_motif_candidates(
     constraints: HistoricalCarvingConstraintSetV1,
     fingerprint_evidence: CarvingFingerprintEvidenceV1 | None,
     substitution_batches: Sequence[EmpiricalMotifCandidateBatchV1] = (),
+    point_in_time_max_anchor_gap_ns: int | None = None,
+    point_in_time_wide_spread_threshold: float | None = None,
 ) -> HistoricalCarvedCandidateBatchV1:
     """Preserve the v1 empirical entry point over generic carving."""
     if not isinstance(candidate_batch, EmpiricalMotifCandidateBatchV1) or any(
@@ -1303,6 +1303,10 @@ def carve_empirical_motif_candidates(
         constraints=constraints,
         fingerprint_evidence=fingerprint_evidence,
         substitution_batches=substitution_batches,
+        point_in_time_max_anchor_gap_ns=point_in_time_max_anchor_gap_ns,
+        point_in_time_wide_spread_threshold=(
+            point_in_time_wide_spread_threshold
+        ),
     )
 
 
@@ -1316,6 +1320,8 @@ def carve_reconstruction_candidates(
     constraints: HistoricalCarvingConstraintSetV1,
     fingerprint_evidence: CarvingFingerprintEvidenceV1 | None,
     substitution_batches: Sequence[ReconstructionCandidateBatchV1] = (),
+    point_in_time_max_anchor_gap_ns: int | None = None,
+    point_in_time_wide_spread_threshold: float | None = None,
 ) -> HistoricalCarvedCandidateBatchV1:
     """Carve one structural candidate batch with fail-closed precedence."""
     if not isinstance(candidate_batch, ReconstructionCandidateBatchV1):
@@ -1374,6 +1380,7 @@ def carve_reconstruction_candidates(
         market_context,
         constraints,
         fingerprint_evidence,
+        point_in_time_max_anchor_gap_ns,
     )
     if refusal is not None:
         return _terminal_batch(
@@ -1420,6 +1427,7 @@ def carve_reconstruction_candidates(
             left_anchor,
             right_anchor,
             constraints,
+            point_in_time_wide_spread_threshold,
         )
         if hard_reason is not None:
             _record_rejection(
@@ -1709,9 +1717,19 @@ def _support_refusal(
     market_context: MarketContextQueryV1,
     constraints: HistoricalCarvingConstraintSetV1,
     fingerprint_evidence: CarvingFingerprintEvidenceV1 | None,
+    point_in_time_max_anchor_gap_ns: int | None,
 ) -> CarvingReason | None:
-    if anchors[1].event_time_ns - anchors[0].event_time_ns > (
+    evidence_gap = (
         constraints.max_anchor_gap_ns
+        if point_in_time_max_anchor_gap_ns is None
+        else _strict_int(
+            point_in_time_max_anchor_gap_ns, "point_in_time_max_anchor_gap_ns"
+        )
+    )
+    if evidence_gap <= 0:
+        raise ValueError("point_in_time_max_anchor_gap_ns must be positive")
+    if anchors[1].event_time_ns - anchors[0].event_time_ns > min(
+        constraints.max_anchor_gap_ns, evidence_gap
     ):
         return CarvingReason.ANCHOR_GAP_LIMIT
     if sum(len(item.events) for item in batches) > (
@@ -1723,7 +1741,7 @@ def _support_refusal(
     if constraints.require_fingerprint_validation:
         if fingerprint_evidence is None:
             return CarvingReason.FINGERPRINT_EVIDENCE_MISSING
-        if not set(item.batch_id for item in batches).issubset(
+        if not {item.batch_id for item in batches}.issubset(
             fingerprint_evidence.candidate_batch_ids
         ):
             return CarvingReason.FINGERPRINT_VALIDATION_FAILED
@@ -1763,6 +1781,7 @@ def _candidate_hard_reason(
     left_anchor: SyntheticEventV1,
     right_anchor: SyntheticEventV1,
     constraints: HistoricalCarvingConstraintSetV1,
+    point_in_time_wide_spread_threshold: float | None,
 ) -> CarvingReason | None:
     if (
         event.origin is not SyntheticEventOrigin.SYNTHETIC
@@ -1787,6 +1806,19 @@ def _candidate_hard_reason(
             and quarantine.start_ns <= event.event_time_ns < quarantine.end_ns
         ):
             return CarvingReason.QUARANTINED_INTERVAL
+    if point_in_time_wide_spread_threshold is not None:
+        threshold = _finite_float(
+            point_in_time_wide_spread_threshold,
+            "point_in_time_wide_spread_threshold",
+        )
+        if threshold < 0.0:
+            raise ValueError(
+                "point_in_time_wide_spread_threshold must be non-negative"
+            )
+        if event.ask - event.bid > (
+            threshold * constraints.max_combined_spread_multiplier
+        ):
+            return CarvingReason.PROJECTION_LIMIT
     return None
 
 
@@ -2239,7 +2271,7 @@ def _strict_bool(value: Any, name: str) -> bool:
 
 def _finite_float(value: Any, name: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise ValueError(f"{name} must be numeric")
+        raise TypeError(f"{name} must be numeric")
     result = float(value)
     if not math.isfinite(result):
         raise ValueError(f"{name} must be finite")
@@ -2275,19 +2307,19 @@ def _sha256(value: Any, name: str) -> str:
 
 def _mapping(value: Any) -> Mapping[str, Any]:
     if not isinstance(value, Mapping):
-        raise ValueError("expected a mapping")
+        raise TypeError("expected a mapping")
     return cast(Mapping[str, Any], value)
 
 
 def _mapping_sequence(value: Any) -> tuple[Mapping[str, Any], ...]:
     if not isinstance(value, (list, tuple)):
-        raise ValueError("expected a sequence")
+        raise TypeError("expected a sequence")
     return tuple(_mapping(item) for item in value)
 
 
 def _string_tuple(value: Any) -> tuple[str, ...]:
     if not isinstance(value, (list, tuple)):
-        raise ValueError("expected a string sequence")
+        raise TypeError("expected a string sequence")
     if any(not isinstance(item, str) for item in value):
         raise ValueError("expected string sequence values")
     return tuple(cast(Sequence[str], value))

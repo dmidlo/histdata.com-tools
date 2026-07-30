@@ -2890,6 +2890,25 @@ enter those files. See
 for the source profile, feature schema, corrected event-clock/transition
 semantics, qualification gates, CLI, and nonclaims.
 
+#### Point-in-Time Reconstruction Evidence
+
+The reconstruction plan now hash-binds a versioned evidence policy and the
+HistData source handler compiles bounded row, interval, window, partition, and
+series evidence sidecars before proposal work begins. Exact row findings keep
+their immutable source-row identity; aggregate quality and fingerprint state
+remain sidecars and cannot be flattened onto ticks. Ex-ante execution withholds
+future rows, values, and finding counts.
+
+Resolved gap, spread, and source-quality constraints affect proposal
+conditioning and historical carving, while reconciliation, delivery, and
+validation retain the projection and use-decision lineage through the
+committed delivery-quality manifest. The contracts are provider-neutral, but
+the public planner admits only HistData.com ASCII/T; OANDA,
+alternate-provider, and broker evidence adapters remain later-milestone work.
+See
+[`docs/reconstruction-evidence-contracts.md`](docs/reconstruction-evidence-contracts.md)
+for grain, availability, fallback, boundedness, and audit semantics.
+
 #### Empirical Motif Candidate Generation
 
 `generate_empirical_motif_candidates()` proposes zero, one, or many narrow

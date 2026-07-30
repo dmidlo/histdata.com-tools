@@ -10,17 +10,17 @@ workflow payloads.
 
 from __future__ import annotations
 
+import hashlib
+import json
+import math
+import os
+import re
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
 from functools import lru_cache
-import hashlib
-import json
-import math
-import os
 from pathlib import Path
-import re
 from typing import Any, cast
 
 from histdatacom.data_analytics.feed_epochs_v2 import (
@@ -51,6 +51,11 @@ from histdatacom.orchestration.reconstruction import (
     ReconstructionWorkflowRequestV1,
     artifact_ref_for_file,
     verify_artifact_ref,
+)
+from histdatacom.reconstruction_evidence import (
+    CURRENT_EVIDENCE_SOURCE_PROVIDER_ID,
+    RECONSTRUCTION_EVIDENCE_POLICY_ARTIFACT_KIND,
+    ReconstructionEvidencePolicyV1,
 )
 from histdatacom.runtime_contracts import ArtifactRef, JSONValue
 from histdatacom.synthetic.benchmark_corpus import (
@@ -306,7 +311,7 @@ class ReconstructionSourcePartitionV1:
     @classmethod
     def from_dict(
         cls, data: Mapping[str, Any]
-    ) -> "ReconstructionSourcePartitionV1":
+    ) -> ReconstructionSourcePartitionV1:
         _require_schema(data, RECONSTRUCTION_SOURCE_PARTITION_SCHEMA_VERSION)
         _require_derived(
             data, "row_identity_basis", "zero-based-arrow-row-ordinal-v1"
@@ -448,7 +453,7 @@ class ReconstructionSourceInventoryV1:
     @classmethod
     def from_dict(
         cls, data: Mapping[str, Any]
-    ) -> "ReconstructionSourceInventoryV1":
+    ) -> ReconstructionSourceInventoryV1:
         _require_schema(data, RECONSTRUCTION_SOURCE_INVENTORY_SCHEMA_VERSION)
         _require_derived(data, "input_contract", "ascii/T-tick-bid-ask-only")
         _require_derived(data, "observed_values_immutable", True)
@@ -477,7 +482,7 @@ class ReconstructionSourceInventoryV1:
         )
 
     @classmethod
-    def from_json(cls, text: str) -> "ReconstructionSourceInventoryV1":
+    def from_json(cls, text: str) -> ReconstructionSourceInventoryV1:
         return cls.from_dict(_json_mapping(text))
 
 
@@ -596,7 +601,7 @@ class ReconstructionPlanConfigurationV1:
     @classmethod
     def from_dict(
         cls, data: Mapping[str, Any]
-    ) -> "ReconstructionPlanConfigurationV1":
+    ) -> ReconstructionPlanConfigurationV1:
         _require_schema(data, RECONSTRUCTION_PLAN_CONFIGURATION_SCHEMA_VERSION)
         _require_derived(data, "scientific_nonclaim", SCIENTIFIC_NONCLAIM)
         _require_derived(
@@ -648,7 +653,7 @@ class ReconstructionPlanConfigurationV1:
         )
 
     @classmethod
-    def from_json(cls, text: str) -> "ReconstructionPlanConfigurationV1":
+    def from_json(cls, text: str) -> ReconstructionPlanConfigurationV1:
         return cls.from_dict(_json_mapping(text))
 
 
@@ -699,9 +704,7 @@ class ReconstructionPlanRefusalV1:
         return {**self.identity_payload(), "refusal_id": self.refusal_id}
 
     @classmethod
-    def from_dict(
-        cls, data: Mapping[str, Any]
-    ) -> "ReconstructionPlanRefusalV1":
+    def from_dict(cls, data: Mapping[str, Any]) -> ReconstructionPlanRefusalV1:
         _require_schema(data, RECONSTRUCTION_PLAN_REFUSAL_SCHEMA_VERSION)
         return cls(
             start_ns=_strict_int(data.get("start_ns"), "start_ns"),
@@ -843,7 +846,7 @@ class ReconstructionPlanResourceSummaryV1:
     @classmethod
     def from_dict(
         cls, data: Mapping[str, Any]
-    ) -> "ReconstructionPlanResourceSummaryV1":
+    ) -> ReconstructionPlanResourceSummaryV1:
         _require_schema(
             data, RECONSTRUCTION_PLAN_RESOURCE_SUMMARY_SCHEMA_VERSION
         )
@@ -978,7 +981,10 @@ class ReconstructionPlanExecutionManifestV1:
         }
         if self.delivery_mode is ReconstructionDeliveryMode.BROKER_CONDITIONED:
             required.add("broker_delivery")
-        if set(artifacts) != required:
+        allowed = required | {"evidence_policy"}
+        if not required.issubset(artifacts) or not set(artifacts).issubset(
+            allowed
+        ):
             raise ValueError(
                 "execution artifact graph is incomplete or contains extras"
             )
@@ -1062,7 +1068,7 @@ class ReconstructionPlanExecutionManifestV1:
     @classmethod
     def from_dict(
         cls, data: Mapping[str, Any]
-    ) -> "ReconstructionPlanExecutionManifestV1":
+    ) -> ReconstructionPlanExecutionManifestV1:
         _require_schema(
             data, RECONSTRUCTION_PLAN_EXECUTION_MANIFEST_SCHEMA_VERSION
         )
@@ -1099,7 +1105,7 @@ class ReconstructionPlanExecutionManifestV1:
         )
 
     @classmethod
-    def from_json(cls, text: str) -> "ReconstructionPlanExecutionManifestV1":
+    def from_json(cls, text: str) -> ReconstructionPlanExecutionManifestV1:
         return cls.from_dict(_json_mapping(text))
 
 
@@ -1202,7 +1208,7 @@ class SyntheticInfillPlanV1:
         if self.schema_version != SYNTHETIC_INFILL_PLAN_SCHEMA_VERSION:
             raise ValueError("unsupported synthetic infill plan schema")
         if not isinstance(self.run, ReconstructionRunV1):
-            raise ValueError(
+            raise TypeError(
                 "synthetic infill plan requires a reconstruction run"
             )
         object.__setattr__(
@@ -1257,9 +1263,7 @@ class SyntheticInfillPlanV1:
             )
         object.__setattr__(self, "artifact_graph", graph)
         if not isinstance(self.resources, ReconstructionPlanResourceSummaryV1):
-            raise ValueError(
-                "synthetic infill plan requires a resource summary"
-            )
+            raise TypeError("synthetic infill plan requires a resource summary")
         if self.resources.workflow_request_count != len(requests):
             raise ValueError("resource workflow request count differs")
         if (
@@ -1377,7 +1381,7 @@ class SyntheticInfillPlanV1:
         return str(canonical_contract_json(self.dry_run_payload()))
 
     @classmethod
-    def from_dict(cls, data: Mapping[str, Any]) -> "SyntheticInfillPlanV1":
+    def from_dict(cls, data: Mapping[str, Any]) -> SyntheticInfillPlanV1:
         _require_schema(data, SYNTHETIC_INFILL_PLAN_SCHEMA_VERSION)
         _require_derived(data, "scientific_nonclaim", SCIENTIFIC_NONCLAIM)
         _require_derived(
@@ -1420,7 +1424,7 @@ class SyntheticInfillPlanV1:
         )
 
     @classmethod
-    def from_json(cls, text: str) -> "SyntheticInfillPlanV1":
+    def from_json(cls, text: str) -> SyntheticInfillPlanV1:
         return cls.from_dict(_json_mapping(text))
 
 
@@ -1476,6 +1480,7 @@ def build_synthetic_infill_plan(
     generator_config: EmpiricalMotifGeneratorConfigV1 | None = None,
     carving_constraints: HistoricalCarvingConstraintSetV1 | None = None,
     cross_currency_config: CrossCurrencyReconciliationConfigV1 | None = None,
+    evidence_policy: ReconstructionEvidencePolicyV1 | None = None,
 ) -> SyntheticInfillPlanV1:
     """Resolve real artifacts and build one executable first-party plan."""
     selected_symbols = _symbols(tuple(symbols))
@@ -1592,6 +1597,23 @@ def build_synthetic_infill_plan(
         kind=SOURCE_INVENTORY_ARTIFACT_KIND,
         metadata={"inventory_id": inventory.inventory_id},
     )
+    selected_evidence_policy = (
+        evidence_policy or ReconstructionEvidencePolicyV1()
+    )
+    if selected_evidence_policy.supported_provider_ids != (
+        CURRENT_EVIDENCE_SOURCE_PROVIDER_ID,
+    ):
+        raise ReconstructionPlanCompatibilityError(
+            "the current reconstruction evidence policy supports only "
+            "HistData.com"
+        )
+    evidence_policy_ref = _write_contract_artifact(
+        selected_evidence_policy,
+        artifacts_dir,
+        prefix="reconstruction-evidence-policy",
+        kind=RECONSTRUCTION_EVIDENCE_POLICY_ARTIFACT_KIND,
+        metadata={"policy_id": selected_evidence_policy.policy_id},
+    )
 
     selected_storage = storage_policy or ReconstructionStoragePolicyV1()
     selected_ensemble = ensemble_config or EnsembleCalibrationConfigV1()
@@ -1651,6 +1673,7 @@ def build_synthetic_infill_plan(
         selected_generator.config_id: _contract_sha256(selected_generator),
         selected_carving.constraint_set_id: _contract_sha256(selected_carving),
         selected_cross.config_id: _contract_sha256(selected_cross),
+        selected_evidence_policy.policy_id: evidence_policy_ref.sha256,
         resolved.feed_epoch_definition.definition_id: resolved.artifacts[
             "feed_epochs"
         ].sha256,
@@ -1734,6 +1757,7 @@ def build_synthetic_infill_plan(
             **resolved.artifacts,
             "source_inventory": inventory_ref,
             "configuration": configuration_ref,
+            "evidence_policy": evidence_policy_ref,
         },
         motif_profile=resolved.motif_profile,
         requested_start_ns=requested_start,
@@ -1801,6 +1825,7 @@ def build_synthetic_infill_plan(
         **resolved.artifacts,
         "source_inventory": inventory_ref,
         "configuration": configuration_ref,
+        "evidence_policy": evidence_policy_ref,
         "information_manifest": information_manifest_ref,
         "information_audit": information_audit_ref,
         "ensemble_plan": ensemble_ref,
@@ -2522,6 +2547,13 @@ def _build_information_evidence(
             None,
         ),
         (
+            "evidence_policy",
+            InformationStage.FEATURE,
+            InformationScope.POINT_IN_TIME,
+            requested_start_ns,
+            None,
+        ),
+        (
             "feed_epochs",
             InformationStage.FEATURE,
             (
@@ -2970,7 +3002,7 @@ def _common_source_periods(
 def _inspect_tick_cache(path: Path) -> tuple[int, int, int]:
     try:
         import pyarrow as pa  # pylint: disable=import-outside-toplevel
-        import pyarrow.ipc as ipc  # pylint: disable=import-outside-toplevel
+        from pyarrow import ipc  # pylint: disable=import-outside-toplevel
     except ImportError as err:
         raise RuntimeError("reconstruction planning requires pyarrow") from err
     if not path.is_file():
@@ -3280,7 +3312,7 @@ def _bounded_text(value: Any, maximum: int) -> str:
 
 def _strict_int(value: Any, name: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int):
-        raise ValueError(f"{name} must be an integer")
+        raise TypeError(f"{name} must be an integer")
     return value
 
 
@@ -3307,13 +3339,13 @@ def _int64(value: Any, name: str) -> int:
 
 def _mapping(value: Any) -> Mapping[str, Any]:
     if not isinstance(value, Mapping):
-        raise ValueError("expected a mapping")
+        raise TypeError("expected a mapping")
     return value
 
 
 def _sequence(value: Any) -> Sequence[Any]:
     if isinstance(value, (str, bytes)) or not isinstance(value, Sequence):
-        raise ValueError("expected a sequence")
+        raise TypeError("expected a sequence")
     return value
 
 
@@ -3385,9 +3417,9 @@ __all__ = [
     "ReconstructionPlanRefusalCode",
     "ReconstructionPlanRefusalV1",
     "ReconstructionPlanResourceSummaryV1",
-    "ReconstructionStagePlanV1",
     "ReconstructionSourceInventoryV1",
     "ReconstructionSourcePartitionV1",
+    "ReconstructionStagePlanV1",
     "SyntheticInfillPlanV1",
     "build_synthetic_infill_plan",
     "load_reconstruction_stage_plan",

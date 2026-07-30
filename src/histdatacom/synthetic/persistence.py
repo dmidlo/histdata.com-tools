@@ -120,7 +120,7 @@ class ReconstructionStoragePreflightError(ReconstructionPersistenceError):
 
     def __init__(
         self,
-        estimate: "ReconstructionRetentionPlanV1",
+        estimate: ReconstructionRetentionPlanV1,
         violations: Sequence[str],
     ) -> None:
         self.estimate = estimate
@@ -266,7 +266,7 @@ class ReconstructionRetentionPlanV1:
     @classmethod
     def from_dict(
         cls, data: Mapping[str, Any]
-    ) -> "ReconstructionRetentionPlanV1":
+    ) -> ReconstructionRetentionPlanV1:
         """Restore and verify a retention plan."""
         _require_schema(data, RECONSTRUCTION_RETENTION_PLAN_SCHEMA_VERSION)
         _require_derived(
@@ -472,7 +472,7 @@ class ReconstructionEnsembleManifestV1:
     @classmethod
     def from_dict(
         cls, data: Mapping[str, Any]
-    ) -> "ReconstructionEnsembleManifestV1":
+    ) -> ReconstructionEnsembleManifestV1:
         """Restore and verify retained-ensemble identity."""
         _require_schema(data, RECONSTRUCTION_ENSEMBLE_MANIFEST_SCHEMA_VERSION)
         _require_derived(data, "automatic_winner", False)
@@ -605,7 +605,7 @@ class ReconstructionProductPartitionV1:
     @classmethod
     def from_dict(
         cls, data: Mapping[str, Any]
-    ) -> "ReconstructionProductPartitionV1":
+    ) -> ReconstructionProductPartitionV1:
         """Restore and verify partition evidence."""
         _require_schema(data, RECONSTRUCTION_PARTITION_SCHEMA_VERSION)
         _require_derived(
@@ -716,7 +716,7 @@ class ReconstructionSourceManifestV1:
     @classmethod
     def from_dict(
         cls, data: Mapping[str, Any]
-    ) -> "ReconstructionSourceManifestV1":
+    ) -> ReconstructionSourceManifestV1:
         """Restore and verify source evidence."""
         _require_schema(data, RECONSTRUCTION_SOURCE_MANIFEST_SCHEMA_VERSION)
         _require_derived(data, "observed_values_verified_exactly", True)
@@ -842,7 +842,7 @@ class ReconstructionConstraintManifestV1:
     @classmethod
     def from_dict(
         cls, data: Mapping[str, Any]
-    ) -> "ReconstructionConstraintManifestV1":
+    ) -> ReconstructionConstraintManifestV1:
         """Restore and verify constraint lineage."""
         _require_schema(data, RECONSTRUCTION_CONSTRAINT_MANIFEST_SCHEMA_VERSION)
         _require_derived(data, "candidate_rows_inline", False)
@@ -1012,7 +1012,7 @@ class ReconstructionQualityManifestV1:
     @classmethod
     def from_dict(
         cls, data: Mapping[str, Any]
-    ) -> "ReconstructionQualityManifestV1":
+    ) -> ReconstructionQualityManifestV1:
         """Restore and verify final quality evidence."""
         _require_schema(data, RECONSTRUCTION_QUALITY_MANIFEST_SCHEMA_VERSION)
         return cls(
@@ -1082,6 +1082,8 @@ class ReconstructionDeliveryQualityManifestV1:
     identity_lineage_sha256: str
     delivery_action_counts: Mapping[str, int]
     benchmark_artifact_ids: tuple[str, ...]
+    point_in_time_evidence_projection_ids: tuple[str, ...] = ()
+    point_in_time_evidence_decision_ids: tuple[str, ...] = ()
     quality_manifest_id: str = ""
     schema_version: str = (
         RECONSTRUCTION_DELIVERY_QUALITY_MANIFEST_SCHEMA_VERSION
@@ -1147,6 +1149,20 @@ class ReconstructionDeliveryQualityManifestV1:
         if not artifacts:
             raise ValueError("delivery quality lacks benchmark artifacts")
         object.__setattr__(self, "benchmark_artifact_ids", artifacts)
+        projections = _normalized_text_tuple(
+            self.point_in_time_evidence_projection_ids
+        )
+        decisions = _normalized_text_tuple(
+            self.point_in_time_evidence_decision_ids
+        )
+        if len(projections) > 64 or len(decisions) > 256:
+            raise ValueError("delivery quality evidence lineage is unbounded")
+        object.__setattr__(
+            self, "point_in_time_evidence_projection_ids", projections
+        )
+        object.__setattr__(
+            self, "point_in_time_evidence_decision_ids", decisions
+        )
         if self.final_validation_status != "passed":
             raise ValueError("final delivery validation is not passing")
         if self.cross_instrument_quality_status == "failed":
@@ -1159,7 +1175,7 @@ class ReconstructionDeliveryQualityManifestV1:
 
     def payload(self) -> dict[str, JSONValue]:
         """Return compact generic quality evidence."""
-        return {
+        payload: dict[str, JSONValue] = {
             "schema_version": self.schema_version,
             "delivery_manifest_id": self.delivery_manifest_id,
             "delivery_profile_id": self.delivery_profile_id,
@@ -1182,6 +1198,15 @@ class ReconstructionDeliveryQualityManifestV1:
             "delivery_action_counts": dict(self.delivery_action_counts),
             "benchmark_artifact_ids": list(self.benchmark_artifact_ids),
         }
+        if self.point_in_time_evidence_projection_ids:
+            payload["point_in_time_evidence_projection_ids"] = list(
+                self.point_in_time_evidence_projection_ids
+            )
+        if self.point_in_time_evidence_decision_ids:
+            payload["point_in_time_evidence_decision_ids"] = list(
+                self.point_in_time_evidence_decision_ids
+            )
+        return payload
 
     def to_dict(self) -> dict[str, JSONValue]:
         """Return compact JSON-compatible quality evidence."""
@@ -1193,7 +1218,7 @@ class ReconstructionDeliveryQualityManifestV1:
     @classmethod
     def from_dict(
         cls, data: Mapping[str, Any]
-    ) -> "ReconstructionDeliveryQualityManifestV1":
+    ) -> ReconstructionDeliveryQualityManifestV1:
         """Restore and verify generic delivery quality evidence."""
         _require_schema(
             data, RECONSTRUCTION_DELIVERY_QUALITY_MANIFEST_SCHEMA_VERSION
@@ -1238,6 +1263,14 @@ class ReconstructionDeliveryQualityManifestV1:
             },
             benchmark_artifact_ids=_string_tuple(
                 data.get("benchmark_artifact_ids"), "benchmark_artifact_ids"
+            ),
+            point_in_time_evidence_projection_ids=_string_tuple(
+                data.get("point_in_time_evidence_projection_ids", ()),
+                "point_in_time_evidence_projection_ids",
+            ),
+            point_in_time_evidence_decision_ids=_string_tuple(
+                data.get("point_in_time_evidence_decision_ids", ()),
+                "point_in_time_evidence_decision_ids",
             ),
             quality_manifest_id=str(data.get("quality_manifest_id", "")),
             schema_version=str(data.get("schema_version", "")),
@@ -1333,7 +1366,7 @@ class ReconstructionReplayManifestV1:
     @classmethod
     def from_dict(
         cls, data: Mapping[str, Any]
-    ) -> "ReconstructionReplayManifestV1":
+    ) -> ReconstructionReplayManifestV1:
         """Restore and verify replay evidence."""
         _require_schema(data, RECONSTRUCTION_REPLAY_MANIFEST_SCHEMA_VERSION)
         return cls(
@@ -1591,7 +1624,7 @@ class ReconstructionProductManifestV1:
     @classmethod
     def from_dict(
         cls, data: Mapping[str, Any]
-    ) -> "ReconstructionProductManifestV1":
+    ) -> ReconstructionProductManifestV1:
         """Restore and reconcile a final-product manifest."""
         _require_schema(data, RECONSTRUCTION_PRODUCT_SCHEMA_VERSION)
         _require_derived(
@@ -1655,7 +1688,7 @@ class ReconstructionProductManifestV1:
         return manifest
 
     @classmethod
-    def from_json(cls, text: str) -> "ReconstructionProductManifestV1":
+    def from_json(cls, text: str) -> ReconstructionProductManifestV1:
         """Restore a final-product manifest from JSON."""
         return cls.from_dict(_json_mapping(text))
 
@@ -1898,7 +1931,7 @@ class ReconstructionProductManifestV2:
     @classmethod
     def from_dict(
         cls, data: Mapping[str, Any]
-    ) -> "ReconstructionProductManifestV2":
+    ) -> ReconstructionProductManifestV2:
         """Restore and reconcile a generic-delivery product manifest."""
         _require_schema(data, RECONSTRUCTION_PRODUCT_V2_SCHEMA_VERSION)
         _require_derived(
@@ -1965,7 +1998,7 @@ class ReconstructionProductManifestV2:
         return manifest
 
     @classmethod
-    def from_json(cls, text: str) -> "ReconstructionProductManifestV2":
+    def from_json(cls, text: str) -> ReconstructionProductManifestV2:
         """Restore product v2 from JSON."""
         return cls.from_dict(_json_mapping(text))
 
@@ -2286,6 +2319,8 @@ def stage_delivery_reconstruction_publication(
     final_validation: CrossCurrencyValidationReportV1,
     benchmark_artifact_ids: Sequence[str],
     benchmark_evidence: Mapping[str, JSONValue],
+    point_in_time_evidence_projection_ids: Sequence[str] = (),
+    point_in_time_evidence_decision_ids: Sequence[str] = (),
     immutable_source_anchors: Iterable[SyntheticEventV1],
     symbol_group_id: str,
     retention_plan: ReconstructionRetentionPlanV1,
@@ -2348,6 +2383,12 @@ def stage_delivery_reconstruction_publication(
             final_validation=final_validation,
             benchmark_artifact_ids=benchmark_artifact_ids,
             benchmark_evidence=benchmark_evidence,
+            point_in_time_evidence_projection_ids=(
+                point_in_time_evidence_projection_ids
+            ),
+            point_in_time_evidence_decision_ids=(
+                point_in_time_evidence_decision_ids
+            ),
         )
         ensemble = ReconstructionEnsembleManifestV1(
             run_id=retention_plan.run_id,
@@ -3197,6 +3238,8 @@ def _delivery_quality_manifest(
     final_validation: CrossCurrencyValidationReportV1,
     benchmark_artifact_ids: Sequence[str],
     benchmark_evidence: Mapping[str, JSONValue],
+    point_in_time_evidence_projection_ids: Sequence[str],
+    point_in_time_evidence_decision_ids: Sequence[str],
 ) -> ReconstructionDeliveryQualityManifestV1:
     manifest = group.manifest
     output_hash = reconstruction_streams_content_sha256(group.streams)
@@ -3208,6 +3251,12 @@ def _delivery_quality_manifest(
         "final_validation": final_validation.to_dict(),
         "benchmark_artifact_ids": list(benchmark_artifact_ids),
         "benchmark_evidence": dict(benchmark_evidence),
+        "point_in_time_evidence_projection_ids": list(
+            point_in_time_evidence_projection_ids
+        ),
+        "point_in_time_evidence_decision_ids": list(
+            point_in_time_evidence_decision_ids
+        ),
     }
     quality_hash = _content_sha256(evidence)
     identity_hash = cast(str, manifest.identity_lineage_sha256)
@@ -3232,6 +3281,12 @@ def _delivery_quality_manifest(
             else {}
         ),
         benchmark_artifact_ids=tuple(benchmark_artifact_ids),
+        point_in_time_evidence_projection_ids=tuple(
+            point_in_time_evidence_projection_ids
+        ),
+        point_in_time_evidence_decision_ids=tuple(
+            point_in_time_evidence_decision_ids
+        ),
     )
 
 
@@ -3728,7 +3783,7 @@ def _required_event_date(value: str) -> str:
 
 def _strict_int(value: Any, name: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int):
-        raise ValueError(f"{name} must be an integer")
+        raise TypeError(f"{name} must be an integer")
     return value
 
 
@@ -3740,7 +3795,7 @@ def _optional_int(value: Any, name: str) -> int | None:
 
 def _strict_float(value: Any, name: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise ValueError(f"{name} must be numeric")
+        raise TypeError(f"{name} must be numeric")
     return _finite_float(float(value), name)
 
 
@@ -3770,7 +3825,7 @@ def _positive_int(value: Any, name: str) -> int:
 
 def _mapping(value: Any, name: str) -> Mapping[str, Any]:
     if not isinstance(value, Mapping):
-        raise ValueError(f"{name} must be an object")
+        raise TypeError(f"{name} must be an object")
     return cast(Mapping[str, Any], value)
 
 
@@ -3778,7 +3833,7 @@ def _mapping_sequence(value: Any, name: str) -> tuple[Mapping[str, Any], ...]:
     if isinstance(value, (str, bytes, bytearray)) or not isinstance(
         value, Sequence
     ):
-        raise ValueError(f"{name} must be a sequence")
+        raise TypeError(f"{name} must be a sequence")
     if not all(isinstance(item, Mapping) for item in value):
         raise ValueError(f"{name} must contain objects")
     return tuple(cast(Mapping[str, Any], item) for item in value)
@@ -3788,7 +3843,7 @@ def _string_tuple(value: Any, name: str) -> tuple[str, ...]:
     if isinstance(value, (str, bytes, bytearray)) or not isinstance(
         value, Sequence
     ):
-        raise ValueError(f"{name} must be a sequence")
+        raise TypeError(f"{name} must be a sequence")
     return tuple(str(item) for item in value)
 
 
@@ -3844,8 +3899,8 @@ __all__ = [
     "PublishedReconstructionV1",
     "PublishedReconstructionV2",
     "ReconstructionConstraintManifestV1",
-    "ReconstructionEnsembleManifestV1",
     "ReconstructionDeliveryQualityManifestV1",
+    "ReconstructionEnsembleManifestV1",
     "ReconstructionPersistenceError",
     "ReconstructionProductManifestV1",
     "ReconstructionProductManifestV2",
@@ -3858,8 +3913,8 @@ __all__ = [
     "StagedReconstructionPublicationV1",
     "StagedReconstructionPublicationV2",
     "cleanup_reconstruction_scratch",
-    "commit_reconstruction_publication",
     "commit_delivery_reconstruction_publication",
+    "commit_reconstruction_publication",
     "discover_reconstruction_manifests",
     "estimate_reconstruction_retention",
     "iter_reconstruction_event_batches",
@@ -3869,7 +3924,7 @@ __all__ = [
     "reconstruction_logical_content_sha256",
     "reconstruction_parquet_paths",
     "scan_reconstruction_events_polars",
-    "stage_reconstruction_publication",
     "stage_delivery_reconstruction_publication",
+    "stage_reconstruction_publication",
     "verify_reconstruction_publication",
 ]

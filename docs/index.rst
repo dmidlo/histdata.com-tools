@@ -21,6 +21,7 @@ Data and reconstruction foundations
    cftc-positioning-contracts
    provider-neutral-dataset-catalog
    reconstruction-schema-compatibility
+   reconstruction-evidence-contracts
 
 Empirical reconstruction pipeline
 ---------------------------------

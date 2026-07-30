@@ -11,7 +11,6 @@ recovered without referring to a vanished staging path.
 from __future__ import annotations
 
 import asyncio
-from bisect import bisect_left
 import hashlib
 import json
 import math
@@ -19,6 +18,7 @@ import os
 import shutil
 import tempfile
 import time
+from bisect import bisect_left
 from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import replace
@@ -29,8 +29,8 @@ from histdatacom.data_analytics.feed_epochs_v2 import (
     read_active_time_feed_epoch_definition,
 )
 from histdatacom.market_context import (
-    CftcPositioningQueryV1,
     CftcPositioningQueryStatus,
+    CftcPositioningQueryV1,
     CftcReportFamily,
     CftcReportScope,
     MarketContextKind,
@@ -53,8 +53,21 @@ from histdatacom.orchestration.reconstruction import (
     registered_reconstruction_stage_handlers,
     verify_artifact_ref,
 )
+from histdatacom.reconstruction_evidence import (
+    HISTDATA_ENRICHED_CACHE_SCHEMA_VERSION,
+    HISTDATA_LEGACY_CACHE_SCHEMA_VERSION,
+    RECONSTRUCTION_EVIDENCE_PROJECTION_ARTIFACT_KIND,
+    PointInTimeEvidenceProjectionV1,
+    ReconstructionEvidencePolicyV1,
+    ReconstructionEvidenceUseStatus,
+    ReconstructionEvidenceUseV1,
+    compile_histdata_point_in_time_evidence,
+    read_point_in_time_evidence_projection,
+    read_reconstruction_evidence_policy,
+    reconstruction_evidence_use,
+)
 from histdatacom.resource_usage import peak_rss_bytes
-from histdatacom.runtime_contracts import ArtifactRef, JSONValue
+from histdatacom.runtime_contracts import ArtifactRef, JSONScalar, JSONValue
 from histdatacom.synthetic.benchmark_corpus import (
     read_reverse_degradation_benchmark_corpus,
 )
@@ -157,6 +170,27 @@ _MAX_CARVED_BATCH_LEDGER_LINE_BYTES = 1_048_576
 _MAX_SYNCHRONIZATION_TIMESTAMP_PROBES = 4_096
 
 _SourceRow = tuple[int, float, float, str, int, str]
+_CachedPartitionEvidence = tuple[str, dict[int, dict[str, JSONScalar]], bool]
+
+_CACHE_ISSUE_COLUMN_TO_METRIC = {
+    "dq_issue_duplicate_timestamp": "duplicate_timestamp",
+    "dq_issue_non_monotonic_timestamp": "non_monotonic_timestamp",
+    "dq_issue_gap_after_previous": "suspicious_gap",
+    "dq_issue_suspicious_gap": "suspicious_gap",
+    "dq_issue_weekend_activity": "weekend_activity",
+    "dq_issue_session_closed": "session_closed",
+    "dq_issue_negative_spread": "negative_spread",
+    "dq_issue_zero_spread": "zero_spread",
+    "dq_issue_wide_spread": "wide_spread",
+    "dq_issue_invalid_row": "invalid_row",
+    "dq_issue_partial_row": "partial_row",
+    "dq_issue_source_unavailable": "source_availability",
+    "dq_issue_topology_unavailable": "topology_unavailable",
+    "dq_issue_distribution_missing": "distribution_missing",
+    "dq_issue_precision_warning": "precision_warning",
+    "dq_issue_cache_float_precision": "cache_float_precision",
+    "dq_issue_fingerprint_unready": "fingerprint_unready",
+}
 
 _HANDLERS = {
     ReconstructionStage.SOURCE_ENRICHMENT: "source_enrichment_handler",
@@ -197,7 +231,9 @@ def source_enrichment_handler(
         _cancel_if_requested(invocation)
         plan = load_reconstruction_stage_plan(invocation.command)
         window = invocation.task.window
-        source_events = _read_source_events(invocation, plan)
+        source_events, cached_source_evidence = _read_source_events(
+            invocation, plan
+        )
         if any(len(values) < 2 for values in source_events.values()):
             return invocation.refused(
                 "source_corruption",
@@ -215,6 +251,24 @@ def source_enrichment_handler(
             return invocation.refused(
                 "source_corruption",
                 message="complete triangle core is empty for at least one symbol",
+            )
+        evidence_projections, evidence_refs, evidence_uses = (
+            _compile_source_evidence(
+                invocation,
+                plan,
+                source_events,
+                cached_source_evidence,
+            )
+        )
+        refused_evidence = tuple(
+            item
+            for item in evidence_uses.values()
+            if item.status is ReconstructionEvidenceUseStatus.REFUSED
+        )
+        if refused_evidence:
+            return invocation.refused(
+                "source_quality_refused",
+                message="; ".join(item.reason for item in refused_evidence),
             )
         try:
             context, positioning = _window_context(plan, invocation)
@@ -234,6 +288,7 @@ def source_enrichment_handler(
                 source_events,
                 context=context,
                 positioning=positioning,
+                evidence_uses=evidence_uses,
             )
             cross_condition = _cross_condition(
                 invocation, conditions, context=context
@@ -258,6 +313,12 @@ def source_enrichment_handler(
         anchor_hash = _events_content_sha256(
             event for values in core_events.values() for event in values
         )
+        projection_ids: list[JSONValue] = [
+            item.projection_id
+            for item in sorted(
+                evidence_projections, key=lambda item: item.projection_id
+            )
+        ]
         payload: dict[str, JSONValue] = {
             **_stage_scope(invocation),
             "input_stream_refs": _refs_dict(input_refs),
@@ -270,6 +331,12 @@ def source_enrichment_handler(
                 for symbol, condition in sorted(conditions.items())
             },
             "cross_condition": cross_condition.to_dict(),
+            "point_in_time_evidence_refs": _refs_dict(evidence_refs),
+            "point_in_time_evidence_projection_ids": projection_ids,
+            "point_in_time_evidence_use": {
+                symbol: item.to_dict()
+                for symbol, item in sorted(evidence_uses.items())
+            },
             "immutable_anchor_content_sha256": anchor_hash,
             "source_row_identity": {
                 "inventory_basis": "zero-based-arrow-row-ordinal-v1",
@@ -289,7 +356,11 @@ def source_enrichment_handler(
             manifest,
             started=started,
             observed=observed,
-            message="resolved immutable source, feed epoch, calendar, and CFTC context",
+            message=(
+                "resolved immutable source, point-in-time quality evidence, "
+                "feed epoch, calendar, and CFTC context"
+            ),
+            additional_refs=tuple(evidence_refs.values()),
         )
     except asyncio.CancelledError:
         raise
@@ -473,6 +544,10 @@ def proposal_handler(
             "immutable_anchor_content_sha256": source[
                 "immutable_anchor_content_sha256"
             ],
+            "point_in_time_evidence_refs": source[
+                "point_in_time_evidence_refs"
+            ],
+            "point_in_time_evidence_use": source["point_in_time_evidence_use"],
         }
         manifest = _write_json_artifact(
             invocation,
@@ -531,6 +606,8 @@ def carving_handler(
         context = MarketContextQueryV1.from_dict(
             _mapping(source["market_context"])
         )
+        evidence_by_symbol = _read_source_evidence(source)
+        evidence_policy = _read_evidence_policy(plan)
         index = read_modern_reference_motif_index(
             plan.execution_manifest.artifacts["motif_index"].path
         )
@@ -553,8 +630,17 @@ def carving_handler(
         candidates = 0
         accepted = 0
         rejected = 0
+        evidence_decisions: list[ReconstructionEvidenceUseV1] = []
         for ordinal, batch in enumerate(batches, start=1):
             _cancel_if_requested(invocation)
+            stage_used_at = _evidence_stage_used_at(plan, invocation)
+            evidence_use = reconstruction_evidence_use(
+                evidence_by_symbol[batch.symbol],
+                stage="carving",
+                used_at_ns=stage_used_at,
+                policy=evidence_policy,
+            )
+            evidence_decisions.append(evidence_use)
             carved = carve_empirical_motif_candidates(
                 run=invocation.run,
                 window=invocation.task.window,
@@ -563,16 +649,25 @@ def carving_handler(
                 market_context=context,
                 constraints=plan.configuration.carving_constraints,
                 fingerprint_evidence=None,
+                point_in_time_max_anchor_gap_ns=_optional_int_effect(
+                    evidence_use, "max_anchor_gap_ns"
+                ),
+                point_in_time_wide_spread_threshold=(
+                    _optional_float_effect(
+                        evidence_use, "wide_spread_threshold"
+                    )
+                ),
             )
             accepted_by_symbol[batch.symbol].extend(carved.accepted_events)
             candidates += len(batch.events)
             accepted += len(carved.accepted_events)
             rejected += carved.rejection_summary.rejected_count
+            carved_evidence = _carved_evidence(carved)
+            carved_evidence["point_in_time_evidence_use"] = (
+                evidence_use.to_dict()
+            )
             encoded_evidence = (
-                canonical_contract_json(_carved_evidence(carved)).encode(
-                    "utf-8"
-                )
-                + b"\n"
+                canonical_contract_json(carved_evidence).encode("utf-8") + b"\n"
             )
             if len(encoded_evidence) > _MAX_CARVED_BATCH_LEDGER_LINE_BYTES:
                 raise ValueError("carved batch ledger row exceeds limit")
@@ -636,6 +731,22 @@ def carving_handler(
             directory_name="carved",
             kind=_CARVED_STREAM_KIND,
         )
+        projection_ids: list[JSONValue] = [
+            projection_id
+            for projection_id in sorted(
+                {
+                    projection.projection_id
+                    for values in evidence_by_symbol.values()
+                    for projection in values
+                }
+            )
+        ]
+        decision_ids: list[JSONValue] = [
+            decision_id
+            for decision_id in sorted(
+                {item.decision_id for item in evidence_decisions}
+            )
+        ]
         payload: dict[str, JSONValue] = {
             **_stage_scope(invocation),
             "stream_refs": _refs_dict(stream_refs),
@@ -648,6 +759,12 @@ def carving_handler(
             "immutable_anchor_content_sha256": source[
                 "immutable_anchor_content_sha256"
             ],
+            "point_in_time_evidence_projection_ids": projection_ids,
+            "point_in_time_evidence_decision_ids": decision_ids,
+            "point_in_time_evidence_refusal_count": sum(
+                item.status is ReconstructionEvidenceUseStatus.REFUSED
+                for item in evidence_decisions
+            ),
         }
         manifest = _write_json_artifact(
             invocation,
@@ -729,6 +846,15 @@ def cross_series_reconciliation_handler(
             "immutable_anchor_content_sha256": carving[
                 "immutable_anchor_content_sha256"
             ],
+            "point_in_time_evidence_projection_ids": carving[
+                "point_in_time_evidence_projection_ids"
+            ],
+            "point_in_time_evidence_decision_ids": carving[
+                "point_in_time_evidence_decision_ids"
+            ],
+            "point_in_time_evidence_refusal_count": carving[
+                "point_in_time_evidence_refusal_count"
+            ],
         }
         manifest = _write_json_artifact(
             invocation,
@@ -801,6 +927,15 @@ def delivery_projection_handler(
             "immutable_anchor_content_sha256": cross[
                 "immutable_anchor_content_sha256"
             ],
+            "point_in_time_evidence_projection_ids": cross[
+                "point_in_time_evidence_projection_ids"
+            ],
+            "point_in_time_evidence_decision_ids": cross[
+                "point_in_time_evidence_decision_ids"
+            ],
+            "point_in_time_evidence_refusal_count": cross[
+                "point_in_time_evidence_refusal_count"
+            ],
         }
         manifest = _write_json_artifact(
             invocation,
@@ -846,6 +981,25 @@ def validation_handler(
         source = _prior_manifest(invocation, SOURCE_STAGE_ARTIFACT_KIND)
         delivery = _prior_manifest(invocation, DELIVERY_STAGE_ARTIFACT_KIND)
         delivered = _restore_delivered_group(delivery)
+        evidence_by_symbol = _read_source_evidence(source)
+        validation_evidence = reconstruction_evidence_use(
+            tuple(
+                projection
+                for symbol in sorted(evidence_by_symbol)
+                for projection in evidence_by_symbol[symbol]
+            ),
+            stage="validation",
+            used_at_ns=_evidence_stage_used_at(plan, invocation),
+            policy=_read_evidence_policy(plan),
+        )
+        if (
+            validation_evidence.status
+            is ReconstructionEvidenceUseStatus.REFUSED
+        ):
+            return invocation.refused(
+                "point_in_time_evidence_refused",
+                message=validation_evidence.reason,
+            )
         core_streams = _read_stream_map(source, "core_stream_refs")
         anchors = tuple(
             event
@@ -900,6 +1054,21 @@ def validation_handler(
                 }
             ),
             benchmark_evidence=benchmark_evidence,
+            point_in_time_evidence_projection_ids=tuple(
+                str(value)
+                for value in _sequence(
+                    delivery["point_in_time_evidence_projection_ids"]
+                )
+            ),
+            point_in_time_evidence_decision_ids=(
+                *(
+                    str(value)
+                    for value in _sequence(
+                        delivery["point_in_time_evidence_decision_ids"]
+                    )
+                ),
+                validation_evidence.decision_id,
+            ),
             immutable_source_anchors=anchors,
             symbol_group_id=invocation.task.window.synchronization_unit_id,
             retention_plan=retention,
@@ -918,6 +1087,18 @@ def validation_handler(
             "immutable_anchor_content_sha256": source[
                 "immutable_anchor_content_sha256"
             ],
+            "point_in_time_evidence_projection_ids": list(
+                staged.manifest.quality.point_in_time_evidence_projection_ids
+            ),
+            "point_in_time_evidence_decision_ids": list(
+                staged.manifest.quality.point_in_time_evidence_decision_ids
+            ),
+            "point_in_time_evidence_refusal_count": delivery[
+                "point_in_time_evidence_refusal_count"
+            ],
+            "point_in_time_evidence_validation_use": (
+                validation_evidence.to_dict()
+            ),
         }
         descriptor = _write_json_artifact(
             invocation,
@@ -1036,10 +1217,13 @@ def atomic_commit_handler(
 def _read_source_events(
     invocation: ReconstructionStageInvocationV1,
     plan: ReconstructionStagePlanV1,
-) -> dict[str, tuple[SyntheticEventV1, ...]]:
+) -> tuple[
+    dict[str, tuple[SyntheticEventV1, ...]],
+    dict[str, _CachedPartitionEvidence],
+]:
     try:
         import pyarrow as pa
-        import pyarrow.ipc as ipc
+        from pyarrow import ipc
     except ImportError as err:  # pragma: no cover - package dependency
         raise RuntimeError(
             "first-party reconstruction requires pyarrow"
@@ -1048,6 +1232,7 @@ def _read_source_events(
     raw: dict[str, list[_SourceRow]] = {
         symbol: [] for symbol in invocation.run.symbols
     }
+    cached_by_partition: dict[str, _CachedPartitionEvidence] = {}
     selected = plan.source_inventory.partitions_for_window(window)
     for partition in selected:
         _cancel_if_requested(invocation)
@@ -1059,6 +1244,34 @@ def _read_source_events(
             ask_index = reader.schema.get_field_index("ask")
             if min(dt_index, bid_index, ask_index) < 0:
                 raise ValueError("source partition lacks datetime/bid/ask")
+            training_version_index = reader.schema.get_field_index(
+                "training_schema_version"
+            )
+            issue_indexes = {
+                metric_id: reader.schema.get_field_index(column)
+                for column, metric_id in _CACHE_ISSUE_COLUMN_TO_METRIC.items()
+                if reader.schema.get_field_index(column) >= 0
+            }
+            cache_schema = (
+                HISTDATA_ENRICHED_CACHE_SCHEMA_VERSION
+                if training_version_index >= 0
+                else HISTDATA_LEGACY_CACHE_SCHEMA_VERSION
+            )
+            cache_evidence_complete = (
+                cache_schema == HISTDATA_ENRICHED_CACHE_SCHEMA_VERSION
+                and all(
+                    reader.schema.get_field_index(column) >= 0
+                    for column in _CACHE_ISSUE_COLUMN_TO_METRIC
+                )
+            )
+            if (
+                cache_schema == HISTDATA_ENRICHED_CACHE_SCHEMA_VERSION
+                and not cache_evidence_complete
+            ):
+                raise ValueError(
+                    "enriched source cache lacks complete issue evidence"
+                )
+            cached_rows: dict[int, dict[str, JSONScalar]] = {}
             ordinal = 0
             series_id = (
                 f"ascii-tick:{partition.symbol}:{partition.period}:"
@@ -1069,7 +1282,11 @@ def _read_source_events(
                 times = batch.column(dt_index).to_pylist()
                 bids = batch.column(bid_index).to_pylist()
                 asks = batch.column(ask_index).to_pylist()
-                for timestamp_ms, bid_raw, ask_raw in zip(times, bids, asks):
+                for batch_row, (
+                    timestamp_ms,
+                    bid_raw,
+                    ask_raw,
+                ) in enumerate(zip(times, bids, asks, strict=True)):
                     timestamp_ns = int(timestamp_ms) * 1_000_000
                     bid = float(bid_raw)
                     ask = float(ask_raw)
@@ -1095,7 +1312,34 @@ def _read_source_events(
                                 series_id,
                             )
                         )
+                        if training_version_index >= 0:
+                            training_version = batch.column(
+                                training_version_index
+                            )[batch_row].as_py()
+                            if (
+                                training_version
+                                != HISTDATA_ENRICHED_CACHE_SCHEMA_VERSION
+                            ):
+                                raise ValueError(
+                                    "source training schema version differs"
+                                )
+                        row_metrics: dict[str, JSONScalar] = {}
+                        for metric_id, index in issue_indexes.items():
+                            value = batch.column(index)[batch_row].as_py()
+                            if type(value) is not bool:
+                                raise ValueError(
+                                    "cached row evidence must be boolean"
+                                )
+                            if value:
+                                row_metrics[metric_id] = True
+                        if row_metrics:
+                            cached_rows[ordinal + 1] = row_metrics
                     ordinal += 1
+            cached_by_partition[partition.partition_id] = (
+                cache_schema,
+                cached_rows,
+                cache_evidence_complete,
+            )
     result: dict[str, tuple[SyntheticEventV1, ...]] = {}
     source_version = invocation.run.source_version_ids[0]
     for symbol, values in raw.items():
@@ -1122,7 +1366,174 @@ def _read_source_events(
                 )
             )
         result[symbol] = tuple(events)
-    return result
+    return result, cached_by_partition
+
+
+def _compile_source_evidence(
+    invocation: ReconstructionStageInvocationV1,
+    plan: ReconstructionStagePlanV1,
+    source_events: Mapping[str, Sequence[SyntheticEventV1]],
+    cached_source_evidence: Mapping[str, _CachedPartitionEvidence],
+) -> tuple[
+    tuple[PointInTimeEvidenceProjectionV1, ...],
+    dict[str, ArtifactRef],
+    dict[str, ReconstructionEvidenceUseV1],
+]:
+    """Compile bounded HistData projections before any proposal decision."""
+    policy = _read_evidence_policy(plan)
+    window = invocation.task.window
+    mode = plan.configuration.information_policy.information_mode
+    as_of_ns = _evidence_stage_used_at(plan, invocation)
+    projections: list[PointInTimeEvidenceProjectionV1] = []
+    refs: dict[str, ArtifactRef] = {}
+    for partition in plan.source_inventory.partitions_for_window(window):
+        partition_events = tuple(
+            sorted(
+                (
+                    event
+                    for event in source_events[partition.symbol]
+                    if event.source_period == partition.period
+                    and event.source_series_id is not None
+                    and event.source_series_id.endswith(
+                        partition.artifact.sha256
+                    )
+                ),
+                key=lambda event: cast(int, event.source_row_id),
+            )
+        )
+        support_start = max(window.input_start_ns, partition.coverage_start_ns)
+        support_end = min(window.input_end_ns, partition.coverage_end_ns)
+        if support_end <= support_start:
+            continue
+        cache_schema, cached_rows, cache_evidence_complete = (
+            cached_source_evidence[partition.partition_id]
+        )
+        projection = compile_histdata_point_in_time_evidence(
+            partition_events,
+            evidence_window_id=window.window_id,
+            source_partition_id=partition.partition_id,
+            source_artifact_id=(
+                f"{partition.artifact.kind}:sha256:{partition.artifact.sha256}"
+            ),
+            source_artifact_sha256=partition.artifact.sha256,
+            symbol=partition.symbol,
+            period=partition.period,
+            support_start_ns=support_start,
+            support_end_ns=support_end,
+            available_at_ns=window.core_end_ns,
+            as_of_ns=as_of_ns,
+            information_mode=mode,
+            policy=policy,
+            source_cache_schema_version=cache_schema,
+            cached_row_evidence=cached_rows,
+            cached_row_evidence_complete=cache_evidence_complete,
+        )
+        key = f"{partition.symbol}:{partition.period}:{partition.partition_id}"
+        ref = _write_json_artifact(
+            invocation,
+            "source-evidence",
+            RECONSTRUCTION_EVIDENCE_PROJECTION_ARTIFACT_KIND,
+            projection.to_dict(),
+            metadata={
+                "projection_id": projection.projection_id,
+                "symbol": projection.symbol,
+                "period": projection.period,
+                "source_partition_id": projection.source_partition_id,
+                "information_mode": projection.information_mode.value,
+                "status": projection.status.value,
+            },
+        )
+        projections.append(projection)
+        refs[key] = ref
+    if not projections:
+        raise ValueError("source evidence compiler produced no projections")
+    by_symbol = {
+        symbol: tuple(item for item in projections if item.symbol == symbol)
+        for symbol in invocation.run.symbols
+    }
+    if any(not values for values in by_symbol.values()):
+        raise ValueError("source evidence does not cover every run symbol")
+    uses = {
+        symbol: reconstruction_evidence_use(
+            values,
+            stage="source_enrichment",
+            used_at_ns=as_of_ns,
+            policy=policy,
+        )
+        for symbol, values in by_symbol.items()
+    }
+    return tuple(projections), refs, uses
+
+
+def _read_evidence_policy(
+    plan: ReconstructionStagePlanV1,
+) -> ReconstructionEvidencePolicyV1:
+    """Restore the policy or the declared legacy-plan compatibility default."""
+    policy_ref = plan.execution_manifest.artifacts.get("evidence_policy")
+    if policy_ref is None:
+        return ReconstructionEvidencePolicyV1()
+    verify_artifact_ref(policy_ref)
+    policy = read_reconstruction_evidence_policy(policy_ref.path)
+    if policy_ref.metadata.get("policy_id") != policy.policy_id:
+        raise ValueError("evidence policy artifact identity differs")
+    return policy
+
+
+def _read_source_evidence(
+    source_manifest: Mapping[str, Any],
+) -> dict[str, tuple[PointInTimeEvidenceProjectionV1, ...]]:
+    """Restore and verify source-stage projection sidecars by symbol."""
+    grouped: dict[str, list[PointInTimeEvidenceProjectionV1]] = {}
+    for value in _mapping(
+        source_manifest["point_in_time_evidence_refs"]
+    ).values():
+        ref = ArtifactRef.from_dict(_mapping(value))
+        if ref.kind != RECONSTRUCTION_EVIDENCE_PROJECTION_ARTIFACT_KIND:
+            raise ValueError("source evidence reference has the wrong kind")
+        verify_artifact_ref(ref)
+        projection = read_point_in_time_evidence_projection(ref.path)
+        if ref.metadata.get("projection_id") != projection.projection_id:
+            raise ValueError("source evidence projection identity differs")
+        grouped.setdefault(projection.symbol, []).append(projection)
+    return {
+        symbol: tuple(sorted(values, key=lambda item: item.projection_id))
+        for symbol, values in grouped.items()
+    }
+
+
+def _evidence_stage_used_at(
+    plan: ReconstructionStagePlanV1,
+    invocation: ReconstructionStageInvocationV1,
+) -> int:
+    """Return the run-declared evidence decision time for this window."""
+    if (
+        plan.configuration.information_policy.information_mode
+        is InformationMode.EX_ANTE_SIMULATION
+    ):
+        value = invocation.task.window.core_start_ns
+    else:
+        value = invocation.task.window.core_end_ns
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError("evidence stage time must be an integer")
+    return value
+
+
+def _optional_int_effect(
+    decision: ReconstructionEvidenceUseV1, name: str
+) -> int | None:
+    value = decision.effects.get(name)
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value
+
+
+def _optional_float_effect(
+    decision: ReconstructionEvidenceUseV1, name: str
+) -> float | None:
+    value = decision.effects.get(name)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value)
 
 
 def _source_row_order_key(row: _SourceRow) -> tuple[int, str, int, str]:
@@ -1319,6 +1730,7 @@ def _motif_conditions(
     *,
     context: MarketContextQueryV1,
     positioning: CftcPositioningQueryV1,
+    evidence_uses: Mapping[str, ReconstructionEvidenceUseV1],
 ) -> dict[str, ReferenceMotifConditionV1]:
     definition = read_active_time_feed_epoch_definition(
         plan.execution_manifest.artifacts["feed_epochs"].path
@@ -1331,6 +1743,12 @@ def _motif_conditions(
     )
     result: dict[str, ReferenceMotifConditionV1] = {}
     for symbol, events in sorted(source_events.items()):
+        evidence_use = evidence_uses[symbol]
+        quality_value = evidence_use.effects.get("source_quality_score", 1.0)
+        if isinstance(quality_value, bool) or not isinstance(
+            quality_value, (int, float)
+        ):
+            raise TypeError("source evidence quality score is not numeric")
         midpoint_ms = (
             (
                 invocation.task.window.core_start_ns
@@ -1356,6 +1774,7 @@ def _motif_conditions(
             overlap_tags=calendar.overlaps,
             special_tags=calendar.special_tags,
             holiday_tags=calendar.holiday_tags,
+            source_quality_score=float(quality_value),
         )
     return result
 
@@ -1437,7 +1856,7 @@ def _commit_or_recover(
         raise ValueError("neither staged nor committed publication exists")
     manifest = verify_reconstruction_publication(manifest_path)
     if not isinstance(manifest, ReconstructionProductManifestV2):
-        raise ValueError("recovered publication is not a v2 product")
+        raise TypeError("recovered publication is not a v2 product")
     if manifest != staged.manifest:
         raise ValueError("recovered publication differs from staged evidence")
     ref = artifact_ref_for_file(
@@ -2026,7 +2445,10 @@ def _tree_size(path: str | Path) -> int:
 
 
 def _peak_rss_bytes() -> int:
-    return peak_rss_bytes()
+    value = peak_rss_bytes()
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError("peak RSS probe must return an integer")
+    return value
 
 
 def _file_sha256(path: Path) -> str:
@@ -2088,7 +2510,7 @@ def _bounded_reasons(
 
 def _mapping(value: Any) -> Mapping[str, Any]:
     if not isinstance(value, Mapping):
-        raise ValueError("expected a JSON object")
+        raise TypeError("expected a JSON object")
     return value
 
 
@@ -2096,7 +2518,7 @@ def _sequence(value: Any) -> Sequence[Any]:
     if not isinstance(value, Sequence) or isinstance(
         value, (str, bytes, bytearray)
     ):
-        raise ValueError("expected a JSON sequence")
+        raise TypeError("expected a JSON sequence")
     return value
 
 

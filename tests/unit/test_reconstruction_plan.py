@@ -2,19 +2,30 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
-from datetime import datetime, timezone
 import hashlib
 import json
+from dataclasses import replace
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+import polars as pl
 import pyarrow as pa
-import pyarrow.ipc as ipc
 import pytest
+from pyarrow import ipc
 
+from histdatacom.data_quality.training_features import (
+    enrich_tick_cache_with_training_features,
+)
 from histdatacom.manifest_store import ManifestStatusStore
+from histdatacom.orchestration.queues import build_orchestration_worker_config
+from histdatacom.orchestration.reconstruction import (
+    RECONSTRUCTION_STAGE_ORDER,
+    ReconstructionStage,
+    ReconstructionStageInvocationV1,
+    artifact_ref_for_file,
+)
 from histdatacom.reconstruction import (
     ReconstructionClient,
     ReconstructionExecutionRequestV1,
@@ -29,13 +40,10 @@ from histdatacom.reconstruction import (
     write_execution_request,
     write_operation_receipt,
 )
-
-from histdatacom.orchestration.reconstruction import (
-    RECONSTRUCTION_STAGE_ORDER,
-    ReconstructionStage,
-    artifact_ref_for_file,
+from histdatacom.reconstruction_evidence import (
+    ReconstructionEvidencePolicyV1,
+    read_reconstruction_evidence_policy,
 )
-from histdatacom.orchestration.queues import build_orchestration_worker_config
 from histdatacom.synthetic import (
     ASCII_TICK_SOURCE_KIND,
     FIRST_PARTY_RECONSTRUCTION_HANDLERS,
@@ -57,6 +65,7 @@ from histdatacom.synthetic import (
     validate_synthetic_infill_plan_for_execution,
     write_synthetic_infill_plan,
 )
+from histdatacom.synthetic import reconstruction_handlers as handlers_module
 from histdatacom.synthetic import reconstruction_plan as plan_module
 
 _SYMBOLS = ("eurgbp", "eurusd", "gbpusd")
@@ -68,7 +77,9 @@ def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def _write_tick_partition(path: Path, offset: int) -> None:
+def _write_tick_partition(
+    path: Path, offset: int, *, enriched: bool = False
+) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     table = pa.table(
         {
@@ -78,9 +89,20 @@ def _write_tick_partition(path: Path, offset: int) -> None:
             "vol": [0, 0],
         }
     )
-    with pa.OSFile(str(path), "wb") as sink:
-        with ipc.new_file(sink, table.schema) as writer:
-            writer.write_table(table)
+    if enriched:
+        frame = enrich_tick_cache_with_training_features(
+            pl.from_arrow(table),
+            symbol=path.parents[2].name.upper(),
+            data_format="ascii",
+            timeframe="T",
+            period=_PERIOD,
+        ).with_columns(pl.Series("dq_issue_precision_warning", [False, True]))
+        table = frame.to_arrow()
+    with (
+        pa.OSFile(str(path), "wb") as sink,
+        ipc.new_file(sink, table.schema) as writer,
+    ):
+        writer.write_table(table)
 
 
 def _artifact(tmp_path: Path, role: str, kind: str) -> Any:
@@ -92,11 +114,13 @@ def _artifact(tmp_path: Path, role: str, kind: str) -> Any:
     return artifact_ref_for_file(path, kind=kind)
 
 
-def _resolved_inputs(tmp_path: Path, source_root: Path) -> Any:
+def _resolved_inputs(
+    tmp_path: Path, source_root: Path, *, enriched: bool = False
+) -> Any:
     lineage: list[dict[str, str]] = []
     for ordinal, symbol in enumerate(_SYMBOLS):
         path = source_root / symbol / "2020" / "1" / ".data"
-        _write_tick_partition(path, ordinal)
+        _write_tick_partition(path, ordinal, enriched=enriched)
         lineage.append(
             {
                 "period": _PERIOD,
@@ -236,6 +260,9 @@ def test_public_builder_is_deterministic_bounded_and_stage_consumable(
     assert first.to_dict()["scientific_nonclaim"] == SCIENTIFIC_NONCLAIM
     assert first.to_dict()["immutable_anchor_policy"] == IMMUTABLE_ANCHOR_POLICY
     assert first.to_dict()["input_policy"] == TICK_ONLY_INPUT_POLICY
+    assert first.artifact_graph["evidence_policy"].kind == (
+        "reconstruction_evidence_policy_v1"
+    )
 
     validate_synthetic_infill_plan_for_execution(restored)
     task = restored.workflow_requests[0].tasks[0]
@@ -255,12 +282,53 @@ def test_public_builder_is_deterministic_bounded_and_stage_consumable(
         assert command.configuration_refs == (
             restored.artifact_graph["execution_manifest"],
         )
+        assert "evidence_policy" in loaded.execution_manifest.artifacts
     broker_command = next(
         command
         for command in task.commands
         if command.stage is ReconstructionStage.BROKER_TRANSFER
     )
     assert broker_command.input_manifest_refs == ()
+
+
+def test_source_reader_preserves_complete_enriched_cache_row_evidence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source_root = tmp_path / "ASCII" / "T"
+    resolved = _resolved_inputs(tmp_path, source_root, enriched=True)
+    monkeypatch.setattr(
+        plan_module, "_resolve_plan_inputs", lambda **_: resolved
+    )
+    monkeypatch.setattr(
+        plan_module,
+        "preflight_market_context_corpus",
+        lambda *_, **__: SimpleNamespace(reasons=()),
+    )
+    monkeypatch.setattr(
+        plan_module,
+        "preflight_cftc_positioning_corpus",
+        lambda *_, **__: SimpleNamespace(ready=True, reasons=()),
+    )
+    plan = build_synthetic_infill_plan(source_root, **_builder_kwargs(tmp_path))
+    task = plan.workflow_requests[0].tasks[0]
+    command = task.commands[0]
+    invocation = ReconstructionStageInvocationV1(
+        run=plan.run,
+        task=task,
+        command=command,
+        prior_outcomes=(),
+    )
+
+    source_events, cached = handlers_module._read_source_events(
+        invocation, load_reconstruction_stage_plan(command)
+    )
+
+    assert all(len(events) == 2 for events in source_events.values())
+    assert len(cached) == 3
+    for schema_version, rows, complete in cached.values():
+        assert schema_version == "histdatacom.ascii-tick-training-features.v1"
+        assert complete
+        assert rows[2]["precision_warning"] is True
 
 
 def test_typed_public_facade_constructs_requests_and_preflights(
@@ -289,6 +357,60 @@ def test_typed_public_facade_constructs_requests_and_preflights(
     assert preflight.dry_run["resources"]["workflow_request_count"] == 4
     assert "benchmark_manifest" in preflight.evidence_refs
     assert "information_audit" in preflight.evidence_refs
+    assert "evidence_policy" in preflight.evidence_refs
+
+
+def test_public_plan_spec_round_trips_and_applies_histdata_evidence_policy(
+    planned_environment: tuple[Path, dict[str, Any]],
+) -> None:
+    source_root, kwargs = planned_environment
+    policy = ReconstructionEvidencePolicyV1(
+        suspicious_gap_fallback_ms=86_400_000,
+        wide_spread_multiplier=4.0,
+        max_records=128,
+        max_row_records=32,
+    )
+    spec = replace(_public_spec(source_root, kwargs), evidence_policy=policy)
+
+    restored = ReconstructionPlanSpecV1.from_dict(spec.to_dict())
+    plan_ref = ReconstructionClient().construct_plan(restored)
+    plan = read_synthetic_infill_plan(plan_ref.path)
+    installed = read_reconstruction_evidence_policy(
+        plan.artifact_graph["evidence_policy"].path
+    )
+    assert restored.evidence_policy == policy
+    assert installed == policy
+    assert policy.policy_id in plan.run.configuration_ids
+    assert plan.artifact_graph["evidence_policy"].sha256
+
+
+def test_public_plan_spec_rejects_alternate_evidence_provider() -> None:
+    with pytest.raises(
+        ReconstructionUnsupportedError,
+        match="supports only HistData.com",
+    ):
+        ReconstructionPlanSpecV1(
+            source_root="/tmp/ASCII/T",
+            feed_epoch_definition_path="/tmp/feed.json",
+            observation_operator_path="/tmp/observation.json",
+            market_context_corpus_path="/tmp/context.json",
+            cftc_positioning_corpus_path="/tmp/cftc.json",
+            benchmark_manifest_path="/tmp/benchmark.json",
+            motif_manifest_path="/tmp/motif.json",
+            motif_index_path="/tmp/index.json",
+            motif_qualification_path="/tmp/qualification.json",
+            motif_leakage_audit_path="/tmp/leakage.json",
+            artifact_root="/tmp/artifacts",
+            output_root="/tmp/output",
+            checkpoint_root="/tmp/checkpoints",
+            scratch_root="/tmp/scratch",
+            information_mode=InformationMode.EX_POST_RECONSTRUCTION,
+            start_period="202001",
+            end_period="202001",
+            evidence_policy=ReconstructionEvidencePolicyV1(
+                supported_provider_ids=("histdata.com", "oanda")
+            ),
+        )
 
 
 def test_public_plan_set_shards_and_revalidates_bounded_full_range(
