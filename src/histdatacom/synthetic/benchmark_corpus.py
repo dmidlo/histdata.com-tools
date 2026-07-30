@@ -127,6 +127,19 @@ from histdatacom.synthetic.regime_hawkes import (
     build_regime_hawkes_benchmark_candidate,
     fit_regime_hawkes_challenger,
 )
+from histdatacom.synthetic.schrodinger_bridge import (
+    FittedSchrodingerBridgeBenchmarkGeneratorV1,
+    SchrodingerBridgeBrokerTargetV1,
+    SchrodingerBridgeConfigV1,
+    SchrodingerBridgeFitResultV1,
+    SchrodingerBridgeFitStatus,
+    SchrodingerBridgeGenerationStatus,
+    SchrodingerBridgeWindowContextV1,
+    build_fitted_schrodinger_bridge_generator,
+    build_schrodinger_bridge_benchmark_candidate,
+    build_schrodinger_bridge_protected_window,
+    fit_schrodinger_bridge_challenger,
+)
 from histdatacom.synthetic.streaming import (
     ReconstructionRunV1,
     ReconstructionStoragePolicyV1,
@@ -164,7 +177,7 @@ DEFAULT_MAX_ARTIFACT_BYTES = 64 * 1024 * 1024
 MAX_BENCHMARK_SOURCE_BYTES = 2 * 1024**3
 MAX_BENCHMARK_WINDOWS = 96
 MAX_BENCHMARK_EVENTS_PER_SYMBOL = 4096
-MAX_BENCHMARK_CANDIDATES = 16
+MAX_BENCHMARK_CANDIDATES = 32
 MAX_BENCHMARK_METRICS = 256
 NANOSECONDS_PER_MILLISECOND = 1_000_000
 NANOSECONDS_PER_SECOND = 1_000_000_000
@@ -1798,6 +1811,36 @@ def _validated_add_thin_config(
     return value
 
 
+def _validated_schrodinger_bridge_inputs(
+    config: SchrodingerBridgeConfigV1 | None,
+    target: SchrodingerBridgeBrokerTargetV1 | None,
+) -> tuple[
+    SchrodingerBridgeConfigV1 | None,
+    SchrodingerBridgeBrokerTargetV1 | None,
+]:
+    if (config is None) != (target is None):
+        raise ValueError(
+            "Schrödinger-bridge campaign requires config and broker target together"
+        )
+    if config is not None and not isinstance(config, SchrodingerBridgeConfigV1):
+        raise TypeError(
+            "Schrödinger-bridge campaign received an invalid config"
+        )
+    if target is not None and not isinstance(
+        target, SchrodingerBridgeBrokerTargetV1
+    ):
+        raise TypeError(
+            "Schrödinger-bridge campaign received an invalid target"
+        )
+    if (
+        config is not None
+        and target is not None
+        and len(target.time_bin_weights) != config.time_bin_count
+    ):
+        raise ValueError("Schrödinger-bridge campaign target shape differs")
+    return config, target
+
+
 def _regime_hawkes_window_context(
     partition: BenchmarkWindowPartitionV1,
     *,
@@ -1948,6 +1991,56 @@ def _add_thin_window_context(
     )
 
 
+def _schrodinger_bridge_window_context(
+    partition: BenchmarkWindowPartitionV1,
+    *,
+    feed_epoch_definition: FeedEpochDefinitionV2,
+) -> SchrodingerBridgeWindowContextV1:
+    """Bind one corpus window to the bridge's immutable feed evidence."""
+    assignment = feed_epoch_definition.assign(
+        symbol="EURUSD",
+        timestamp_utc_ms=(partition.start_ns + partition.end_ns)
+        // 2
+        // NANOSECONDS_PER_MILLISECOND,
+    )
+    if assignment.assignment_kind not in {"epoch", "transition"}:
+        raise ValueError("benchmark window is outside feed epoch scope")
+    if assignment.label != partition.epoch_label:
+        raise ValueError("benchmark window feed epoch label differs")
+    if assignment.assignment_kind == "epoch":
+        if assignment.epoch_id is None:
+            raise ValueError("stable benchmark epoch lacks identity")
+        return SchrodingerBridgeWindowContextV1(
+            window_id=partition.window_id,
+            session=partition.session,
+            technology_assignment_kind="epoch",
+            technology_label=assignment.label,
+            feed_epoch_definition_id=feed_epoch_definition.definition_id,
+            epoch_id=assignment.epoch_id,
+        )
+    boundary = next(
+        (
+            item
+            for item in feed_epoch_definition.boundaries
+            if item.boundary_id == assignment.boundary_id
+        ),
+        None,
+    )
+    if boundary is None:
+        raise ValueError("transition benchmark window lacks boundary evidence")
+    return SchrodingerBridgeWindowContextV1(
+        window_id=partition.window_id,
+        session=partition.session,
+        technology_assignment_kind="transition",
+        technology_label=assignment.label,
+        feed_epoch_definition_id=feed_epoch_definition.definition_id,
+        boundary_id=boundary.boundary_id,
+        boundary_support=boundary.support,
+        uncertainty_start_period=boundary.uncertainty_start_period,
+        uncertainty_end_period=boundary.uncertainty_end_period,
+    )
+
+
 def run_reverse_degradation_benchmark_campaign(
     corpus: ReverseDegradationBenchmarkCorpusV1,
     source_root: str | Path,
@@ -1959,6 +2052,10 @@ def run_reverse_degradation_benchmark_campaign(
     regime_hawkes_configs: Sequence[RegimeHawkesConfigV1] = (),
     neural_tpp_config: NeuralTPPConfigV1 | None = None,
     add_thin_config: AddThinConfigV1 | None = None,
+    schrodinger_bridge_config: SchrodingerBridgeConfigV1 | None = None,
+    schrodinger_bridge_broker_target: (
+        SchrodingerBridgeBrokerTargetV1 | None
+    ) = None,
 ) -> tuple[ReverseDegradationBenchmarkCampaignV1, ReferenceMotifIndexV1]:
     """Run controls and every explicitly configured challenger family."""
     if not isinstance(corpus, ReverseDegradationBenchmarkCorpusV1):
@@ -2006,14 +2103,20 @@ def run_reverse_degradation_benchmark_campaign(
     regime_configs = _validated_regime_hawkes_configs(regime_hawkes_configs)
     neural_config = _validated_neural_tpp_config(neural_tpp_config)
     add_thin_selected_config = _validated_add_thin_config(add_thin_config)
+    bridge_config, bridge_target = _validated_schrodinger_bridge_inputs(
+        schrodinger_bridge_config,
+        schrodinger_bridge_broker_target,
+    )
     regime_contexts: tuple[RegimeHawkesWindowContextV1, ...] = ()
     neural_contexts: tuple[NeuralTPPWindowContextV1, ...] = ()
     add_thin_contexts: tuple[AddThinWindowContextV1, ...] = ()
+    bridge_contexts: tuple[SchrodingerBridgeWindowContextV1, ...] = ()
     feed_epoch_definition: FeedEpochDefinitionV2 | None = None
     if (
         regime_configs
         or neural_config is not None
         or add_thin_selected_config is not None
+        or bridge_config is not None
     ):
         feed_epoch_definition = read_active_time_feed_epoch_definition(
             corpus.dependency_artifacts["feed_epochs"].path
@@ -2047,6 +2150,14 @@ def run_reverse_degradation_benchmark_campaign(
                 )
                 for partition in corpus.windows
             )
+        if bridge_config is not None:
+            bridge_contexts = tuple(
+                _schrodinger_bridge_window_context(
+                    partition,
+                    feed_epoch_definition=feed_epoch_definition,
+                )
+                for partition in corpus.windows
+            )
     regime_context_by_window = {
         item.window_id: item for item in regime_contexts
     }
@@ -2055,6 +2166,9 @@ def run_reverse_degradation_benchmark_campaign(
     }
     add_thin_context_by_window = {
         item.window_id: item for item in add_thin_contexts
+    }
+    bridge_context_by_window = {
+        item.window_id: item for item in bridge_contexts
     }
     reconstruction_run = ReconstructionRunV1(
         symbols=corpus.profile.symbols,
@@ -2070,6 +2184,8 @@ def run_reverse_degradation_benchmark_campaign(
                 if add_thin_selected_config is not None
                 else ()
             ),
+            *((bridge_config.config_id,) if bridge_config is not None else ()),
+            *((bridge_target.target_id,) if bridge_target is not None else ()),
         ),
         ensemble_member_ids=corpus.profile.ensemble_member_ids,
         base_seed=463,
@@ -2355,6 +2471,69 @@ def run_reverse_degradation_benchmark_campaign(
                 },
             )
 
+    bridge_fit: SchrodingerBridgeFitResultV1 | None = None
+    bridge_candidate: BenchmarkCandidateV1 | None = None
+    bridge_generator: FittedSchrodingerBridgeBenchmarkGeneratorV1 | None = None
+    if bridge_config is not None and bridge_target is not None:
+        bridge_calibration_contexts = tuple(
+            bridge_context_by_window[item.window_id]
+            for item in corpus.windows
+            if item.split_kind == "calibration"
+        )
+        bridge_protected_windows = tuple(
+            build_schrodinger_bridge_protected_window(
+                EventClockCalibrationWindowV1(
+                    window_id=partition.window_id,
+                    start_ns=partition.start_ns,
+                    end_ns=partition.end_ns,
+                    events=events_by_window[partition.window_id],
+                ),
+                bridge_context_by_window[partition.window_id],
+                role=partition.split_kind,
+            )
+            for partition in corpus.windows
+            if partition.split_kind in {"validation", "final_holdout"}
+        )
+        bridge_fit = fit_schrodinger_bridge_challenger(
+            bridge_config,
+            bridge_target,
+            calibration_windows,
+            window_contexts=bridge_calibration_contexts,
+            protected_windows=bridge_protected_windows,
+            information_mode=InformationMode.EX_POST_RECONSTRUCTION,
+        )
+        bridge_candidate = build_schrodinger_bridge_benchmark_candidate(
+            bridge_config,
+            bridge_target,
+            bridge_fit,
+            ensemble_member_ids=corpus.profile.ensemble_member_ids,
+        )
+        if bridge_fit.status is SchrodingerBridgeFitStatus.FITTED:
+            bridge_generation_contexts = tuple(
+                replace(
+                    bridge_context_by_window[partition.window_id],
+                    window_id=ReconstructionWindowV1(
+                        run_id=reconstruction_run.run_id,
+                        ensemble_member_id=member_id,
+                        symbols=corpus.profile.symbols,
+                        core_start_ns=partition.start_ns,
+                        core_end_ns=partition.end_ns,
+                    ).window_id,
+                    context_id="",
+                )
+                for partition in corpus.windows
+                for member_id in corpus.profile.ensemble_member_ids
+            )
+            bridge_generator = build_fitted_schrodinger_bridge_generator(
+                bridge_config,
+                bridge_target,
+                bridge_fit,
+                ensemble_member_ids=corpus.profile.ensemble_member_ids,
+                window_contexts={
+                    item.window_id: item for item in bridge_generation_contexts
+                },
+            )
+
     degradation_coverage = dict.fromkeys(_degradation_config_names(), 0)
     degradation_effect_coverage = dict.fromkeys(_degradation_config_names(), 0)
     degradation_failures: Counter[str] = Counter()
@@ -2442,7 +2621,13 @@ def run_reverse_degradation_benchmark_campaign(
         if add_thin_candidate is not None
         else None
     )
+    bridge_key = (
+        "schrodinger_bridge_markov_sinkhorn_cpu_v1"
+        if bridge_candidate is not None
+        else None
+    )
     add_thin_generation_totals: dict[str, float] = defaultdict(float)
+    bridge_generation_totals: dict[str, float] = defaultdict(float)
     accumulators = {
         "dense_identity": _CandidateAccumulator(),
         "degraded_identity": _CandidateAccumulator(),
@@ -2460,6 +2645,11 @@ def run_reverse_degradation_benchmark_campaign(
         **(
             {add_thin_key: _CandidateAccumulator()}
             if add_thin_key is not None
+            else {}
+        ),
+        **(
+            {bridge_key: _CandidateAccumulator()}
+            if bridge_key is not None
             else {}
         ),
     }
@@ -2771,6 +2961,68 @@ def run_reverse_degradation_benchmark_campaign(
                                 partition,
                             )
                         )
+            if bridge_key is not None and bridge_candidate is not None:
+                accumulator = accumulators[bridge_key]
+                if bridge_generator is None:
+                    accumulator.failures += 1
+                else:
+                    result = bridge_generator.generate_with_evidence(
+                        degraded,
+                        scenario=scenario,
+                        window=reconstruction_window,
+                        ensemble_member_id=member_id,
+                    )
+                    evidence = result.evidence
+                    bridge_generation_totals["attempt_count"] += 1
+                    for name in (
+                        "input_event_count",
+                        "history_event_count",
+                        "expected_total_event_count",
+                        "requested_generated_event_count",
+                        "generated_event_count",
+                        "skipped_outside_anchor_count",
+                        "skipped_quarantine_count",
+                        "collision_count",
+                        "boundary_conditioning_l1",
+                        "mean_triangle_residual_before",
+                        "mean_triangle_residual_after",
+                        "generation_work",
+                        "wall_time_ms",
+                    ):
+                        bridge_generation_totals[name] += getattr(
+                            evidence, name
+                        )
+                    bridge_generation_totals["peak_memory_bytes"] = max(
+                        bridge_generation_totals["peak_memory_bytes"],
+                        evidence.peak_memory_bytes,
+                    )
+                    if evidence.failure_reason is not None:
+                        bridge_generation_totals[
+                            f"reason_count.{evidence.failure_reason}"
+                        ] += 1
+                    if (
+                        evidence.status
+                        is SchrodingerBridgeGenerationStatus.FAILED
+                    ):
+                        accumulator.failures += 1
+                    elif (
+                        evidence.status
+                        is SchrodingerBridgeGenerationStatus.REFUSED
+                    ):
+                        accumulator.refusals += 1
+                    else:
+                        if (
+                            evidence.status
+                            is SchrodingerBridgeGenerationStatus.EMPTY
+                        ):
+                            accumulator.refusals += 1
+                        accumulator.consume(
+                            _compare_streams(
+                                reference,
+                                result.events,
+                                partition,
+                            )
+                        )
         _enforce_runtime(started, corpus.profile.max_runtime_seconds)
 
     subject_ids = {
@@ -2790,6 +3042,8 @@ def run_reverse_degradation_benchmark_campaign(
         subject_ids[neural_key] = neural_candidate.candidate_id
     if add_thin_key is not None and add_thin_candidate is not None:
         subject_ids[add_thin_key] = add_thin_candidate.candidate_id
+    if bridge_key is not None and bridge_candidate is not None:
+        subject_ids[bridge_key] = bridge_candidate.candidate_id
     roles = {
         "dense_identity": "baseline",
         "degraded_identity": "baseline",
@@ -2801,6 +3055,7 @@ def run_reverse_degradation_benchmark_campaign(
         **{key: "candidate" for key in regime_keys.values()},
         **({neural_key: "candidate"} if neural_key is not None else {}),
         **({add_thin_key: "candidate"} if add_thin_key is not None else {}),
+        **({bridge_key: "candidate"} if bridge_key is not None else {}),
     }
     method_names = dict.fromkeys(accumulators, "")
     for name in method_names:
@@ -2815,6 +3070,8 @@ def run_reverse_degradation_benchmark_campaign(
         method_names[neural_key] = "neural_tpp_rmtpp_cpu_v1"
     if add_thin_key is not None:
         method_names[add_thin_key] = "add_thin_histogram_marked_cpu_v1"
+    if bridge_key is not None:
+        method_names[bridge_key] = "schrodinger_bridge_markov_sinkhorn_cpu_v1"
     fit_by_key = {clock_keys[family]: fit for family, fit in clock_fits.items()}
     hawkes_fit_by_key = {
         hawkes_keys[structure]: fit for structure, fit in hawkes_fits.items()
@@ -2830,6 +3087,11 @@ def run_reverse_degradation_benchmark_campaign(
     add_thin_fit_by_key = (
         {add_thin_key: add_thin_fit}
         if add_thin_key is not None and add_thin_fit is not None
+        else {}
+    )
+    bridge_fit_by_key = (
+        {bridge_key: bridge_fit}
+        if bridge_key is not None and bridge_fit is not None
         else {}
     )
     extra_metrics_by_key: dict[str, Mapping[str, JSONScalar]] = {
@@ -2853,6 +3115,13 @@ def run_reverse_degradation_benchmark_campaign(
             key: _add_thin_fit_metrics(fit, add_thin_generation_totals)
             for key, fit in add_thin_fit_by_key.items()
         },
+        **{
+            key: _schrodinger_bridge_fit_metrics(
+                fit,
+                bridge_generation_totals,
+            )
+            for key, fit in bridge_fit_by_key.items()
+        },
     }
     reports = tuple(
         _candidate_report(
@@ -2869,11 +3138,13 @@ def run_reverse_degradation_benchmark_campaign(
                 or name in regime_fit_by_key
                 or name in neural_fit_by_key
                 or name in add_thin_fit_by_key
+                or name in bridge_fit_by_key
                 else 1
             ),
             evaluated_window_count=len(evaluated),
             provisional=(
-                name == "empirical_motif" and motif_candidate_provisional
+                (name == "empirical_motif" and motif_candidate_provisional)
+                or name in bridge_fit_by_key
             ),
             extra_metrics=extra_metrics_by_key.get(name),
         )
@@ -2957,6 +3228,10 @@ def run_reverse_degradation_benchmark_campaign(
     if add_thin_selected_config is not None:
         base_campaign_metrics["point_process_diagnostic_status"] = (
             "available-bounded-marked-add-thin-cpu-challenger"
+        )
+    if bridge_config is not None:
+        base_campaign_metrics["point_process_diagnostic_status"] = (
+            "available-bounded-markov-schrodinger-bridge-cpu-challenger"
         )
     base_campaign_metrics.update(
         {
@@ -3491,6 +3766,137 @@ def _add_thin_fit_metrics(
     metrics.update(
         {
             f"add_thin_generation_{name}": int(value)
+            for name, value in generation_totals.items()
+        }
+    )
+    return metrics
+
+
+def _schrodinger_bridge_fit_metrics(
+    fit: SchrodingerBridgeFitResultV1,
+    generation_totals: Mapping[str, float],
+) -> dict[str, JSONScalar]:
+    """Expose bridge split, IPF, path, boundary, and resource evidence."""
+    dataset = fit.dataset_manifest
+    checkpoint = fit.checkpoint
+    solver = fit.solver_evidence
+    runtime = fit.runtime_metadata
+    metrics: dict[str, JSONScalar] = {
+        "schrodinger_bridge_architecture": "finite_state_markov_sinkhorn_cpu_v1",
+        "schrodinger_bridge_config_id": fit.config_id,
+        "schrodinger_bridge_broker_target_id": fit.broker_target_id,
+        "schrodinger_bridge_fit_id": fit.fit_id,
+        "schrodinger_bridge_fit_status": fit.status.value,
+        "schrodinger_bridge_fit_converged": fit.converged,
+        "schrodinger_bridge_fit_failure_reason": fit.failure_reason,
+        "schrodinger_bridge_training_window_count": fit.training_window_count,
+        "schrodinger_bridge_tuning_window_count": fit.tuning_window_count,
+        "schrodinger_bridge_training_event_count": fit.training_event_count,
+        "schrodinger_bridge_tuning_event_count": fit.tuning_event_count,
+        "schrodinger_bridge_fit_wall_time_ms": fit.fit_wall_time_ms,
+        "schrodinger_bridge_fit_peak_memory_bytes": fit.fit_peak_memory_bytes,
+        "schrodinger_bridge_runtime_os": cast(
+            JSONScalar, runtime.get("operating_system")
+        ),
+        "schrodinger_bridge_runtime_machine": cast(
+            JSONScalar, runtime.get("machine")
+        ),
+        "schrodinger_bridge_accelerator_policy": cast(
+            JSONScalar, runtime.get("accelerator_policy")
+        ),
+        "schrodinger_bridge_dataset_id": (
+            dataset.dataset_id if dataset is not None else None
+        ),
+        "schrodinger_bridge_protected_window_count": (
+            dataset.protected_window_count if dataset is not None else None
+        ),
+        "schrodinger_bridge_exact_duplicate_count": (
+            dataset.exact_duplicate_count if dataset is not None else None
+        ),
+        "schrodinger_bridge_near_duplicate_collision_count": (
+            dataset.near_duplicate_collision_count
+            if dataset is not None
+            else None
+        ),
+        "schrodinger_bridge_interval_overlap_count": (
+            dataset.interval_overlap_count if dataset is not None else None
+        ),
+        "schrodinger_bridge_checkpoint_id": (
+            checkpoint.checkpoint_id if checkpoint is not None else None
+        ),
+        "schrodinger_bridge_parameter_count": (
+            checkpoint.parameter_count if checkpoint is not None else None
+        ),
+        "schrodinger_bridge_parameter_bytes": (
+            checkpoint.parameter_bytes if checkpoint is not None else None
+        ),
+        "schrodinger_bridge_target_mean_event_count": (
+            checkpoint.target_mean_event_count
+            if checkpoint is not None
+            else None
+        ),
+        "schrodinger_bridge_tune_joint_nll": (
+            checkpoint.tune_joint_nll if checkpoint is not None else None
+        ),
+        "schrodinger_bridge_source_iid_tune_nll": (
+            checkpoint.source_iid_tune_nll if checkpoint is not None else None
+        ),
+        "schrodinger_bridge_uniform_tune_nll": (
+            checkpoint.uniform_tune_nll if checkpoint is not None else None
+        ),
+        "schrodinger_bridge_solver_converged": (
+            solver.converged if solver is not None else False
+        ),
+        "schrodinger_bridge_solver_iterations": (
+            solver.iterations if solver is not None else 0
+        ),
+        "schrodinger_bridge_source_marginal_residual": (
+            solver.source_marginal_residual if solver is not None else None
+        ),
+        "schrodinger_bridge_target_marginal_residual": (
+            solver.target_marginal_residual if solver is not None else None
+        ),
+        "schrodinger_bridge_maximum_marginal_residual": (
+            solver.maximum_marginal_residual if solver is not None else None
+        ),
+        "schrodinger_bridge_support_missing_count": (
+            solver.support_missing_count if solver is not None else None
+        ),
+        "schrodinger_bridge_numerical_repair_count": (
+            solver.numerical_repair_count if solver is not None else None
+        ),
+        "schrodinger_bridge_minimum_positive_kernel": (
+            solver.minimum_positive_kernel if solver is not None else None
+        ),
+        "schrodinger_bridge_maximum_scaling": (
+            solver.maximum_scaling if solver is not None else None
+        ),
+        "schrodinger_bridge_expected_transport_cost": (
+            solver.expected_transport_cost if solver is not None else None
+        ),
+        "schrodinger_bridge_relative_entropy": (
+            solver.relative_entropy if solver is not None else None
+        ),
+        "schrodinger_bridge_regularized_objective": (
+            solver.regularized_objective if solver is not None else None
+        ),
+        "schrodinger_bridge_quantization_mean_abs_error": (
+            solver.quantization_mean_abs_error if solver is not None else None
+        ),
+        "schrodinger_bridge_window_boundary_transition_l1": (
+            solver.window_boundary_transition_l1 if solver is not None else None
+        ),
+        "schrodinger_bridge_solver_work": (
+            solver.solver_work if solver is not None else None
+        ),
+        "point_process_diagnostic_status": (
+            "available-finite-state-markov-sinkhorn-and-conditional-paths"
+        ),
+        "automatic_winner": False,
+    }
+    metrics.update(
+        {
+            f"schrodinger_bridge_generation_{name}": value
             for name, value in generation_totals.items()
         }
     )

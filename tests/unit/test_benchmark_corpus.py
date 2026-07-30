@@ -27,6 +27,10 @@ from histdatacom.synthetic.event_clock import default_event_clock_configs
 from histdatacom.synthetic.marked_hawkes import default_marked_hawkes_configs
 from histdatacom.synthetic.neural_tpp import default_neural_tpp_config
 from histdatacom.synthetic.regime_hawkes import default_regime_hawkes_configs
+from histdatacom.synthetic.schrodinger_bridge import (
+    SchrodingerBridgeBrokerTargetV1,
+    default_schrodinger_bridge_config,
+)
 
 
 def _corpus() -> ReverseDegradationBenchmarkCorpusV1:
@@ -389,3 +393,44 @@ def test_add_thin_campaign_accepts_none_or_the_fixed_config() -> None:
     assert corpus_module._validated_add_thin_config(config) == config
     with pytest.raises(TypeError, match="invalid config"):
         corpus_module._validated_add_thin_config(object())
+
+
+def test_schrodinger_bridge_campaign_requires_config_and_target_together() -> (
+    None
+):
+    config = default_schrodinger_bridge_config()
+    target = SchrodingerBridgeBrokerTargetV1(
+        broker_profile_selection_id="broker-profile-selection:test",
+        fingerprint_id="broker-fingerprint:test",
+        broker_support_status="supported",
+        selected_at_utc_ns=2,
+        profile_effective_start_utc_ns=1,
+        profile_effective_end_utc_ns=None,
+        transfer_config_id="broker-transfer-config:test",
+        transfer_strength=0.25,
+        target_mean_event_count=100.0,
+        target_cadence_ns=100_000_000.0,
+        symbol_weights={
+            symbol: 1.0 for symbol in ("EURGBP", "EURUSD", "GBPUSD")
+        },
+        mark_weights={
+            "ask_only": 1.0,
+            "bid_only": 1.0,
+            "joint": 1.0,
+            "unchanged": 1.0,
+        },
+        time_bin_weights=tuple(1.0 for _ in range(config.time_bin_count)),
+        spread_target=0.0002,
+    )
+
+    assert corpus_module._validated_schrodinger_bridge_inputs(None, None) == (
+        None,
+        None,
+    )
+    assert corpus_module._validated_schrodinger_bridge_inputs(
+        config, target
+    ) == (config, target)
+    with pytest.raises(ValueError, match="config and broker target together"):
+        corpus_module._validated_schrodinger_bridge_inputs(config, None)
+    with pytest.raises(TypeError, match="invalid config"):
+        corpus_module._validated_schrodinger_bridge_inputs(object(), target)
