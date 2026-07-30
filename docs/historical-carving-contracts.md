@@ -1,18 +1,25 @@
 # Historical Carving Contracts
 
-Historical carving is the first stage that may promote empirical-motif
-candidates into accepted synthetic events. It consumes process-local candidate
+Historical carving is the first stage that may promote generator candidates
+into accepted synthetic events. It consumes process-local candidate
 rows, applies versioned historical constraints in a fixed order, and returns
 accepted rows plus bounded decision evidence. It does not perform cross-series
 reconciliation, broker conditioning, or final persistence.
 
+`ReconstructionCandidateBatchV1` is the generator-neutral structural surface
+used by `carve_reconstruction_candidates()`. The original
+`carve_empirical_motif_candidates()` entry point remains a strict compatible
+wrapper. `EventClockCandidateBatchV1` therefore reaches the same hard carving
+and output contracts without weakening the empirical API; see
+[`classical-event-clock-challengers.md`](classical-event-clock-challengers.md).
+
 ## Bound inputs
 
-One call to `carve_empirical_motif_candidates()` binds:
+One carving call binds:
 
 - the semantic `ReconstructionRunV1` and owned `ReconstructionWindowV1`;
-- one primary `EmpiricalMotifCandidateBatchV1` and optional same-scope
-  substitution batches;
+- one primary structural candidate batch and optional same-scope substitution
+  batches;
 - the caller's immutable observed events, including both anchor IDs;
 - one window-covering `MarketContextQueryV1` in the same information mode;
 - one `HistoricalCarvingConstraintSetV1` listed in the run configuration; and
@@ -27,7 +34,7 @@ for unrelated candidate rows.
 The market-context query may report `no_matching_event`; an ordinary interval
 with a complete calendar profile is still supported evidence. Timeline gaps,
 point-in-time unavailability, missing calendar state, or an incomplete required
-profile refuse the batch. Context and motif-query information modes must agree.
+profile refuse the batch. Context and candidate information modes must agree.
 
 ## Fixed precedence and fail-closed behavior
 

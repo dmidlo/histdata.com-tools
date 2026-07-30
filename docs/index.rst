@@ -30,6 +30,7 @@ Empirical reconstruction pipeline
    reference-motif-index-contracts
    modern-reference-motif-library
    empirical-motif-generation-contracts
+   classical-event-clock-challengers
    historical-carving-contracts
    cross-currency-reconciliation-contracts
    reconstruction-ensemble-calibration-contracts

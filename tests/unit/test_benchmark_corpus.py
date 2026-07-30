@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+import histdatacom.synthetic.benchmark_corpus as corpus_module
 from histdatacom.runtime_contracts import ArtifactRef
 from histdatacom.synthetic.benchmark import BenchmarkEventV1
 from histdatacom.synthetic.benchmark_corpus import (
@@ -21,7 +22,7 @@ from histdatacom.synthetic.benchmark_gates import (
     load_default_benchmark_promotion_gate_policy,
 )
 from histdatacom.synthetic.contracts import canonical_contract_json
-import histdatacom.synthetic.benchmark_corpus as corpus_module
+from histdatacom.synthetic.event_clock import default_event_clock_configs
 
 
 def _corpus() -> ReverseDegradationBenchmarkCorpusV1:
@@ -336,3 +337,13 @@ def test_cli_exposes_installed_real_corpus_command() -> None:
     assert args.analytics_command == "reverse-degradation-benchmark-corpus"
     assert args.gate_policy_commit == PREDECLARED_GATE_COMMIT
     assert args.windows_per_split == 6
+
+
+def test_event_clock_campaign_requires_one_config_per_family() -> None:
+    configs = default_event_clock_configs()
+
+    assert corpus_module._validated_event_clock_configs(configs) == configs
+    with pytest.raises(ValueError, match="exactly one config per family"):
+        corpus_module._validated_event_clock_configs(configs[:-1])
+    with pytest.raises(ValueError, match="exactly one config per family"):
+        corpus_module._validated_event_clock_configs((*configs, configs[0]))

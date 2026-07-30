@@ -49,6 +49,18 @@ from histdatacom.synthetic.benchmark_gates import (
     load_default_benchmark_promotion_gate_policy,
 )
 from histdatacom.synthetic.contracts import canonical_contract_json
+from histdatacom.synthetic.event_clock import (
+    EventClockCalibrationWindowV1,
+    EventClockConfigurationV1,
+    EventClockConfigV1,
+    EventClockFamily,
+    EventClockFitResultV1,
+    EventClockFitStatus,
+    FittedEventClockBenchmarkGeneratorV1,
+    build_event_clock_benchmark_candidate,
+    build_fitted_event_clock_generator,
+    fit_event_clock_challenger,
+)
 from histdatacom.synthetic.generation import (
     EMPIRICAL_MOTIF_GENERATOR_ID,
     EmpiricalMotifBenchmarkGeneratorV1,
@@ -1670,14 +1682,33 @@ def _split_hashes(
     return result
 
 
+def _validated_event_clock_configs(
+    values: Sequence[EventClockConfigurationV1],
+) -> tuple[EventClockConfigurationV1, ...]:
+    configs = tuple(values)
+    if any(not isinstance(item, EventClockConfigV1) for item in configs):
+        raise TypeError("event-clock campaign received an invalid config")
+    if configs and (
+        len(configs) != len(EventClockFamily)
+        or {item.family for item in configs} != set(EventClockFamily)
+    ):
+        raise ValueError(
+            "event-clock campaign requires exactly one config per family"
+        )
+    if len({item.config_id for item in configs}) != len(configs):
+        raise ValueError("event-clock campaign config identities collide")
+    return configs
+
+
 def run_reverse_degradation_benchmark_campaign(
     corpus: ReverseDegradationBenchmarkCorpusV1,
     source_root: str | Path,
     *,
     motif_index: ReferenceMotifIndexV1 | None = None,
     motif_candidate_provisional: bool = True,
+    event_clock_configs: Sequence[EventClockConfigurationV1] = (),
 ) -> tuple[ReverseDegradationBenchmarkCampaignV1, ReferenceMotifIndexV1]:
-    """Run baselines, one bound motif candidate, and a negative control."""
+    """Run controls, the motif baseline, and optional event-clock challengers."""
     if not isinstance(corpus, ReverseDegradationBenchmarkCorpusV1):
         raise ValueError("benchmark campaign requires a v1 corpus")
     started_wall = datetime.now(timezone.utc)
@@ -1718,10 +1749,14 @@ def run_reverse_degradation_benchmark_campaign(
         max_events_per_interval=512,
         max_transformations_per_interval=64,
     )
+    clock_configs = _validated_event_clock_configs(event_clock_configs)
     reconstruction_run = ReconstructionRunV1(
         symbols=corpus.profile.symbols,
         source_version_ids=tuple(item.partition_id for item in corpus.sources),
-        configuration_ids=(generator_config.config_id,),
+        configuration_ids=(
+            generator_config.config_id,
+            *(item.config_id for item in clock_configs),
+        ),
         ensemble_member_ids=corpus.profile.ensemble_member_ids,
         base_seed=463,
         storage_policy=ReconstructionStoragePolicyV1(
@@ -1761,6 +1796,43 @@ def run_reverse_degradation_benchmark_campaign(
         ensemble_member_ids=("control",),
         control_kind=BenchmarkControlKind.LINEAR_INTERPOLATION,
     )
+    calibration_windows = tuple(
+        EventClockCalibrationWindowV1(
+            window_id=partition.window_id,
+            start_ns=partition.start_ns,
+            end_ns=partition.end_ns,
+            events=events_by_window[partition.window_id],
+        )
+        for partition in corpus.windows
+        if partition.split_kind == "calibration"
+    )
+    clock_fits = {
+        config.family: fit_event_clock_challenger(
+            config,
+            calibration_windows,
+            information_mode=InformationMode.EX_POST_RECONSTRUCTION,
+        )
+        for config in clock_configs
+    }
+    clock_candidates = {
+        config.family: build_event_clock_benchmark_candidate(
+            config,
+            clock_fits[config.family],
+            ensemble_member_ids=corpus.profile.ensemble_member_ids,
+        )
+        for config in clock_configs
+    }
+    clock_generators: dict[
+        EventClockFamily, FittedEventClockBenchmarkGeneratorV1
+    ] = {
+        config.family: build_fitted_event_clock_generator(
+            config,
+            clock_fits[config.family],
+            ensemble_member_ids=corpus.profile.ensemble_member_ids,
+        )
+        for config in clock_configs
+        if clock_fits[config.family].status is EventClockFitStatus.FITTED
+    }
 
     degradation_coverage = dict.fromkeys(_degradation_config_names(), 0)
     degradation_effect_coverage = dict.fromkeys(_degradation_config_names(), 0)
@@ -1830,12 +1902,16 @@ def run_reverse_degradation_benchmark_campaign(
             + ", ".join(sorted(ineffective))
         )
 
+    clock_keys = {
+        family: f"event_clock_{family.value}" for family in clock_candidates
+    }
     accumulators = {
         "dense_identity": _CandidateAccumulator(),
         "degraded_identity": _CandidateAccumulator(),
         "linear_interpolation": _CandidateAccumulator(),
         "empirical_motif": _CandidateAccumulator(),
         "negative_anchor_drop": _CandidateAccumulator(),
+        **{key: _CandidateAccumulator() for key in clock_keys.values()},
     }
     evaluated = tuple(
         item
@@ -1932,16 +2008,51 @@ def run_reverse_degradation_benchmark_campaign(
                     member_refused = True
             if member_failed:
                 accumulators["empirical_motif"].failures += 1
-                continue
-            if member_refused:
-                accumulators["empirical_motif"].refusals += 1
-            accumulators["empirical_motif"].consume(
-                _compare_streams(
-                    reference,
-                    tuple(_ordered_events(generated)),
-                    partition,
+            else:
+                if member_refused:
+                    accumulators["empirical_motif"].refusals += 1
+                accumulators["empirical_motif"].consume(
+                    _compare_streams(
+                        reference,
+                        tuple(_ordered_events(generated)),
+                        partition,
+                    )
                 )
-            )
+            for family, candidate in clock_candidates.items():
+                accumulator = accumulators[clock_keys[family]]
+                generator = clock_generators.get(family)
+                if generator is None:
+                    accumulator.failures += 1
+                    continue
+                try:
+                    candidate_window = generate_benchmark_candidate_window(
+                        generator,
+                        candidate,
+                        degraded,
+                        scenario=scenario,
+                        window=reconstruction_window,
+                        ensemble_member_id=member_id,
+                        execution=BenchmarkExecutionEvidenceV1(
+                            attempted=True,
+                            converged=True,
+                            peak_memory_bytes=_peak_memory_bytes(),
+                        ),
+                    )
+                except (RuntimeError, ValueError):
+                    accumulator.failures += 1
+                    continue
+                if not any(
+                    item.sparsity.startswith("event-clock-")
+                    for item in candidate_window.events
+                ):
+                    accumulator.refusals += 1
+                accumulator.consume(
+                    _compare_streams(
+                        reference,
+                        candidate_window.events,
+                        partition,
+                    )
+                )
         _enforce_runtime(started, corpus.profile.max_runtime_seconds)
 
     subject_ids = {
@@ -1951,28 +2062,42 @@ def run_reverse_degradation_benchmark_campaign(
         for name in accumulators
     }
     subject_ids["empirical_motif"] = motif_candidate.candidate_id
+    for family, key in clock_keys.items():
+        subject_ids[key] = clock_candidates[family].candidate_id
     roles = {
         "dense_identity": "baseline",
         "degraded_identity": "baseline",
         "linear_interpolation": "baseline",
         "empirical_motif": "candidate",
         "negative_anchor_drop": "negative_control",
+        **{key: "candidate" for key in clock_keys.values()},
     }
+    method_names = dict.fromkeys(accumulators, "")
+    for name in method_names:
+        method_names[name] = name
+    for family, key in clock_keys.items():
+        method_names[key] = family.value
+    fit_by_key = {clock_keys[family]: fit for family, fit in clock_fits.items()}
     reports = tuple(
         _candidate_report(
             subject_id=subject_ids[name],
-            method_name=name,
+            method_name=method_names[name],
             role=roles[name],
             accumulator=accumulator,
             policy=policy,
             ensemble_member_count=(
                 len(corpus.profile.ensemble_member_ids)
-                if name == "empirical_motif"
+                if name == "empirical_motif" or name in fit_by_key
                 else 1
             ),
             evaluated_window_count=len(evaluated),
             provisional=(
                 name == "empirical_motif" and motif_candidate_provisional
+            ),
+            extra_metrics=(
+                _event_clock_fit_metrics(fit_by_key[name])
+                if name in fit_by_key
+                else None
             ),
         )
         for name, accumulator in accumulators.items()
@@ -2036,6 +2161,10 @@ def run_reverse_degradation_benchmark_campaign(
         "ineffective_degradation_family_count": len(ineffective),
         "point_process_diagnostic_status": "not_applicable-no-conditional-intensity",
     }
+    if clock_configs:
+        base_campaign_metrics["point_process_diagnostic_status"] = (
+            "available-four-classical-event-clock-families"
+        )
     base_campaign_metrics.update(
         {
             f"degradation_effect_window_count:{name}": count
@@ -2119,6 +2248,7 @@ def _candidate_report(
     ensemble_member_count: int,
     evaluated_window_count: int,
     provisional: bool,
+    extra_metrics: Mapping[str, JSONScalar] | None = None,
 ) -> BenchmarkCandidateReportV1:
     defaults = {
         "event_count_relative_error": 1.0,
@@ -2178,6 +2308,8 @@ def _candidate_report(
             if values
         }
     )
+    if extra_metrics:
+        metrics.update(extra_metrics)
     observations = _gate_observations(
         scope=BenchmarkGateScope.CANDIDATE,
         subject_id=subject_id,
@@ -2214,6 +2346,37 @@ def _candidate_report(
         gate_decision=decision,
         provisional=provisional,
     )
+
+
+def _event_clock_fit_metrics(
+    fit: EventClockFitResultV1,
+) -> dict[str, JSONScalar]:
+    diagnostic_status = {
+        EventClockFamily.NHPP: "available-conditional-intensity",
+        EventClockFamily.COX: "available-random-conditional-intensity",
+        EventClockFamily.ACD: "available-conditional-duration",
+        EventClockFamily.HIDDEN_MARKOV: "available-hidden-duration-mark",
+    }[fit.family]
+    return {
+        "event_clock_family": fit.family.value,
+        "event_clock_config_id": fit.config_id,
+        "event_clock_fit_id": fit.fit_id,
+        "event_clock_fit_status": fit.status.value,
+        "event_clock_fit_converged": fit.converged,
+        "event_clock_fit_iteration_count": fit.iteration_count,
+        "event_clock_fitted_event_count": fit.fitted_event_count,
+        "event_clock_fitted_window_count": fit.fitted_window_count,
+        "event_clock_fit_log_likelihood": fit.log_likelihood,
+        "event_clock_fit_failure_reason": fit.failure_reason,
+        "event_clock_fit_estimated_peak_memory_bytes": (
+            fit.estimated_peak_memory_bytes
+        ),
+        "event_clock_calibration_content_sha256": (
+            fit.calibration_content_sha256
+        ),
+        "point_process_diagnostic_status": diagnostic_status,
+        "automatic_winner": False,
+    }
 
 
 def _gate_observations(
@@ -3335,7 +3498,7 @@ def _read_content_addressed_json(
 
 
 def _peak_memory_bytes() -> int:
-    return peak_rss_bytes()
+    return int(peak_rss_bytes())
 
 
 def _enforce_runtime(started: float, maximum: float) -> None:

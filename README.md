@@ -46,6 +46,7 @@ Works on macOS, Linux, and Windows.
     - [Feed-Regime Detection](#feed-regime-detection)
     - [Historical Feed-Observation Operators](#historical-feed-observation-operators)
     - [Reverse-Degradation Benchmark](#reverse-degradation-benchmark)
+    - [Classical Event-Clock Challengers](#classical-event-clock-challengers)
     - [Empirical Reference-Motif Index](#empirical-reference-motif-index)
     - [Real Modern Reference-Motif Library](#real-modern-reference-motif-library)
     - [Empirical Motif Candidate Generation](#empirical-motif-candidate-generation)
@@ -2721,6 +2722,25 @@ runs dense/no-fill/interpolation/motif/negative controls, and writes a compact
 content-addressed manifest, motif index, leakage audit, resource audit, and
 scorecard. Required fitted-operator or replay failures abort the campaign;
 dense and holdout event rows remain process-local.
+
+#### Classical Event-Clock Challengers
+
+`histdatacom.synthetic.event_clock` adds opt-in non-homogeneous Poisson,
+gamma-mixed Cox, exponential ACD(1,1), and two-state hidden Markov
+duration/mark challengers behind the existing generator-neutral benchmark.
+All four use calibration-only versioned fits, deterministic synchronized
+generation, explicit epoch/session support and refusal, bounded prior-only
+history, hard fit/generation resource limits, and family-specific diagnostics.
+
+Event-clock proposals can be projected into the same structural candidate
+surface and historical-carving engine as empirical motifs. The public
+reconstruction-plan v1 contract and empirical default remain unchanged; no
+scorecard selects a winner automatically. The retained real campaign fitted
+all four families with zero generation failures or anchor violations, but none
+passed the frozen candidate gates. See
+[`docs/classical-event-clock-challengers.md`](docs/classical-event-clock-challengers.md)
+for likelihoods, conditioning/backoff semantics, deterministic lineage,
+resource bounds, carving integration, retained evidence, and primary sources.
 
 #### Empirical Reference-Motif Index
 
