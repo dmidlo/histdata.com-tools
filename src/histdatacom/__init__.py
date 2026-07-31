@@ -37,6 +37,10 @@ __all__ = [
     "ReconstructionClient",
     "ReconstructionExecutionRequestV1",
     "ReconstructionExitCode",
+    "ReconstructionExperimentManifestV1",
+    "ReconstructionExperimentRole",
+    "ReconstructionExperimentSelectionV1",
+    "ReconstructionExperimentVerificationV1",
     "ReconstructionOperationReceiptV1",
     "ReconstructionPlanSetPreflightV1",
     "ReconstructionPlanSetV1",
@@ -60,6 +64,15 @@ _RECONSTRUCTION_EXPORTS = frozenset(
         "ReconstructionPlanShardV1",
         "ReconstructionPlanSpecV1",
         "ReconstructionPreflightV1",
+    }
+)
+
+_EXPERIMENT_EXPORTS = frozenset(
+    {
+        "ReconstructionExperimentManifestV1",
+        "ReconstructionExperimentRole",
+        "ReconstructionExperimentSelectionV1",
+        "ReconstructionExperimentVerificationV1",
     }
 )
 
@@ -87,13 +100,18 @@ _CROSS_SERIES_EXPORTS = frozenset(
 def __getattr__(name: str) -> Any:
     """Lazily expose the typed reconstruction facade without import cycles."""
     if name not in (
-        _RECONSTRUCTION_EXPORTS | _DATASET_EXPORTS | _CROSS_SERIES_EXPORTS
+        _RECONSTRUCTION_EXPORTS
+        | _EXPERIMENT_EXPORTS
+        | _DATASET_EXPORTS
+        | _CROSS_SERIES_EXPORTS
     ):
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
     from importlib import import_module
 
     if name in _RECONSTRUCTION_EXPORTS:
         module_name = "histdatacom.reconstruction"
+    elif name in _EXPERIMENT_EXPORTS:
+        module_name = "histdatacom.reconstruction_experiment"
     elif name in _DATASET_EXPORTS:
         module_name = "histdatacom.datasets"
     else:

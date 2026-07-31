@@ -48,6 +48,7 @@ from histdatacom.reconstruction_evidence import (
     ReconstructionEvidencePolicyV1,
     read_reconstruction_evidence_policy,
 )
+from histdatacom.reconstruction_experiment import read_reconstruction_experiment
 from histdatacom.synthetic import (
     ASCII_TICK_SOURCE_KIND,
     FIRST_PARTY_RECONSTRUCTION_HANDLERS,
@@ -109,11 +110,17 @@ def _write_tick_partition(
         writer.write_table(table)
 
 
-def _artifact(tmp_path: Path, role: str, kind: str) -> Any:
+def _artifact(
+    tmp_path: Path,
+    role: str,
+    kind: str,
+    **identity: Any,
+) -> Any:
     path = tmp_path / "inputs" / f"{role}.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
-        json.dumps({"role": role}, sort_keys=True), encoding="utf-8"
+        json.dumps({"role": role, **identity}, sort_keys=True),
+        encoding="utf-8",
     )
     return artifact_ref_for_file(path, kind=kind)
 
@@ -142,35 +149,59 @@ def _resolved_inputs(
     )
     artifacts = {
         "feed_epochs": _artifact(
-            tmp_path, "feed-epochs", "feed_epoch_definition_v2"
+            tmp_path,
+            "feed-epochs",
+            "feed_epoch_definition_v2",
+            definition_id="feed-epochs-v2:test",
         ),
         "observation_operator": _artifact(
-            tmp_path, "observation", "observation-operator"
+            tmp_path,
+            "observation",
+            "observation-operator",
+            operator_id="observation-operator:test",
         ),
         "market_context": _artifact(
-            tmp_path, "market-context", "market_context_corpus_v1"
+            tmp_path,
+            "market-context",
+            "market_context_corpus_v1",
+            corpus_id="market-context:test",
         ),
         "cftc_positioning": _artifact(
-            tmp_path, "cftc-positioning", "cftc_positioning_corpus_v1"
+            tmp_path,
+            "cftc-positioning",
+            "cftc_positioning_corpus_v1",
+            corpus_id="cftc-positioning:test",
         ),
         "benchmark_manifest": _artifact(
-            tmp_path, "benchmark", "reverse_degradation_manifest_v1"
+            tmp_path,
+            "benchmark",
+            "reverse_degradation_manifest_v1",
+            schema_version="histdatacom.reverse-degradation-manifest.v1",
+            corpus={"corpus_id": "benchmark:test"},
         ),
         "motif_manifest": _artifact(
-            tmp_path, "motif-manifest", "modern_reference_motif_manifest_v1"
+            tmp_path,
+            "motif-manifest",
+            "modern_reference_motif_manifest_v1",
+            library_id="modern-reference-motif:test",
         ),
         "motif_index": _artifact(
-            tmp_path, "motif-index", "modern_reference_motif_index_v1"
+            tmp_path,
+            "motif-index",
+            "modern_reference_motif_index_v1",
+            index_id="motif-index:test",
         ),
         "motif_qualification": _artifact(
             tmp_path,
             "motif-qualification",
             "modern_reference_motif_qualification_v1",
+            library_id="modern-reference-motif:test",
         ),
         "motif_leakage_audit": _artifact(
             tmp_path,
             "motif-leakage",
             "modern_reference_motif_leakage_audit_v1",
+            library_id="modern-reference-motif:test",
         ),
     }
     return plan_module._ResolvedPlanInputs(
@@ -300,6 +331,45 @@ def test_public_builder_is_deterministic_bounded_and_stage_consumable(
         if command.stage is ReconstructionStage.BROKER_TRANSFER
     )
     assert broker_command.input_manifest_refs == ()
+
+
+def test_catalog_selector_reproduces_legacy_translation_and_binds_experiment(
+    planned_environment: tuple[Path, dict[str, Any]],
+) -> None:
+    source_root, kwargs = planned_environment
+    legacy = build_synthetic_infill_plan(source_root, **kwargs)
+    catalog_path = legacy.artifact_graph["dataset_catalog"].path
+    catalog_spec = replace(
+        _public_spec(source_root, kwargs),
+        source_root=None,
+        dataset_catalog_path=catalog_path,
+        dataset_reference="reconstruction-selected",
+    )
+    client = ReconstructionClient()
+
+    compatibility = client.compatibility(
+        catalog_spec,
+        inspect_source=True,
+        inspect_artifacts=False,
+    )
+    selected_ref = client.construct_plan(catalog_spec)
+    selected = read_synthetic_infill_plan(selected_ref.path)
+    experiment = read_reconstruction_experiment(
+        selected.artifact_graph["experiment_manifest"].path
+    )
+
+    assert compatibility.executable
+    assert selected == legacy
+    assert experiment.experiment_id in selected.run.configuration_ids
+    assert experiment.dataset_version_ids == (
+        experiment.selections[0].dataset_version_id,
+    )
+    assert (
+        selected.artifact_graph["dataset_catalog"].kind == "dataset_catalog_v1"
+    )
+    assert selected.artifact_graph["dataset_resolution"].kind == (
+        "dataset_resolution_receipt_v1"
+    )
 
 
 def test_source_reader_preserves_complete_enriched_cache_row_evidence(

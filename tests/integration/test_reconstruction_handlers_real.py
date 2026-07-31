@@ -1,6 +1,6 @@
 """Real-artifact closure gates for first-party reconstruction handlers.
 
-Set ``HISTDATACOM_REAL_RECONSTRUCTION_PLAN`` to a #465 plan artifact.  These
+Set ``HISTDATACOM_REAL_RECONSTRUCTION_PLAN`` to a #486 plan artifact.  These
 tests never replace scientific handlers; they re-home only execution roots so
 the committed products and injected failures remain isolated under pytest's
 temporary directory.
@@ -45,6 +45,7 @@ from histdatacom.reconstruction_evidence import (
     RECONSTRUCTION_EVIDENCE_PROJECTION_ARTIFACT_KIND,
     read_point_in_time_evidence_projection,
 )
+from histdatacom.reconstruction_experiment import read_reconstruction_experiment
 from histdatacom.runtime_contracts import ArtifactRef
 from histdatacom.synthetic.contracts import canonical_contract_json
 from histdatacom.synthetic.persistence import (
@@ -156,6 +157,10 @@ def test_real_triangle_is_deterministic_and_recovers_post_rename_crash(
     assert recovered.checkpoint.phase is ReconstructionCommitPhase.COMMITTED
     assert recovered.outcomes[-1].output_refs[0].metadata["idempotent_retry"]
     first_manifest = _committed_manifest(recovered)
+    experiment = read_reconstruction_experiment(
+        first.plan.artifact_graph["experiment_manifest"].path
+    )
+    assert first_manifest.source.experiment_id == experiment.experiment_id
     first_streams = read_reconstruction_streams(
         recovered.committed_manifest_ref.path  # type: ignore[union-attr]
     )

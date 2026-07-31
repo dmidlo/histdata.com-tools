@@ -2069,7 +2069,7 @@ def _exact_alignment(
     for timestamp in common_times:
         cardinality = min(len(rows[timestamp]) for rows in by_symbol.values())
         for ordinal in range(cardinality):
-            identities = [
+            identities: list[JSONValue] = [
                 _event_id(by_symbol[symbol][timestamp][ordinal])
                 for symbol in sorted(by_symbol)
             ]

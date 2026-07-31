@@ -45,13 +45,17 @@ Both commands use the same registry and compatibility engine consumed by
 for field metadata, cache translations, compatibility states, and future
 reserved contracts.
 
-Planning starts from a JSON `ReconstructionPlanSpecV1`. Paths point to strong,
-qualified artifacts; data rows remain in their source artifacts.
+Planning starts from a JSON `ReconstructionPlanSpecV1`. A catalog selector is
+preferred; the legacy `source_root` field invokes a documented v2.3-to-v2.4
+catalog translation. Paths point to strong, qualified artifacts; data rows
+remain in their source artifacts.
 
 ```json
 {
   "schema_version": "histdatacom.reconstruction-plan-spec.v1",
-  "source_root": "data/ASCII/T",
+  "source_root": null,
+  "dataset_catalog_path": "artifacts/histdata-dataset-catalog.json",
+  "dataset_reference": "reconstruction-selected",
   "feed_epoch_definition_path": "artifacts/feed-epochs-v2-definition.json",
   "observation_operator_path": "artifacts/observation-operator.json",
   "market_context_corpus_path": "artifacts/market-context-corpus.json",
@@ -81,6 +85,24 @@ complete v1 policy object, changes plan/run identity, and is compatibility
 checked before source scanning. Merely adding `oanda` or another provider to a
 policy is rejected; a future provider requires a separately implemented and
 qualified adapter milestone.
+
+The selected catalog reference is resolved to an exact dataset version,
+revision, query scope, and partition set before plan identity is computed. The
+plan graph retains the catalog, resolution receipt, and experiment manifest;
+the committed product repeats the experiment ID in `source.experiment_id`.
+See
+[`reconstruction-experiment-contracts.md`](reconstruction-experiment-contracts.md).
+
+Frozen experiments are discoverable and independently verifiable without
+publishing local paths:
+
+```sh
+histdatacom reconstruction --json experiment-list --root work/plan-artifacts
+histdatacom reconstruction --json experiment-inspect \
+  --manifest work/plan-artifacts/reconstruction-experiment-<sha256>.json
+histdatacom reconstruction --json experiment-verify \
+  --manifest work/plan-artifacts/reconstruction-experiment-<sha256>.json
+```
 
 `window_size_ns` is a positive execution bound. Use smaller synchronized
 windows when dense monthly inputs would exceed the declared memory, scratch,

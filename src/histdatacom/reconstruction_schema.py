@@ -29,6 +29,12 @@ from histdatacom.data_quality.training_features import (
     TRAINING_SCHEMA_VERSION,
     training_feature_definitions,
 )
+from histdatacom.datasets import (
+    DatasetCatalog,
+    DatasetContractError,
+    DatasetOrigin,
+    DatasetQueryScopeV1,
+)
 from histdatacom.reconstruction_evidence import (
     ReconstructionEvidencePolicyV1,
 )
@@ -362,6 +368,7 @@ _AUDITED_MODULES = (
     "histdatacom.market_context.positioning",
     "histdatacom.orchestration.reconstruction",
     "histdatacom.reconstruction",
+    "histdatacom.reconstruction_experiment",
     "histdatacom.cross_series_constraints",
     "histdatacom.reconstruction_evidence",
     "histdatacom.synthetic.contracts",
@@ -422,6 +429,10 @@ _REQUIRED_SCHEMA_TOKENS = (
     "modern-reference-motif-leakage",
     "reconstruction-ensemble-config",
     "reconstruction-plan-spec.v1",
+    "reconstruction-experiment-manifest",
+    "reconstruction-experiment-selection",
+    "reconstruction-experiment-split-policy",
+    "reconstruction-experiment-leakage-audit",
     "synthetic-infill-plan",
     "reconstruction-checkpoint",
     "reconstruction-product.v2",
@@ -462,6 +473,8 @@ _PLAN_FIELDS = frozenset(
     {
         "schema_version",
         "source_root",
+        "dataset_catalog_path",
+        "dataset_reference",
         "source_provider_id",
         "provider",
         "dataset_version_id",
@@ -623,7 +636,7 @@ def evaluate_reconstruction_compatibility(
         _check_unknown_plan_fields(payload, findings)
         _check_current_scope(payload, findings)
         if inspect_source:
-            cache_schemas = _inspect_source_root(payload, findings)
+            cache_schemas = _inspect_source_input(payload, findings)
         if inspect_artifacts:
             _inspect_artifacts(payload, registry, findings)
 
@@ -1111,6 +1124,118 @@ def _check_current_scope(
             "Broker-conditioned and OANDA inputs are outside the HistData v2.4 milestone.",
             "Use modern_reference delivery; defer broker/OANDA work.",
         )
+
+
+def _inspect_source_input(
+    payload: Mapping[str, Any],
+    findings: list[ReconstructionCompatibilityFindingV1],
+) -> tuple[ReconstructionCacheSchemaV1, ...]:
+    """Inspect an exact catalog selection or the documented v2.3 path seam."""
+    catalog_text = str(payload.get("dataset_catalog_path", "") or "").strip()
+    if not catalog_text:
+        return _inspect_source_root(payload, findings)
+    catalog_path = Path(catalog_text).expanduser().resolve()
+    try:
+        catalog = DatasetCatalog.read(catalog_path)
+        periods = _compatibility_periods(
+            payload.get("start_period"), payload.get("end_period")
+        )
+        scope = DatasetQueryScopeV1(
+            symbols=tuple(str(value) for value in payload.get("symbols", ())),
+            periods=periods,
+            origin=DatasetOrigin.OBSERVED,
+        )
+        reference = str(
+            payload.get("dataset_reference", "reconstruction-selected")
+        ).strip()
+        resolution = catalog.resolve(reference, query_scope=scope)
+        resolution = catalog.replay(resolution)
+        catalog.verify(resolution)
+        version = next(
+            item
+            for item in catalog.versions
+            if item.dataset_version_id == resolution.dataset_version_id
+        )
+        if (
+            version.origin is not DatasetOrigin.OBSERVED
+            or version.source_provider_ids != (HISTDATA_PROVIDER_ID,)
+        ):
+            raise ValueError(
+                "v2.4 accepts only observed HistData.com catalog versions"
+            )
+        selected = tuple(
+            item
+            for item in version.partitions
+            if (not scope.symbols or item.symbol in scope.symbols)
+            and (not scope.periods or item.period in scope.periods)
+        )
+        if not selected or any(
+            item.format != SUPPORTED_SOURCE_FORMAT
+            or item.granularity != SUPPORTED_TIMEFRAME
+            for item in selected
+        ):
+            raise ValueError(
+                "v2.4 catalog selection must contain HistData ASCII/T partitions"
+            )
+        roots = {
+            Path(item.artifact.path).expanduser().resolve().parents[3]
+            for item in selected
+        }
+        if len(roots) != 1:
+            raise ValueError(
+                "catalog selection spans multiple HistData materialization roots"
+            )
+        root = next(iter(roots))
+        supplied_root = str(payload.get("source_root", "") or "").strip()
+        if supplied_root and Path(supplied_root).expanduser().resolve() != root:
+            raise ValueError(
+                "source_root differs from the catalog materialization root"
+            )
+    except (
+        DatasetContractError,
+        IndexError,
+        OSError,
+        StopIteration,
+        TypeError,
+        ValueError,
+    ) as err:
+        _finding(
+            findings,
+            "invalid_histdata_catalog_selection",
+            ReconstructionCompatibilityStatus.INVALID,
+            "dataset_catalog_path",
+            str(err),
+            "Select a qualified HistData.com ASCII/T catalog entry and revision.",
+        )
+        return ()
+    translated = dict(payload)
+    translated["source_root"] = str(root)
+    return _inspect_source_root(translated, findings)
+
+
+def _compatibility_periods(start: Any, end: Any) -> tuple[str, ...]:
+    start_text = str(start or "").strip()
+    end_text = str(end or "").strip()
+    if not start_text and not end_text:
+        return ()
+    if len(start_text) != 6 or len(end_text) != 6 or start_text > end_text:
+        raise ValueError("catalog period bounds must be a valid YYYYMM range")
+    result: list[str] = []
+    year, month = int(start_text[:4]), int(start_text[4:])
+    end_year, end_month = int(end_text[:4]), int(end_text[4:])
+    while (year, month) <= (end_year, end_month):
+        if not 1 <= month <= 12:
+            raise ValueError("catalog period month is outside 01-12")
+        result.append(f"{year:04d}{month:02d}")
+        month += 1
+        if month == 13:
+            year += 1
+            month = 1
+        if len(result) > MAX_SOURCE_PARTITIONS:
+            raise ValueError(
+                "catalog period range exceeds compatibility limits"
+            )
+    return tuple(result)
 
 
 def _inspect_source_root(

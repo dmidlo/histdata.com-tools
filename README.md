@@ -138,6 +138,28 @@ for adapter authoring, manifest and configuration examples, licensing limits,
 row/cursor identity, synthetic lineage, reconstruction preflight, and the
 contract required by the future OANDA-compatible API in issue #77.
 
+### Catalog-bound Reconstruction Experiments
+
+Version 2.4 resolves a HistData catalog selector to immutable ASCII/T
+partitions before reconstruction plan identity is computed. One frozen
+experiment ID binds dataset version/revision, source hashes, roles, split and
+leakage policy, evidence/preprocessing/feature/gate identities, authoritative
+domain artifacts, and implementation versions. Every first-party stage carries
+the catalog, resolution receipt, and experiment manifest; committed v2 products
+retain the same identity at `source.experiment_id`.
+
+```bash
+histdatacom reconstruction --json experiment-list --root work/plan-artifacts
+histdatacom reconstruction --json experiment-inspect \
+  --manifest work/plan-artifacts/reconstruction-experiment-<sha256>.json
+histdatacom reconstruction --json experiment-verify \
+  --manifest work/plan-artifacts/reconstruction-experiment-<sha256>.json
+```
+
+Provider-neutral fields remain identity seams only. The executable milestone is
+HistData.com ASCII/T; OANDA, alternate providers, and broker feeds remain later
+milestones. See [Catalog-bound reconstruction experiments](docs/reconstruction-experiment-contracts.md).
+
 ### Show the help and options
 
 ```txt
@@ -3368,6 +3390,7 @@ Schema discovery and compatibility admission are also first-party:
 ```sh
 histdatacom reconstruction schemas --json
 histdatacom reconstruction compatibility --plan plan-spec.json --json
+histdatacom reconstruction --json experiment-list --root work/plan-artifacts
 ```
 
 The registry audits public contracts, explicitly accounts for internal-only

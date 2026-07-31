@@ -658,6 +658,7 @@ class ReconstructionSourceManifestV1:
     observed_event_count: int
     observed_content_sha256: str
     observed_event_ids_sha256: str
+    experiment_id: str | None = None
     source_manifest_id: str = ""
     schema_version: str = RECONSTRUCTION_SOURCE_MANIFEST_SCHEMA_VERSION
 
@@ -690,6 +691,9 @@ class ReconstructionSourceManifestV1:
             object.__setattr__(
                 self, name, _required_sha256(getattr(self, name), name)
             )
+        object.__setattr__(
+            self, "experiment_id", _optional_text(self.experiment_id)
+        )
         expected = _stable_id("reconstruction-source", self.payload())
         supplied = _optional_text(self.source_manifest_id)
         if supplied is not None and supplied != expected:
@@ -698,7 +702,7 @@ class ReconstructionSourceManifestV1:
 
     def payload(self) -> dict[str, JSONValue]:
         """Return immutable-source evidence."""
-        return {
+        payload: dict[str, JSONValue] = {
             "schema_version": self.schema_version,
             "source_version_ids": list(self.source_version_ids),
             "source_series_ids": list(self.source_series_ids),
@@ -708,6 +712,9 @@ class ReconstructionSourceManifestV1:
             "observed_event_ids_sha256": self.observed_event_ids_sha256,
             "observed_values_verified_exactly": True,
         }
+        if self.experiment_id is not None:
+            payload["experiment_id"] = self.experiment_id
+        return payload
 
     def to_dict(self) -> dict[str, JSONValue]:
         """Return compact source-manifest JSON."""
@@ -739,6 +746,7 @@ class ReconstructionSourceManifestV1:
             observed_event_ids_sha256=str(
                 data.get("observed_event_ids_sha256", "")
             ),
+            experiment_id=_optional_text(data.get("experiment_id")),
             source_manifest_id=str(data.get("source_manifest_id", "")),
             schema_version=str(data.get("schema_version", "")),
         )
@@ -2382,6 +2390,7 @@ def stage_delivery_reconstruction_publication(
     retention_plan: ReconstructionRetentionPlanV1,
     storage_policy: ReconstructionStoragePolicyV1,
     staging_root: str | Path,
+    experiment_id: str | None = None,
     row_group_size: int = DEFAULT_RECONSTRUCTION_ROW_GROUP_SIZE,
 ) -> StagedReconstructionPublicationV2:
     """Stage one validated generic-delivery group in cancellable scratch."""
@@ -2432,7 +2441,7 @@ def stage_delivery_reconstruction_publication(
             delivered_group.streams,
             row_group_size=row_group,
         )
-        source = _source_manifest(events, anchors)
+        source = _source_manifest(events, anchors, experiment_id=experiment_id)
         constraints = _constraint_manifest(events)
         quality = _delivery_quality_manifest(
             delivered_group,
@@ -3183,6 +3192,8 @@ def _iter_partition_events(path: Path) -> Iterator[SyntheticEventV1]:
 def _source_manifest(
     events: Iterable[SyntheticEventV1],
     anchors: Iterable[SyntheticEventV1],
+    *,
+    experiment_id: str | None = None,
 ) -> ReconstructionSourceManifestV1:
     rows = tuple(events)
     observed = tuple(sorted(anchors, key=_event_order_key))
@@ -3203,6 +3214,7 @@ def _source_manifest(
         observed_event_ids_sha256=_text_sequence_sha256(
             event.event_id for event in observed
         ),
+        experiment_id=experiment_id,
     )
 
 

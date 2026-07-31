@@ -9,6 +9,12 @@ storage/retention preflight. They write only the 26 fields in
 `SyntheticEventV1`. The 521-column analytical frame, candidate surfaces,
 individual rejected rows, and broker-render workspaces remain ephemeral.
 
+The compact source manifest also retains the catalog-bound
+`experiment_id`. This is the same identity carried by the execution plan; it
+binds the committed product back to the exact HistData selection, roles,
+split/leakage policy, evidence, configuration, gates, and implementation
+without embedding the experiment or source rows in the product manifest.
+
 ## Transaction and layout
 
 One all-symbol synchronization unit is one atomic transaction. Its layout is:

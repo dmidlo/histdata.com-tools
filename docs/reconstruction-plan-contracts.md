@@ -1,6 +1,6 @@
 # First-party reconstruction plan
 
-`SyntheticInfillPlanV1` is the public planning boundary for the v2.1 tick
+`SyntheticInfillPlanV1` is the public planning boundary for the v2.4 tick
 reconstruction product. It resolves installed scientific artifacts, inventories
 immutable ASCII tick partitions, performs compatibility and information-safety
 preflight, estimates resources, and emits bounded
@@ -30,6 +30,7 @@ are downstream projections from committed final ticks.
 | --- | --- |
 | `ReconstructionSourcePartitionV1` | Strong hash, monthly ownership, Arrow row count, timestamp bounds, feed-epoch evidence, and immutable row-identity policy for one ASCII/T cache. |
 | `ReconstructionSourceInventoryV1` | Complete Cartesian inventory of the synchronized EURUSD/GBPUSD/EURGBP triangle over the selected common periods. |
+| `ReconstructionExperimentManifestV1` | Catalog revision, immutable partitions, roles, split/leakage policy, authoritative domain bindings, implementation identity, and limitations shared by the plan and product. |
 | `ReconstructionPlanConfigurationV1` | Information, generation, carving, cross-currency, ensemble, storage, delivery, window, and handler policies. |
 | `CrossSeriesConstraintPolicyV1` | Hash-bound alignment, tolerance, readiness, refusal, and artifact-size policy for synchronized source evidence; current admission is the complete HistData triangle only. |
 | `ReconstructionPlanExecutionManifestV1` | Content-addressed artifact graph plus durable output/checkpoint roots and disposable scratch root. |
@@ -40,7 +41,8 @@ are downstream projections from committed final ticks.
 
 Every stage command carries one strong reference to the execution manifest.
 The stage loader verifies that reference, reads the public configuration and
-source inventory, checks the handler name and stage-specific artifact kinds,
+source inventory, verifies the catalog/resolution/experiment graph, checks the
+handler name and stage-specific artifact kinds,
 and rejects any input not present in the execution graph. No dataframe, tick
 row, or process-private configuration object is placed in Temporal history.
 Artifact, output, checkpoint, and scratch roots must be non-overlapping and
@@ -53,10 +55,10 @@ Requests are split by ensemble member and bounded window chunks because
 different members share window boundaries and therefore cannot coexist in one
 request whose task cores must not overlap.
 
-Modern-reference delivery is the default. The orchestration stage named
-`broker_transfer` becomes a deterministic delivery projection with no broker
-input. `broker_conditioned` is optional and fails before source scanning unless
-a verified `broker_delivery_artifact_v1` is supplied.
+Modern-reference delivery is the v2.4 public mode. The orchestration stage
+named `broker_transfer` becomes a deterministic identity delivery projection
+with no broker input. Broker-conditioned/OANDA selection is rejected by public
+compatibility and remains a later feed-qualified milestone.
 
 ## Ex-post construction from installed artifacts
 
@@ -129,13 +131,21 @@ plan_ref = write_synthetic_infill_plan(plan, work / "artifacts")
 first_command = plan.workflow_requests[0].tasks[0].commands[0]
 stage_plan = load_reconstruction_stage_plan(first_command)
 assert stage_plan.configuration.configuration_id == plan.configuration_id
+assert "experiment_manifest" in stage_plan.execution_manifest.artifacts
 ```
+
+Supplying `source_root` uses the documented v2.3 translation: feed-epoch hashes
+are verified, a local HistData catalog is compiled, and the same immutable
+resolution/experiment path continues. New callers pass `source_root=None`,
+`dataset_catalog_path=<catalog>`, and `dataset_reference=<alias-or-version>`.
+The reference is frozen before plan identity is computed.
 
 The persisted plan and its companion artifacts are content addressed. Repeated
 construction with the same files, policies, roots, and period selection has
 the same IDs. Source file paths are retained for execution, while scientific
-source identity is based on the declared digest, size, row count, evidence,
-and period semantics.
+source identity is based on catalog/version/revision, digest, size, row count,
+role, split, evidence, and period semantics. See
+[`reconstruction-experiment-contracts.md`](reconstruction-experiment-contracts.md).
 
 ## Ex-ante construction and fail-closed behavior
 

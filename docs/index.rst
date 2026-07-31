@@ -20,6 +20,7 @@ Data and reconstruction foundations
    market-context-contracts
    cftc-positioning-contracts
    provider-neutral-dataset-catalog
+   reconstruction-experiment-contracts
    reconstruction-schema-compatibility
    reconstruction-evidence-contracts
    cross-series-constraint-contracts

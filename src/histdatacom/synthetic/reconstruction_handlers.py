@@ -81,6 +81,7 @@ from histdatacom.reconstruction_evidence import (
     read_reconstruction_evidence_policy,
     reconstruction_evidence_use,
 )
+from histdatacom.reconstruction_experiment import read_reconstruction_experiment
 from histdatacom.resource_usage import peak_rss_bytes
 from histdatacom.runtime_contracts import ArtifactRef, JSONScalar, JSONValue
 from histdatacom.synthetic.benchmark_corpus import (
@@ -1263,6 +1264,9 @@ def validation_handler(
             retention_plan=retention,
             storage_policy=plan.configuration.storage_policy,
             staging_root=_stage_directory(invocation, "publication"),
+            experiment_id=read_reconstruction_experiment(
+                plan.execution_manifest.artifacts["experiment_manifest"].path
+            ).experiment_id,
         )
         _cancel_if_requested(invocation)
         descriptor_payload: dict[str, JSONValue] = {

@@ -202,6 +202,7 @@ def test_generic_delivery_commit_recovers_after_atomic_rename(
         retention_plan=retention,
         storage_policy=run.storage_policy,
         staging_root=tmp_path / "window-scratch" / "publication",
+        experiment_id="reconstruction-experiment:fixture",
         row_group_size=2,
     )
 
@@ -210,6 +211,9 @@ def test_generic_delivery_commit_recovers_after_atomic_rename(
     assert not committed.idempotent_retry
     assert not staged.staging_directory.exists()
     assert isinstance(committed.manifest, ReconstructionProductManifestV2)
+    assert committed.manifest.source.experiment_id == (
+        "reconstruction-experiment:fixture"
+    )
     assert committed.manifest.quality.point_in_time_evidence_projection_ids == (
         "projection:fixture",
     )

@@ -129,6 +129,10 @@ The synchronized cross-series policy, source binding, member, alignment,
 residual, window, bundle, and use contracts are implemented by issue #484 and
 consumed by the first-party HistData plan and runtime. See
 [Synchronized cross-series constraint contracts](cross-series-constraint-contracts.md).
-The experiment manifest, v2 portfolio plan, and proposal-engine descriptor
-remain reserved handoffs to issues #486 and #489; their registry presence does
-not make those future implementations executable.
+The catalog-bound experiment selection, split, leakage-audit, binding,
+implementation, manifest, and verification contracts are implemented by issue
+#486 and consumed by the first-party HistData planner and runtime. See
+[Catalog-bound reconstruction experiments](reconstruction-experiment-contracts.md).
+The v2 portfolio plan and proposal-engine descriptor remain reserved handoffs
+to issue #489; registry presence does not make those future implementations
+executable.

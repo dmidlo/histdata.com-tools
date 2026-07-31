@@ -2,14 +2,15 @@
 
 import sys
 
-import histdatacom
 import pytest
+
+import histdatacom
 from histdatacom import Options
 
 
 def test_histdatacom__init__() -> None:
     """Test pytest path resolution."""
-    assert True  # noqa:S101 # sourcery skip # act
+    assert True  # sourcery skip # act
 
 
 def test_exposed_classes() -> None:
@@ -32,6 +33,10 @@ def test_exposed_classes() -> None:
         "ReconstructionClient",
         "ReconstructionExecutionRequestV1",
         "ReconstructionExitCode",
+        "ReconstructionExperimentManifestV1",
+        "ReconstructionExperimentRole",
+        "ReconstructionExperimentSelectionV1",
+        "ReconstructionExperimentVerificationV1",
         "ReconstructionOperationReceiptV1",
         "ReconstructionPlanSetPreflightV1",
         "ReconstructionPlanSetV1",

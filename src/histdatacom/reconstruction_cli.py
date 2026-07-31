@@ -78,6 +78,24 @@ def build_parser() -> argparse.ArgumentParser:
         "--json", action="store_true", default=argparse.SUPPRESS
     )
 
+    experiment_list = subparsers.add_parser(
+        "experiment-list",
+        help="discover publication-safe frozen HistData experiments",
+    )
+    experiment_list.add_argument("--root", required=True, metavar="PATH")
+
+    experiment_inspect = subparsers.add_parser(
+        "experiment-inspect",
+        help="inspect one frozen experiment without exposing local paths",
+    )
+    experiment_inspect.add_argument("--manifest", required=True, metavar="PATH")
+
+    experiment_verify = subparsers.add_parser(
+        "experiment-verify",
+        help="verify one experiment's catalogs, partitions, artifacts, and code",
+    )
+    experiment_verify.add_argument("--manifest", required=True, metavar="PATH")
+
     plan = subparsers.add_parser(
         "plan", help="construct and validate a plan from a JSON plan spec"
     )
@@ -261,6 +279,26 @@ def _run_command(
         else:
             code = ReconstructionExitCode.INVALID_PLAN
         return report.to_dict(), code
+    if command == "experiment-list":
+        return (
+            {"experiments": list(client.experiments(args.root))},
+            ReconstructionExitCode.SUCCESS,
+        )
+    if command == "experiment-inspect":
+        return (
+            client.inspect_experiment(args.manifest).publication_summary(),
+            ReconstructionExitCode.SUCCESS,
+        )
+    if command == "experiment-verify":
+        verification = client.verify_experiment(args.manifest)
+        return (
+            verification.to_dict(),
+            (
+                ReconstructionExitCode.SUCCESS
+                if verification.verified
+                else ReconstructionExitCode.VALIDATION_FAILURE
+            ),
+        )
     if command == "plan":
         ref = client.construct_plan(read_plan_spec(args.spec))
         return ref.to_dict(), ReconstructionExitCode.SUCCESS

@@ -23,16 +23,20 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, cast
 
-from histdatacom.data_analytics.feed_epochs_v2 import (
-    read_active_time_feed_epoch_definition,
-)
 from histdatacom.cross_series_constraints import (
     CROSS_SERIES_CONSTRAINT_POLICY_ARTIFACT_KIND,
     CrossSeriesConstraintPolicyV1,
 )
+from histdatacom.data_analytics.feed_epochs_v2 import (
+    read_active_time_feed_epoch_definition,
+)
 from histdatacom.datasets import (
+    DatasetCatalog,
     DatasetContractError,
     DatasetFailureCode,
+    DatasetOrigin,
+    DatasetQueryScopeV1,
+    DatasetResolutionV1,
     HistDataProviderAdapter,
 )
 from histdatacom.market_context import (
@@ -60,6 +64,18 @@ from histdatacom.reconstruction_evidence import (
     CURRENT_EVIDENCE_SOURCE_PROVIDER_ID,
     RECONSTRUCTION_EVIDENCE_POLICY_ARTIFACT_KIND,
     ReconstructionEvidencePolicyV1,
+)
+from histdatacom.reconstruction_experiment import (
+    CURRENT_EXPERIMENT_ALIAS,
+    RECONSTRUCTION_EXPERIMENT_ARTIFACT_KIND,
+    RECONSTRUCTION_EXPERIMENT_CATALOG_ARTIFACT_KIND,
+    RECONSTRUCTION_EXPERIMENT_RESOLUTION_ARTIFACT_KIND,
+    ReconstructionExperimentArtifactBindingV1,
+    ReconstructionExperimentRole,
+    build_legacy_histdata_catalog,
+    freeze_histdata_reconstruction_experiment,
+    read_reconstruction_experiment,
+    verify_reconstruction_experiment,
 )
 from histdatacom.runtime_contracts import ArtifactRef, JSONValue
 from histdatacom.synthetic.benchmark_corpus import (
@@ -968,6 +984,9 @@ class ReconstructionPlanExecutionManifestV1:
         artifacts = _artifact_mapping(self.artifacts)
         required = {
             "configuration",
+            "dataset_catalog",
+            "dataset_resolution",
+            "experiment_manifest",
             "source_inventory",
             "feed_epochs",
             "observation_operator",
@@ -1451,7 +1470,7 @@ class _ResolvedPlanInputs:
 
 
 def build_synthetic_infill_plan(
-    source_root: str | Path,
+    source_root: str | Path | None,
     *,
     feed_epoch_definition_path: str | Path,
     observation_operator_path: str | Path,
@@ -1489,6 +1508,9 @@ def build_synthetic_infill_plan(
     cross_currency_config: CrossCurrencyReconciliationConfigV1 | None = None,
     evidence_policy: ReconstructionEvidencePolicyV1 | None = None,
     cross_series_constraint_policy: CrossSeriesConstraintPolicyV1 | None = None,
+    dataset_catalog_path: str | Path | None = None,
+    dataset_reference: str = CURRENT_EXPERIMENT_ALIAS,
+    dataset_resolution: DatasetResolutionV1 | None = None,
 ) -> SyntheticInfillPlanV1:
     """Resolve real artifacts and build one executable first-party plan."""
     selected_symbols = _symbols(tuple(symbols))
@@ -1496,17 +1518,33 @@ def build_synthetic_infill_plan(
         raise ReconstructionPlanCompatibilityError(
             "v2.1 requires the complete EURUSD/GBPUSD/EURGBP tick triangle"
         )
-    source = Path(source_root).expanduser().resolve()
-    if source.name.upper() != "T" or source.parent.name.upper() != "ASCII":
+    legacy_source = (
+        None
+        if source_root is None or not str(source_root).strip()
+        else Path(source_root).expanduser().resolve()
+    )
+    if legacy_source is not None and (
+        legacy_source.name.upper() != "T"
+        or legacy_source.parent.name.upper() != "ASCII"
+    ):
         raise ReconstructionPlanCompatibilityError(
             "reconstruction source_root must be the ASCII/T tick directory"
         )
-    roots = _validated_plan_roots(
-        source_root=source,
-        artifact_root=artifact_root,
-        output_root=output_root,
-        checkpoint_root=checkpoint_root,
-        scratch_root=scratch_root,
+    if dataset_catalog_path is None and legacy_source is None:
+        raise ReconstructionPlanCompatibilityError(
+            "reconstruction requires a HistData catalog selection or the "
+            "documented v2.3 ASCII/T path translation"
+        )
+    roots = (
+        _validated_plan_roots(
+            source_root=legacy_source,
+            artifact_root=artifact_root,
+            output_root=output_root,
+            checkpoint_root=checkpoint_root,
+            scratch_root=scratch_root,
+        )
+        if legacy_source is not None
+        else None
     )
     mode = InformationMode.from_value(information_mode)
     delivery = ReconstructionDeliveryMode.from_value(delivery_mode)
@@ -1589,14 +1627,68 @@ def build_synthetic_infill_plan(
         definition=resolved.feed_epoch_definition,
         motif_profile=resolved.motif_profile,
     )
-    inventory = _build_source_inventory(
-        source,
-        definition=resolved.feed_epoch_definition,
+    provisional_artifact_root = Path(artifact_root).expanduser().resolve()
+    provisional_artifact_root.mkdir(parents=True, exist_ok=True)
+    query_scope = DatasetQueryScopeV1(
         symbols=selected_symbols,
         periods=selected_periods,
-        requested_start_ns=requested_start,
-        requested_end_ns=requested_end,
+        origin=DatasetOrigin.OBSERVED,
     )
+    inventory: ReconstructionSourceInventoryV1 | None = None
+    if dataset_catalog_path is None:
+        assert legacy_source is not None
+        inventory = _build_source_inventory(
+            legacy_source,
+            definition=resolved.feed_epoch_definition,
+            symbols=selected_symbols,
+            periods=selected_periods,
+            requested_start_ns=requested_start,
+            requested_end_ns=requested_end,
+        )
+        catalog, catalog_path, _ = build_legacy_histdata_catalog(
+            legacy_source,
+            symbols=selected_symbols,
+            periods=selected_periods,
+            qualification_evidence=(resolved.artifacts["feed_epochs"],),
+            path=provisional_artifact_root / "histdata-dataset-catalog.json",
+        )
+        exact_resolution = catalog.resolve(
+            CURRENT_EXPERIMENT_ALIAS,
+            query_scope=query_scope,
+        )
+        selected_reference = CURRENT_EXPERIMENT_ALIAS
+    else:
+        catalog_path = Path(dataset_catalog_path).expanduser().resolve()
+        catalog = DatasetCatalog.read(catalog_path)
+        exact_resolution = dataset_resolution or catalog.resolve(
+            dataset_reference,
+            query_scope=query_scope,
+        )
+        exact_resolution = catalog.replay(exact_resolution)
+        catalog.verify(exact_resolution)
+        selected_reference = dataset_reference
+    source = _catalog_source_root(catalog, exact_resolution)
+    if legacy_source is not None and source != legacy_source:
+        raise ReconstructionPlanCompatibilityError(
+            "source_root differs from the resolved HistData catalog materialization"
+        )
+    roots = roots or _validated_plan_roots(
+        source_root=source,
+        artifact_root=artifact_root,
+        output_root=output_root,
+        checkpoint_root=checkpoint_root,
+        scratch_root=scratch_root,
+    )
+    if inventory is None:
+        inventory = _build_source_inventory(
+            source,
+            definition=resolved.feed_epoch_definition,
+            symbols=selected_symbols,
+            periods=selected_periods,
+            requested_start_ns=requested_start,
+            requested_end_ns=requested_end,
+        )
+    _reconcile_catalog_inventory(catalog, exact_resolution, inventory)
     artifacts_dir = roots["artifact"]
     inventory_ref = _write_contract_artifact(
         inventory,
@@ -1694,6 +1786,67 @@ def build_synthetic_infill_plan(
         metadata={"configuration_id": configuration.configuration_id},
     )
 
+    experiment, experiment_ref = freeze_histdata_reconstruction_experiment(
+        catalog_path=catalog_path,
+        dataset_reference=selected_reference,
+        query_scope=query_scope,
+        resolution=exact_resolution,
+        roles=(
+            ReconstructionExperimentRole.HISTORICAL_ANCHOR,
+            ReconstructionExperimentRole.PRODUCT_INPUT,
+        ),
+        output_directory=artifacts_dir,
+        artifact_bindings=_experiment_artifact_bindings(
+            resolved=resolved,
+            evidence_policy=selected_evidence_policy,
+            evidence_policy_ref=evidence_policy_ref,
+            cross_series_policy=selected_cross_series_policy,
+            cross_series_policy_ref=cross_series_policy_ref,
+            configuration=configuration,
+            configuration_ref=configuration_ref,
+        ),
+        evidence_policy_ids=(
+            selected_evidence_policy.policy_id,
+            selected_cross_series_policy.policy_id,
+        ),
+        preprocessing_ids=(
+            resolved.observation_operator.operator_id,
+            configuration.configuration_id,
+        ),
+        feature_schema_versions=(
+            RECONSTRUCTION_SOURCE_PARTITION_SCHEMA_VERSION,
+            RECONSTRUCTION_SOURCE_INVENTORY_SCHEMA_VERSION,
+            str(
+                getattr(
+                    resolved.observation_operator,
+                    "schema_version",
+                    "histdatacom.observation-operator.v1",
+                )
+            ),
+        ),
+        benchmark_gate_ids=(
+            PREDECLARED_GATE_COMMIT,
+            str(resolved.motif_manifest["library_id"]),
+        ),
+        limitations=(
+            "v2.4 executes only local HistData.com ASCII/T observed partitions.",
+            (
+                "Provider-neutral fields are identity seams; alternate providers, "
+                "brokers, and OANDA are deferred milestones."
+            ),
+            "Existing specialized manifests remain authoritative for their domains.",
+        ),
+    )
+    experiment_verification = verify_reconstruction_experiment(experiment)
+    if not experiment_verification.verified:
+        raise ReconstructionPlanCompatibilityError(
+            "frozen HistData experiment failed deterministic verification: "
+            + ", ".join(experiment_verification.finding_codes)
+        )
+    experiment_selection = experiment.selection_for_role(
+        ReconstructionExperimentRole.PRODUCT_INPUT
+    )
+
     configuration_hashes = {
         configuration.configuration_id: configuration_ref.sha256,
         information_policy.policy_id: _contract_sha256(information_policy),
@@ -1723,6 +1876,7 @@ def build_synthetic_infill_plan(
             "motif_manifest"
         ].sha256,
         resolved.motif_index.index_id: resolved.artifacts["motif_index"].sha256,
+        experiment.experiment_id: experiment_ref.sha256,
     }
     ensemble_plan = plan_reconstruction_ensemble(
         symbols=selected_symbols,
@@ -1789,6 +1943,9 @@ def build_synthetic_infill_plan(
             "configuration": configuration_ref,
             "evidence_policy": evidence_policy_ref,
             "cross_series_constraint_policy": cross_series_policy_ref,
+            "dataset_catalog": experiment_selection.catalog_ref,
+            "dataset_resolution": experiment_selection.resolution_ref,
+            "experiment_manifest": experiment_ref,
         },
         motif_profile=resolved.motif_profile,
         requested_start_ns=requested_start,
@@ -1854,6 +2011,9 @@ def build_synthetic_infill_plan(
 
     graph: dict[str, ArtifactRef] = {
         **resolved.artifacts,
+        "dataset_catalog": experiment_selection.catalog_ref,
+        "dataset_resolution": experiment_selection.resolution_ref,
+        "experiment_manifest": experiment_ref,
         "source_inventory": inventory_ref,
         "configuration": configuration_ref,
         "evidence_policy": evidence_policy_ref,
@@ -1985,6 +2145,23 @@ def validate_synthetic_infill_plan_for_execution(
         configuration_ref.path
     )
     inventory = read_reconstruction_source_inventory(inventory_ref.path)
+    experiment_ref = plan.artifact_graph["experiment_manifest"]
+    experiment = read_reconstruction_experiment(experiment_ref.path)
+    if experiment_ref.metadata.get("experiment_id") != experiment.experiment_id:
+        raise ReconstructionPlanCompatibilityError(
+            "plan experiment artifact metadata identity differs"
+        )
+    experiment_verification = verify_reconstruction_experiment(experiment)
+    if not experiment_verification.verified:
+        raise ReconstructionPlanCompatibilityError(
+            "plan experiment manifest failed deterministic verification: "
+            + ", ".join(experiment_verification.finding_codes)
+        )
+    catalog = DatasetCatalog.read(plan.artifact_graph["dataset_catalog"].path)
+    selection = experiment.selection_for_role(
+        ReconstructionExperimentRole.PRODUCT_INPUT
+    )
+    _reconcile_catalog_inventory(catalog, selection.resolution, inventory)
     if execution.manifest_id != plan.execution_manifest_id:
         raise ReconstructionPlanCompatibilityError(
             "plan execution manifest identity differs"
@@ -2096,6 +2273,27 @@ def load_reconstruction_stage_plan(
             verify_artifact_ref(ref)
         for ref in command.input_manifest_refs:
             verify_artifact_ref(ref)
+    experiment_ref = execution.artifacts["experiment_manifest"]
+    experiment = read_reconstruction_experiment(experiment_ref.path)
+    if experiment_ref.metadata.get("experiment_id") != experiment.experiment_id:
+        raise ReconstructionPlanCompatibilityError(
+            "stage experiment artifact metadata identity differs"
+        )
+    experiment_verification = verify_reconstruction_experiment(experiment)
+    if not experiment_verification.verified:
+        raise ReconstructionPlanCompatibilityError(
+            "stage experiment manifest failed deterministic verification: "
+            + ", ".join(experiment_verification.finding_codes)
+        )
+    inventory = read_reconstruction_source_inventory(inventory_ref.path)
+    catalog = DatasetCatalog.read(execution.artifacts["dataset_catalog"].path)
+    _reconcile_catalog_inventory(
+        catalog,
+        experiment.selection_for_role(
+            ReconstructionExperimentRole.PRODUCT_INPUT
+        ).resolution,
+        inventory,
+    )
     return ReconstructionStagePlanV1(
         command=command,
         execution_manifest_ref=execution_ref,
@@ -2103,9 +2301,7 @@ def load_reconstruction_stage_plan(
         configuration=read_reconstruction_plan_configuration(
             configuration_ref.path
         ),
-        source_inventory=read_reconstruction_source_inventory(
-            inventory_ref.path
-        ),
+        source_inventory=inventory,
     )
 
 
@@ -2369,6 +2565,261 @@ def _file_stat_identity(
         stat.st_size,
         stat.st_mtime_ns,
         stat.st_ctime_ns,
+    )
+
+
+def _catalog_source_root(
+    catalog: DatasetCatalog,
+    resolution: DatasetResolutionV1,
+) -> Path:
+    """Resolve one local HistData ASCII/T materialization without widening scope."""
+    exact = catalog.replay(resolution)
+    catalog.verify(exact)
+    version = next(
+        (
+            item
+            for item in catalog.versions
+            if item.dataset_version_id == exact.dataset_version_id
+        ),
+        None,
+    )
+    if version is None:
+        raise ReconstructionPlanCompatibilityError(
+            "resolved dataset version is absent from the catalog"
+        )
+    if (
+        version.origin is not DatasetOrigin.OBSERVED
+        or version.source_provider_ids != (CURRENT_EVIDENCE_SOURCE_PROVIDER_ID,)
+    ):
+        raise ReconstructionPlanCompatibilityError(
+            "v2.4 plans accept only observed HistData.com catalog selections"
+        )
+    scope = exact.query_scope
+    selected = tuple(
+        item
+        for item in version.partitions
+        if (not scope.symbols or item.symbol in scope.symbols)
+        and (not scope.periods or item.period in scope.periods)
+    )
+    expected = {
+        (symbol, period) for symbol in scope.symbols for period in scope.periods
+    }
+    if (
+        not selected
+        or {(item.symbol, item.period) for item in selected} != expected
+    ):
+        raise ReconstructionPlanCompatibilityError(
+            "catalog selection is not a complete HistData triangle/period matrix"
+        )
+    roots: set[Path] = set()
+    for partition in selected:
+        if partition.format != "ascii" or partition.granularity != "T":
+            raise ReconstructionPlanCompatibilityError(
+                "v2.4 plans reject M1 and non-ASCII/T catalog selections"
+            )
+        path = Path(partition.artifact.path).expanduser().resolve()
+        try:
+            root = path.parents[3]
+        except IndexError as err:
+            raise ReconstructionPlanCompatibilityError(
+                "catalog partition is outside the HistData ASCII/T layout"
+            ) from err
+        if (
+            path.name != ".data"
+            or root.name.upper() != "T"
+            or root.parent.name.upper() != "ASCII"
+        ):
+            raise ReconstructionPlanCompatibilityError(
+                "catalog partition is outside the HistData ASCII/T layout"
+            )
+        roots.add(root)
+    if len(roots) != 1:
+        raise ReconstructionPlanCompatibilityError(
+            "catalog selection spans multiple materialization roots"
+        )
+    return next(iter(roots))
+
+
+def _reconcile_catalog_inventory(
+    catalog: DatasetCatalog,
+    resolution: DatasetResolutionV1,
+    inventory: ReconstructionSourceInventoryV1,
+) -> None:
+    """Require the execution inventory to equal the frozen catalog selection."""
+    exact = catalog.replay(resolution)
+    catalog.verify(exact)
+    version = next(
+        item
+        for item in catalog.versions
+        if item.dataset_version_id == exact.dataset_version_id
+    )
+    scope = exact.query_scope
+    selected = {
+        (_symbol(item.symbol), item.period): item
+        for item in version.partitions
+        if (not scope.symbols or item.symbol in scope.symbols)
+        and (not scope.periods or item.period in scope.periods)
+    }
+    planned = {
+        (_symbol(item.symbol), item.period): item
+        for item in inventory.partitions
+    }
+    if set(selected) != set(planned):
+        raise ReconstructionPlanCompatibilityError(
+            "source inventory scope differs from the resolved catalog selection"
+        )
+    for key, partition in selected.items():
+        inventory_partition = planned[key]
+        if (
+            inventory_partition.artifact.sha256 != partition.artifact.sha256
+            or inventory_partition.artifact.size_bytes
+            != partition.artifact.size_bytes
+            or inventory_partition.row_count != partition.row_count
+        ):
+            raise ReconstructionPlanCompatibilityError(
+                "source inventory content differs from the resolved catalog selection"
+            )
+
+
+def _experiment_artifact_bindings(
+    *,
+    resolved: _ResolvedPlanInputs,
+    evidence_policy: ReconstructionEvidencePolicyV1,
+    evidence_policy_ref: ArtifactRef,
+    cross_series_policy: CrossSeriesConstraintPolicyV1,
+    cross_series_policy_ref: ArtifactRef,
+    configuration: ReconstructionPlanConfigurationV1,
+    configuration_ref: ArtifactRef,
+) -> tuple[ReconstructionExperimentArtifactBindingV1, ...]:
+    """Bind verified authoritative artifacts without duplicating their payloads."""
+    roles = (
+        ReconstructionExperimentRole.HISTORICAL_ANCHOR,
+        ReconstructionExperimentRole.PRODUCT_INPUT,
+    )
+    specifications = (
+        (
+            "feed-epochs",
+            "evidence",
+            resolved.artifacts["feed_epochs"],
+            resolved.feed_epoch_definition.definition_id,
+            "definition_id",
+            getattr(resolved.feed_epoch_definition, "schema_version", ""),
+        ),
+        (
+            "observation-operator",
+            "preprocessing",
+            resolved.artifacts["observation_operator"],
+            resolved.observation_operator.operator_id,
+            "operator_id",
+            getattr(resolved.observation_operator, "schema_version", ""),
+        ),
+        (
+            "market-context",
+            "evidence",
+            resolved.artifacts["market_context"],
+            resolved.market_context.corpus_id,
+            "corpus_id",
+            getattr(resolved.market_context, "schema_version", ""),
+        ),
+        (
+            "cftc-positioning",
+            "evidence",
+            resolved.artifacts["cftc_positioning"],
+            resolved.cftc_positioning.corpus_id,
+            "corpus_id",
+            getattr(resolved.cftc_positioning, "schema_version", ""),
+        ),
+        (
+            "benchmark-corpus",
+            "benchmark",
+            resolved.artifacts["benchmark_manifest"],
+            resolved.benchmark_corpus.corpus_id,
+            "corpus.corpus_id",
+            "histdatacom.reverse-degradation-manifest.v1",
+        ),
+        (
+            "motif-library",
+            "model",
+            resolved.artifacts["motif_manifest"],
+            str(resolved.motif_manifest["library_id"]),
+            "library_id",
+            str(resolved.motif_manifest.get("schema_version", "")),
+        ),
+        (
+            "motif-index",
+            "model",
+            resolved.artifacts["motif_index"],
+            resolved.motif_index.index_id,
+            "index_id",
+            getattr(resolved.motif_index, "schema_version", ""),
+        ),
+        (
+            "motif-qualification",
+            "gate",
+            resolved.artifacts["motif_qualification"],
+            str(
+                resolved.motif_qualification.get(
+                    "library_id", resolved.motif_manifest["library_id"]
+                )
+            ),
+            "library_id",
+            str(resolved.motif_qualification.get("schema_version", "")),
+        ),
+        (
+            "motif-leakage-audit",
+            "gate",
+            resolved.artifacts["motif_leakage_audit"],
+            str(
+                resolved.motif_leakage_audit.get(
+                    "library_id", resolved.motif_manifest["library_id"]
+                )
+            ),
+            "library_id",
+            str(resolved.motif_leakage_audit.get("schema_version", "")),
+        ),
+        (
+            "evidence-policy",
+            "evidence",
+            evidence_policy_ref,
+            evidence_policy.policy_id,
+            "policy_id",
+            evidence_policy.schema_version,
+        ),
+        (
+            "cross-series-policy",
+            "constraint",
+            cross_series_policy_ref,
+            cross_series_policy.policy_id,
+            "policy_id",
+            cross_series_policy.schema_version,
+        ),
+        (
+            "plan-configuration",
+            "configuration",
+            configuration_ref,
+            configuration.configuration_id,
+            "configuration_id",
+            configuration.schema_version,
+        ),
+    )
+    return tuple(
+        ReconstructionExperimentArtifactBindingV1(
+            name=name,
+            domain=domain,
+            artifact=artifact,
+            artifact_id=artifact_id,
+            artifact_identity_field=identity_field,
+            dataset_roles=roles,
+            schema_versions=(str(schema_version),) if schema_version else (),
+        )
+        for (
+            name,
+            domain,
+            artifact,
+            artifact_id,
+            identity_field,
+            schema_version,
+        ) in specifications
     )
 
 
@@ -2844,6 +3295,9 @@ def _stage_commands(
     source_inputs = tuple(
         item.artifact for item in inventory.partitions_for_window(window)
     ) + (
+        graph["dataset_catalog"],
+        graph["dataset_resolution"],
+        graph["experiment_manifest"],
         graph["feed_epochs"],
         graph["observation_operator"],
         graph["market_context"],
@@ -2873,6 +3327,7 @@ def _stage_commands(
             graph["information_audit"],
         ),
         ReconstructionStage.ATOMIC_PARTITION_COMMIT: (
+            graph["experiment_manifest"],
             graph["source_inventory"],
             graph["retention_plan"],
         ),
@@ -2904,6 +3359,9 @@ def _validate_stage_inputs(
     required: Mapping[ReconstructionStage, set[str]] = {
         ReconstructionStage.SOURCE_ENRICHMENT: {
             ASCII_TICK_SOURCE_KIND,
+            RECONSTRUCTION_EXPERIMENT_CATALOG_ARTIFACT_KIND,
+            RECONSTRUCTION_EXPERIMENT_RESOLUTION_ARTIFACT_KIND,
+            RECONSTRUCTION_EXPERIMENT_ARTIFACT_KIND,
             "feed_epoch_definition_v2",
             "observation-operator",
             "market_context_corpus_v1",
@@ -2930,6 +3388,7 @@ def _validate_stage_inputs(
             "reconstruction_information_audit_v1",
         },
         ReconstructionStage.ATOMIC_PARTITION_COMMIT: {
+            RECONSTRUCTION_EXPERIMENT_ARTIFACT_KIND,
             SOURCE_INVENTORY_ARTIFACT_KIND,
             "reconstruction_retention_plan_v1",
         },

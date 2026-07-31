@@ -45,6 +45,13 @@ from histdatacom.reconstruction_evidence import (
     CURRENT_EVIDENCE_SOURCE_PROVIDER_ID,
     ReconstructionEvidencePolicyV1,
 )
+from histdatacom.reconstruction_experiment import (
+    ReconstructionExperimentManifestV1,
+    ReconstructionExperimentVerificationV1,
+    discover_reconstruction_experiments,
+    read_reconstruction_experiment,
+    verify_reconstruction_experiment,
+)
 from histdatacom.reconstruction_schema import (
     ReconstructionCompatibilityReportV1,
     ReconstructionCompatibilityStatus,
@@ -175,7 +182,7 @@ class ReconstructionValidationError(ReconstructionPublicError):
 class ReconstructionPlanSpecV1:
     """Serializable public inputs for constructing one first-party plan."""
 
-    source_root: str
+    source_root: str | None
     feed_epoch_definition_path: str
     observation_operator_path: str
     market_context_corpus_path: str
@@ -190,6 +197,8 @@ class ReconstructionPlanSpecV1:
     checkpoint_root: str
     scratch_root: str
     information_mode: InformationMode
+    dataset_catalog_path: str | None = None
+    dataset_reference: str = "reconstruction-selected"
     start_period: str | None = None
     end_period: str | None = None
     requested_start_ns: int | None = None
@@ -216,7 +225,6 @@ class ReconstructionPlanSpecV1:
                 "unsupported reconstruction plan-spec schema"
             )
         for name in (
-            "source_root",
             "feed_epoch_definition_path",
             "observation_operator_path",
             "market_context_corpus_path",
@@ -233,6 +241,34 @@ class ReconstructionPlanSpecV1:
         ):
             value = str(Path(_required_text(getattr(self, name))).expanduser())
             object.__setattr__(self, name, value)
+        source_root = _optional_text(self.source_root)
+        catalog_path = _optional_text(self.dataset_catalog_path)
+        if source_root is None and catalog_path is None:
+            raise ReconstructionUnsupportedError(
+                "supply dataset_catalog_path or the documented v2.3 source_root "
+                "translation"
+            )
+        object.__setattr__(
+            self,
+            "source_root",
+            (
+                str(Path(source_root).expanduser())
+                if source_root is not None
+                else None
+            ),
+        )
+        object.__setattr__(
+            self,
+            "dataset_catalog_path",
+            (
+                str(Path(catalog_path).expanduser())
+                if catalog_path is not None
+                else None
+            ),
+        )
+        object.__setattr__(
+            self, "dataset_reference", _required_text(self.dataset_reference)
+        )
         object.__setattr__(
             self,
             "information_mode",
@@ -327,6 +363,8 @@ class ReconstructionPlanSpecV1:
         return {
             "schema_version": self.schema_version,
             "source_root": self.source_root,
+            "dataset_catalog_path": self.dataset_catalog_path,
+            "dataset_reference": self.dataset_reference,
             "feed_epoch_definition_path": self.feed_epoch_definition_path,
             "observation_operator_path": self.observation_operator_path,
             "market_context_corpus_path": self.market_context_corpus_path,
@@ -388,7 +426,7 @@ class ReconstructionPlanSpecV1:
             )
         )
         return cls(
-            source_root=str(data.get("source_root", "")),
+            source_root=_optional_text(data.get("source_root")),
             feed_epoch_definition_path=str(
                 data.get("feed_epoch_definition_path", "")
             ),
@@ -418,6 +456,12 @@ class ReconstructionPlanSpecV1:
             scratch_root=str(data.get("scratch_root", "")),
             information_mode=InformationMode.from_value(
                 str(data.get("information_mode", ""))
+            ),
+            dataset_catalog_path=_optional_text(
+                data.get("dataset_catalog_path")
+            ),
+            dataset_reference=str(
+                data.get("dataset_reference", "reconstruction-selected")
             ),
             start_period=_optional_text(data.get("start_period")),
             end_period=_optional_text(data.get("end_period")),
@@ -981,6 +1025,29 @@ class ReconstructionClient:
         """Return the installed deterministic reconstruction schema registry."""
         return reconstruction_schema_registry()
 
+    def experiments(
+        self, root: str | Path
+    ) -> tuple[Mapping[str, JSONValue], ...]:
+        """Discover publication-safe frozen experiment summaries."""
+        return tuple(
+            read_reconstruction_experiment(path).publication_summary()
+            for path in discover_reconstruction_experiments(root)
+        )
+
+    def inspect_experiment(
+        self, path: str | Path
+    ) -> ReconstructionExperimentManifestV1:
+        """Read and identity-check one bounded experiment manifest."""
+        return read_reconstruction_experiment(path)
+
+    def verify_experiment(
+        self, path: str | Path
+    ) -> ReconstructionExperimentVerificationV1:
+        """Recompute catalog, partition, artifact, split, and code identity."""
+        return verify_reconstruction_experiment(
+            read_reconstruction_experiment(path)
+        )
+
     def compatibility(
         self,
         plan: ReconstructionPlanSpecV1 | Mapping[str, Any] | str | Path,
@@ -1071,6 +1138,8 @@ class ReconstructionClient:
                     spec.cross_series_constraint_policy
                 ),
                 broker_delivery_artifact=spec.broker_delivery_artifact,
+                dataset_catalog_path=spec.dataset_catalog_path,
+                dataset_reference=spec.dataset_reference,
             )
             validate_synthetic_infill_plan_for_execution(plan)
             return plan

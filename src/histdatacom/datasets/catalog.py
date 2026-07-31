@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
 import hashlib
 import json
 import os
+from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -175,18 +175,30 @@ class DatasetCatalog:
             "providers": [item.to_dict() for item in self.providers],
             "adapters": [item.to_dict() for item in self.adapters],
             "datasets": [item.to_dict() for item in self.datasets],
-            "versions": [item.to_dict() for item in self.versions],
+            "versions": [
+                {
+                    **item.identity_payload(),
+                    "dataset_version_id": item.dataset_version_id,
+                    "manifest_sha256": item.manifest_sha256,
+                }
+                for item in self.versions
+            ],
             "aliases": [item.to_dict() for item in self.aliases],
         }
 
     def to_dict(self) -> dict[str, JSONValue]:
-        return {**self.identity_payload(), "catalog_id": self.catalog_id}
+        return {
+            **self.identity_payload(),
+            "versions": [item.to_dict() for item in self.versions],
+            "catalog_id": self.catalog_id,
+        }
 
     def to_json(self) -> str:
-        return canonical_contract_json(self.to_dict())
+        encoded: str = canonical_contract_json(self.to_dict())
+        return encoded
 
     @classmethod
-    def from_dict(cls, data: Mapping[str, Any]) -> "DatasetCatalog":
+    def from_dict(cls, data: Mapping[str, Any]) -> DatasetCatalog:
         return cls(
             providers=tuple(
                 SourceProviderDescriptorV1.from_dict(_mapping(value))
@@ -213,7 +225,7 @@ class DatasetCatalog:
         )
 
     @classmethod
-    def from_json(cls, text: str) -> "DatasetCatalog":
+    def from_json(cls, text: str) -> DatasetCatalog:
         try:
             payload = json.loads(text)
         except json.JSONDecodeError as err:
@@ -221,7 +233,7 @@ class DatasetCatalog:
         return cls.from_dict(_mapping(payload))
 
     @classmethod
-    def read(cls, path: str | Path) -> "DatasetCatalog":
+    def read(cls, path: str | Path) -> DatasetCatalog:
         """Read one bounded catalog file."""
         target = Path(path).expanduser().resolve()
         try:
@@ -733,14 +745,16 @@ def _unique(values: tuple[Any, ...], key: Any, name: str) -> None:
 
 def _safe_alias(value: str) -> str:
     try:
-        return normalize_dataset_alias(value)
+        normalized: str = normalize_dataset_alias(value)
+        return normalized
     except ValueError:
         return ""
 
 
 def _safe_dataset_id(value: str) -> str:
     try:
-        return normalize_dataset_id(value)
+        normalized: str = normalize_dataset_id(value)
+        return normalized
     except ValueError:
         return ""
 

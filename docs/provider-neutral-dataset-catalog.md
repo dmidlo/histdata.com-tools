@@ -16,6 +16,13 @@ is not the historical provider unless it supplied the observed record. The V1
 enriched-training and `SyntheticEventV1` schemas remain unchanged; V2 dataset
 lineage is an explicit companion projection.
 
+Catalog identity uses each version's path-independent identity payload rather
+than its serialized local artifact paths. Moving byte-identical qualified
+partitions changes only private materialization references; dataset version,
+catalog, resolution, and downstream experiment scientific identities remain
+stable. Verification still opens those local references and rejects any hash
+or size change.
+
 ## First-party adapters
 
 `HistDataProviderAdapter` owns all HistData-specific behavior:
