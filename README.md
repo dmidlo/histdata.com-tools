@@ -43,6 +43,7 @@ Works on macOS, Linux, and Windows.
     - [Warning, Error, and Exit Policy](#warning-error-and-exit-policy)
   - [Data Analytics](#data-analytics)
     - [Point-in-Time Market Context](#point-in-time-market-context)
+    - [Comprehensive Economic Calendar](#comprehensive-economic-calendar)
     - [Feed-Regime Detection](#feed-regime-detection)
     - [Historical Feed-Observation Operators](#historical-feed-observation-operators)
     - [Reverse-Degradation Benchmark](#reverse-degradation-benchmark)
@@ -2554,6 +2555,33 @@ See [`docs/market-context-contracts.md`](docs/market-context-contracts.md) for
 the source selection, licenses, artifacts, replay, coverage/preflight,
 timezone and revision rules, information-audit integration, streaming limits,
 and trust gates.
+
+#### Comprehensive Economic Calendar
+
+An operator-licensed companion can acquire Trading Economics-style calendar
+coverage for all 66 supported HistData instruments and their 21 mapped
+economies. It retains raw and numeric actual, previous, consensus forecast,
+provider forecast, revised-previous, release, reference, provider-update, and
+refresh-vintage evidence. Inspect the 2000-to-present plan without credentials:
+
+```bash
+histdatacom analytics economic-calendar-corpus \
+  --start-date 2000-01-01 \
+  --end-date 2026-07-30 \
+  --plan-only
+```
+
+Live acquisition requires the operator's own Trading Economics API key and an
+explicit `--provider-license-acknowledged`. Provider data is written as
+restricted local content-addressed artifacts, never bundled or redistributed.
+Historical rows retain provider revision evidence; subsequent refreshes add
+immutable correction/reschedule vintages. The package does not invent
+intermediate historical revisions that the licensed response cannot supply.
+
+See [`docs/economic-calendar-contracts.md`](docs/economic-calendar-contracts.md)
+for the pair/economy matrix, provider and licensing decision, field semantics,
+credential handling, adaptive backfill, point-in-time limitations, replay, and
+benchmark/motif integration.
 
 #### CFTC positioning state
 

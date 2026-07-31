@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from typing import cast
 
@@ -31,15 +32,22 @@ from histdatacom.data_analytics.feed_epochs_v2 import (
     write_active_time_feed_epoch_campaign,
 )
 from histdatacom.market_context import (
+    DEFAULT_ECONOMIC_CALENDAR_ECONOMIES,
     DEFAULT_MARKET_CONTEXT_SOURCES,
     DEFAULT_ONS_QUERIES,
-    MarketContextFetchProfileV1,
     CftcPositioningFetchProfileV1,
-    build_live_market_context_corpus,
+    EconomicCalendarFetchProfileV1,
+    MarketContextFetchProfileV1,
     build_live_cftc_positioning_corpus,
+    build_live_economic_calendar_corpus,
+    build_live_market_context_corpus,
+    economic_calendar_fetch_plan,
     read_cftc_positioning_corpus,
-    write_market_context_corpus,
+    replay_economic_calendar_corpus,
+    validate_api_key_env_name,
     write_cftc_positioning_corpus,
+    write_economic_calendar_corpus,
+    write_market_context_corpus,
 )
 from histdatacom.synthetic.observation_calibration import (
     ObservationCalibrationProfileV2,
@@ -322,6 +330,66 @@ def build_parser() -> argparse.ArgumentParser:
         "--json",
         action="store_true",
         help="emit compact corpus and artifact metadata",
+    )
+    economic_calendar = subparsers.add_parser(
+        "economic-calendar-corpus",
+        help=("build a restricted comprehensive Trading Economics calendar corpus"),
+    )
+    economic_calendar.add_argument(
+        "--artifact-dir",
+        default="",
+        metavar="PATH",
+        help="write restricted raw sources and the corpus (required unless --plan-only)",
+    )
+    economic_calendar.add_argument("--start-date", required=True, metavar="YYYY-MM-DD")
+    economic_calendar.add_argument("--end-date", required=True, metavar="YYYY-MM-DD")
+    economic_calendar.add_argument(
+        "--economies",
+        nargs="+",
+        default=DEFAULT_ECONOMIC_CALENDAR_ECONOMIES,
+        metavar="COUNTRY",
+        help="Trading Economics country/economy names (default: all HistData mappings)",
+    )
+    economic_calendar.add_argument(
+        "--api-key-env",
+        default="TRADING_ECONOMICS_API_KEY",
+        metavar="ENV_NAME",
+        help="environment variable containing the provider key; the value is never logged",
+    )
+    economic_calendar.add_argument(
+        "--provider-license-acknowledged",
+        action="store_true",
+        help="confirm the operator has provider rights for acquisition and local retention",
+    )
+    economic_calendar.add_argument(
+        "--previous-corpus",
+        default="",
+        metavar="PATH",
+        help="accumulate changed provider rows as vintages from a prior corpus",
+    )
+    economic_calendar.add_argument("--initial-window-days", type=int, default=366)
+    economic_calendar.add_argument("--timeout-seconds", type=float, default=45.0)
+    economic_calendar.add_argument(
+        "--min-request-interval-seconds", type=float, default=0.51
+    )
+    economic_calendar.add_argument(
+        "--max-response-bytes", type=int, default=32 * 1024**2
+    )
+    economic_calendar.add_argument(
+        "--max-total-source-bytes", type=int, default=2 * 1024**3
+    )
+    economic_calendar.add_argument("--max-requests", type=int, default=10_000)
+    economic_calendar.add_argument("--max-events", type=int, default=1_000_000)
+    economic_calendar.add_argument("--max-runtime-seconds", type=float, default=7_200.0)
+    economic_calendar.add_argument(
+        "--plan-only",
+        action="store_true",
+        help="print the secret-free initial request/coverage plan without API access",
+    )
+    economic_calendar.add_argument(
+        "--json",
+        action="store_true",
+        help="emit machine-readable plan or corpus metadata",
     )
     positioning = subparsers.add_parser(
         "cftc-positioning-corpus",
@@ -803,6 +871,98 @@ def main(argv: list[str] | None = None) -> int:
                 f"events: {len(corpus.timeline.events)}\n"
                 f"duplicates removed: {corpus.duplicate_event_count}\n"
                 f"timeline: {artifacts['timeline'].path}\n"
+                f"corpus: {artifacts['corpus'].path}"
+            )
+        return 0
+    if args.analytics_command == "economic-calendar-corpus":
+        try:
+            profile = EconomicCalendarFetchProfileV1(
+                start_date=args.start_date,
+                end_date=args.end_date,
+                economies=tuple(args.economies),
+                initial_window_days=args.initial_window_days,
+                timeout_seconds=args.timeout_seconds,
+                min_request_interval_seconds=(args.min_request_interval_seconds),
+                max_response_bytes=args.max_response_bytes,
+                max_total_source_bytes=args.max_total_source_bytes,
+                max_requests=args.max_requests,
+                max_events=args.max_events,
+                max_runtime_seconds=args.max_runtime_seconds,
+            )
+            plan = economic_calendar_fetch_plan(profile)
+            if args.plan_only:
+                if args.json:
+                    print(json.dumps(plan, indent=2, sort_keys=True))
+                else:
+                    print(
+                        "Comprehensive economic-calendar acquisition plan\n"
+                        f"provider: {plan['provider']}\n"
+                        f"HistData pairs: {plan['pair_count']}\n"
+                        f"economies: {plan['economy_count']}\n"
+                        f"initial requests: {plan['initial_request_count']}\n"
+                        "adaptive splits: enabled at the 1,000-row ceiling"
+                    )
+                return 0
+            if not args.artifact_dir:
+                raise ValueError(
+                    "--artifact-dir is required unless --plan-only is used"
+                )
+            env_name = validate_api_key_env_name(args.api_key_env)
+            api_key = str(os.environ.get(env_name) or "").strip()
+            if not api_key:
+                raise ValueError(
+                    f"Trading Economics API key environment variable is empty: {env_name}"
+                )
+            previous_build = (
+                replay_economic_calendar_corpus(args.previous_corpus)
+                if args.previous_corpus
+                else None
+            )
+            build = build_live_economic_calendar_corpus(
+                profile,
+                api_key=api_key,
+                license_acknowledged=args.provider_license_acknowledged,
+                previous_corpus=(
+                    previous_build.corpus if previous_build is not None else None
+                ),
+                previous_snapshots=(
+                    previous_build.snapshots
+                    if previous_build is not None
+                    else ()
+                ),
+            )
+            artifacts = write_economic_calendar_corpus(build, args.artifact_dir)
+        except (OSError, TypeError, ValueError) as exc:
+            print(f"economic-calendar corpus error: {exc}", file=sys.stderr)
+            return 1
+        corpus = build.corpus
+        calendar_payload = {
+            "schema_version": corpus.schema_version,
+            "corpus_id": corpus.corpus_id,
+            "event_count": len(corpus.events),
+            "source_count": len(corpus.sources),
+            "source_bytes": sum(item.size_bytes for item in corpus.sources),
+            "pair_count": len(corpus.pair_coverage),
+            "complete_pair_count": sum(
+                bool(cast(dict[str, object], item).get("complete"))
+                for item in corpus.pair_coverage.values()
+            ),
+            "coverage": [item.to_dict() for item in corpus.coverage],
+            "runtime_seconds": corpus.runtime_seconds,
+            "peak_memory_bytes": corpus.peak_memory_bytes,
+            "artifacts": {
+                name: artifact.to_dict() for name, artifact in sorted(artifacts.items())
+            },
+        }
+        if args.json:
+            print(json.dumps(calendar_payload, indent=2, sort_keys=True))
+        else:
+            print(
+                "Comprehensive economic-calendar corpus\n"
+                f"events/vintages: {len(corpus.events)}\n"
+                f"sources: {len(corpus.sources)}\n"
+                f"HistData pairs: {calendar_payload['complete_pair_count']}/"
+                f"{calendar_payload['pair_count']} complete\n"
                 f"corpus: {artifacts['corpus'].path}"
             )
         return 0

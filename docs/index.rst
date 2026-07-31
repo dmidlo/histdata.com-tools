@@ -18,6 +18,7 @@ Data and reconstruction foundations
    feed-epoch-contracts
    observation-operator-contracts
    market-context-contracts
+   economic-calendar-contracts
    cftc-positioning-contracts
    provider-neutral-dataset-catalog
    reconstruction-schema-compatibility

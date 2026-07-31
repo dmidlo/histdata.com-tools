@@ -35,12 +35,13 @@ from histdatacom.market_context import (
     CftcPositioningCorpusV1,
     CftcReportFamily,
     CftcReportScope,
-    MarketContextCorpusV1,
+    MarketContextCorpusLike,
     MarketContextKind,
+    context_corpus_artifact_kind,
     preflight_cftc_positioning_corpus,
-    preflight_market_context_corpus,
+    preflight_context_corpus,
     read_cftc_positioning_corpus,
-    read_market_context_corpus,
+    read_context_corpus,
 )
 from histdatacom.orchestration.reconstruction import (
     MAX_STAGE_ARTIFACT_REFS,
@@ -1432,7 +1433,7 @@ class SyntheticInfillPlanV1:
 class _ResolvedPlanInputs:
     feed_epoch_definition: Any
     observation_operator: ObservationOperatorV1
-    market_context: MarketContextCorpusV1
+    market_context: MarketContextCorpusLike
     cftc_positioning: CftcPositioningCorpusV1
     benchmark_corpus: Any
     motif_profile: ModernReferenceMotifProfileV1
@@ -2181,10 +2182,10 @@ def _resolve_plan_inputs_uncached(
             "observation operator feed epoch definition differs"
         )
 
+    context = read_context_corpus(market_context_corpus_path)
     context_ref = artifact_ref_for_file(
-        market_context_corpus_path, kind="market_context_corpus_v1"
+        market_context_corpus_path, kind=context_corpus_artifact_kind(context)
     )
-    context = read_market_context_corpus(context_ref.path)
     positioning_ref = artifact_ref_for_file(
         cftc_positioning_corpus_path, kind="cftc_positioning_corpus_v1"
     )
@@ -2441,7 +2442,7 @@ def _preflight_window_support(
     windows: Sequence[ReconstructionWindowV1],
     *,
     definition: Any,
-    context: MarketContextCorpusV1,
+    context: MarketContextCorpusLike,
     positioning: CftcPositioningCorpusV1,
     mode: InformationMode,
 ) -> tuple[
@@ -2474,7 +2475,7 @@ def _preflight_window_support(
             continue
         context_reasons: list[str] = []
         for currency, kind in required_context:
-            decision = preflight_market_context_corpus(
+            decision = preflight_context_corpus(
                 context,
                 start_ns=window.core_start_ns,
                 end_ns=window.core_end_ns,
@@ -2862,6 +2863,8 @@ def _validate_stage_inputs(
     delivery_mode: ReconstructionDeliveryMode,
 ) -> None:
     kinds = {ref.kind for ref in command.input_manifest_refs}
+    if "economic_calendar_corpus_v1" in kinds:
+        kinds.add("market_context_corpus_v1")
     required: Mapping[ReconstructionStage, set[str]] = {
         ReconstructionStage.SOURCE_ENRICHMENT: {
             ASCII_TICK_SOURCE_KIND,

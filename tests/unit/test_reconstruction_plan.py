@@ -219,7 +219,7 @@ def planned_environment(
     )
     monkeypatch.setattr(
         plan_module,
-        "preflight_market_context_corpus",
+        "preflight_context_corpus",
         lambda *_, **__: SimpleNamespace(reasons=()),
     )
     monkeypatch.setattr(
@@ -301,7 +301,7 @@ def test_source_reader_preserves_complete_enriched_cache_row_evidence(
     )
     monkeypatch.setattr(
         plan_module,
-        "preflight_market_context_corpus",
+        "preflight_context_corpus",
         lambda *_, **__: SimpleNamespace(reasons=()),
     )
     monkeypatch.setattr(
@@ -487,7 +487,7 @@ def test_public_plan_set_preserves_a_contiguous_refusal_only_shard(
     source_root, kwargs = planned_environment
     monkeypatch.setattr(
         plan_module,
-        "preflight_market_context_corpus",
+        "preflight_context_corpus",
         lambda *_, **__: SimpleNamespace(reasons=("context unsupported",)),
     )
     client = ReconstructionClient()
@@ -962,7 +962,7 @@ def test_builder_records_a_fully_refused_interval_without_executable_work(
     source_root, kwargs = planned_environment
     monkeypatch.setattr(
         plan_module,
-        "preflight_market_context_corpus",
+        "preflight_context_corpus",
         lambda *_, **__: SimpleNamespace(reasons=("context unsupported",)),
     )
 

@@ -267,11 +267,13 @@ def build_modern_reference_motif_library(
         CftcReportScope,
         MarketContextView,
         cftc_positioning_state_label,
+        context_corpus_artifact_kind,
+        context_corpus_event_times,
         market_context_benchmark_event_state,
         query_cftc_positioning_corpus,
-        query_market_context_corpus,
+        query_context_corpus,
         read_cftc_positioning_corpus,
-        read_market_context_corpus,
+        read_context_corpus,
     )
 
     selected = profile or ModernReferenceMotifProfileV1()
@@ -312,7 +314,7 @@ def build_modern_reference_motif_library(
             "modern motif source period falls outside stable epoch 04"
         )
 
-    context_corpus = read_market_context_corpus(context_path)
+    context_corpus = read_context_corpus(context_path)
     positioning_corpus = read_cftc_positioning_corpus(positioning_path)
     source_lineage = {
         (str(item["period"]), str(item["symbol"])): item
@@ -359,9 +361,9 @@ def build_modern_reference_motif_library(
             period,
             duration_seconds=selected.window_duration_seconds,
             context_event_times=tuple(
-                event.event_time_ns
-                for event in context_corpus.timeline.events
-                if _period_for_ns(event.event_time_ns) == period
+                event_time_ns
+                for event_time_ns in context_corpus_event_times(context_corpus)
+                if _period_for_ns(event_time_ns) == period
             ),
         )
         accepted = 0
@@ -380,7 +382,7 @@ def build_modern_reference_motif_library(
                 for rows in rows_by_symbol.values()
             ):
                 continue
-            context_query = query_market_context_corpus(
+            context_query = query_context_corpus(
                 context_corpus,
                 start_ns=start_ns,
                 end_ns=end_ns,
@@ -644,7 +646,7 @@ def build_modern_reference_motif_library(
             definition_path, "feed_epoch_definition_v2"
         ),
         "market_context_corpus": _artifact_ref(
-            context_path, "market_context_corpus_v1"
+            context_path, context_corpus_artifact_kind(context_corpus)
         ),
         "cftc_positioning_corpus": _artifact_ref(
             positioning_path, "cftc_positioning_corpus_v1"

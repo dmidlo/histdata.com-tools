@@ -38,11 +38,11 @@ from histdatacom.market_context import (
     MarketContextView,
     cftc_positioning_state_label,
     market_context_benchmark_event_state,
-    preflight_market_context_corpus,
+    preflight_context_corpus,
     query_cftc_positioning_corpus,
-    query_market_context_corpus,
+    query_context_corpus,
     read_cftc_positioning_corpus,
-    read_market_context_corpus,
+    read_context_corpus,
 )
 from histdatacom.orchestration.reconstruction import (
     ReconstructionStage,
@@ -1662,7 +1662,7 @@ def _window_context(
     invocation: ReconstructionStageInvocationV1,
 ) -> tuple[MarketContextQueryV1, CftcPositioningQueryV1]:
     window = invocation.task.window
-    context_corpus = read_market_context_corpus(
+    context_corpus = read_context_corpus(
         plan.execution_manifest.artifacts["market_context"].path
     )
     requirements = (
@@ -1672,7 +1672,7 @@ def _window_context(
     )
     reasons: list[str] = []
     for currency, kind in requirements:
-        decision = preflight_market_context_corpus(
+        decision = preflight_context_corpus(
             context_corpus,
             start_ns=window.core_start_ns,
             end_ns=window.core_end_ns,
@@ -1688,7 +1688,7 @@ def _window_context(
         if mode.value == "ex_ante_simulation"
         else MarketContextView.EX_POST
     )
-    context = query_market_context_corpus(
+    context = query_context_corpus(
         context_corpus,
         start_ns=window.core_start_ns,
         end_ns=window.core_end_ns,

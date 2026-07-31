@@ -2,6 +2,12 @@
 
 ### Added
 
+- **market-context**: add an operator-licensed comprehensive economic-calendar
+  corpus for all 66 HistData instruments and 21 mapped economies, preserving
+  actual/previous/forecast/provider-forecast/revised values, observed refresh
+  vintages, restricted raw replay, bounded 2000-to-present acquisition plans,
+  and common benchmark/motif consumer seams (#492).
+
 - **datasets**: add provider-neutral HistData and explicit-UTC fixture adapters,
   immutable observed/derived dataset manifests, qualified aliases, exact
   resolution/replay receipts, query-bound cursors, strong verification,

@@ -1152,11 +1152,13 @@ def build_reverse_degradation_benchmark_corpus(
         CftcReportScope,
         MarketContextView,
         cftc_positioning_state_label,
+        context_corpus_artifact_kind,
+        context_corpus_event_times,
         market_context_benchmark_event_state,
         query_cftc_positioning_corpus,
-        query_market_context_corpus,
+        query_context_corpus,
         read_cftc_positioning_corpus,
-        read_market_context_corpus,
+        read_context_corpus,
     )
 
     selected = profile or ReverseDegradationCorpusProfileV1()
@@ -1171,7 +1173,7 @@ def build_reverse_degradation_benchmark_corpus(
     positioning_path = Path(cftc_positioning_corpus_path).expanduser().resolve()
     definition = read_active_time_feed_epoch_definition(definition_path)
     calibration = read_observation_calibration_campaign(observation_path)
-    context_corpus = read_market_context_corpus(context_path)
+    context_corpus = read_context_corpus(context_path)
     positioning_corpus = read_cftc_positioning_corpus(positioning_path)
     policy = load_default_benchmark_promotion_gate_policy()
     if not definition.valid_for_observation_models:
@@ -1211,9 +1213,9 @@ def build_reverse_degradation_benchmark_corpus(
             period,
             duration_seconds=selected.window_duration_seconds,
             context_event_times=tuple(
-                event.event_time_ns
-                for event in context_corpus.timeline.events
-                if _period_for_ns(event.event_time_ns) == period
+                event_time_ns
+                for event_time_ns in context_corpus_event_times(context_corpus)
+                if _period_for_ns(event_time_ns) == period
             ),
         )
         for start_ns, end_ns, session in candidates:
@@ -1238,7 +1240,7 @@ def build_reverse_degradation_benchmark_corpus(
             )
             if assignment.assignment_kind not in {"epoch", "transition"}:
                 continue
-            context_query = query_market_context_corpus(
+            context_query = query_context_corpus(
                 context_corpus,
                 start_ns=start_ns,
                 end_ns=end_ns,
@@ -1328,7 +1330,7 @@ def build_reverse_degradation_benchmark_corpus(
         ),
         "market_context": _artifact_ref(
             context_path,
-            "market_context_corpus_v1",
+            context_corpus_artifact_kind(context_corpus),
             {"corpus_id": context_corpus.corpus_id},
         ),
         "cftc_positioning": _artifact_ref(

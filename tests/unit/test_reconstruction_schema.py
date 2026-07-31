@@ -287,6 +287,25 @@ def test_legacy_and_enriched_histdata_caches_have_explicit_compatibility(
     assert enriched.registry_id == reconstruction_schema_registry().registry_id
 
 
+def test_comprehensive_economic_calendar_is_a_supported_context_artifact(
+    tmp_path: Path,
+) -> None:
+    plan = _plan(tmp_path, _legacy_source(tmp_path))
+    Path(plan["market_context_corpus_path"]).write_text(
+        json.dumps(
+            {"schema_version": "histdatacom.economic-calendar-corpus.v1"}
+        ),
+        encoding="utf-8",
+    )
+
+    report = evaluate_reconstruction_compatibility(plan)
+
+    assert report.executable
+    assert "artifact_schema_mismatch" not in {
+        item.code for item in report.findings
+    }
+
+
 @pytest.mark.parametrize(
     ("updates", "code", "status"),
     (

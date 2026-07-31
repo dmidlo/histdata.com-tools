@@ -356,6 +356,7 @@ _AUDITED_MODULES = (
     "histdatacom.data_analytics.feed_regimes",
     "histdatacom.market_context.contracts",
     "histdatacom.market_context.corpus",
+    "histdatacom.market_context.economic_calendar",
     "histdatacom.market_context.positioning",
     "histdatacom.orchestration.reconstruction",
     "histdatacom.reconstruction",
@@ -487,7 +488,10 @@ _PLAN_FIELDS = frozenset(
 _ARTIFACT_SCHEMA_EXPECTATIONS = {
     "feed_epoch_definition_path": ("histdatacom.feed-epoch-definition.v2",),
     "observation_operator_path": ("histdatacom.observation-operator.v1",),
-    "market_context_corpus_path": ("histdatacom.market-context-corpus.v1",),
+    "market_context_corpus_path": (
+        "histdatacom.market-context-corpus.v1",
+        "histdatacom.economic-calendar-corpus.v1",
+    ),
     "cftc_positioning_corpus_path": ("histdatacom.cftc-positioning-corpus.v1",),
     "benchmark_manifest_path": (
         "histdatacom.reverse-degradation-benchmark-manifest.v1",
