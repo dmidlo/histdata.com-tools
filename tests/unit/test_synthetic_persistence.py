@@ -12,6 +12,7 @@ import pyarrow.parquet as pq
 import pytest
 
 from histdatacom.broker_capture import fit_broker_delivery_fingerprint
+from histdatacom.reconstruction import ReconstructionClient
 from histdatacom.synthetic import (
     RECONSTRUCTION_PRODUCT_DIRECTORY,
     BrokerTransferConfigV1,
@@ -220,6 +221,10 @@ def test_generic_delivery_commit_recovers_after_atomic_rename(
     assert committed.manifest.quality.point_in_time_evidence_decision_ids == (
         "decision:fixture",
     )
+    assert committed.manifest.quality.benchmark_evidence == {"gate": "passed"}
+    assert ReconstructionClient().replay(committed.manifest_path)[
+        "replay_verified"
+    ]
     assert committed.manifest.quality.cross_series_constraint_bundle_ids == (
         "bundle:fixture",
     )

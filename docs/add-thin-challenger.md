@@ -1,10 +1,10 @@
 # Bounded marked Add-Thin sequence challenger
 
-`histdatacom.synthetic.add_thin` is one opt-in, dependency-free CPU research
-challenger. It adds a variable-cardinality point-process diffusion comparison
-after the empirical motif, four classical event clocks, three static marked
-Hawkes models, two regime-Hawkes models, and the bounded RMTPP. It does not
-change the certified empirical default.
+`histdatacom.synthetic.add_thin` supplies one registered dependency-free CPU
+proposal engine. Its challenger role adds a variable-cardinality point-process
+diffusion comparison after the empirical motif, four classical event clocks,
+three static marked Hawkes models, two regime-Hawkes models, and bounded RMTPP.
+Retained failed gates keep it out of product selection.
 
 ## Method boundary
 

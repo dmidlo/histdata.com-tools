@@ -133,6 +133,11 @@ The catalog-bound experiment selection, split, leakage-audit, binding,
 implementation, manifest, and verification contracts are implemented by issue
 #486 and consumed by the first-party HistData planner and runtime. See
 [Catalog-bound reconstruction experiments](reconstruction-experiment-contracts.md).
-The v2 portfolio plan and proposal-engine descriptor remain reserved handoffs
-to issue #489; registry presence does not make those future implementations
-executable.
+Issue #489 implements the proposal-engine descriptor/registry and executable
+v2 portfolio plan. A v2 plan must explicitly order engines, select only
+reconstruction-eligible engines, and bind replay-verified HistData evaluation
+scorecards. Registry presence alone still grants no eligibility: failed
+engines remain benchmark-only, the broker-target bridge remains research-only,
+and the current qualified product reports a one-engine motif portfolio without
+claiming model diversity. See
+[Proposal-engine registry and qualified portfolios](proposal-engine-portfolios.md).

@@ -79,6 +79,13 @@ from histdatacom.synthetic.persistence import (
     read_reconstruction_streams,
     verify_reconstruction_publication,
 )
+from histdatacom.synthetic.proposal_engines import (
+    ProposalEnginePortfolioV1,
+    ProposalEngineRegistryV1,
+    ProposalPortfolioEvaluationV1,
+    proposal_engine_registry,
+    run_histdata_proposal_portfolio_evaluation,
+)
 from histdatacom.synthetic.reconstruction_handlers import (
     register_first_party_reconstruction_handlers,
 )
@@ -98,6 +105,9 @@ from histdatacom.synthetic.reconstruction_plan import (
 
 RECONSTRUCTION_PLAN_SPEC_SCHEMA_VERSION = (
     "histdatacom.reconstruction-plan-spec.v1"
+)
+RECONSTRUCTION_PLAN_SPEC_V2_SCHEMA_VERSION = (
+    "histdatacom.reconstruction-plan-spec.v2"
 )
 RECONSTRUCTION_PLAN_SET_SCHEMA_VERSION = (
     "histdatacom.reconstruction-plan-set.v1"
@@ -217,10 +227,16 @@ class ReconstructionPlanSpecV1:
     source_format: str = RECONSTRUCTION_SOURCE_FORMAT
     timeframe: str = RECONSTRUCTION_TIMEFRAME
     symbols: tuple[str, ...] = RECONSTRUCTION_SYMBOLS
+    proposal_engine_ids: tuple[str, ...] = ()
+    selected_proposal_engine_ids: tuple[str, ...] = ()
+    proposal_evaluation_paths: tuple[str, ...] = ()
     schema_version: str = RECONSTRUCTION_PLAN_SPEC_SCHEMA_VERSION
 
     def __post_init__(self) -> None:
-        if self.schema_version != RECONSTRUCTION_PLAN_SPEC_SCHEMA_VERSION:
+        if self.schema_version not in {
+            RECONSTRUCTION_PLAN_SPEC_SCHEMA_VERSION,
+            RECONSTRUCTION_PLAN_SPEC_V2_SCHEMA_VERSION,
+        }:
             raise ReconstructionUnsupportedError(
                 "unsupported reconstruction plan-spec schema"
             )
@@ -316,6 +332,35 @@ class ReconstructionPlanSpecV1:
         object.__setattr__(self, "source_format", RECONSTRUCTION_SOURCE_FORMAT)
         object.__setattr__(self, "timeframe", RECONSTRUCTION_TIMEFRAME)
         object.__setattr__(self, "symbols", RECONSTRUCTION_SYMBOLS)
+        proposal_engine_ids = tuple(
+            _required_text(value) for value in self.proposal_engine_ids
+        )
+        selected_engine_ids = tuple(
+            _required_text(value) for value in self.selected_proposal_engine_ids
+        )
+        if len(set(proposal_engine_ids)) != len(proposal_engine_ids):
+            raise ReconstructionUnsupportedError(
+                "proposal_engine_ids cannot contain duplicates"
+            )
+        if len(set(selected_engine_ids)) != len(selected_engine_ids):
+            raise ReconstructionUnsupportedError(
+                "selected_proposal_engine_ids cannot contain duplicates"
+            )
+        evaluation_paths = tuple(
+            str(Path(_required_text(value)).expanduser())
+            for value in self.proposal_evaluation_paths
+        )
+        if self.schema_version == RECONSTRUCTION_PLAN_SPEC_SCHEMA_VERSION and (
+            proposal_engine_ids or selected_engine_ids or evaluation_paths
+        ):
+            raise ReconstructionUnsupportedError(
+                "v1 plan translation cannot declare proposal portfolio fields"
+            )
+        object.__setattr__(self, "proposal_engine_ids", proposal_engine_ids)
+        object.__setattr__(
+            self, "selected_proposal_engine_ids", selected_engine_ids
+        )
+        object.__setattr__(self, "proposal_evaluation_paths", evaluation_paths)
         requested_start = self.requested_start_ns
         requested_end = self.requested_end_ns
         exact_bounds = (requested_start, requested_end)
@@ -360,7 +405,7 @@ class ReconstructionPlanSpecV1:
 
     def to_dict(self) -> dict[str, JSONValue]:
         """Return machine-readable planning metadata without row payloads."""
-        return {
+        payload: dict[str, JSONValue] = {
             "schema_version": self.schema_version,
             "source_root": self.source_root,
             "dataset_catalog_path": self.dataset_catalog_path,
@@ -399,6 +444,15 @@ class ReconstructionPlanSpecV1:
             "symbols": list(self.symbols),
             "scientific_nonclaim": SCIENTIFIC_NONCLAIM,
         }
+        if self.schema_version == RECONSTRUCTION_PLAN_SPEC_V2_SCHEMA_VERSION:
+            payload["proposal_engine_ids"] = list(self.proposal_engine_ids)
+            payload["selected_proposal_engine_ids"] = list(
+                self.selected_proposal_engine_ids
+            )
+            payload["proposal_evaluation_paths"] = list(
+                self.proposal_evaluation_paths
+            )
+        return payload
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> ReconstructionPlanSpecV1:
@@ -495,8 +549,52 @@ class ReconstructionPlanSpecV1:
                     data.get("symbols", RECONSTRUCTION_SYMBOLS)
                 )
             ),
+            proposal_engine_ids=tuple(
+                str(value)
+                for value in _sequence(data.get("proposal_engine_ids", ()))
+            ),
+            selected_proposal_engine_ids=tuple(
+                str(value)
+                for value in _sequence(
+                    data.get("selected_proposal_engine_ids", ())
+                )
+            ),
+            proposal_evaluation_paths=tuple(
+                str(value)
+                for value in _sequence(
+                    data.get("proposal_evaluation_paths", ())
+                )
+            ),
             schema_version=str(data.get("schema_version", "")),
         )
+
+
+@dataclass(frozen=True, slots=True)
+class ReconstructionPlanSpecV2(ReconstructionPlanSpecV1):
+    """Executable HistData plan with bound proposal-portfolio evidence."""
+
+    schema_version: str = RECONSTRUCTION_PLAN_SPEC_V2_SCHEMA_VERSION
+
+    def __post_init__(self) -> None:
+        ReconstructionPlanSpecV1.__post_init__(self)
+        if not self.proposal_engine_ids:
+            raise ReconstructionUnsupportedError(
+                "v2 plan requires an explicit proposal engine ordering"
+            )
+        if not self.selected_proposal_engine_ids:
+            raise ReconstructionUnsupportedError(
+                "v2 plan requires an explicit reconstruction selection"
+            )
+        if not set(self.selected_proposal_engine_ids).issubset(
+            self.proposal_engine_ids
+        ):
+            raise ReconstructionUnsupportedError(
+                "v2 reconstruction selection is absent from its portfolio"
+            )
+        if not self.proposal_evaluation_paths:
+            raise ReconstructionUnsupportedError(
+                "v2 plan requires retained proposal evaluation evidence"
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -1025,6 +1123,43 @@ class ReconstructionClient:
         """Return the installed deterministic reconstruction schema registry."""
         return reconstruction_schema_registry()
 
+    def proposal_engines(self) -> ProposalEngineRegistryV1:
+        """Return every installed concrete proposal-engine descriptor."""
+        return proposal_engine_registry()
+
+    def proposal_portfolio(
+        self, plan_path: str | Path
+    ) -> ProposalEnginePortfolioV1:
+        """Read the exact qualified/refused portfolio bound to one plan."""
+        plan = _read_plan(plan_path)
+        ref = plan.artifact_graph.get("proposal_engine_portfolio")
+        if ref is None:
+            raise ReconstructionUnsupportedError(
+                "plan has no proposal portfolio artifact"
+            )
+        verify_artifact_ref(ref)
+        payload = _read_json_mapping(ref.path)
+        return ProposalEnginePortfolioV1.from_dict(payload)
+
+    def evaluate_proposal_portfolio(
+        self,
+        benchmark_manifest_path: str | Path,
+        source_root: str | Path,
+        *,
+        output_directory: str | Path,
+        engine_ids: Sequence[str] | None = None,
+    ) -> ProposalPortfolioEvaluationV1:
+        """Execute all HistData benchmark-eligible engines without promotion."""
+        try:
+            return run_histdata_proposal_portfolio_evaluation(
+                benchmark_manifest_path,
+                source_root,
+                output_directory=output_directory,
+                engine_ids=engine_ids,
+            )
+        except (OSError, TypeError, ValueError, RuntimeError) as err:
+            raise ReconstructionValidationError(str(err)) from err
+
     def experiments(
         self, root: str | Path
     ) -> tuple[Mapping[str, JSONValue], ...]:
@@ -1140,6 +1275,11 @@ class ReconstructionClient:
                 broker_delivery_artifact=spec.broker_delivery_artifact,
                 dataset_catalog_path=spec.dataset_catalog_path,
                 dataset_reference=spec.dataset_reference,
+                proposal_engine_ids=spec.proposal_engine_ids,
+                selected_proposal_engine_ids=(
+                    spec.selected_proposal_engine_ids
+                ),
+                proposal_evaluation_paths=spec.proposal_evaluation_paths,
             )
             validate_synthetic_infill_plan_for_execution(plan)
             return plan
@@ -1744,6 +1884,10 @@ class ReconstructionClient:
         manifest = load_reconstruction_manifest(path)
         streams = read_reconstruction_streams(path)
         event_count = sum(len(stream.events) for stream in streams)
+        benchmark_evidence = cast(
+            Mapping[str, JSONValue],
+            getattr(manifest.quality, "benchmark_evidence", {}),
+        )
         return {
             "schema_version": RECONSTRUCTION_REPLAY_SCHEMA_VERSION,
             "manifest_path": str(path),
@@ -1755,6 +1899,24 @@ class ReconstructionClient:
             "event_count": event_count,
             "logical_content_sha256": manifest.replay.logical_content_sha256,
             "replay_verified": event_count == manifest.event_count,
+            "proposal_engine_registry_id": benchmark_evidence.get(
+                "proposal_engine_registry_id"
+            ),
+            "proposal_portfolio_id": benchmark_evidence.get(
+                "proposal_portfolio_id"
+            ),
+            "proposal_selected_engine_ids": benchmark_evidence.get(
+                "proposal_selected_engine_ids", []
+            ),
+            "proposal_portfolio_diversity_claim": (
+                benchmark_evidence.get("proposal_portfolio_diversity_claim")
+            ),
+            "proposal_eligibility_audit_ids": (
+                benchmark_evidence.get("proposal_eligibility_audit_ids", [])
+            ),
+            "proposal_evidence_ids": benchmark_evidence.get(
+                "proposal_evidence_ids", []
+            ),
         }
 
     def certify(
@@ -1788,9 +1950,17 @@ class ReconstructionClient:
         return _bound_plan(request)
 
 
-def read_plan_spec(path: str | Path) -> ReconstructionPlanSpecV1:
+def read_plan_spec(
+    path: str | Path,
+) -> ReconstructionPlanSpecV1 | ReconstructionPlanSpecV2:
     """Read a public plan-spec JSON artifact."""
-    return ReconstructionPlanSpecV1.from_dict(_read_json_mapping(path))
+    payload = _read_json_mapping(path)
+    if (
+        payload.get("schema_version")
+        == RECONSTRUCTION_PLAN_SPEC_V2_SCHEMA_VERSION
+    ):
+        return ReconstructionPlanSpecV2.from_dict(payload)
+    return ReconstructionPlanSpecV1.from_dict(payload)
 
 
 def write_reconstruction_plan_set(
@@ -2304,12 +2474,14 @@ __all__ = [
     "RECONSTRUCTION_PLAN_SET_SCHEMA_VERSION",
     "RECONSTRUCTION_PLAN_SHARD_SCHEMA_VERSION",
     "RECONSTRUCTION_PLAN_SPEC_SCHEMA_VERSION",
+    "RECONSTRUCTION_PLAN_SPEC_V2_SCHEMA_VERSION",
     "RECONSTRUCTION_PREVIEW_SCHEMA_VERSION",
     "RECONSTRUCTION_RECEIPT_SCHEMA_VERSION",
     "RECONSTRUCTION_REPLAY_SCHEMA_VERSION",
     "RECONSTRUCTION_SOURCE_FORMAT",
     "RECONSTRUCTION_SYMBOLS",
     "RECONSTRUCTION_TIMEFRAME",
+    "CrossSeriesConstraintPolicyV1",
     "InformationMode",
     "ModernReferenceCertificationCampaignResultV1",
     "ModernReferenceCertificationCampaignSpecV1",
@@ -2317,7 +2489,6 @@ __all__ = [
     "ReconstructionClient",
     "ReconstructionCompatibilityReportV1",
     "ReconstructionCompatibilityStatus",
-    "CrossSeriesConstraintPolicyV1",
     "ReconstructionEvidencePolicyV1",
     "ReconstructionExecutionRequestV1",
     "ReconstructionExitCode",
@@ -2327,6 +2498,7 @@ __all__ = [
     "ReconstructionPlanSetV1",
     "ReconstructionPlanShardV1",
     "ReconstructionPlanSpecV1",
+    "ReconstructionPlanSpecV2",
     "ReconstructionPreflightV1",
     "ReconstructionPublicError",
     "ReconstructionRefusedError",

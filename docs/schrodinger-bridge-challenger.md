@@ -1,11 +1,11 @@
 # Constrained Schrödinger-bridge challenger
 
-`histdatacom.synthetic.schrodinger_bridge` is an opt-in, dependency-free CPU
-research challenger. It tests whether a finite-state path-space transport can
-improve reconstruction diagnostics while immutable observations, information
-boundaries, historical exclusions, and the EURGBP/EURUSD/GBPUSD triangle stay
-authoritative. It cannot replace the certified empirical default or promote
-itself.
+`histdatacom.synthetic.schrodinger_bridge` supplies one registered,
+dependency-free CPU proposal engine. Its challenger role tests finite-state
+path-space transport while immutable observations and historical constraints
+stay authoritative. Because its implemented target is broker-conditioned, it
+is research-only in the HistData milestone; OANDA and broker execution remain
+deferred and it cannot enter product selection.
 
 ## Falsifiable hypothesis and comparators
 

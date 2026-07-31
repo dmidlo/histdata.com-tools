@@ -89,7 +89,7 @@ from histdatacom.synthetic.benchmark_corpus import (
 )
 from histdatacom.synthetic.carving import (
     HistoricalCarvedCandidateBatchV1,
-    carve_empirical_motif_candidates,
+    carve_reconstruction_candidates,
 )
 from histdatacom.synthetic.contracts import (
     SyntheticEventOrigin,
@@ -114,6 +114,7 @@ from histdatacom.synthetic.delivery import (
     project_modern_reference_delivery,
 )
 from histdatacom.synthetic.generation import (
+    EMPIRICAL_MOTIF_GENERATOR_ID,
     EmpiricalMotifCandidateBatchV1,
     EmpiricalMotifEventLineageV1,
     EmpiricalMotifGeneratorConfigV1,
@@ -148,8 +149,14 @@ from histdatacom.synthetic.persistence import (
     stage_delivery_reconstruction_publication,
     verify_reconstruction_publication,
 )
+from histdatacom.synthetic.proposal_engines import (
+    ProposalEnginePortfolioV1,
+    ProposalEngineRegistryV1,
+    proposal_engine_registry,
+)
 from histdatacom.synthetic.reconstruction_plan import (
     FIRST_PARTY_RECONSTRUCTION_HANDLERS,
+    ReconstructionPlanConfigurationV2,
     ReconstructionStagePlanV1,
     load_reconstruction_stage_plan,
 )
@@ -218,6 +225,13 @@ _HANDLERS = {
     ReconstructionStage.BROKER_TRANSFER: "delivery_projection_handler",
     ReconstructionStage.VALIDATION: "validation_handler",
     ReconstructionStage.ATOMIC_PARTITION_COMMIT: "atomic_commit_handler",
+}
+
+# A selected engine reaches product execution only through an installed adapter.
+# Additional adapters are added here only after their eligibility audit can bind
+# all fitted/checkpoint artifacts; absence is a fail-closed runtime refusal.
+_PROPOSAL_RUNTIME_DISPATCH = {
+    EMPIRICAL_MOTIF_GENERATOR_ID: generate_empirical_motif_candidates,
 }
 
 
@@ -409,13 +423,80 @@ def source_enrichment_handler(
 def proposal_handler(
     invocation: ReconstructionStageInvocationV1,
 ) -> ReconstructionStageOutcomeV1:
-    """Run deterministic empirical motif retrieval and proposal generation."""
+    """Dispatch the explicitly qualified engine selected by the portfolio."""
     started = time.perf_counter()
     ledger_stream: Any | None = None
     ledger_temporary: Path | None = None
     try:
         _cancel_if_requested(invocation)
         plan = load_reconstruction_stage_plan(invocation.command)
+        portfolio: ProposalEnginePortfolioV1 | None = None
+        registry: ProposalEngineRegistryV1 | None = None
+        selected_binding = None
+        selected_audit = None
+        selected_engine_id = EMPIRICAL_MOTIF_GENERATOR_ID
+        if isinstance(plan.configuration, ReconstructionPlanConfigurationV2):
+            portfolio = ProposalEnginePortfolioV1.from_dict(
+                _mapping(
+                    json.loads(
+                        Path(
+                            plan.execution_manifest.artifacts[
+                                "proposal_engine_portfolio"
+                            ].path
+                        ).read_text(encoding="utf-8")
+                    )
+                )
+            )
+            registry = ProposalEngineRegistryV1.from_dict(
+                _mapping(
+                    json.loads(
+                        Path(
+                            plan.execution_manifest.artifacts[
+                                "proposal_engine_registry"
+                            ].path
+                        ).read_text(encoding="utf-8")
+                    )
+                )
+            )
+            if portfolio != plan.configuration.proposal_portfolio:
+                raise ValueError(
+                    "proposal portfolio differs from configuration"
+                )
+            if portfolio.registry_id != registry.registry_id:
+                raise ValueError("proposal portfolio registry differs")
+            if registry != proposal_engine_registry():
+                raise ValueError(
+                    "proposal engine registry differs from installed code"
+                )
+            if len(portfolio.selected_engine_ids) != 1:
+                raise ValueError(
+                    "current HistData runtime refuses an unqualified or ambiguous "
+                    "proposal selection"
+                )
+            selected_engine_id = portfolio.selected_engine_ids[0]
+            selected_binding = portfolio.binding(selected_engine_id)
+            selected_audit = next(
+                item
+                for item in portfolio.eligibility_audits
+                if item.engine_id == selected_engine_id
+            )
+            if not selected_audit.reconstruction_eligible:
+                raise ValueError(
+                    "selected proposal engine is not reconstruction eligible"
+                )
+            if (
+                selected_binding.config_id
+                != plan.configuration.generator_config.config_id
+            ):
+                raise ValueError(
+                    "selected proposal binding differs from runtime config"
+                )
+        generator = _PROPOSAL_RUNTIME_DISPATCH.get(selected_engine_id)
+        if generator is None:
+            raise ValueError(
+                "selected proposal engine has no qualified first-party runtime "
+                f"adapter: {selected_engine_id}"
+            )
         source = _prior_manifest(invocation, SOURCE_STAGE_ARTIFACT_KIND)
         streams = _read_stream_map(source, "input_stream_refs")
         cross_bundles = _read_cross_series_constraints(source)
@@ -497,7 +578,7 @@ def proposal_handler(
                     max_results=index.config.max_matches,
                 )
                 result = query_reference_motifs(index, query)
-                batch = generate_empirical_motif_candidates(
+                batch = generator(
                     run=invocation.run,
                     window=invocation.task.window,
                     left_anchor=left,
@@ -513,6 +594,24 @@ def proposal_handler(
                     ),
                 )
                 candidate_evidence = _candidate_evidence(batch)
+                if portfolio is not None:
+                    assert registry is not None
+                    assert selected_binding is not None
+                    assert selected_audit is not None
+                    candidate_evidence.update(
+                        {
+                            "proposal_engine_id": selected_engine_id,
+                            "proposal_engine_registry_id": registry.registry_id,
+                            "proposal_portfolio_id": portfolio.portfolio_id,
+                            "proposal_binding_id": selected_binding.binding_id,
+                            "proposal_eligibility_audit_id": (
+                                selected_audit.audit_id
+                            ),
+                            "proposal_evidence_ids": list(
+                                selected_audit.evidence_ids
+                            ),
+                        }
+                    )
                 candidate_evidence["cross_series_constraint_use"] = (
                     cross_use.to_dict()
                 )
@@ -550,7 +649,7 @@ def proposal_handler(
                         scratch_bytes=_tree_size(
                             invocation.task.scratch_directory
                         ),
-                        message="empirical motif proposal",
+                        message="qualified proposal-engine dispatch",
                     )
         ledger_stream.flush()
         os.fsync(ledger_stream.fileno())
@@ -591,6 +690,27 @@ def proposal_handler(
                 for symbol, condition in sorted(conditions.items())
             },
             "generator_config": plan.configuration.generator_config.to_dict(),
+            "proposal_engine_id": selected_engine_id,
+            "proposal_engine_registry_id": (
+                registry.registry_id if registry is not None else None
+            ),
+            "proposal_portfolio_id": (
+                portfolio.portfolio_id if portfolio is not None else None
+            ),
+            "proposal_binding_id": (
+                selected_binding.binding_id
+                if selected_binding is not None
+                else None
+            ),
+            "proposal_eligibility_audit_id": (
+                selected_audit.audit_id if selected_audit is not None else None
+            ),
+            "proposal_evidence_ids": (
+                list(selected_audit.evidence_ids)
+                if selected_audit is not None
+                else []
+            ),
+            "proposal_fallback_used": False,
             "candidate_stream_refs": _refs_dict(candidate_refs),
             "batch_count": batch_count,
             "generated_event_count": generated,
@@ -650,7 +770,7 @@ def proposal_handler(
             ),
             candidates=generated,
             rejected=refused,
-            message="generated empirical motif proposals",
+            message="generated qualified portfolio proposals",
             output_bytes=(manifest.size_bytes or 0)
             + (ledger_ref.size_bytes or 0)
             + sum(ref.size_bytes or 0 for ref in candidate_refs.values()),
@@ -732,7 +852,7 @@ def carving_handler(
                 policy=evidence_policy,
             )
             evidence_decisions.append(evidence_use)
-            carved = carve_empirical_motif_candidates(
+            carved = carve_reconstruction_candidates(
                 run=invocation.run,
                 window=invocation.task.window,
                 candidate_batch=batch,
@@ -1220,7 +1340,10 @@ def validation_handler(
                     "motif_qualification",
                     "motif_leakage_audit",
                     "information_audit",
+                    "proposal_engine_registry",
+                    "proposal_engine_portfolio",
                 }
+                or name.startswith("proposal_engine_evidence_")
             ),
             benchmark_evidence=benchmark_evidence,
             point_in_time_evidence_projection_ids=tuple(
@@ -2126,6 +2249,36 @@ def _validate_scientific_evidence(
     )
     contracts = _mapping(qualification.get("real_window_contracts"))
     failures: list[str] = []
+    proposal_portfolio: ProposalEnginePortfolioV1 | None = None
+    if isinstance(plan.configuration, ReconstructionPlanConfigurationV2):
+        proposal_portfolio = ProposalEnginePortfolioV1.from_dict(
+            _mapping(
+                json.loads(
+                    Path(artifacts["proposal_engine_portfolio"].path).read_text(
+                        encoding="utf-8"
+                    )
+                )
+            )
+        )
+        if proposal_portfolio != plan.configuration.proposal_portfolio:
+            failures.append(
+                "proposal portfolio differs from execution configuration"
+            )
+        if proposal_portfolio.selected_engine_ids != (
+            "histdatacom.empirical-motif-resampling",
+        ):
+            failures.append(
+                "proposal portfolio selection is unqualified or ambiguous"
+            )
+        selected_audits = tuple(
+            item
+            for item in proposal_portfolio.eligibility_audits
+            if item.engine_id in proposal_portfolio.selected_engine_ids
+        )
+        if not selected_audits or any(
+            not item.reconstruction_eligible for item in selected_audits
+        ):
+            failures.append("selected proposal engine failed eligibility audit")
     if qualification.get("candidate_promotion_eligible") is not True:
         failures.append("motif candidate is not promotion eligible")
     if qualification.get("candidate_provisional") is not False:
@@ -2153,6 +2306,33 @@ def _validate_scientific_evidence(
         "information_violation_count": audit.total_violation_count,
         "leakage_cross_split_finding_count": cast(
             int, leakage["post_exclusion_cross_split_finding_count"]
+        ),
+        "proposal_engine_registry_id": (
+            proposal_portfolio.registry_id if proposal_portfolio else None
+        ),
+        "proposal_portfolio_id": (
+            proposal_portfolio.portfolio_id if proposal_portfolio else None
+        ),
+        "proposal_selected_engine_ids": (
+            list(proposal_portfolio.selected_engine_ids)
+            if proposal_portfolio
+            else ["histdatacom.empirical-motif-resampling"]
+        ),
+        "proposal_portfolio_diversity_claim": (
+            "single-qualified-engine"
+            if proposal_portfolio
+            and len(proposal_portfolio.selected_engine_ids) == 1
+            else "legacy-v1-translation"
+        ),
+        "proposal_eligibility_audit_ids": (
+            [item.audit_id for item in proposal_portfolio.eligibility_audits]
+            if proposal_portfolio
+            else []
+        ),
+        "proposal_evidence_ids": (
+            [item.evidence_id for item in proposal_portfolio.evidence]
+            if proposal_portfolio
+            else []
         ),
     }
 

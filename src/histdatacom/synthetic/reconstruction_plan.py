@@ -100,7 +100,10 @@ from histdatacom.synthetic.ensembles import (
     EnsembleCalibrationConfigV1,
     plan_reconstruction_ensemble,
 )
-from histdatacom.synthetic.generation import EmpiricalMotifGeneratorConfigV1
+from histdatacom.synthetic.generation import (
+    EMPIRICAL_MOTIF_GENERATOR_ID,
+    EmpiricalMotifGeneratorConfigV1,
+)
 from histdatacom.synthetic.information import (
     InformationAuditReportV1,
     InformationInputKind,
@@ -125,6 +128,17 @@ from histdatacom.synthetic.observation import (
     read_observation_operator_artifact,
 )
 from histdatacom.synthetic.persistence import estimate_reconstruction_retention
+from histdatacom.synthetic.proposal_engines import (
+    PROPOSAL_ENGINE_PORTFOLIO_SCHEMA_VERSION,
+    ProposalEngineBindingV1,
+    ProposalEnginePortfolioV1,
+    ProposalEngineRegistryV1,
+    build_histdata_proposal_portfolio,
+    proposal_engine_default_configs,
+    proposal_engine_registry,
+    proposal_evidence_from_campaigns,
+    read_proposal_evidence_campaigns,
+)
 from histdatacom.synthetic.streaming import (
     ReconstructionResourceEstimateV1,
     ReconstructionRunV1,
@@ -141,6 +155,9 @@ RECONSTRUCTION_SOURCE_INVENTORY_SCHEMA_VERSION = (
 RECONSTRUCTION_PLAN_CONFIGURATION_SCHEMA_VERSION = (
     "histdatacom.reconstruction-plan-configuration.v1"
 )
+RECONSTRUCTION_PLAN_CONFIGURATION_V2_SCHEMA_VERSION = (
+    "histdatacom.reconstruction-plan-configuration.v2"
+)
 RECONSTRUCTION_PLAN_EXECUTION_MANIFEST_SCHEMA_VERSION = (
     "histdatacom.reconstruction-plan-execution-manifest.v1"
 )
@@ -155,6 +172,13 @@ SYNTHETIC_INFILL_PLAN_SCHEMA_VERSION = "histdatacom.synthetic-infill-plan.v1"
 ASCII_TICK_SOURCE_KIND = "histdata_ascii_tick_arrow"
 SOURCE_INVENTORY_ARTIFACT_KIND = "reconstruction_source_inventory_v1"
 PLAN_CONFIGURATION_ARTIFACT_KIND = "reconstruction_plan_configuration_v1"
+PLAN_CONFIGURATION_V2_ARTIFACT_KIND = "reconstruction_plan_configuration_v2"
+PROPOSAL_ENGINE_REGISTRY_ARTIFACT_KIND = "proposal_engine_registry_v1"
+PROPOSAL_ENGINE_PORTFOLIO_ARTIFACT_KIND = "proposal_engine_portfolio_v1"
+PROPOSAL_ENGINE_CONFIG_ARTIFACT_KIND = "proposal_engine_config_v1"
+PROPOSAL_ENGINE_EVALUATION_ARTIFACT_KIND = (
+    "proposal_engine_evaluation_scorecard_v1"
+)
 PLAN_EXECUTION_MANIFEST_ARTIFACT_KIND = (
     "reconstruction_plan_execution_manifest_v1"
 )
@@ -678,6 +702,159 @@ class ReconstructionPlanConfigurationV1:
 
 
 @dataclass(frozen=True, slots=True)
+class ReconstructionPlanConfigurationV2:
+    """Portfolio-bound configuration with an explicit v2.3 translation base."""
+
+    base_configuration: ReconstructionPlanConfigurationV1
+    proposal_portfolio: ProposalEnginePortfolioV1
+    configuration_id: str = ""
+    schema_version: str = RECONSTRUCTION_PLAN_CONFIGURATION_V2_SCHEMA_VERSION
+
+    def __post_init__(self) -> None:
+        if (
+            self.schema_version
+            != RECONSTRUCTION_PLAN_CONFIGURATION_V2_SCHEMA_VERSION
+        ):
+            raise ValueError(
+                "unsupported reconstruction plan configuration v2 schema"
+            )
+        if not isinstance(
+            self.base_configuration, ReconstructionPlanConfigurationV1
+        ):
+            raise TypeError("configuration v2 requires a v1 translation base")
+        if not isinstance(self.proposal_portfolio, ProposalEnginePortfolioV1):
+            raise TypeError("configuration v2 requires a proposal portfolio")
+        if self.proposal_portfolio.selected_engine_ids != (
+            "histdatacom.empirical-motif-resampling",
+        ):
+            raise ValueError(
+                "current HistData configuration requires the single qualified "
+                "empirical-motif engine"
+            )
+        if (
+            self.proposal_portfolio.binding(
+                "histdatacom.empirical-motif-resampling"
+            ).config_id
+            != self.base_configuration.generator_config.config_id
+        ):
+            raise ValueError("v1 translation generator differs from portfolio")
+        expected = _stable_id(
+            "reconstruction-plan-configuration", self.identity_payload()
+        )
+        if self.configuration_id and self.configuration_id != expected:
+            raise ValueError("plan configuration v2 identity differs")
+        object.__setattr__(self, "configuration_id", expected)
+
+    @property
+    def delivery_mode(self) -> ReconstructionDeliveryMode:
+        return self.base_configuration.delivery_mode
+
+    @property
+    def information_policy(self) -> ReconstructionInformationPolicyV1:
+        return self.base_configuration.information_policy
+
+    @property
+    def generator_config(self) -> EmpiricalMotifGeneratorConfigV1:
+        """Return the explicit v2.3 motif adapter selected by the portfolio."""
+        return self.base_configuration.generator_config
+
+    @property
+    def carving_constraints(self) -> HistoricalCarvingConstraintSetV1:
+        return self.base_configuration.carving_constraints
+
+    @property
+    def cross_currency_config(self) -> CrossCurrencyReconciliationConfigV1:
+        return self.base_configuration.cross_currency_config
+
+    @property
+    def ensemble_config(self) -> EnsembleCalibrationConfigV1:
+        return self.base_configuration.ensemble_config
+
+    @property
+    def storage_policy(self) -> ReconstructionStoragePolicyV1:
+        return self.base_configuration.storage_policy
+
+    @property
+    def window_size_ns(self) -> int:
+        return self.base_configuration.window_size_ns
+
+    @property
+    def left_halo_ns(self) -> int:
+        return self.base_configuration.left_halo_ns
+
+    @property
+    def right_lookahead_ns(self) -> int:
+        return self.base_configuration.right_lookahead_ns
+
+    @property
+    def max_parallel_windows(self) -> int:
+        return self.base_configuration.max_parallel_windows
+
+    def identity_payload(self) -> dict[str, JSONValue]:
+        return {
+            "schema_version": self.schema_version,
+            "base_configuration": self.base_configuration.to_dict(),
+            "proposal_portfolio": self.proposal_portfolio.to_dict(),
+            "portfolio_schema_version": PROPOSAL_ENGINE_PORTFOLIO_SCHEMA_VERSION,
+            "fallback_policy": "refuse-no-silent-fallback-v1",
+            "v2_3_translation": "explicit-empirical-motif-adapter",
+            "current_provider_scope": "histdata.com-ascii-T-only",
+            "scientific_nonclaim": SCIENTIFIC_NONCLAIM,
+        }
+
+    def to_dict(self) -> dict[str, JSONValue]:
+        return {
+            **self.identity_payload(),
+            "configuration_id": self.configuration_id,
+        }
+
+    def to_json(self) -> str:
+        return str(canonical_contract_json(self.to_dict()))
+
+    @classmethod
+    def from_dict(
+        cls, data: Mapping[str, Any]
+    ) -> ReconstructionPlanConfigurationV2:
+        _require_schema(
+            data, RECONSTRUCTION_PLAN_CONFIGURATION_V2_SCHEMA_VERSION
+        )
+        _require_derived(
+            data,
+            "portfolio_schema_version",
+            PROPOSAL_ENGINE_PORTFOLIO_SCHEMA_VERSION,
+        )
+        _require_derived(
+            data, "fallback_policy", "refuse-no-silent-fallback-v1"
+        )
+        _require_derived(
+            data, "v2_3_translation", "explicit-empirical-motif-adapter"
+        )
+        _require_derived(
+            data, "current_provider_scope", "histdata.com-ascii-T-only"
+        )
+        _require_derived(data, "scientific_nonclaim", SCIENTIFIC_NONCLAIM)
+        return cls(
+            base_configuration=ReconstructionPlanConfigurationV1.from_dict(
+                _mapping(data.get("base_configuration"))
+            ),
+            proposal_portfolio=ProposalEnginePortfolioV1.from_dict(
+                _mapping(data.get("proposal_portfolio"))
+            ),
+            configuration_id=str(data.get("configuration_id", "")),
+            schema_version=str(data.get("schema_version", "")),
+        )
+
+    @classmethod
+    def from_json(cls, text: str) -> ReconstructionPlanConfigurationV2:
+        return cls.from_dict(_json_mapping(text))
+
+
+ReconstructionPlanConfiguration = (
+    ReconstructionPlanConfigurationV1 | ReconstructionPlanConfigurationV2
+)
+
+
+@dataclass(frozen=True, slots=True)
 class ReconstructionPlanRefusalV1:
     """One window rejected before workflow submission."""
 
@@ -1007,7 +1184,17 @@ class ReconstructionPlanExecutionManifestV1:
         allowed = required | {
             "evidence_policy",
             "cross_series_constraint_policy",
+            "proposal_engine_registry",
+            "proposal_engine_portfolio",
+            "proposal_dataset_resolution",
         }
+        allowed.update(
+            name
+            for name in artifacts
+            if name.startswith(
+                ("proposal_engine_config_", "proposal_engine_evidence_")
+            )
+        )
         if not required.issubset(artifacts) or not set(artifacts).issubset(
             allowed
         ):
@@ -1142,7 +1329,7 @@ class ReconstructionStagePlanV1:
     command: ReconstructionStageCommandV1
     execution_manifest_ref: ArtifactRef
     execution_manifest: ReconstructionPlanExecutionManifestV1
-    configuration: ReconstructionPlanConfigurationV1
+    configuration: ReconstructionPlanConfiguration
     source_inventory: ReconstructionSourceInventoryV1
 
     def __post_init__(self) -> None:
@@ -1189,12 +1376,27 @@ class ReconstructionStagePlanV1:
                 "execution delivery mode differs from configuration"
             )
         _validate_stage_inputs(
-            self.command, self.execution_manifest.delivery_mode
+            self.command,
+            self.execution_manifest.delivery_mode,
+            portfolio_bound=isinstance(
+                self.configuration, ReconstructionPlanConfigurationV2
+            ),
         )
         graph_refs = {
             canonical_contract_json(ref.to_dict())
             for ref in self.execution_manifest.artifacts.values()
         }
+        if isinstance(
+            self.configuration, ReconstructionPlanConfigurationV2
+        ) and not {
+            "proposal_engine_registry",
+            "proposal_engine_portfolio",
+        }.issubset(
+            self.execution_manifest.artifacts
+        ):
+            raise ReconstructionPlanCompatibilityError(
+                "portfolio configuration lacks registry or portfolio artifact"
+            )
         source_refs = {
             canonical_contract_json(item.artifact.to_dict())
             for item in self.source_inventory.partitions
@@ -1294,11 +1496,11 @@ class SyntheticInfillPlanV1:
             raise ValueError("resource workflow request count differs")
         if (
             self.resources.executable_window_count
-            * self.resources.ensemble_member_count
+            * self.resources.retained_member_count
             != len(tasks)
         ):
             raise ValueError(
-                "resource executable window count differs from tasks"
+                "retained-member executable window count differs from tasks"
             )
         refusals = tuple(
             sorted(
@@ -1511,6 +1713,9 @@ def build_synthetic_infill_plan(
     dataset_catalog_path: str | Path | None = None,
     dataset_reference: str = CURRENT_EXPERIMENT_ALIAS,
     dataset_resolution: DatasetResolutionV1 | None = None,
+    proposal_engine_ids: Iterable[str] = (),
+    selected_proposal_engine_ids: Iterable[str] = (),
+    proposal_evaluation_paths: Iterable[str | Path] = (),
 ) -> SyntheticInfillPlanV1:
     """Resolve real artifacts and build one executable first-party plan."""
     selected_symbols = _symbols(tuple(symbols))
@@ -1765,7 +1970,7 @@ def build_synthetic_infill_plan(
         information_mode=mode,
         max_allowed_lookahead_ns=selected_right,
     )
-    configuration = ReconstructionPlanConfigurationV1(
+    base_configuration = ReconstructionPlanConfigurationV1(
         delivery_mode=delivery,
         information_policy=information_policy,
         generator_config=selected_generator,
@@ -1778,11 +1983,144 @@ def build_synthetic_infill_plan(
         right_lookahead_ns=selected_right,
         max_parallel_windows=max_parallel_windows,
     )
+    proposal_registry = proposal_engine_registry()
+    ordered_proposal_engine_ids = tuple(proposal_engine_ids) or (
+        EMPIRICAL_MOTIF_GENERATOR_ID,
+    )
+    selected_engine_ids = tuple(selected_proposal_engine_ids) or (
+        EMPIRICAL_MOTIF_GENERATOR_ID,
+    )
+    if len(set(ordered_proposal_engine_ids)) != len(
+        ordered_proposal_engine_ids
+    ):
+        raise ReconstructionPlanCompatibilityError(
+            "proposal engine ordering contains duplicates"
+        )
+    for engine_id in ordered_proposal_engine_ids:
+        proposal_registry.descriptor(engine_id)
+    if not set(selected_engine_ids).issubset(ordered_proposal_engine_ids):
+        raise ReconstructionPlanCompatibilityError(
+            "selected proposal engine is absent from portfolio"
+        )
+    proposal_registry_ref = _write_contract_artifact(
+        proposal_registry,
+        artifacts_dir,
+        prefix="proposal-engine-registry",
+        kind=PROPOSAL_ENGINE_REGISTRY_ARTIFACT_KIND,
+        metadata={"registry_id": proposal_registry.registry_id},
+    )
+    proposal_dataset_ref = _write_contract_artifact(
+        exact_resolution,
+        artifacts_dir,
+        prefix="proposal-dataset-resolution",
+        kind="proposal_dataset_resolution_v1",
+        metadata={
+            "resolution_id": exact_resolution.resolution_id,
+            "dataset_version_id": exact_resolution.dataset_version_id,
+            "schema_version": exact_resolution.schema_version,
+        },
+    )
+    installed_proposal_configs = dict(proposal_engine_default_configs())
+    installed_proposal_configs[EMPIRICAL_MOTIF_GENERATOR_ID] = (
+        selected_generator
+    )
+    proposal_configs = {
+        engine_id: installed_proposal_configs[engine_id]
+        for engine_id in ordered_proposal_engine_ids
+    }
+    proposal_config_refs = {
+        engine_id: _write_contract_artifact(
+            config,
+            artifacts_dir,
+            prefix="proposal-engine-config",
+            kind=PROPOSAL_ENGINE_CONFIG_ARTIFACT_KIND,
+            metadata={
+                "engine_id": engine_id,
+                "config_id": config.config_id,
+                "schema_version": config.schema_version,
+            },
+        )
+        for engine_id, config in proposal_configs.items()
+    }
+    evaluation_paths = tuple(proposal_evaluation_paths)
+    proposal_campaigns = read_proposal_evidence_campaigns(evaluation_paths)
+    if any(
+        campaign.corpus_id != resolved.benchmark_corpus.corpus_id
+        for campaign in proposal_campaigns
+    ):
+        raise ReconstructionPlanCompatibilityError(
+            "proposal evaluation corpus differs from planned benchmark"
+        )
+    proposal_evidence = proposal_evidence_from_campaigns(proposal_campaigns)
+    proposal_evaluation_refs = tuple(
+        artifact_ref_for_file(
+            path, kind=PROPOSAL_ENGINE_EVALUATION_ARTIFACT_KIND
+        )
+        for path in evaluation_paths
+    )
+    common_context_refs = (
+        resolved.artifacts["benchmark_manifest"],
+        resolved.artifacts["feed_epochs"],
+        resolved.artifacts["market_context"],
+        resolved.artifacts["cftc_positioning"],
+        resolved.artifacts["observation_operator"],
+    )
+    proposal_bindings = tuple(
+        ProposalEngineBindingV1(
+            engine_id=descriptor.engine_id,
+            descriptor_id=descriptor.descriptor_id,
+            config_id=proposal_configs[descriptor.engine_id].config_id,
+            config_ref=proposal_config_refs[descriptor.engine_id],
+            dataset_ref=proposal_dataset_ref,
+            context_refs=common_context_refs,
+            evidence_refs=(
+                *proposal_evaluation_refs,
+                *(
+                    (
+                        resolved.artifacts["motif_manifest"],
+                        resolved.artifacts["motif_index"],
+                        resolved.artifacts["motif_qualification"],
+                        resolved.artifacts["motif_leakage_audit"],
+                    )
+                    if descriptor.engine_id == EMPIRICAL_MOTIF_GENERATOR_ID
+                    else ()
+                ),
+            ),
+        )
+        for descriptor in (
+            proposal_registry.descriptor(engine_id)
+            for engine_id in ordered_proposal_engine_ids
+        )
+    )
+    proposal_portfolio = build_histdata_proposal_portfolio(
+        registry=proposal_registry,
+        dataset_version_id=exact_resolution.dataset_version_id,
+        bindings=proposal_bindings,
+        evidence=proposal_evidence,
+        motif_qualification=resolved.motif_qualification,
+        engine_ids=ordered_proposal_engine_ids,
+        selected_engine_ids=selected_engine_ids,
+        allow_legacy_motif_qualification=not evaluation_paths,
+    )
+    proposal_portfolio_ref = _write_contract_artifact(
+        proposal_portfolio,
+        artifacts_dir,
+        prefix="proposal-engine-portfolio",
+        kind=PROPOSAL_ENGINE_PORTFOLIO_ARTIFACT_KIND,
+        metadata={
+            "portfolio_id": proposal_portfolio.portfolio_id,
+            "registry_id": proposal_portfolio.registry_id,
+        },
+    )
+    configuration = ReconstructionPlanConfigurationV2(
+        base_configuration=base_configuration,
+        proposal_portfolio=proposal_portfolio,
+    )
     configuration_ref = _write_contract_artifact(
         configuration,
         artifacts_dir,
         prefix="reconstruction-plan-configuration",
-        kind=PLAN_CONFIGURATION_ARTIFACT_KIND,
+        kind=PLAN_CONFIGURATION_V2_ARTIFACT_KIND,
         metadata={"configuration_id": configuration.configuration_id},
     )
 
@@ -1804,6 +2142,8 @@ def build_synthetic_infill_plan(
             cross_series_policy_ref=cross_series_policy_ref,
             configuration=configuration,
             configuration_ref=configuration_ref,
+            proposal_registry_ref=proposal_registry_ref,
+            proposal_portfolio_ref=proposal_portfolio_ref,
         ),
         evidence_policy_ids=(
             selected_evidence_policy.policy_id,
@@ -1849,6 +2189,15 @@ def build_synthetic_infill_plan(
 
     configuration_hashes = {
         configuration.configuration_id: configuration_ref.sha256,
+        base_configuration.configuration_id: _contract_sha256(
+            base_configuration
+        ),
+        proposal_registry.registry_id: proposal_registry_ref.sha256,
+        proposal_portfolio.portfolio_id: proposal_portfolio_ref.sha256,
+        **{
+            config.config_id: proposal_config_refs[engine_id].sha256
+            for engine_id, config in proposal_configs.items()
+        },
         information_policy.policy_id: _contract_sha256(information_policy),
         selected_generator.config_id: _contract_sha256(selected_generator),
         selected_carving.constraint_set_id: _contract_sha256(selected_carving),
@@ -2022,6 +2371,19 @@ def build_synthetic_infill_plan(
         "information_audit": information_audit_ref,
         "ensemble_plan": ensemble_ref,
         "retention_plan": retention_ref,
+        "proposal_engine_registry": proposal_registry_ref,
+        "proposal_engine_portfolio": proposal_portfolio_ref,
+        "proposal_dataset_resolution": proposal_dataset_ref,
+        **{
+            f"proposal_engine_config_{index:02d}": ref
+            for index, (_, ref) in enumerate(
+                sorted(proposal_config_refs.items())
+            )
+        },
+        **{
+            f"proposal_engine_evidence_{index:02d}": ref
+            for index, ref in enumerate(proposal_evaluation_refs)
+        },
     }
     if broker_ref is not None:
         graph["broker_delivery"] = broker_ref
@@ -2053,7 +2415,11 @@ def build_synthetic_infill_plan(
 
     workflows = _build_workflow_requests(
         run=ensemble_plan.run,
-        member_window_plans=member_window_plans,
+        member_window_plans=tuple(
+            item
+            for item in member_window_plans
+            if item.ensemble_member_id in retained_ids
+        ),
         executable_keys=executable_keys,
         estimates_by_boundary=estimates_by_boundary,
         inventory=inventory,
@@ -2066,9 +2432,7 @@ def build_synthetic_infill_plan(
         key=lambda item: item.estimated_memory_bytes,
         default=None,
     )
-    total_candidate_events = candidate_events_per_member * len(
-        ensemble_plan.members
-    )
+    total_candidate_events = candidate_events_per_member * len(retained_ids)
     resources = ReconstructionPlanResourceSummaryV1(
         source_event_count=inventory.total_row_count,
         source_size_bytes=inventory.total_size_bytes,
@@ -2079,7 +2443,7 @@ def build_synthetic_infill_plan(
         retained_member_count=len(retained_ids),
         workflow_request_count=len(workflows),
         estimated_input_event_count=(
-            input_events_per_member * len(ensemble_plan.members)
+            input_events_per_member * len(retained_ids)
         ),
         estimated_candidate_event_count=total_candidate_events,
         estimated_candidate_bytes=(
@@ -2170,6 +2534,105 @@ def validate_synthetic_infill_plan_for_execution(
         raise ReconstructionPlanCompatibilityError(
             "plan configuration identity differs"
         )
+    if isinstance(configuration, ReconstructionPlanConfigurationV2):
+        registry_ref = plan.artifact_graph["proposal_engine_registry"]
+        portfolio_ref = plan.artifact_graph["proposal_engine_portfolio"]
+        registry = ProposalEngineRegistryV1.from_dict(
+            _mapping(
+                json.loads(Path(registry_ref.path).read_text(encoding="utf-8"))
+            )
+        )
+        portfolio = ProposalEnginePortfolioV1.from_dict(
+            _mapping(
+                json.loads(Path(portfolio_ref.path).read_text(encoding="utf-8"))
+            )
+        )
+        if registry.registry_id != portfolio.registry_id:
+            raise ReconstructionPlanCompatibilityError(
+                "proposal portfolio registry identity differs"
+            )
+        if registry != proposal_engine_registry():
+            raise ReconstructionPlanCompatibilityError(
+                "proposal engine registry differs from installed code"
+            )
+        if portfolio != configuration.proposal_portfolio:
+            raise ReconstructionPlanCompatibilityError(
+                "proposal portfolio artifact differs from configuration"
+            )
+        graph_values = {
+            canonical_contract_json(ref.to_dict())
+            for ref in plan.artifact_graph.values()
+        }
+        if (
+            portfolio.dataset_version_id
+            != selection.resolution.dataset_version_id
+        ):
+            raise ReconstructionPlanCompatibilityError(
+                "proposal portfolio dataset differs from experiment selection"
+            )
+        experiment_benchmark_id = next(
+            item.artifact_id
+            for item in experiment.artifact_bindings
+            if item.name == "benchmark-corpus"
+        )
+        if any(
+            item.corpus_id != experiment_benchmark_id
+            for item in portfolio.evidence
+        ):
+            raise ReconstructionPlanCompatibilityError(
+                "proposal evidence corpus differs from experiment benchmark"
+            )
+        for binding in portfolio.bindings:
+            descriptor = registry.descriptor(binding.engine_id)
+            entry = next(
+                item
+                for item in portfolio.entries
+                if item.engine_id == binding.engine_id
+            )
+            if entry.descriptor_id != descriptor.descriptor_id:
+                raise ReconstructionPlanCompatibilityError(
+                    "proposal entry descriptor differs from installed registry"
+                )
+            config_payload = _read_content_addressed_json(
+                binding.config_ref.path, "proposal-engine-config"
+            )
+            if (
+                config_payload.get("config_id") != binding.config_id
+                or config_payload.get("schema_version")
+                not in descriptor.config_schema_versions
+                or binding.config_ref.metadata.get("engine_id")
+                != binding.engine_id
+            ):
+                raise ReconstructionPlanCompatibilityError(
+                    "proposal engine configuration binding differs"
+                )
+            if (
+                binding.dataset_ref.metadata.get("dataset_version_id")
+                != portfolio.dataset_version_id
+                or binding.dataset_ref.metadata.get("schema_version")
+                not in descriptor.dataset_schema_versions
+            ):
+                raise ReconstructionPlanCompatibilityError(
+                    "proposal engine dataset binding differs"
+                )
+            required_refs = (
+                binding.config_ref,
+                binding.dataset_ref,
+                *binding.context_refs,
+                *binding.evidence_refs,
+                *(() if binding.fit_ref is None else (binding.fit_ref,)),
+                *(
+                    ()
+                    if binding.checkpoint_ref is None
+                    else (binding.checkpoint_ref,)
+                ),
+            )
+            if not {
+                canonical_contract_json(ref.to_dict()) for ref in required_refs
+            }.issubset(graph_values):
+                raise ReconstructionPlanCompatibilityError(
+                    "proposal engine binding reference is absent from plan graph"
+                )
     if inventory.inventory_id != plan.run.source_version_ids[0]:
         raise ReconstructionPlanCompatibilityError(
             "plan source inventory is not run-bound"
@@ -2234,10 +2697,15 @@ def read_reconstruction_source_inventory(
 
 def read_reconstruction_plan_configuration(
     path: str | Path,
-) -> ReconstructionPlanConfigurationV1:
+) -> ReconstructionPlanConfiguration:
     payload = _read_content_addressed_json(
         path, "reconstruction-plan-configuration"
     )
+    if (
+        payload.get("schema_version")
+        == RECONSTRUCTION_PLAN_CONFIGURATION_V2_SCHEMA_VERSION
+    ):
+        return ReconstructionPlanConfigurationV2.from_dict(payload)
     return ReconstructionPlanConfigurationV1.from_dict(payload)
 
 
@@ -2688,8 +3156,10 @@ def _experiment_artifact_bindings(
     evidence_policy_ref: ArtifactRef,
     cross_series_policy: CrossSeriesConstraintPolicyV1,
     cross_series_policy_ref: ArtifactRef,
-    configuration: ReconstructionPlanConfigurationV1,
+    configuration: ReconstructionPlanConfiguration,
     configuration_ref: ArtifactRef,
+    proposal_registry_ref: ArtifactRef,
+    proposal_portfolio_ref: ArtifactRef,
 ) -> tuple[ReconstructionExperimentArtifactBindingV1, ...]:
     """Bind verified authoritative artifacts without duplicating their payloads."""
     roles = (
@@ -2800,6 +3270,22 @@ def _experiment_artifact_bindings(
             configuration.configuration_id,
             "configuration_id",
             configuration.schema_version,
+        ),
+        (
+            "proposal-engine-registry",
+            "model",
+            proposal_registry_ref,
+            str(proposal_registry_ref.metadata["registry_id"]),
+            "registry_id",
+            "histdatacom.proposal-engine-registry.v1",
+        ),
+        (
+            "proposal-engine-portfolio",
+            "model",
+            proposal_portfolio_ref,
+            str(proposal_portfolio_ref.metadata["portfolio_id"]),
+            "portfolio_id",
+            PROPOSAL_ENGINE_PORTFOLIO_SCHEMA_VERSION,
         ),
     )
     return tuple(
@@ -3133,7 +3619,7 @@ def _window_resource_estimate(
     window: ReconstructionWindowV1,
     *,
     inventory: ReconstructionSourceInventoryV1,
-    configuration: ReconstructionPlanConfigurationV1,
+    configuration: ReconstructionPlanConfiguration,
 ) -> ReconstructionResourceEstimateV1:
     partitions = inventory.partitions_for_window(window)
     input_count = sum(
@@ -3308,6 +3794,19 @@ def _stage_commands(
         ReconstructionStage.PROPOSAL: (
             graph["motif_manifest"],
             graph["motif_index"],
+            *(
+                ref
+                for name, ref in sorted(graph.items())
+                if name
+                in {
+                    "proposal_engine_registry",
+                    "proposal_engine_portfolio",
+                    "proposal_dataset_resolution",
+                }
+                or name.startswith(
+                    ("proposal_engine_config_", "proposal_engine_evidence_")
+                )
+            ),
         ),
         ReconstructionStage.CARVING: (
             graph["market_context"],
@@ -3354,6 +3853,8 @@ def _stage_commands(
 def _validate_stage_inputs(
     command: ReconstructionStageCommandV1,
     delivery_mode: ReconstructionDeliveryMode,
+    *,
+    portfolio_bound: bool,
 ) -> None:
     kinds = {ref.kind for ref in command.input_manifest_refs}
     required: Mapping[ReconstructionStage, set[str]] = {
@@ -3393,6 +3894,14 @@ def _validate_stage_inputs(
             "reconstruction_retention_plan_v1",
         },
     }
+    if portfolio_bound:
+        required[ReconstructionStage.PROPOSAL].update(
+            {
+                PROPOSAL_ENGINE_REGISTRY_ARTIFACT_KIND,
+                PROPOSAL_ENGINE_PORTFOLIO_ARTIFACT_KIND,
+                PROPOSAL_ENGINE_CONFIG_ARTIFACT_KIND,
+            }
+        )
     if not required[command.stage].issubset(kinds):
         raise ReconstructionPlanCompatibilityError(
             f"{command.stage.value} command lacks required artifact kinds"
@@ -3554,9 +4063,16 @@ def _write_contract_artifact(
     metadata: Mapping[str, JSONValue],
 ) -> ArtifactRef:
     serializer = getattr(contract, "to_json", None)
-    if not callable(serializer):
-        raise TypeError("content-addressed contract must provide to_json()")
-    encoded = str(serializer()).encode("utf-8") + b"\n"
+    if callable(serializer):
+        payload = str(serializer())
+    else:
+        to_dict = getattr(contract, "to_dict", None)
+        if not callable(to_dict):
+            raise TypeError(
+                "content-addressed contract must provide to_json() or to_dict()"
+            )
+        payload = canonical_contract_json(to_dict())
+    encoded = payload.encode("utf-8") + b"\n"
     digest = hashlib.sha256(encoded).hexdigest()
     root.mkdir(parents=True, exist_ok=True)
     path = root / f"{prefix}-{digest}.json"

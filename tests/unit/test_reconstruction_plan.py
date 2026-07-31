@@ -36,10 +36,12 @@ from histdatacom.reconstruction import (
     ReconstructionPlanError,
     ReconstructionPlanSetV1,
     ReconstructionPlanSpecV1,
+    ReconstructionPlanSpecV2,
     ReconstructionRefusedError,
     ReconstructionUnsupportedError,
     read_execution_request,
     read_operation_receipt,
+    read_plan_spec,
     read_reconstruction_plan_set,
     write_execution_request,
     write_operation_receipt,
@@ -72,6 +74,11 @@ from histdatacom.synthetic import (
 )
 from histdatacom.synthetic import reconstruction_handlers as handlers_module
 from histdatacom.synthetic import reconstruction_plan as plan_module
+from histdatacom.synthetic.generation import EMPIRICAL_MOTIF_GENERATOR_ID
+from histdatacom.synthetic.proposal_engines import (
+    ProposalEngineEvidenceV1,
+    proposal_engine_default_configs,
+)
 
 _SYMBOLS = ("eurgbp", "eurusd", "gbpusd")
 _PERIOD = "202001"
@@ -282,7 +289,18 @@ def test_public_builder_is_deterministic_bounded_and_stage_consumable(
     assert first.resources.planned_window_count == 2
     assert first.resources.executable_window_count == 2
     assert first.resources.ensemble_member_count == 4
-    assert len(first.workflow_requests) == 4
+    assert first.resources.retained_member_count == 2
+    assert len(first.workflow_requests) == 2
+    retention = json.loads(
+        Path(first.artifact_graph["retention_plan"].path).read_text(
+            encoding="utf-8"
+        )
+    )
+    assert {
+        task.window.ensemble_member_id
+        for request in first.workflow_requests
+        for task in request.tasks
+    } == set(retention["retained_member_ids"])
     assert (
         max(
             len(json.dumps(request.to_dict()).encode("utf-8"))
@@ -301,6 +319,16 @@ def test_public_builder_is_deterministic_bounded_and_stage_consumable(
     assert first.artifact_graph["cross_series_constraint_policy"].kind == (
         "cross_series_constraint_policy_v1"
     )
+    translated_portfolio = ReconstructionClient().proposal_portfolio(
+        plan_ref.path
+    )
+    assert tuple(item.engine_id for item in translated_portfolio.entries) == (
+        "histdatacom.empirical-motif-resampling",
+    )
+    assert translated_portfolio.selected_engine_ids == (
+        "histdatacom.empirical-motif-resampling",
+    )
+    assert len(ReconstructionClient().proposal_engines().descriptors) == 13
 
     validate_synthetic_infill_plan_for_execution(restored)
     task = restored.workflow_requests[0].tasks[0]
@@ -331,6 +359,85 @@ def test_public_builder_is_deterministic_bounded_and_stage_consumable(
         if command.stage is ReconstructionStage.BROKER_TRANSFER
     )
     assert broker_command.input_manifest_refs == ()
+
+
+def test_v2_spec_round_trips_explicit_portfolio_without_hidden_default(
+    planned_environment: tuple[Path, dict[str, Any]],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    source_root, kwargs = planned_environment
+    scorecard = tmp_path / "retained-scorecard.json"
+    scorecard.write_text("{}\n", encoding="utf-8")
+    monkeypatch.setattr(
+        plan_module, "read_proposal_evidence_campaigns", lambda _: ()
+    )
+    config_id = proposal_engine_default_configs()[
+        EMPIRICAL_MOTIF_GENERATOR_ID
+    ].config_id
+    monkeypatch.setattr(
+        plan_module,
+        "proposal_evidence_from_campaigns",
+        lambda _: (
+            ProposalEngineEvidenceV1(
+                engine_id=EMPIRICAL_MOTIF_GENERATOR_ID,
+                campaign_id="campaign:sha256:" + "1" * 64,
+                corpus_id="benchmark:test",
+                report_id="report:sha256:" + "2" * 64,
+                candidate_id="candidate:sha256:" + "3" * 64,
+                method_name="empirical_motif",
+                promotion_eligible=True,
+                provisional=False,
+                failure_count=0,
+                refusal_count=0,
+                failed_gate_ids=(),
+                config_ids=(config_id,),
+                fit_ids=(),
+                checkpoint_ids=(),
+                training_dataset_ids=(),
+            ),
+        ),
+    )
+    base = _public_spec(source_root, kwargs)
+    payload = base.to_dict()
+    payload.update(
+        {
+            "schema_version": "histdatacom.reconstruction-plan-spec.v2",
+            "proposal_engine_ids": ["histdatacom.empirical-motif-resampling"],
+            "selected_proposal_engine_ids": [
+                "histdatacom.empirical-motif-resampling"
+            ],
+            "proposal_evaluation_paths": [str(scorecard)],
+        }
+    )
+    spec = ReconstructionPlanSpecV2.from_dict(payload)
+    spec_path = tmp_path / "plan-spec-v2.json"
+    spec_path.write_text(json.dumps(spec.to_dict()), encoding="utf-8")
+
+    restored = read_plan_spec(spec_path)
+    plan_ref = ReconstructionClient().construct_plan(restored)
+    portfolio = ReconstructionClient().proposal_portfolio(plan_ref.path)
+
+    assert isinstance(restored, ReconstructionPlanSpecV2)
+    assert restored == spec
+    assert portfolio.selected_engine_ids == spec.selected_proposal_engine_ids
+
+
+def test_execution_rejects_registry_from_changed_installed_code(
+    planned_environment: tuple[Path, dict[str, Any]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_root, kwargs = planned_environment
+    plan = build_synthetic_infill_plan(source_root, **kwargs)
+    monkeypatch.setattr(plan_module, "proposal_engine_registry", object)
+
+    with pytest.raises(
+        ReconstructionPlanCompatibilityError,
+        match="differs from installed code",
+    ):
+        validate_synthetic_infill_plan_for_execution(
+            plan, verify_artifacts=False
+        )
 
 
 def test_catalog_selector_reproduces_legacy_translation_and_binds_experiment(
@@ -435,7 +542,7 @@ def test_typed_public_facade_constructs_requests_and_preflights(
     assert preflight.executable
     assert preflight.status == "ready"
     assert preflight.dry_run["information_mode"] == "ex_post_reconstruction"
-    assert preflight.dry_run["resources"]["workflow_request_count"] == 4
+    assert preflight.dry_run["resources"]["workflow_request_count"] == 2
     assert "benchmark_manifest" in preflight.evidence_refs
     assert "information_audit" in preflight.evidence_refs
     assert "evidence_policy" in preflight.evidence_refs
@@ -828,10 +935,10 @@ def test_public_submit_status_resume_and_receipt_round_trip(
     resumed = client.resume(restored, wait=False)
 
     assert restored == submitted
-    assert len(submitted.handles) == 4
+    assert len(submitted.handles) == 2
     assert status.status == "running"
     assert cancelled.status == "cancellation_requested"
-    assert len(cancelled.job_snapshots) == 4
+    assert len(cancelled.job_snapshots) == 2
     assert resumed.operation == "resume"
     assert resumed.execution_attempt_id == "resume-001"
     resume_calls = [
@@ -839,7 +946,7 @@ def test_public_submit_status_resume_and_receipt_round_trip(
         for _, payload, _ in temporal.calls
         if payload.get("execution_attempt_id") == "resume-001"
     ]
-    assert len(resume_calls) == 4
+    assert len(resume_calls) == 2
     assert all(
         call["request"]["request_id"] == workflow_request.request_id
         for call, workflow_request in zip(

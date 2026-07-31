@@ -1,10 +1,10 @@
 # Bounded marked Hawkes reconstruction challenger
 
-`histdatacom.synthetic.marked_hawkes` provides three opt-in, nested
-point-process ablations for reverse-degradation research. The module is
-separate from the fixed four-family classical event-clock registry. It does
-not alter `ReconstructionPlanConfigurationV1`, replace the certified empirical
-motif generator, or select a production default.
+`histdatacom.synthetic.marked_hawkes` provides three registered nested proposal
+engines. “Challenger” is their benchmark role, not a permanent product class.
+Their descriptors and failed promotion evidence are part of the v2 proposal
+bank; they remain benchmark-eligible and cannot enter product execution or
+select a default.
 
 The ablations are:
 

@@ -36,23 +36,26 @@ Discover the installed substrate and audit a JSON plan before constructing it:
 
 ```sh
 histdatacom reconstruction schemas --json
+histdatacom reconstruction engines --json
 histdatacom reconstruction compatibility --plan plan-spec.json --json
 ```
 
 Both commands use the same registry and compatibility engine consumed by
 `ReconstructionClient.construct_plan()`. See
 [`reconstruction-schema-compatibility.md`](reconstruction-schema-compatibility.md)
-for field metadata, cache translations, compatibility states, and future
-reserved contracts.
+for field metadata, cache translations, and compatibility states.
 
-Planning starts from a JSON `ReconstructionPlanSpecV1`. A catalog selector is
-preferred; the legacy `source_root` field invokes a documented v2.3-to-v2.4
-catalog translation. Paths point to strong, qualified artifacts; data rows
-remain in their source artifacts.
+New planning starts from a JSON `ReconstructionPlanSpecV2`. It explicitly
+orders the proposal engines, selects the reconstruction-eligible product
+engine, and binds retained evaluation evidence. The v1 input remains a
+deprecated deterministic translation to a motif-only portfolio. A catalog
+selector is preferred; the legacy `source_root` field invokes the documented
+v2.3-to-v2.4 catalog translation. Paths point to strong, qualified artifacts;
+data rows remain in their source artifacts.
 
 ```json
 {
-  "schema_version": "histdatacom.reconstruction-plan-spec.v1",
+  "schema_version": "histdatacom.reconstruction-plan-spec.v2",
   "source_root": null,
   "dataset_catalog_path": "artifacts/histdata-dataset-catalog.json",
   "dataset_reference": "reconstruction-selected",
@@ -75,9 +78,33 @@ remain in their source artifacts.
   "end_period": "201101",
   "requested_start_ns": null,
   "requested_end_ns": null,
-  "window_size_ns": 86400000000000
+  "window_size_ns": 86400000000000,
+  "proposal_engine_ids": [
+    "histdatacom.empirical-motif-resampling",
+    "histdatacom.event-clock.nhpp"
+  ],
+  "selected_proposal_engine_ids": [
+    "histdatacom.empirical-motif-resampling"
+  ],
+  "proposal_evaluation_paths": [
+    "artifacts/reverse-degradation-scorecard-<sha256>.json"
+  ]
 }
 ```
+
+Portfolio order is not scientific rank. The example retains NHPP as a failed
+or benchmark-eligible candidate while selecting only the qualified motif
+engine. Selecting an unqualified engine is `research_only` and fails before
+submission. Inspect the resolved audits and evidence with:
+
+```sh
+histdatacom reconstruction --json portfolio \
+  --plan work/plan-artifacts/synthetic-infill-plan-<sha256>.json
+```
+
+See
+[`proposal-engine-portfolios.md`](proposal-engine-portfolios.md) for discovery,
+single-engine evaluation, refusal, lineage, and no-fallback semantics.
 
 The omitted `evidence_policy` and `cross_series_constraint_policy` fields use
 their versioned HistData-only defaults. Supplying either field serializes the

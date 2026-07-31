@@ -1858,6 +1858,9 @@ def _default_module_paths() -> dict[str, Path]:
         "histdatacom.synthetic.reconstruction_plan": (
             root / "synthetic" / "reconstruction_plan.py"
         ),
+        "histdatacom.synthetic.proposal_engines": (
+            root / "synthetic" / "proposal_engines.py"
+        ),
     }
 
 

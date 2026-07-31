@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import argparse
-from collections.abc import Mapping, Sequence
 import json
-from pathlib import Path
 import sys
+from collections.abc import Mapping, Sequence
+from pathlib import Path
 from typing import Any
 
 from histdatacom.cli_config import (
@@ -28,8 +28,8 @@ from histdatacom.reconstruction import (
     write_operation_receipt,
 )
 from histdatacom.reconstruction_schema import ReconstructionCompatibilityStatus
-from histdatacom.synthetic.information import InformationMode
 from histdatacom.synthetic.certification import CertificationState
+from histdatacom.synthetic.information import InformationMode
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -67,6 +67,39 @@ def build_parser() -> argparse.ArgumentParser:
     )
     schemas.add_argument(
         "--json", action="store_true", default=argparse.SUPPRESS
+    )
+
+    engines = subparsers.add_parser(
+        "engines",
+        help="discover concrete proposal engines and their executable scope",
+    )
+    engines.add_argument(
+        "--json", action="store_true", default=argparse.SUPPRESS
+    )
+
+    portfolio = subparsers.add_parser(
+        "portfolio",
+        help="inspect qualified selections and refusals bound to one plan",
+    )
+    portfolio.add_argument("--plan", required=True, metavar="PATH")
+
+    engine_evaluate = subparsers.add_parser(
+        "engine-evaluate",
+        help="run every HistData benchmark-eligible proposal engine",
+    )
+    engine_evaluate.add_argument(
+        "--benchmark-manifest", required=True, metavar="PATH"
+    )
+    engine_evaluate.add_argument("--source-root", required=True, metavar="PATH")
+    engine_evaluate.add_argument(
+        "--output-directory", required=True, metavar="PATH"
+    )
+    engine_evaluate.add_argument(
+        "--engine",
+        action="append",
+        default=None,
+        metavar="ENGINE_ID",
+        help="evaluate one engine (repeat for an explicit portfolio)",
     )
 
     compatibility = subparsers.add_parser(
@@ -247,7 +280,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             exit_code=ReconstructionExitCode.INVALID_PLAN,
             as_json="--json" in raw_argv,
         )
-    except Exception as err:  # pragma: no cover - defensive CLI boundary
+    except Exception as err:  # noqa: BLE001  # pragma: no cover - CLI boundary
         return _write_error(
             err,
             reason_code="reconstruction_runtime_failure",
@@ -270,6 +303,24 @@ def _run_command(
     command = args.reconstruction_command
     if command == "schemas":
         return client.schemas().to_dict(), ReconstructionExitCode.SUCCESS
+    if command == "engines":
+        return (
+            client.proposal_engines().to_dict(),
+            ReconstructionExitCode.SUCCESS,
+        )
+    if command == "portfolio":
+        return (
+            client.proposal_portfolio(args.plan).to_dict(),
+            ReconstructionExitCode.SUCCESS,
+        )
+    if command == "engine-evaluate":
+        evaluation = client.evaluate_proposal_portfolio(
+            args.benchmark_manifest,
+            args.source_root,
+            output_directory=args.output_directory,
+            engine_ids=args.engine,
+        )
+        return evaluation.to_dict(), ReconstructionExitCode.SUCCESS
     if command == "compatibility":
         report = client.compatibility(args.plan)
         if report.executable:
@@ -414,42 +465,40 @@ def _certification_exit_code(
 
 def _write_result(result: Mapping[str, Any], *, as_json: bool) -> None:
     if as_json:
-        print(json.dumps(result, indent=2, sort_keys=True))  # noqa:T201
+        print(json.dumps(result, indent=2, sort_keys=True))
         return
     schema_version = result.get("schema_version")
     if schema_version == "histdatacom.reconstruction-schema-registry.v1":
-        print(  # noqa:T201
+        print(
             "Reconstruction schemas "
             f"({result.get('registry_id', '')}): "
             f"{result.get('contract_count', 0)} contracts"
         )
         scope = result.get("current_scope", {})
         if isinstance(scope, Mapping):
-            print(  # noqa:T201
+            print(
                 "executable scope: "
                 f"{scope.get('provider')}/"
                 f"{scope.get('source_format')}/"
                 f"{scope.get('timeframe')}"
             )
-            print("broker/OANDA: later milestone")  # noqa:T201
+            print("broker/OANDA: later milestone")
         counts = result.get("status_counts", {})
         if isinstance(counts, Mapping):
             summary = ", ".join(
                 f"{key}={counts[key]}" for key in sorted(counts)
             )
-            print(f"contract status: {summary}")  # noqa:T201
+            print(f"contract status: {summary}")
         return
     if schema_version == "histdatacom.reconstruction-compatibility-report.v1":
-        print(  # noqa:T201
+        print(
             "Reconstruction compatibility "
             f"{result.get('status')} ({result.get('report_id', '')})"
         )
-        print(
-            f"executable: {str(bool(result.get('executable'))).lower()}"
-        )  # noqa:T201
+        print(f"executable: {str(bool(result.get('executable'))).lower()}")
         for finding in result.get("findings", ()):  # type: ignore[union-attr]
             if isinstance(finding, Mapping):
-                print(  # noqa:T201
+                print(
                     f"{finding.get('status')} {finding.get('code')}: "
                     f"{finding.get('message')}"
                 )
@@ -463,10 +512,10 @@ def _write_result(result: Mapping[str, Any], *, as_json: bool) -> None:
         or ""
     )
     suffix = f" ({identity})" if identity else ""
-    print(f"Reconstruction {status}{suffix}")  # noqa:T201
+    print(f"Reconstruction {status}{suffix}")
     for key in ("path", "request_path", "receipt_path", "manifest_path"):
         if result.get(key):
-            print(f"{key}: {result[key]}")  # noqa:T201
+            print(f"{key}: {result[key]}")
 
 
 def _write_error(
@@ -483,11 +532,9 @@ def _write_error(
         "exit_code": int(exit_code),
     }
     if as_json:
-        print(json.dumps(payload, sort_keys=True), file=sys.stderr)  # noqa:T201
+        print(json.dumps(payload, sort_keys=True), file=sys.stderr)
     else:
-        print(  # noqa:T201
-            f"reconstruction error [{reason_code}]: {error}", file=sys.stderr
-        )
+        print(f"reconstruction error [{reason_code}]: {error}", file=sys.stderr)
     return int(exit_code)
 
 

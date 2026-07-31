@@ -1,10 +1,10 @@
 # Bounded recurrent marked temporal point-process challenger
 
-`histdatacom.synthetic.neural_tpp` is one opt-in research challenger. It adds a
-small recurrent marked temporal point process (RMTPP) after the empirical,
-classical event-clock, static Hawkes, and regime-Hawkes comparisons. It does
-not add a neural framework dependency, change an existing model registry,
-promote a winner, or alter the certified empirical default.
+`histdatacom.synthetic.neural_tpp` supplies one registered RMTPP proposal
+engine. Its challenger role places it after the empirical, classical
+event-clock, static Hawkes, and regime-Hawkes comparators in retained campaigns.
+It remains benchmark-eligible, cannot promote a winner, and adds no neural
+framework dependency.
 
 ## Fixed model
 

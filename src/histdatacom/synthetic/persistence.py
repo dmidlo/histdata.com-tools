@@ -24,7 +24,7 @@ import shutil
 import sys
 import tempfile
 from collections.abc import Iterable, Iterator, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any, cast
@@ -98,6 +98,7 @@ RECONSTRUCTION_COMPRESSION = "zstd"
 DEFAULT_RECONSTRUCTION_ROW_GROUP_SIZE = 65_536
 DEFAULT_ESTIMATED_BYTES_PER_EVENT = 256
 DEFAULT_ESTIMATED_COMPRESSION_RATIO = 0.35
+MAX_RECONSTRUCTION_BENCHMARK_EVIDENCE_BYTES = 64 * 1024
 DEFAULT_MANIFEST_BYTES_PER_PARTITION = 4_096
 MAX_RECONSTRUCTION_PARTITIONS = 4_096
 MAX_RECONSTRUCTION_MANIFEST_BYTES = 4 * 1024**2
@@ -1090,6 +1091,7 @@ class ReconstructionDeliveryQualityManifestV1:
     identity_lineage_sha256: str
     delivery_action_counts: Mapping[str, int]
     benchmark_artifact_ids: tuple[str, ...]
+    benchmark_evidence: Mapping[str, JSONValue] = field(default_factory=dict)
     point_in_time_evidence_projection_ids: tuple[str, ...] = ()
     point_in_time_evidence_decision_ids: tuple[str, ...] = ()
     cross_series_constraint_bundle_ids: tuple[str, ...] = ()
@@ -1160,6 +1162,15 @@ class ReconstructionDeliveryQualityManifestV1:
         if not artifacts:
             raise ValueError("delivery quality lacks benchmark artifacts")
         object.__setattr__(self, "benchmark_artifact_ids", artifacts)
+        object.__setattr__(
+            self,
+            "benchmark_evidence",
+            _bounded_json_value_mapping(
+                self.benchmark_evidence,
+                "benchmark_evidence",
+                maximum_bytes=MAX_RECONSTRUCTION_BENCHMARK_EVIDENCE_BYTES,
+            ),
+        )
         projections = _normalized_text_tuple(
             self.point_in_time_evidence_projection_ids
         )
@@ -1235,6 +1246,8 @@ class ReconstructionDeliveryQualityManifestV1:
             "delivery_action_counts": dict(self.delivery_action_counts),
             "benchmark_artifact_ids": list(self.benchmark_artifact_ids),
         }
+        if self.benchmark_evidence:
+            payload["benchmark_evidence"] = dict(self.benchmark_evidence)
         if self.point_in_time_evidence_projection_ids:
             payload["point_in_time_evidence_projection_ids"] = list(
                 self.point_in_time_evidence_projection_ids
@@ -1312,6 +1325,9 @@ class ReconstructionDeliveryQualityManifestV1:
             },
             benchmark_artifact_ids=_string_tuple(
                 data.get("benchmark_artifact_ids"), "benchmark_artifact_ids"
+            ),
+            benchmark_evidence=_mapping(
+                data.get("benchmark_evidence", {}), "benchmark_evidence"
             ),
             point_in_time_evidence_projection_ids=_string_tuple(
                 data.get("point_in_time_evidence_projection_ids", ()),
@@ -3370,6 +3386,7 @@ def _delivery_quality_manifest(
             else {}
         ),
         benchmark_artifact_ids=tuple(benchmark_artifact_ids),
+        benchmark_evidence=benchmark_evidence,
         point_in_time_evidence_projection_ids=tuple(
             point_in_time_evidence_projection_ids
         ),
@@ -3922,6 +3939,22 @@ def _mapping(value: Any, name: str) -> Mapping[str, Any]:
     if not isinstance(value, Mapping):
         raise TypeError(f"{name} must be an object")
     return cast(Mapping[str, Any], value)
+
+
+def _bounded_json_value_mapping(
+    value: Mapping[str, Any],
+    name: str,
+    *,
+    maximum_bytes: int,
+) -> dict[str, JSONValue]:
+    """Normalize a compact JSON mapping and enforce its wire-size bound."""
+    encoded = canonical_contract_json(dict(value)).encode("utf-8")
+    if len(encoded) > maximum_bytes:
+        raise ValueError(f"{name} exceeds its bounded payload limit")
+    restored = json.loads(encoded)
+    if not isinstance(restored, dict):  # pragma: no cover - mapping encoded
+        raise TypeError(f"{name} must encode as an object")
+    return cast(dict[str, JSONValue], restored)
 
 
 def _mapping_sequence(value: Any, name: str) -> tuple[Mapping[str, Any], ...]:

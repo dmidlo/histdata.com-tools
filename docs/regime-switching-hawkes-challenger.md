@@ -1,11 +1,11 @@
 # Bounded regime-switching marked Hawkes challenger
 
-`histdatacom.synthetic.regime_hawkes` is an opt-in research challenger. It
-tests whether a shared latent activity state adds reconstruction value beyond
-the empirical motif baseline, all four classical event-clock families, and
-all three static marked-Hawkes ablations. It does not alter the fixed
-`EventClockFamily` or `HawkesExcitationStructure` registries, change the
-certified empirical default, or select a winner.
+`histdatacom.synthetic.regime_hawkes` supplies two registered proposal engines.
+Their challenger role tests whether a shared latent activity state adds value
+beyond the empirical motif reference, all four classical event-clock families,
+and all three static marked-Hawkes ablations. Retained evidence keeps both
+benchmark-eligible but not reconstruction-eligible; neither can select a
+winner.
 
 The fixed regime registry contains exactly two nested ablations:
 

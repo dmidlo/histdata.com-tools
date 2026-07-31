@@ -46,11 +46,12 @@ Works on macOS, Linux, and Windows.
     - [Feed-Regime Detection](#feed-regime-detection)
     - [Historical Feed-Observation Operators](#historical-feed-observation-operators)
     - [Reverse-Degradation Benchmark](#reverse-degradation-benchmark)
-    - [Classical Event-Clock Challengers](#classical-event-clock-challengers)
-    - [Marked Hawkes Challenger](#marked-hawkes-challenger)
-    - [Regime-Switching Hawkes Challenger](#regime-switching-hawkes-challenger)
-    - [Recurrent Marked Temporal Point-Process Challenger](#recurrent-marked-temporal-point-process-challenger)
-    - [Marked Add-Thin Sequence Challenger](#marked-add-thin-sequence-challenger)
+    - [Qualified Proposal-Engine Bank](#qualified-proposal-engine-bank)
+    - [Classical Event-Clock Proposal Engines](#classical-event-clock-proposal-engines)
+    - [Marked Hawkes Proposal Engines](#marked-hawkes-proposal-engines)
+    - [Regime-Switching Hawkes Proposal Engines](#regime-switching-hawkes-proposal-engines)
+    - [Recurrent Marked Temporal Point-Process Engine](#recurrent-marked-temporal-point-process-engine)
+    - [Marked Add-Thin Sequence Engine](#marked-add-thin-sequence-engine)
     - [Empirical Reference-Motif Index](#empirical-reference-motif-index)
     - [Real Modern Reference-Motif Library](#real-modern-reference-motif-library)
     - [Point-in-Time Reconstruction Evidence](#point-in-time-reconstruction-evidence)
@@ -2751,26 +2752,43 @@ content-addressed manifest, motif index, leakage audit, resource audit, and
 scorecard. Required fitted-operator or replay failures abort the campaign;
 dense and holdout event rows remain process-local.
 
-#### Classical Event-Clock Challengers
+#### Qualified Proposal-Engine Bank
 
-`histdatacom.synthetic.event_clock` adds opt-in non-homogeneous Poisson,
+The v2.4 proposal layer registers empirical motif, four event clocks, three
+marked Hawkes variants, two regime-Hawkes variants, RMTPP, Add-Thin, and the
+constrained Schrödinger bridge as one first-party model bank. Engine identity,
+campaign role, and product eligibility are independent. “Challenger” in older
+module/document names is a benchmark role, not an optional post-certification
+architecture or a permanent product classification.
+
+The public v2 plan explicitly orders engines, binds config/dataset/context/
+evidence artifacts, and names the reconstruction selection. Retained evidence
+currently qualifies only empirical motif for product execution; failed
+non-broker engines remain benchmark-eligible and the broker-target bridge is
+research-only. The resulting product truthfully declares a single-qualified-
+engine portfolio and never silently falls back to motif. See
+[`docs/proposal-engine-portfolios.md`](docs/proposal-engine-portfolios.md).
+
+#### Classical Event-Clock Proposal Engines
+
+`histdatacom.synthetic.event_clock` registers non-homogeneous Poisson,
 gamma-mixed Cox, exponential ACD(1,1), and two-state hidden Markov
-duration/mark challengers behind the existing generator-neutral benchmark.
+duration/mark engines in the generator-neutral benchmark.
 All four use calibration-only versioned fits, deterministic synchronized
 generation, explicit epoch/session support and refusal, bounded prior-only
 history, hard fit/generation resource limits, and family-specific diagnostics.
 
-Event-clock proposals can be projected into the same structural candidate
-surface and historical-carving engine as empirical motifs. The public
-reconstruction-plan v1 contract and empirical default remain unchanged; no
-scorecard selects a winner automatically. The retained real campaign fitted
+Event-clock proposals project into the same structural candidate surface and
+historical-carving engine as empirical motifs. The v2 portfolio retains their
+audits and evidence but refuses them from product selection; no scorecard
+selects a winner automatically. The retained real campaign fitted
 all four families with zero generation failures or anchor violations, but none
 passed the frozen candidate gates. See
 [`docs/classical-event-clock-challengers.md`](docs/classical-event-clock-challengers.md)
 for likelihoods, conditioning/backoff semantics, deterministic lineage,
 resource bounds, carving integration, retained evidence, and primary sources.
 
-#### Marked Hawkes Challenger
+#### Marked Hawkes Proposal Engines
 
 `histdatacom.synthetic.marked_hawkes` adds separate zero-excitation,
 self-excitation, and full self/cross-excitation ablations without changing the
@@ -2787,16 +2805,16 @@ parameter, memory, and runtime limits refuse the complete attempt without
 partial rows. Hawkes batches satisfy the same generator-neutral carving
 protocol as empirical and event-clock candidates.
 
-The real reverse-degradation campaign can evaluate all three Hawkes ablations
-beside the qualified empirical baseline and all four classical challengers,
+The real reverse-degradation campaign evaluates all three Hawkes ablations
+beside the qualified empirical reference and all four classical engines,
 but continues to declare `automatic_winner: false`. See
 [`docs/marked-hawkes-challenger.md`](docs/marked-hawkes-challenger.md) for fit,
 stability, mark, synchronized-generation, lineage, resource, and benchmark
 semantics.
 
-#### Regime-Switching Hawkes Challenger
+#### Regime-Switching Hawkes Proposal Engines
 
-`histdatacom.synthetic.regime_hawkes` adds two opt-in, two-state MMHP-delta
+`histdatacom.synthetic.regime_hawkes` registers two two-state MMHP-delta
 ablations beyond the static Hawkes comparison: state-specific baseline/mark
 behavior with shared excitation, and state-specific baseline/excitation/mark
 behavior. The state is shared across the synchronized triangle, canonicalized
@@ -2816,16 +2834,16 @@ uncertainty periods. The real campaign reloads the corpus-bound feed-epoch
 artifact and rejects context mismatch. Candidate batches retain exact
 context/anchor digests and use the shared historical-carving protocol.
 
-The full optional comparison contains the empirical baseline, four event
-clocks, three static Hawkes models, and both regime challengers, with no
-automatic winner or production-default change. See
+The retained comparison contains the empirical reference, four event clocks,
+three static Hawkes models, and both regime engines, with no automatic winner
+or unqualified product selection. See
 [`docs/regime-switching-hawkes-challenger.md`](docs/regime-switching-hawkes-challenger.md)
 for the approximation, information boundaries, diagnostics, lineage,
 resource limits, carving seam, nonclaims, and primary references.
 
-#### Recurrent Marked Temporal Point-Process Challenger
+#### Recurrent Marked Temporal Point-Process Engine
 
-`histdatacom.synthetic.neural_tpp` adds one opt-in, dependency-free CPU RMTPP
+`histdatacom.synthetic.neural_tpp` registers one dependency-free CPU RMTPP
 after the empirical, classical event-clock, static Hawkes, and regime-Hawkes
 comparisons. It uses an explicit start token, deterministic full-batch BPTT,
 whole-window train/tune splits, row-free protected-split leakage evidence, an
@@ -2839,17 +2857,17 @@ and enter the same generator-neutral historical-carving path. Independent
 fit, gradient-work, checkpoint, history, step, amplification, memory, output,
 and wall-time limits fail closed without partial parameters or rows.
 
-The full optional campaign now contains 11 challengers and 15 total reports,
-while continuing to declare `automatic_winner: false` and leaving the
-certified empirical default unchanged. See
+The retained campaign contains 11 proposal candidates and 15 total reports,
+while continuing to declare `automatic_winner: false`; RMTPP remains
+benchmark-eligible and is refused from the current product. See
 [`docs/neural-tpp-challenger.md`](docs/neural-tpp-challenger.md) for the model,
 dataset/leakage boundary, exact likelihood and sampler, checkpoint/replay
 contracts, carving seam, nonclaims, and primary references.
 
-#### Marked Add-Thin Sequence Challenger
+#### Marked Add-Thin Sequence Engine
 
-`histdatacom.synthetic.add_thin` adds one opt-in, dependency-free CPU
-point-process diffusion challenger. It uses the Add-Thin forward law and exact
+`histdatacom.synthetic.add_thin` registers one dependency-free CPU
+point-process diffusion engine. It uses the Add-Thin forward law and exact
 B/C/D/E reverse coefficients with a deliberately bounded, non-neural
 piecewise-constant time-bin × joint-mark posterior approximation. The fixed
 12 marks are a declared project extension; the reference paper models arrival
@@ -2863,11 +2881,11 @@ anchors outside the denoising state, emits only core-owned points strictly
 inside destination-symbol anchor pairs, and records every B/C/D/E, thinning,
 collision, resource, and lineage decision.
 
-The full optional campaign contains 12 challengers and 16 total reports. The
+The retained campaign contains 12 proposal candidates and 16 total reports. The
 real closure comparison records no Add-Thin fit/generation failure, refusal,
 leakage, or anchor violation, but the challenger fails multiple promotion
-gates. It declares `automatic_winner: false` and leaves the certified
-empirical default unchanged. See
+gates. It declares `automatic_winner: false` and remains refused from product
+selection. See
 [`docs/add-thin-challenger.md`](docs/add-thin-challenger.md) for the equations,
 approximation boundary, marked extension, strict contracts, resource limits,
 carving seam, retained evidence, nonclaims, and primary references.
@@ -3389,16 +3407,34 @@ Schema discovery and compatibility admission are also first-party:
 
 ```sh
 histdatacom reconstruction schemas --json
+histdatacom reconstruction engines --json
 histdatacom reconstruction compatibility --plan plan-spec.json --json
 histdatacom reconstruction --json experiment-list --root work/plan-artifacts
 ```
 
 The registry audits public contracts, explicitly accounts for internal-only
-schemas, distinguishes legacy raw and enriched HistData caches, and reserves
-later portfolio contracts without making them executable. The planner consumes
-the same compatibility engine. Provider-neutral identity is the architectural
+schemas, distinguishes legacy raw and enriched HistData caches, and exposes the
+executable proposal-engine portfolio contracts. The planner consumes the same
+compatibility engine. A v1 input translates to an explicit motif-only
+portfolio; a v2 input must declare engine order, product selection, and
+retained evaluation evidence. Provider-neutral identity is the architectural
 foundation, while alternate providers, OANDA, and broker conditioning remain
 later-milestone work.
+
+Engine evaluation and resolved product eligibility are also public:
+
+```sh
+histdatacom reconstruction --json engine-evaluate \
+  --benchmark-manifest artifacts/reverse-degradation-manifest-<sha256>.json \
+  --source-root data/ASCII/T \
+  --output-directory work/proposal-evaluation
+histdatacom reconstruction --json portfolio \
+  --plan work/plan-artifacts/synthetic-infill-plan-<sha256>.json
+```
+
+Failed engines stay inspectable and benchmark-eligible; they cannot enter a
+committed product. The current plan selects one qualified motif engine and
+reports that it has no cross-model diversity. There is no silent fallback.
 
 Only HistData.com ASCII/T and the complete EURGBP/EURUSD/GBPUSD triangle are
 accepted. M1, bar, partial-triangle, alternate-provider, OANDA, and broker

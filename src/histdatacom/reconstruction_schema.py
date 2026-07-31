@@ -388,6 +388,7 @@ _AUDITED_MODULES = (
     "histdatacom.synthetic.delivery",
     "histdatacom.synthetic.persistence",
     "histdatacom.synthetic.reconstruction_plan",
+    "histdatacom.synthetic.proposal_engines",
     "histdatacom.synthetic.reconstruction_handlers",
     "histdatacom.synthetic.certification",
     "histdatacom.synthetic.certification_campaign",
@@ -429,6 +430,10 @@ _REQUIRED_SCHEMA_TOKENS = (
     "modern-reference-motif-leakage",
     "reconstruction-ensemble-config",
     "reconstruction-plan-spec.v1",
+    "reconstruction-plan-spec.v2",
+    "proposal-engine-descriptor",
+    "proposal-engine-registry",
+    "proposal-engine-portfolio",
     "reconstruction-experiment-manifest",
     "reconstruction-experiment-selection",
     "reconstruction-experiment-split-policy",
@@ -505,6 +510,9 @@ _PLAN_FIELDS = frozenset(
         "timeframe",
         "symbols",
         "scientific_nonclaim",
+        "proposal_engine_ids",
+        "selected_proposal_engine_ids",
+        "proposal_evaluation_paths",
     }
 )
 
@@ -516,6 +524,7 @@ _ARTIFACT_SCHEMA_EXPECTATIONS = {
     "benchmark_manifest_path": (
         "histdatacom.reverse-degradation-benchmark-manifest.v1",
         "histdatacom.reverse-degradation-corpus.v1",
+        "histdatacom.reverse-degradation-manifest.v1",
     ),
     "motif_manifest_path": ("histdatacom.modern-reference-motif-manifest.v1",),
     "motif_index_path": ("histdatacom.reference-motif-index.v1",),
@@ -608,16 +617,10 @@ def evaluate_reconstruction_compatibility(
             "The proposed plan has no schema version.",
             "Supply a registered reconstruction plan schema version.",
         )
-    elif subject_schema == PORTFOLIO_PLAN_SCHEMA_VERSION:
-        _finding(
-            findings,
-            "portfolio_plan_not_executable",
-            ReconstructionCompatibilityStatus.RESEARCH_ONLY,
-            "schema_version",
-            "The v2 portfolio plan is reserved for issue #489 and is not executable.",
-            "Use the v1 empirical-motif path until #489 is implemented.",
-        )
-    elif subject_schema != CURRENT_PLAN_SCHEMA_VERSION:
+    elif subject_schema not in {
+        CURRENT_PLAN_SCHEMA_VERSION,
+        PORTFOLIO_PLAN_SCHEMA_VERSION,
+    }:
         _finding(
             findings,
             "unsupported_plan_schema",
@@ -626,13 +629,16 @@ def evaluate_reconstruction_compatibility(
             f"Plan schema {subject_schema!r} is not an executable installed schema.",
             "Use the current registered plan schema.",
         )
-    else:
+    elif subject_schema == CURRENT_PLAN_SCHEMA_VERSION:
         translations.append(
-            "v2.3 explicit empirical-motif plan adapted to the current "
-            "provider-neutral domain boundary"
+            "deprecated v2.3 empirical-motif plan translated to an explicit "
+            "single-qualified-engine portfolio"
         )
 
-    if subject_schema == CURRENT_PLAN_SCHEMA_VERSION:
+    if subject_schema in {
+        CURRENT_PLAN_SCHEMA_VERSION,
+        PORTFOLIO_PLAN_SCHEMA_VERSION,
+    }:
         _check_unknown_plan_fields(payload, findings)
         _check_current_scope(payload, findings)
         if inspect_source:
@@ -974,6 +980,44 @@ def _check_current_scope(
     payload: Mapping[str, Any],
     findings: list[ReconstructionCompatibilityFindingV1],
 ) -> None:
+    if payload.get("schema_version") == PORTFOLIO_PLAN_SCHEMA_VERSION:
+        proposal_ids = _compatibility_text_sequence(
+            payload.get("proposal_engine_ids")
+        )
+        selected_ids = _compatibility_text_sequence(
+            payload.get("selected_proposal_engine_ids")
+        )
+        if not proposal_ids or len(set(proposal_ids)) != len(proposal_ids):
+            _finding(
+                findings,
+                "invalid_proposal_engine_ordering",
+                ReconstructionCompatibilityStatus.INVALID,
+                "proposal_engine_ids",
+                "A v2 plan requires an explicit unique proposal-engine order.",
+                "Declare one or more installed proposal engine IDs in order.",
+            )
+        if (
+            not selected_ids
+            or len(set(selected_ids)) != len(selected_ids)
+            or not set(selected_ids).issubset(proposal_ids)
+        ):
+            _finding(
+                findings,
+                "invalid_proposal_engine_selection",
+                ReconstructionCompatibilityStatus.INVALID,
+                "selected_proposal_engine_ids",
+                "A v2 plan requires an explicit selection from its portfolio.",
+                "Select only reconstruction-eligible engines in the portfolio.",
+            )
+        elif selected_ids != ("histdatacom.empirical-motif-resampling",):
+            _finding(
+                findings,
+                "unqualified_proposal_engine_selection",
+                ReconstructionCompatibilityStatus.RESEARCH_ONLY,
+                "selected_proposal_engine_ids",
+                "Only empirical motif is reconstruction-eligible in retained v2.4 evidence.",
+                "Select empirical motif for product execution; evaluate other engines separately.",
+            )
     provider = (
         str(
             payload.get(
@@ -1124,6 +1168,16 @@ def _check_current_scope(
             "Broker-conditioned and OANDA inputs are outside the HistData v2.4 milestone.",
             "Use modern_reference delivery; defer broker/OANDA work.",
         )
+
+
+def _compatibility_text_sequence(value: Any) -> tuple[str, ...]:
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
+        return ()
+    return tuple(
+        str(item).strip()
+        for item in value
+        if isinstance(item, str) and item.strip()
+    )
 
 
 def _inspect_source_input(
@@ -1519,6 +1573,51 @@ def _inspect_artifacts(
                 f"Artifact schema {version!r} does not match {expected!r}.",
                 "Regenerate or select the required current artifact version.",
             )
+    if payload.get("schema_version") == PORTFOLIO_PLAN_SCHEMA_VERSION:
+        evidence_paths = payload.get("proposal_evaluation_paths")
+        if (
+            not isinstance(evidence_paths, Sequence)
+            or isinstance(evidence_paths, (str, bytes))
+            or not evidence_paths
+        ):
+            _finding(
+                findings,
+                "missing_proposal_evaluation_evidence",
+                ReconstructionCompatibilityStatus.INVALID,
+                "proposal_evaluation_paths",
+                "A v2 portfolio plan requires retained HistData evaluation evidence.",
+                "Supply one or more content-addressed reverse-degradation scorecards.",
+            )
+            return
+        for index, value in enumerate(evidence_paths):
+            path = Path(str(value)).expanduser()
+            location = f"proposal_evaluation_paths[{index}]"
+            try:
+                data = _read_artifact_mapping(path)
+            except (OSError, TypeError, ValueError) as err:
+                _finding(
+                    findings,
+                    "invalid_proposal_evaluation_evidence",
+                    ReconstructionCompatibilityStatus.INVALID,
+                    location,
+                    str(err),
+                    "Supply a bounded reverse-degradation scorecard artifact.",
+                )
+                continue
+            if (
+                data.get("schema_version")
+                != "histdatacom.reverse-degradation-campaign.v1"
+                or data.get("source_replay_verified") is not True
+                or data.get("automatic_winner") is not False
+            ):
+                _finding(
+                    findings,
+                    "proposal_evaluation_evidence_mismatch",
+                    ReconstructionCompatibilityStatus.INVALID,
+                    location,
+                    "Proposal evidence is not a replay-verified no-winner campaign.",
+                    "Regenerate the HistData proposal-engine campaign.",
+                )
 
 
 def _read_artifact_mapping(path: Path) -> Mapping[str, Any]:

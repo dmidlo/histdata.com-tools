@@ -268,8 +268,8 @@ def test_registry_explains_legacy_training_event_and_future_seams() -> None:
         "limiting_symbols",
         "status",
     } <= {item.name for item in cross_constraint.fields}
-    assert portfolio.status is ReconstructionContractStatus.RESERVED
-    assert "#489" in portfolio.audit_note
+    assert portfolio.status is ReconstructionContractStatus.REQUIRED
+    assert "proposal-portfolio evidence" in portfolio.audit_note
     for contract in contracts.values():
         assert contract.publication_safety
         assert len(contract.fields) <= 1024
@@ -372,14 +372,75 @@ def test_current_scope_fails_closed_with_precise_reasons(
     assert code in {item.code for item in report.findings}
 
 
-def test_portfolio_plan_is_discoverable_but_not_yet_executable() -> None:
+def test_portfolio_plan_is_an_exact_executable_contract(tmp_path: Path) -> None:
+    plan = _plan(tmp_path, _legacy_source(tmp_path))
+    plan.update(
+        {
+            "schema_version": PORTFOLIO_PLAN_SCHEMA_VERSION,
+            "proposal_engine_ids": ["histdatacom.empirical-motif-resampling"],
+            "selected_proposal_engine_ids": [
+                "histdatacom.empirical-motif-resampling"
+            ],
+            "proposal_evaluation_paths": ["retained-scorecard.json"],
+        }
+    )
     report = evaluate_reconstruction_compatibility(
-        {"schema_version": PORTFOLIO_PLAN_SCHEMA_VERSION}
+        plan,
+        inspect_source=False,
+        inspect_artifacts=False,
+    )
+
+    assert report.executable
+    assert report.status is ReconstructionCompatibilityStatus.EXACT
+    assert not report.findings
+
+
+def test_portfolio_plan_requires_retained_evaluation_evidence(
+    tmp_path: Path,
+) -> None:
+    plan = _plan(tmp_path, _legacy_source(tmp_path))
+    plan["schema_version"] = PORTFOLIO_PLAN_SCHEMA_VERSION
+    plan["proposal_engine_ids"] = ["histdatacom.empirical-motif-resampling"]
+    plan["selected_proposal_engine_ids"] = [
+        "histdatacom.empirical-motif-resampling"
+    ]
+
+    report = evaluate_reconstruction_compatibility(
+        plan,
+        inspect_source=False,
+    )
+
+    assert not report.executable
+    assert report.status is ReconstructionCompatibilityStatus.INVALID
+    assert "missing_proposal_evaluation_evidence" in {
+        item.code for item in report.findings
+    }
+
+
+def test_portfolio_plan_refuses_unqualified_product_selection(
+    tmp_path: Path,
+) -> None:
+    plan = _plan(tmp_path, _legacy_source(tmp_path))
+    plan.update(
+        {
+            "schema_version": PORTFOLIO_PLAN_SCHEMA_VERSION,
+            "proposal_engine_ids": ["histdatacom.event-clock.nhpp"],
+            "selected_proposal_engine_ids": ["histdatacom.event-clock.nhpp"],
+            "proposal_evaluation_paths": ["retained-scorecard.json"],
+        }
+    )
+
+    report = evaluate_reconstruction_compatibility(
+        plan,
+        inspect_source=False,
+        inspect_artifacts=False,
     )
 
     assert not report.executable
     assert report.status is ReconstructionCompatibilityStatus.RESEARCH_ONLY
-    assert report.findings[0].code == "portfolio_plan_not_executable"
+    assert "unqualified_proposal_engine_selection" in {
+        item.code for item in report.findings
+    }
 
 
 def test_unversioned_and_mismatched_artifacts_fail_closed(

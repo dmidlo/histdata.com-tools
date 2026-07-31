@@ -1,9 +1,10 @@
 # Classical event-clock reconstruction challengers
 
-`histdatacom.synthetic.event_clock` provides four opt-in, transparent
-event-time challengers for reverse-degradation research. They are not part of
-`ReconstructionPlanConfigurationV1`, do not replace the certified empirical
-motif generator, and cannot select a production default.
+`histdatacom.synthetic.event_clock` provides four transparent proposal engines.
+“Challenger” in this historical filename describes their role in a benchmark,
+not an optional architecture. All four are registered by the v2 proposal bank,
+retain their failed promotion evidence, and are benchmark-eligible but not
+reconstruction-eligible. They cannot select a product default.
 
 The implementation follows one shared lifecycle:
 
