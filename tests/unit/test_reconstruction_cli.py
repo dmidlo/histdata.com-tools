@@ -61,6 +61,8 @@ def test_installed_help_lists_complete_reconstruction_family(
         "portfolio",
         "engine-evaluate",
         "qualify",
+        "diagnostic-build",
+        "diagnostic-list",
         "compatibility",
         "plan",
         "plan-set",
@@ -134,6 +136,22 @@ def test_cli_exposes_engine_discovery_portfolio_and_selected_evaluation(
             )
             return Result("histdatacom.powered-qualification-dossier.v1")
 
+        def publish_diagnostics(self, spec, *, output_directory):
+            calls.append(("diagnostic-build", (spec, output_directory)))
+            return Result(
+                "histdatacom.reconstruction-diagnostic-publication.v1"
+            )
+
+        def diagnostics(self, manifest):
+            calls.append(("diagnostic-list", manifest))
+            return {
+                "schema_version": (
+                    "histdatacom.reconstruction-diagnostic-publication.v1"
+                ),
+                "family_count": 12,
+                "status_counts": {"available": 12},
+            }
+
     monkeypatch.setattr(reconstruction_cli, "_client", lambda _: FakeClient())
 
     assert reconstruction_cli.main(["--json", "engines"]) == 0
@@ -185,6 +203,34 @@ def test_cli_exposes_engine_discovery_portfolio_and_selected_evaluation(
     assert json.loads(capsys.readouterr().out)["schema_version"].endswith(
         "dossier.v1"
     )
+    assert (
+        reconstruction_cli.main(
+            [
+                "--json",
+                "diagnostic-build",
+                "--spec",
+                "diagnostics.json",
+                "--output-directory",
+                "publication",
+            ]
+        )
+        == 0
+    )
+    assert json.loads(capsys.readouterr().out)["schema_version"].endswith(
+        "publication.v1"
+    )
+    assert (
+        reconstruction_cli.main(
+            [
+                "--json",
+                "diagnostic-list",
+                "--manifest",
+                "publication.json",
+            ]
+        )
+        == 0
+    )
+    assert json.loads(capsys.readouterr().out)["family_count"] == 12
     assert calls == [
         ("engines", None),
         ("portfolio", "plan.json"),
@@ -201,6 +247,11 @@ def test_cli_exposes_engine_discovery_portfolio_and_selected_evaluation(
             "qualify",
             ("evaluation.json", "experiment.json", "qualification"),
         ),
+        (
+            "diagnostic-build",
+            ("diagnostics.json", "publication"),
+        ),
+        ("diagnostic-list", "publication.json"),
     ]
 
 

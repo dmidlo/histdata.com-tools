@@ -110,6 +110,21 @@ def build_parser() -> argparse.ArgumentParser:
     qualify.add_argument("--experiment", required=True, metavar="PATH")
     qualify.add_argument("--output-directory", required=True, metavar="PATH")
 
+    diagnostic_build = subparsers.add_parser(
+        "diagnostic-build",
+        help="build verified chart data and optional deterministic static figures",
+    )
+    diagnostic_build.add_argument("--spec", required=True, metavar="PATH")
+    diagnostic_build.add_argument(
+        "--output-directory", required=True, metavar="PATH"
+    )
+
+    diagnostic_list = subparsers.add_parser(
+        "diagnostic-list",
+        help="verify and list one reconstruction diagnostic publication",
+    )
+    diagnostic_list.add_argument("--manifest", required=True, metavar="PATH")
+
     compatibility = subparsers.add_parser(
         "compatibility",
         help="audit a proposed plan against installed executable contracts",
@@ -330,12 +345,19 @@ def _run_command(
         )
         return evaluation.to_dict(), ReconstructionExitCode.SUCCESS
     if command == "qualify":
-        dossier = client.qualify_proposal_portfolio(
+        qualification = client.qualify_proposal_portfolio(
             args.evaluation,
             args.experiment,
             output_directory=args.output_directory,
         )
-        return dossier.to_dict(), ReconstructionExitCode.SUCCESS
+        return qualification.to_dict(), ReconstructionExitCode.SUCCESS
+    if command == "diagnostic-build":
+        publication = client.publish_diagnostics(
+            args.spec, output_directory=args.output_directory
+        )
+        return publication.to_dict(), ReconstructionExitCode.SUCCESS
+    if command == "diagnostic-list":
+        return client.diagnostics(args.manifest), ReconstructionExitCode.SUCCESS
     if command == "compatibility":
         report = client.compatibility(args.plan)
         if report.executable:
@@ -449,12 +471,12 @@ def _run_command(
     if command == "replay":
         return client.replay(args.manifest), ReconstructionExitCode.SUCCESS
     if command == "certify":
-        dossier, result = client.certify(
+        certification_dossier, result = client.certify(
             args.spec, output_directory=args.output_directory
         )
         payload = result.to_dict()
-        payload["summary"] = dossier.summary
-        return payload, _certification_exit_code(dossier.state)
+        payload["summary"] = certification_dossier.summary
+        return payload, _certification_exit_code(certification_dossier.state)
     raise ValueError(f"unsupported reconstruction command: {command}")
 
 
@@ -517,6 +539,20 @@ def _write_result(result: Mapping[str, Any], *, as_json: bool) -> None:
                     f"{finding.get('status')} {finding.get('code')}: "
                     f"{finding.get('message')}"
                 )
+        return
+    if schema_version == "histdatacom.reconstruction-diagnostic-publication.v1":
+        print(
+            "Reconstruction diagnostics "
+            f"({result.get('publication_id', '')}): "
+            f"{result.get('family_count', 0)} families, "
+            f"{result.get('chart_count', 0)} views"
+        )
+        counts = result.get("status_counts", {})
+        if isinstance(counts, Mapping):
+            summary = ", ".join(
+                f"{key}={counts[key]}" for key in sorted(counts)
+            )
+            print(f"diagnostic status: {summary}")
         return
     status = result.get("status") or result.get("kind") or "complete"
     identity = (

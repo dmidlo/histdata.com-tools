@@ -71,6 +71,12 @@ from histdatacom.synthetic.certification_campaign import (
     run_modern_reference_certification_campaign,
 )
 from histdatacom.synthetic.contracts import canonical_contract_json
+from histdatacom.synthetic.diagnostics import (
+    DiagnosticPublicationManifestV1,
+    DiagnosticPublicationSpecV1,
+    diagnostic_publication_listing,
+    publish_reconstruction_diagnostics,
+)
 from histdatacom.synthetic.information import InformationMode
 from histdatacom.synthetic.persistence import (
     discover_reconstruction_manifests,
@@ -1193,6 +1199,32 @@ class ReconstructionClient:
                 evaluation_path,
                 experiment_path,
                 output_directory=output_directory,
+            )
+        except (OSError, TypeError, ValueError, RuntimeError) as err:
+            raise ReconstructionValidationError(str(err)) from err
+
+    def publish_diagnostics(
+        self,
+        spec: DiagnosticPublicationSpecV1 | str | Path,
+        *,
+        output_directory: str | Path,
+    ) -> DiagnosticPublicationManifestV1:
+        """Publish verified HistData reconstruction diagnostic evidence."""
+        try:
+            return publish_reconstruction_diagnostics(
+                spec, output_directory=output_directory
+            )
+        except ModuleNotFoundError as err:
+            raise ReconstructionUnsupportedError(str(err)) from err
+        except (OSError, TypeError, ValueError, RuntimeError) as err:
+            raise ReconstructionValidationError(str(err)) from err
+
+    def diagnostics(self, manifest_path: str | Path) -> Mapping[str, JSONValue]:
+        """Verify and list one publication-safe diagnostic bundle."""
+        try:
+            return cast(
+                Mapping[str, JSONValue],
+                diagnostic_publication_listing(manifest_path),
             )
         except (OSError, TypeError, ValueError, RuntimeError) as err:
             raise ReconstructionValidationError(str(err)) from err
@@ -2520,6 +2552,8 @@ __all__ = [
     "RECONSTRUCTION_SYMBOLS",
     "RECONSTRUCTION_TIMEFRAME",
     "CrossSeriesConstraintPolicyV1",
+    "DiagnosticPublicationManifestV1",
+    "DiagnosticPublicationSpecV1",
     "InformationMode",
     "ModernReferenceCertificationCampaignResultV1",
     "ModernReferenceCertificationCampaignSpecV1",

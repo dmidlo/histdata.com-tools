@@ -69,6 +69,7 @@ Works on macOS, Linux, and Windows.
     - [Reconstructed-History Strategy Sensitivity](#reconstructed-history-strategy-sensitivity)
     - [EURUSD Triangle Reconstruction Certification](#eurusd-triangle-reconstruction-certification)
     - [Temporal Reconstruction Orchestration](#temporal-reconstruction-orchestration)
+    - [Reconstruction Evidence Diagnostics](#reconstruction-evidence-diagnostics)
     - [Public Reconstruction CLI and API](#public-reconstruction-cli-and-api)
   - [Orchestration Runtime](#orchestration-runtime)
     - [Runtime Model and Install Surface](#runtime-model-and-install-surface)
@@ -3381,6 +3382,29 @@ See
 [`docs/reconstruction-temporal-orchestration.md`](docs/reconstruction-temporal-orchestration.md)
 for adapter registration, queue/resource policy, backpressure, recovery,
 cancellation, report reconciliation, and fault-injection guarantees.
+
+#### Reconstruction Evidence Diagnostics
+
+The first-party diagnostic publisher converts strong retained HistData
+experiment and qualification evidence into twelve bounded chart-data families
+with stable, scale-coherent views where one mixed axis would mislead.
+Missing product, carving, bar, or strategy evidence remains explicitly
+unavailable; underpowered qualification remains underpowered. Figures never
+select an engine or replace the machine-readable gates.
+
+```sh
+histdatacom reconstruction --json diagnostic-build \
+  --spec work/diagnostic-spec.json \
+  --output-directory work/diagnostics
+histdatacom reconstruction --json diagnostic-list \
+  --manifest work/diagnostics/reconstruction-diagnostic-publication-<sha256>.json
+```
+
+JSON publication works in the base install. The `histdatacom[viz]` extra adds
+deterministic, receipted SVG and PNG rendering. Current execution is restricted
+to HistData.com ASCII/T evidence; provider-neutral contracts preserve the
+future seam, while OANDA and broker data remain later milestones. See
+[`docs/reconstruction-diagnostics.md`](docs/reconstruction-diagnostics.md).
 
 #### Public Reconstruction CLI and API
 

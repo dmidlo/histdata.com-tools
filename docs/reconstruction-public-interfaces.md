@@ -132,6 +132,33 @@ same content identity. See
 [`powered-reconstruction-qualification.md`](powered-reconstruction-qualification.md)
 for residual, score, power, holdout, and no-decision semantics.
 
+Retained evidence diagnostics use the same public boundary:
+
+```sh
+histdatacom reconstruction --json diagnostic-build \
+  --spec work/diagnostic-spec.json \
+  --output-directory work/diagnostics
+histdatacom reconstruction --json diagnostic-list \
+  --manifest work/diagnostics/reconstruction-diagnostic-publication-<sha256>.json
+```
+
+```python
+publication = ReconstructionClient().publish_diagnostics(
+    "work/diagnostic-spec.json",
+    output_directory="work/diagnostics",
+)
+listing = ReconstructionClient().diagnostics(
+    "work/diagnostics/reconstruction-diagnostic-publication-<sha256>.json"
+)
+```
+
+JSON chart data works in the base install. SVG and PNG require the optional
+`histdatacom[viz]` extra. Both surfaces verify the same strong evidence graph,
+preserve explicit unavailable and underpowered states, and never reinterpret a
+figure as an eligibility decision. Family and view counts remain distinct so
+dense evidence is not forced onto one unreadable mixed axis. See
+[`reconstruction-diagnostics.md`](reconstruction-diagnostics.md).
+
 The omitted `evidence_policy` and `cross_series_constraint_policy` fields use
 their versioned HistData-only defaults. Supplying either field serializes the
 complete v1 policy object, changes plan/run identity, and is compatibility
