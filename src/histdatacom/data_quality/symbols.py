@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
+import math
+import zipfile
 from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from itertools import combinations
-import math
 from pathlib import Path
-from typing import cast, TypeVar
-import zipfile
+from typing import TypeVar, cast
 
 from histdatacom.data_quality.contracts import (
     QualityFinding,
@@ -22,10 +22,10 @@ from histdatacom.data_quality.contracts import (
     QualityTarget,
     QualityTargetKind,
 )
+from histdatacom.data_quality.limits import bounded_report_limit
 from histdatacom.data_quality.polars_cache import (
     read_quality_polars_cache,
 )
-from histdatacom.data_quality.limits import bounded_report_limit
 from histdatacom.data_quality.training_features import (
     TRAINING_SCHEMA_VERSION,
     ensure_tick_training_features,
@@ -557,6 +557,108 @@ class _StaleJoinSample:
         }
 
 
+_RELATIVE_DIFFERENCE_HISTOGRAM_EDGES = (
+    0.0,
+    1e-10,
+    1e-9,
+    1e-8,
+    1e-7,
+    1e-6,
+    1e-5,
+    1e-4,
+    1e-3,
+    0.005,
+    0.01,
+    0.05,
+    0.1,
+    0.25,
+    0.5,
+    1.0,
+    math.inf,
+)
+
+
+@dataclass(slots=True)
+class _RelativeDifferenceDistribution:
+    """Bounded streaming distribution for cross-series disagreement."""
+
+    count: int = 0
+    total: float = 0.0
+    minimum: float = math.inf
+    maximum: float = 0.0
+    histogram_counts: list[int] = field(
+        default_factory=lambda: [
+            0 for _ in _RELATIVE_DIFFERENCE_HISTOGRAM_EDGES
+        ]
+    )
+
+    def add(self, value: float) -> None:
+        """Accumulate one finite non-negative relative difference."""
+        selected = float(value)
+        if not math.isfinite(selected) or selected < 0.0:
+            return
+        self.count += 1
+        self.total += selected
+        self.minimum = min(self.minimum, selected)
+        self.maximum = max(self.maximum, selected)
+        for index, edge in enumerate(_RELATIVE_DIFFERENCE_HISTOGRAM_EDGES):
+            if selected <= edge:
+                self.histogram_counts[index] += 1
+                break
+
+    def to_metadata(self) -> dict[str, JSONValue]:
+        """Return deterministic bounded quantile and histogram evidence."""
+        if not self.count:
+            return {
+                "status": "unavailable",
+                "count": 0,
+                "reason": "no_compared_timestamps",
+                "method": "fixed-relative-difference-histogram-v1",
+            }
+        bins: list[JSONValue] = []
+        lower = 0.0
+        for index, (edge, count) in enumerate(
+            zip(
+                _RELATIVE_DIFFERENCE_HISTOGRAM_EDGES,
+                self.histogram_counts,
+                strict=True,
+            )
+        ):
+            bins.append(
+                {
+                    "lower_exclusive": None if index == 0 else lower,
+                    "upper_inclusive": None if math.isinf(edge) else edge,
+                    "count": count,
+                }
+            )
+            lower = edge
+        return {
+            "status": "valid",
+            "count": self.count,
+            "minimum": self.minimum,
+            "mean": self.total / self.count,
+            "p50_upper_bound": self._quantile_upper_bound(0.50),
+            "p95_upper_bound": self._quantile_upper_bound(0.95),
+            "p99_upper_bound": self._quantile_upper_bound(0.99),
+            "maximum": self.maximum,
+            "method": "fixed-relative-difference-histogram-v1",
+            "bins": bins,
+        }
+
+    def _quantile_upper_bound(self, quantile: float) -> float | None:
+        target = max(1, math.ceil(self.count * quantile))
+        cumulative = 0
+        for edge, count in zip(
+            _RELATIVE_DIFFERENCE_HISTOGRAM_EDGES,
+            self.histogram_counts,
+            strict=True,
+        ):
+            cumulative += count
+            if cumulative >= target:
+                return None if math.isinf(edge) else edge
+        return None
+
+
 @dataclass(slots=True)
 class _CrossInstrumentScan:
     target_count: int = 0
@@ -588,6 +690,12 @@ class _CrossInstrumentScan:
     inverse_errors: list[_InverseComparisonSample] = field(default_factory=list)
     sparse_grids: list[_TimestampGridSample] = field(default_factory=list)
     stale_join_risks: list[_StaleJoinSample] = field(default_factory=list)
+    triangular_relative_differences: _RelativeDifferenceDistribution = field(
+        default_factory=_RelativeDifferenceDistribution
+    )
+    inverse_relative_differences: _RelativeDifferenceDistribution = field(
+        default_factory=_RelativeDifferenceDistribution
+    )
 
 
 @dataclass(slots=True)
@@ -766,8 +874,7 @@ class HistDataSymbolMetadataRule:
             _domain_finding(
                 target,
                 code="DOMAIN_SYMBOL_METADATA_SUMMARY",
-                message="Normalized symbol metadata and quote-convention "
-                "profile.",
+                message="Normalized symbol metadata and quote-convention profile.",
                 severity=QualitySeverity.INFO,
                 rule_id=self.rule_id,
                 metadata=metadata,
@@ -947,6 +1054,56 @@ class HistDataCrossSeriesFingerprintRule:
         )
         run_target = _cross_instrument_target(
             target_tuple,
+            metadata=metadata,
+            payload=payload,
+            rule_id=self.rule_id,
+            manifest="cross-series-fingerprint",
+        )
+        finding = _cross_instrument_finding(
+            run_target,
+            code=CROSS_SERIES_FINGERPRINT_SUMMARY_CODE,
+            message="Run-scoped cross-series fingerprint summary.",
+            severity=QualitySeverity.INFO,
+            rule_id=self.rule_id,
+            metadata={CROSS_SERIES_FINGERPRINT_METADATA_KEY: payload},
+        )
+        return QualityReport(
+            rule_results=(
+                QualityRuleResult(
+                    rule_id=self.rule_id,
+                    target=run_target,
+                    findings=(finding,),
+                ),
+            ),
+            metadata={CROSS_SERIES_FINGERPRINT_METADATA_KEY: payload},
+        )
+
+    def evaluate_series(
+        self,
+        series: Iterable[CrossInstrumentSeriesInput],
+        *,
+        metadata: Mapping[str, JSONValue] | None = None,
+    ) -> QualityReport:
+        """Fingerprint reconstructed streams without a filesystem roundtrip."""
+        inputs = tuple(series)
+        scan = _scan_cross_instrument_series_inputs(
+            inputs,
+            tolerance=self.tolerance,
+            warning_severity=self.warning_severity,
+            error_severity=self.error_severity,
+        )
+        payload = _cross_series_fingerprint_payload(
+            scan,
+            tolerance=self.tolerance,
+            metadata=metadata,
+            group_limit=self.group_limit,
+            correlation_limit=self.correlation_limit,
+        )
+        targets = tuple(
+            _quality_target_for_series_input(item) for item in inputs
+        )
+        run_target = _cross_instrument_target(
+            targets,
             metadata=metadata,
             payload=payload,
             rule_id=self.rule_id,
@@ -1815,8 +1972,12 @@ def _record_triangular_checks(
                 denominator_price = denominator.points[timestamp].price
                 direct_price = direct.points[timestamp].price
                 implied_price = numerator_price / denominator_price
+                relative_difference = _relative_difference(
+                    implied_price, direct_price
+                )
+                scan.triangular_relative_differences.add(relative_difference)
                 severity = _relative_difference_severity(
-                    _relative_difference(implied_price, direct_price),
+                    relative_difference,
                     warning_threshold=(
                         tolerance.triangular_warning_relative_tolerance
                     ),
@@ -1836,10 +1997,7 @@ def _record_triangular_checks(
                     timestamp_utc_ms=timestamp,
                     direct_price=direct_price,
                     implied_price=implied_price,
-                    relative_difference=_relative_difference(
-                        implied_price,
-                        direct_price,
-                    ),
+                    relative_difference=relative_difference,
                     severity=severity,
                 )
                 if severity is error_severity:
@@ -1891,6 +2049,7 @@ def _record_inverse_checks(
                 left.points[timestamp].price * right.points[timestamp].price
             )
             relative_difference = abs(product - 1.0)
+            scan.inverse_relative_differences.add(relative_difference)
             severity = _relative_difference_severity(
                 relative_difference,
                 warning_threshold=tolerance.inverse_warning_relative_tolerance,
@@ -2062,6 +2221,9 @@ def _cross_series_fingerprint_payload(
                 error_count=scan.triangular_error_count,
                 warning_samples=scan.triangular_warnings,
                 error_samples=scan.triangular_errors,
+                relative_difference_distribution=(
+                    scan.triangular_relative_differences
+                ),
             ),
             "inverse_consistency": _cross_series_consistency_payload(
                 candidate_count=scan.inverse_candidate_count,
@@ -2072,6 +2234,9 @@ def _cross_series_fingerprint_payload(
                 error_count=scan.inverse_error_count,
                 warning_samples=scan.inverse_warnings,
                 error_samples=scan.inverse_errors,
+                relative_difference_distribution=(
+                    scan.inverse_relative_differences
+                ),
             ),
             "stale_join_risk": {
                 "risk_count": scan.stale_join_risk_count,
@@ -2466,6 +2631,7 @@ def _cross_series_consistency_payload(
     error_count: int,
     warning_samples: Sequence[object],
     error_samples: Sequence[object],
+    relative_difference_distribution: _RelativeDifferenceDistribution,
 ) -> dict[str, JSONValue]:
     return {
         "candidate_count": candidate_count,
@@ -2474,6 +2640,9 @@ def _cross_series_consistency_payload(
         "error_count": error_count,
         "warning_samples": _publish_safe_cross_samples(warning_samples),
         "error_samples": _publish_safe_cross_samples(error_samples),
+        "relative_difference_distribution": (
+            relative_difference_distribution.to_metadata()
+        ),
     }
 
 
@@ -2685,12 +2854,10 @@ def _cross_instrument_findings(
             warning_code="DOMAIN_CROSS_INSTRUMENT_INVERSE_WARNING",
             error_code="DOMAIN_CROSS_INSTRUMENT_INVERSE_ERROR",
             warning_message=(
-                "Inverse FX pair product differs from one beyond the "
-                "warning tolerance."
+                "Inverse FX pair product differs from one beyond the warning tolerance."
             ),
             error_message=(
-                "Inverse FX pair product differs from one beyond the error "
-                "tolerance."
+                "Inverse FX pair product differs from one beyond the error tolerance."
             ),
             warning_samples=scan.inverse_warnings,
             error_samples=scan.inverse_errors,

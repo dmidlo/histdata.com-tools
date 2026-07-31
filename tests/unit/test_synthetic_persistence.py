@@ -194,6 +194,9 @@ def test_generic_delivery_commit_recovers_after_atomic_rename(
         benchmark_evidence={"gate": "passed"},
         point_in_time_evidence_projection_ids=("projection:fixture",),
         point_in_time_evidence_decision_ids=("decision:fixture",),
+        cross_series_constraint_bundle_ids=("bundle:fixture",),
+        cross_series_constraint_window_ids=("window:fixture",),
+        cross_series_constraint_decision_ids=("cross-decision:fixture",),
         immutable_source_anchors=anchors,
         symbol_group_id=window.synchronization_unit_id,
         retention_plan=retention,
@@ -213,15 +216,30 @@ def test_generic_delivery_commit_recovers_after_atomic_rename(
     assert committed.manifest.quality.point_in_time_evidence_decision_ids == (
         "decision:fixture",
     )
+    assert committed.manifest.quality.cross_series_constraint_bundle_ids == (
+        "bundle:fixture",
+    )
+    assert committed.manifest.quality.cross_series_constraint_window_ids == (
+        "window:fixture",
+    )
+    assert committed.manifest.quality.cross_series_constraint_decision_ids == (
+        "cross-decision:fixture",
+    )
     legacy_quality = replace(
         committed.manifest.quality,
         point_in_time_evidence_projection_ids=(),
         point_in_time_evidence_decision_ids=(),
+        cross_series_constraint_bundle_ids=(),
+        cross_series_constraint_window_ids=(),
+        cross_series_constraint_decision_ids=(),
         quality_manifest_id="",
     )
     legacy_payload = legacy_quality.to_dict()
     assert "point_in_time_evidence_projection_ids" not in legacy_payload
     assert "point_in_time_evidence_decision_ids" not in legacy_payload
+    assert "cross_series_constraint_bundle_ids" not in legacy_payload
+    assert "cross_series_constraint_window_ids" not in legacy_payload
+    assert "cross_series_constraint_decision_ids" not in legacy_payload
     assert type(legacy_quality).from_dict(legacy_payload) == legacy_quality
     assert discover_reconstruction_manifests(
         root,

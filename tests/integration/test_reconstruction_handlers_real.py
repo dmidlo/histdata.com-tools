@@ -20,6 +20,10 @@ from typing import Any
 import pytest
 
 from histdatacom import reconstruction_cli
+from histdatacom.cross_series_constraints import (
+    CROSS_SERIES_CONSTRAINT_BUNDLE_ARTIFACT_KIND,
+    read_cross_series_constraint_bundle,
+)
 from histdatacom.orchestration.reconstruction import (
     ReconstructionCheckpointStore,
     ReconstructionStage,
@@ -175,7 +179,7 @@ def test_real_triangle_is_deterministic_and_recovers_post_rename_crash(
     source_ref = next(
         ref
         for ref in source_outcome.output_refs
-        if ref.kind == "reconstruction_source_stage_v1"
+        if ref.kind == "reconstruction_source_stage_v2"
     )
     source_manifest = json.loads(
         Path(source_ref.path).read_text(encoding="utf-8")
@@ -206,6 +210,55 @@ def test_real_triangle_is_deterministic_and_recovers_post_rename_crash(
         '"full_tick_rows_embedded":false' in item.to_json()
         for item in projections
     )
+    constraint_refs = tuple(
+        ArtifactRef.from_dict(value)
+        for value in source_manifest["cross_series_constraint_refs"].values()
+    )
+    assert all(
+        ref.kind == CROSS_SERIES_CONSTRAINT_BUNDLE_ARTIFACT_KIND
+        for ref in constraint_refs
+    )
+    constraint_bundles = tuple(
+        read_cross_series_constraint_bundle(ref.path) for ref in constraint_refs
+    )
+    assert [item.bundle_id for item in constraint_bundles] == (
+        source_manifest["cross_series_constraint_bundle_ids"]
+    )
+    assert all(item.windows for item in constraint_bundles)
+    assert all(len(item.to_json()) < 1_000_000 for item in constraint_bundles)
+    assert all(
+        '"full_tick_rows_embedded":false' in item.to_json()
+        for item in constraint_bundles
+    )
+    assert source_manifest["cross_series_constraint_use"]["status"] in {
+        "applied",
+        "not_applicable",
+    }
+    proposal_outcome = next(
+        outcome
+        for outcome in recovered.outcomes
+        if outcome.stage is ReconstructionStage.PROPOSAL
+    )
+    proposal_manifest = json.loads(
+        Path(proposal_outcome.output_refs[0].path).read_text(encoding="utf-8")
+    )
+    assert proposal_manifest["synchronization_constraint_window_id"] in (
+        source_manifest["cross_series_constraint_window_ids"]
+    )
+    assert proposal_manifest["cross_series_constraint_use"]["status"] == (
+        "applied"
+    )
+    proposal_ledger_ref = ArtifactRef.from_dict(
+        proposal_manifest["batch_ledger_ref"]
+    )
+    with Path(proposal_ledger_ref.path).open("rb") as stream:
+        proposal_rows = tuple(json.loads(line) for line in stream)
+    assert all("cross_series_constraint_use" in row for row in proposal_rows)
+    assert all(
+        row["cross_series_synchronization_constraint_window_id"]
+        == proposal_manifest["synchronization_constraint_window_id"]
+        for row in proposal_rows
+    )
     carving_outcome = next(
         outcome
         for outcome in recovered.outcomes
@@ -223,7 +276,7 @@ def test_real_triangle_is_deterministic_and_recovers_post_rename_crash(
     ledger_ref = ArtifactRef.from_dict(
         carving_manifest["carved_batch_ledger_ref"]
     )
-    assert ledger_ref.kind == "reconstruction_carved_batch_ledger_v1"
+    assert ledger_ref.kind == "reconstruction_carved_batch_ledger_v2"
     assert (
         ledger_ref.metadata["batch_count"]
         == carving_manifest["carved_batch_count"]
@@ -232,6 +285,7 @@ def test_real_triangle_is_deterministic_and_recovers_post_rename_crash(
         rows = tuple(json.loads(line) for line in stream)
     assert len(rows) == carving_manifest["carved_batch_count"]
     assert all("point_in_time_evidence_use" in row for row in rows)
+    assert all("cross_series_constraint_use" in row for row in rows)
     for stage in (
         ReconstructionStage.CROSS_SERIES_RECONCILIATION,
         ReconstructionStage.BROKER_TRANSFER,
@@ -248,6 +302,13 @@ def test_real_triangle_is_deterministic_and_recovers_post_rename_crash(
         assert downstream["point_in_time_evidence_decision_ids"] == (
             carving_manifest["point_in_time_evidence_decision_ids"]
         )
+        assert downstream["cross_series_constraint_bundle_ids"] == (
+            carving_manifest["cross_series_constraint_bundle_ids"]
+        )
+        assert downstream["cross_series_constraint_window_ids"] == (
+            carving_manifest["cross_series_constraint_window_ids"]
+        )
+        assert downstream["cross_series_constraint_decision_ids"]
     validation_outcome = next(
         item
         for item in recovered.outcomes
@@ -278,6 +339,24 @@ def test_real_triangle_is_deterministic_and_recovers_post_rename_crash(
         "applied",
         "not_applicable",
     }
+    assert descriptor["cross_series_constraint_bundle_ids"] == (
+        carving_manifest["cross_series_constraint_bundle_ids"]
+    )
+    assert descriptor["cross_series_constraint_window_ids"] == (
+        carving_manifest["cross_series_constraint_window_ids"]
+    )
+    assert descriptor["cross_series_constraint_validation_use"]["status"] == (
+        "applied"
+    )
+    assert list(first_manifest.quality.cross_series_constraint_bundle_ids) == (
+        descriptor["cross_series_constraint_bundle_ids"]
+    )
+    assert list(first_manifest.quality.cross_series_constraint_window_ids) == (
+        descriptor["cross_series_constraint_window_ids"]
+    )
+    assert list(
+        first_manifest.quality.cross_series_constraint_decision_ids
+    ) == (descriptor["cross_series_constraint_decision_ids"])
 
     second = _case(tmp_path / "concurrency-2", max_parallel_windows=2)
     second_state = asyncio.run(

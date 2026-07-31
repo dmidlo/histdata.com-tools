@@ -75,6 +75,13 @@ qualified artifacts; data rows remain in their source artifacts.
 }
 ```
 
+The omitted `evidence_policy` and `cross_series_constraint_policy` fields use
+their versioned HistData-only defaults. Supplying either field serializes the
+complete v1 policy object, changes plan/run identity, and is compatibility
+checked before source scanning. Merely adding `oanda` or another provider to a
+policy is rejected; a future provider requires a separately implemented and
+qualified adapter milestone.
+
 `window_size_ns` is a positive execution bound. Use smaller synchronized
 windows when dense monthly inputs would exceed the declared memory, scratch,
 or output policy; it changes plan and run identity and is never a hidden

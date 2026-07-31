@@ -125,7 +125,10 @@ The point-in-time evidence policy, record, projection, and use contracts are
 implemented by issue #483 and are consumed by the first-party HistData plan
 and runtime. See
 [Point-in-time reconstruction evidence contracts](reconstruction-evidence-contracts.md).
-The reserved synchronized cross-series constraint window, experiment manifest,
-v2 portfolio plan, and proposal-engine descriptor preserve the still-future
-handoffs to issues #484, #486, and #489 without falsely claiming that those
-implementations already exist.
+The synchronized cross-series policy, source binding, member, alignment,
+residual, window, bundle, and use contracts are implemented by issue #484 and
+consumed by the first-party HistData plan and runtime. See
+[Synchronized cross-series constraint contracts](cross-series-constraint-contracts.md).
+The experiment manifest, v2 portfolio plan, and proposal-engine descriptor
+remain reserved handoffs to issues #486 and #489; their registry presence does
+not make those future implementations executable.

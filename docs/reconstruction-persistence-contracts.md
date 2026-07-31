@@ -86,7 +86,9 @@ The top-level manifest embeds bounded summaries, never event rows:
 - quality evidence: either broker-transfer/fingerprint evidence for v1 or
   generic delivery profile/mode, final validation, benchmark and leakage
   artifact IDs, observed/synthetic/identity counts, identity-lineage hash, and
-  delivery action counts for v2;
+  delivery action counts for v2; the v2 quality hash also binds point-in-time
+  projection/use IDs and synchronized cross-series bundle, constraint-window,
+  and use-decision IDs;
 - replay evidence: partition-independent logical hash, physical byte aggregate,
   hash algorithms, writer/runtime version, compression, row-group size, and any
   canonicalized metadata exclusions; and

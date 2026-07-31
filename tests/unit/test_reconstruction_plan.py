@@ -15,6 +15,10 @@ import pyarrow as pa
 import pytest
 from pyarrow import ipc
 
+from histdatacom.cross_series_constraints import (
+    CrossSeriesConstraintPolicyV1,
+    read_cross_series_constraint_policy,
+)
 from histdatacom.data_quality.training_features import (
     enrich_tick_cache_with_training_features,
 )
@@ -263,6 +267,9 @@ def test_public_builder_is_deterministic_bounded_and_stage_consumable(
     assert first.artifact_graph["evidence_policy"].kind == (
         "reconstruction_evidence_policy_v1"
     )
+    assert first.artifact_graph["cross_series_constraint_policy"].kind == (
+        "cross_series_constraint_policy_v1"
+    )
 
     validate_synthetic_infill_plan_for_execution(restored)
     task = restored.workflow_requests[0].tasks[0]
@@ -283,6 +290,10 @@ def test_public_builder_is_deterministic_bounded_and_stage_consumable(
             restored.artifact_graph["execution_manifest"],
         )
         assert "evidence_policy" in loaded.execution_manifest.artifacts
+        assert (
+            "cross_series_constraint_policy"
+            in loaded.execution_manifest.artifacts
+        )
     broker_command = next(
         command
         for command in task.commands
@@ -358,6 +369,7 @@ def test_typed_public_facade_constructs_requests_and_preflights(
     assert "benchmark_manifest" in preflight.evidence_refs
     assert "information_audit" in preflight.evidence_refs
     assert "evidence_policy" in preflight.evidence_refs
+    assert "cross_series_constraint_policy" in preflight.evidence_refs
 
 
 def test_public_plan_spec_round_trips_and_applies_histdata_evidence_policy(
@@ -370,7 +382,16 @@ def test_public_plan_spec_round_trips_and_applies_histdata_evidence_policy(
         max_records=128,
         max_row_records=32,
     )
-    spec = replace(_public_spec(source_root, kwargs), evidence_policy=policy)
+    cross_policy = CrossSeriesConstraintPolicyV1(
+        nearest_prior_max_age_ns=4_000_000_000,
+        max_staleness_ns=20_000_000_000,
+        max_alignment_samples=32,
+    )
+    spec = replace(
+        _public_spec(source_root, kwargs),
+        evidence_policy=policy,
+        cross_series_constraint_policy=cross_policy,
+    )
 
     restored = ReconstructionPlanSpecV1.from_dict(spec.to_dict())
     plan_ref = ReconstructionClient().construct_plan(restored)
@@ -378,10 +399,17 @@ def test_public_plan_spec_round_trips_and_applies_histdata_evidence_policy(
     installed = read_reconstruction_evidence_policy(
         plan.artifact_graph["evidence_policy"].path
     )
+    installed_cross_policy = read_cross_series_constraint_policy(
+        plan.artifact_graph["cross_series_constraint_policy"].path
+    )
     assert restored.evidence_policy == policy
+    assert restored.cross_series_constraint_policy == cross_policy
     assert installed == policy
+    assert installed_cross_policy == cross_policy
     assert policy.policy_id in plan.run.configuration_ids
+    assert cross_policy.policy_id in plan.run.configuration_ids
     assert plan.artifact_graph["evidence_policy"].sha256
+    assert plan.artifact_graph["cross_series_constraint_policy"].sha256
 
 
 def test_public_plan_spec_rejects_alternate_evidence_provider() -> None:
@@ -408,6 +436,35 @@ def test_public_plan_spec_rejects_alternate_evidence_provider() -> None:
             start_period="202001",
             end_period="202001",
             evidence_policy=ReconstructionEvidencePolicyV1(
+                supported_provider_ids=("histdata.com", "oanda")
+            ),
+        )
+
+
+def test_public_plan_spec_defers_cross_series_broker_adapters() -> None:
+    with pytest.raises(
+        ReconstructionUnsupportedError,
+        match="cross-series policy supports only HistData.com",
+    ):
+        ReconstructionPlanSpecV1(
+            source_root="/tmp/ASCII/T",
+            feed_epoch_definition_path="/tmp/feed.json",
+            observation_operator_path="/tmp/observation.json",
+            market_context_corpus_path="/tmp/context.json",
+            cftc_positioning_corpus_path="/tmp/cftc.json",
+            benchmark_manifest_path="/tmp/benchmark.json",
+            motif_manifest_path="/tmp/motif.json",
+            motif_index_path="/tmp/index.json",
+            motif_qualification_path="/tmp/qualification.json",
+            motif_leakage_audit_path="/tmp/leakage.json",
+            artifact_root="/tmp/artifacts",
+            output_root="/tmp/output",
+            checkpoint_root="/tmp/checkpoints",
+            scratch_root="/tmp/scratch",
+            information_mode=InformationMode.EX_POST_RECONSTRUCTION,
+            start_period="202001",
+            end_period="202001",
+            cross_series_constraint_policy=CrossSeriesConstraintPolicyV1(
                 supported_provider_ids=("histdata.com", "oanda")
             ),
         )

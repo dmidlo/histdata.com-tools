@@ -1084,6 +1084,9 @@ class ReconstructionDeliveryQualityManifestV1:
     benchmark_artifact_ids: tuple[str, ...]
     point_in_time_evidence_projection_ids: tuple[str, ...] = ()
     point_in_time_evidence_decision_ids: tuple[str, ...] = ()
+    cross_series_constraint_bundle_ids: tuple[str, ...] = ()
+    cross_series_constraint_window_ids: tuple[str, ...] = ()
+    cross_series_constraint_decision_ids: tuple[str, ...] = ()
     quality_manifest_id: str = ""
     schema_version: str = (
         RECONSTRUCTION_DELIVERY_QUALITY_MANIFEST_SCHEMA_VERSION
@@ -1155,13 +1158,39 @@ class ReconstructionDeliveryQualityManifestV1:
         decisions = _normalized_text_tuple(
             self.point_in_time_evidence_decision_ids
         )
+        cross_bundles = _normalized_text_tuple(
+            self.cross_series_constraint_bundle_ids
+        )
+        cross_windows = _normalized_text_tuple(
+            self.cross_series_constraint_window_ids
+        )
+        cross_decisions = _normalized_text_tuple(
+            self.cross_series_constraint_decision_ids
+        )
         if len(projections) > 64 or len(decisions) > 256:
             raise ValueError("delivery quality evidence lineage is unbounded")
+        if (
+            len(cross_bundles) > 64
+            or len(cross_windows) > 256
+            or len(cross_decisions) > 256
+        ):
+            raise ValueError(
+                "delivery cross-series constraint lineage is unbounded"
+            )
         object.__setattr__(
             self, "point_in_time_evidence_projection_ids", projections
         )
         object.__setattr__(
             self, "point_in_time_evidence_decision_ids", decisions
+        )
+        object.__setattr__(
+            self, "cross_series_constraint_bundle_ids", cross_bundles
+        )
+        object.__setattr__(
+            self, "cross_series_constraint_window_ids", cross_windows
+        )
+        object.__setattr__(
+            self, "cross_series_constraint_decision_ids", cross_decisions
         )
         if self.final_validation_status != "passed":
             raise ValueError("final delivery validation is not passing")
@@ -1205,6 +1234,18 @@ class ReconstructionDeliveryQualityManifestV1:
         if self.point_in_time_evidence_decision_ids:
             payload["point_in_time_evidence_decision_ids"] = list(
                 self.point_in_time_evidence_decision_ids
+            )
+        if self.cross_series_constraint_bundle_ids:
+            payload["cross_series_constraint_bundle_ids"] = list(
+                self.cross_series_constraint_bundle_ids
+            )
+        if self.cross_series_constraint_window_ids:
+            payload["cross_series_constraint_window_ids"] = list(
+                self.cross_series_constraint_window_ids
+            )
+        if self.cross_series_constraint_decision_ids:
+            payload["cross_series_constraint_decision_ids"] = list(
+                self.cross_series_constraint_decision_ids
             )
         return payload
 
@@ -1271,6 +1312,18 @@ class ReconstructionDeliveryQualityManifestV1:
             point_in_time_evidence_decision_ids=_string_tuple(
                 data.get("point_in_time_evidence_decision_ids", ()),
                 "point_in_time_evidence_decision_ids",
+            ),
+            cross_series_constraint_bundle_ids=_string_tuple(
+                data.get("cross_series_constraint_bundle_ids", ()),
+                "cross_series_constraint_bundle_ids",
+            ),
+            cross_series_constraint_window_ids=_string_tuple(
+                data.get("cross_series_constraint_window_ids", ()),
+                "cross_series_constraint_window_ids",
+            ),
+            cross_series_constraint_decision_ids=_string_tuple(
+                data.get("cross_series_constraint_decision_ids", ()),
+                "cross_series_constraint_decision_ids",
             ),
             quality_manifest_id=str(data.get("quality_manifest_id", "")),
             schema_version=str(data.get("schema_version", "")),
@@ -2321,6 +2374,9 @@ def stage_delivery_reconstruction_publication(
     benchmark_evidence: Mapping[str, JSONValue],
     point_in_time_evidence_projection_ids: Sequence[str] = (),
     point_in_time_evidence_decision_ids: Sequence[str] = (),
+    cross_series_constraint_bundle_ids: Sequence[str] = (),
+    cross_series_constraint_window_ids: Sequence[str] = (),
+    cross_series_constraint_decision_ids: Sequence[str] = (),
     immutable_source_anchors: Iterable[SyntheticEventV1],
     symbol_group_id: str,
     retention_plan: ReconstructionRetentionPlanV1,
@@ -2388,6 +2444,15 @@ def stage_delivery_reconstruction_publication(
             ),
             point_in_time_evidence_decision_ids=(
                 point_in_time_evidence_decision_ids
+            ),
+            cross_series_constraint_bundle_ids=(
+                cross_series_constraint_bundle_ids
+            ),
+            cross_series_constraint_window_ids=(
+                cross_series_constraint_window_ids
+            ),
+            cross_series_constraint_decision_ids=(
+                cross_series_constraint_decision_ids
             ),
         )
         ensemble = ReconstructionEnsembleManifestV1(
@@ -3240,6 +3305,9 @@ def _delivery_quality_manifest(
     benchmark_evidence: Mapping[str, JSONValue],
     point_in_time_evidence_projection_ids: Sequence[str],
     point_in_time_evidence_decision_ids: Sequence[str],
+    cross_series_constraint_bundle_ids: Sequence[str],
+    cross_series_constraint_window_ids: Sequence[str],
+    cross_series_constraint_decision_ids: Sequence[str],
 ) -> ReconstructionDeliveryQualityManifestV1:
     manifest = group.manifest
     output_hash = reconstruction_streams_content_sha256(group.streams)
@@ -3256,6 +3324,15 @@ def _delivery_quality_manifest(
         ),
         "point_in_time_evidence_decision_ids": list(
             point_in_time_evidence_decision_ids
+        ),
+        "cross_series_constraint_bundle_ids": list(
+            cross_series_constraint_bundle_ids
+        ),
+        "cross_series_constraint_window_ids": list(
+            cross_series_constraint_window_ids
+        ),
+        "cross_series_constraint_decision_ids": list(
+            cross_series_constraint_decision_ids
         ),
     }
     quality_hash = _content_sha256(evidence)
@@ -3286,6 +3363,15 @@ def _delivery_quality_manifest(
         ),
         point_in_time_evidence_decision_ids=tuple(
             point_in_time_evidence_decision_ids
+        ),
+        cross_series_constraint_bundle_ids=tuple(
+            cross_series_constraint_bundle_ids
+        ),
+        cross_series_constraint_window_ids=tuple(
+            cross_series_constraint_window_ids
+        ),
+        cross_series_constraint_decision_ids=tuple(
+            cross_series_constraint_decision_ids
         ),
     )
 
@@ -3488,10 +3574,7 @@ def _delivery_axis_directory(
 
 
 def _partition_relative_path(symbol: str, event_date: str) -> str:
-    return (
-        f"symbol={_path_component(symbol)}/"
-        f"event_date={event_date}/part-00000.parquet"
-    )
+    return f"symbol={_path_component(symbol)}/event_date={event_date}/part-00000.parquet"
 
 
 def _safe_relative_path(value: str) -> str:

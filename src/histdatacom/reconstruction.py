@@ -19,6 +19,9 @@ from itertools import pairwise
 from pathlib import Path
 from typing import Any, cast
 
+from histdatacom.cross_series_constraints import (
+    CrossSeriesConstraintPolicyV1,
+)
 from histdatacom.manifest_store import ManifestStatusStore
 from histdatacom.orchestration.client import (
     OrchestrationJobHandle,
@@ -198,6 +201,9 @@ class ReconstructionPlanSpecV1:
     evidence_policy: ReconstructionEvidencePolicyV1 = field(
         default_factory=ReconstructionEvidencePolicyV1
     )
+    cross_series_constraint_policy: CrossSeriesConstraintPolicyV1 = field(
+        default_factory=CrossSeriesConstraintPolicyV1
+    )
     broker_delivery_artifact: ArtifactRef | None = None
     source_format: str = RECONSTRUCTION_SOURCE_FORMAT
     timeframe: str = RECONSTRUCTION_TIMEFRAME
@@ -246,6 +252,25 @@ class ReconstructionPlanSpecV1:
         ):
             raise ReconstructionUnsupportedError(
                 "the current evidence policy supports only HistData.com"
+            )
+        if not isinstance(
+            self.cross_series_constraint_policy,
+            CrossSeriesConstraintPolicyV1,
+        ):
+            raise ReconstructionUnsupportedError(
+                "cross_series_constraint_policy must use the installed v1 contract"
+            )
+        if self.cross_series_constraint_policy.supported_provider_ids != (
+            CURRENT_EVIDENCE_SOURCE_PROVIDER_ID,
+        ):
+            raise ReconstructionUnsupportedError(
+                "the current cross-series policy supports only HistData.com"
+            )
+        if self.cross_series_constraint_policy.required_symbols != (
+            RECONSTRUCTION_SYMBOLS
+        ):
+            raise ReconstructionUnsupportedError(
+                "the cross-series policy must cover the complete HistData triangle"
             )
         _validate_public_input_contract(
             source_format=self.source_format,
@@ -323,6 +348,9 @@ class ReconstructionPlanSpecV1:
             "window_size_ns": self.window_size_ns,
             "delivery_mode": self.delivery_mode.value,
             "evidence_policy": self.evidence_policy.to_dict(),
+            "cross_series_constraint_policy": (
+                self.cross_series_constraint_policy.to_dict()
+            ),
             "broker_delivery_artifact": (
                 self.broker_delivery_artifact.to_dict()
                 if self.broker_delivery_artifact is not None
@@ -349,6 +377,14 @@ class ReconstructionPlanSpecV1:
             if evidence_payload is None
             else ReconstructionEvidencePolicyV1.from_dict(
                 _mapping(evidence_payload)
+            )
+        )
+        cross_series_payload = data.get("cross_series_constraint_policy")
+        cross_series_constraint_policy = (
+            CrossSeriesConstraintPolicyV1()
+            if cross_series_payload is None
+            else CrossSeriesConstraintPolicyV1.from_dict(
+                _mapping(cross_series_payload)
             )
         )
         return cls(
@@ -405,6 +441,7 @@ class ReconstructionPlanSpecV1:
                 str(data.get("delivery_mode", "modern_reference"))
             ),
             evidence_policy=evidence_policy,
+            cross_series_constraint_policy=cross_series_constraint_policy,
             broker_delivery_artifact=broker_ref,
             source_format=str(data.get("source_format", "ascii")),
             timeframe=str(data.get("timeframe", "T")),
@@ -1030,6 +1067,9 @@ class ReconstructionClient:
                 information_mode=spec.information_mode,
                 delivery_mode=spec.delivery_mode,
                 evidence_policy=spec.evidence_policy,
+                cross_series_constraint_policy=(
+                    spec.cross_series_constraint_policy
+                ),
                 broker_delivery_artifact=spec.broker_delivery_artifact,
             )
             validate_synthetic_infill_plan_for_execution(plan)
@@ -2208,6 +2248,7 @@ __all__ = [
     "ReconstructionClient",
     "ReconstructionCompatibilityReportV1",
     "ReconstructionCompatibilityStatus",
+    "CrossSeriesConstraintPolicyV1",
     "ReconstructionEvidencePolicyV1",
     "ReconstructionExecutionRequestV1",
     "ReconstructionExitCode",

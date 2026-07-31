@@ -53,6 +53,8 @@ Works on macOS, Linux, and Windows.
     - [Marked Add-Thin Sequence Challenger](#marked-add-thin-sequence-challenger)
     - [Empirical Reference-Motif Index](#empirical-reference-motif-index)
     - [Real Modern Reference-Motif Library](#real-modern-reference-motif-library)
+    - [Point-in-Time Reconstruction Evidence](#point-in-time-reconstruction-evidence)
+    - [Synchronized Cross-Series Constraints](#synchronized-cross-series-constraints)
     - [Empirical Motif Candidate Generation](#empirical-motif-candidate-generation)
     - [Historical Candidate Carving](#historical-candidate-carving)
     - [Cross-Currency Reconciliation](#cross-currency-reconciliation)
@@ -2908,6 +2910,31 @@ alternate-provider, and broker evidence adapters remain later-milestone work.
 See
 [`docs/reconstruction-evidence-contracts.md`](docs/reconstruction-evidence-contracts.md)
 for grain, availability, fallback, boundedness, and audit semantics.
+
+#### Synchronized Cross-Series Constraints
+
+The plan now also hash-binds a provider-neutral cross-series constraint policy.
+For the current milestone, source enrichment compiles only the complete
+HistData.com EURGBP/EURUSD/GBPUSD ASCII/T core window. Each bounded bundle
+strongly identifies dataset, series, partition, event identity, duplicate
+timestamps, coverage, availability, alignment support, #331 fingerprint
+content, residual severity, and readiness.
+
+Exact event-sequence alignment is preferred. Bounded nearest-prior evidence is
+diagnostic only: it never forward-fills, never turns timestamps into row
+identity, and never changes observed quotes. Proposal consumes one explicitly
+supported synchronization instant and records its constraint-window ID;
+carving, reconciliation, delivery, and validation preserve bundle, window, and
+use-decision IDs through the committed delivery-quality manifest.
+Contradictory or incomplete groups remain available for anomaly labeling but
+fail closed for proposal and every later production stage.
+
+The contracts establish the provider-neutral seam required by future dataset
+adapters, but OANDA, other historical providers, live feeds, and
+broker-specific adaptation remain later-milestone work and are rejected by the
+current planner. See
+[`docs/cross-series-constraint-contracts.md`](docs/cross-series-constraint-contracts.md)
+for alignment, point-in-time, readiness, lineage, and runtime semantics.
 
 #### Empirical Motif Candidate Generation
 

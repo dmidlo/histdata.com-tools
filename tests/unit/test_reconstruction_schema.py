@@ -201,6 +201,10 @@ def test_registry_explains_legacy_training_event_and_future_seams() -> None:
     training = contracts[TRAINING_SCHEMA_VERSION]
     event = contracts["histdatacom.synthetic-event.v1"]
     evidence = contracts["histdatacom.reconstruction-evidence-projection.v1"]
+    cross_constraint = contracts[
+        "histdatacom.cross-series-constraint-window.v1"
+    ]
+    cross_bundle = contracts["histdatacom.cross-series-constraint-bundle.v1"]
     portfolio = contracts[PORTFOLIO_PLAN_SCHEMA_VERSION]
 
     assert "histdatacom.time-series-fingerprint.v1" in contracts
@@ -243,6 +247,27 @@ def test_registry_explains_legacy_training_event_and_future_seams() -> None:
         "validation",
         "audit",
     )
+    expected_cross_stages = (
+        "source_enrichment",
+        "proposal",
+        "carving",
+        "cross_series_reconciliation",
+        "validation",
+    )
+    assert cross_constraint.status is ReconstructionContractStatus.REQUIRED
+    assert cross_constraint.family == "cross_series_constraint"
+    assert cross_constraint.consumer_stages == expected_cross_stages
+    assert cross_bundle.status is ReconstructionContractStatus.REQUIRED
+    assert cross_bundle.consumer_stages == expected_cross_stages
+    assert {
+        "support_start_ns",
+        "support_end_ns",
+        "available_at_ns",
+        "as_of_ns",
+        "alignment",
+        "limiting_symbols",
+        "status",
+    } <= {item.name for item in cross_constraint.fields}
     assert portfolio.status is ReconstructionContractStatus.RESERVED
     assert "#489" in portfolio.audit_note
     for contract in contracts.values():

@@ -25,6 +25,21 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
 
+from histdatacom.cross_series_constraints import (
+    CROSS_SERIES_CONSTRAINT_BUNDLE_ARTIFACT_KIND,
+    CROSS_SERIES_CONSTRAINT_POLICY_ARTIFACT_KIND,
+    CrossSeriesConstraintBundleV1,
+    CrossSeriesConstraintPolicyV1,
+    CrossSeriesConstraintUseStatus,
+    CrossSeriesConstraintUseV1,
+    CrossSeriesSourceBindingV1,
+    compile_histdata_cross_series_constraints,
+    cross_series_constraint_use,
+    read_cross_series_constraint_bundle,
+    read_cross_series_constraint_policy,
+    require_constraint_support_for_synchronization_time,
+    select_constraint_synchronization_time,
+)
 from histdatacom.data_analytics.feed_epochs_v2 import (
     read_active_time_feed_epoch_definition,
 )
@@ -143,26 +158,26 @@ from histdatacom.synthetic.streaming import (
 )
 
 RECONSTRUCTION_STAGE_ARTIFACT_SCHEMA_VERSION = (
-    "histdatacom.reconstruction-stage-artifact.v1"
+    "histdatacom.reconstruction-stage-artifact.v2"
 )
 RECONSTRUCTION_STAGING_DESCRIPTOR_SCHEMA_VERSION = (
-    "histdatacom.reconstruction-staging-descriptor.v1"
+    "histdatacom.reconstruction-staging-descriptor.v2"
 )
 
-SOURCE_STAGE_ARTIFACT_KIND = "reconstruction_source_stage_v1"
-PROPOSAL_STAGE_ARTIFACT_KIND = "reconstruction_proposal_stage_v1"
-CARVING_STAGE_ARTIFACT_KIND = "reconstruction_carving_stage_v1"
-CROSS_STAGE_ARTIFACT_KIND = "reconstruction_cross_stage_v1"
-DELIVERY_STAGE_ARTIFACT_KIND = "reconstruction_delivery_stage_v1"
-VALIDATION_STAGE_ARTIFACT_KIND = "reconstruction_validation_stage_v1"
-STAGING_DESCRIPTOR_ARTIFACT_KIND = "reconstruction_staging_descriptor_v1"
+SOURCE_STAGE_ARTIFACT_KIND = "reconstruction_source_stage_v2"
+PROPOSAL_STAGE_ARTIFACT_KIND = "reconstruction_proposal_stage_v2"
+CARVING_STAGE_ARTIFACT_KIND = "reconstruction_carving_stage_v2"
+CROSS_STAGE_ARTIFACT_KIND = "reconstruction_cross_stage_v2"
+DELIVERY_STAGE_ARTIFACT_KIND = "reconstruction_delivery_stage_v2"
+VALIDATION_STAGE_ARTIFACT_KIND = "reconstruction_validation_stage_v2"
+STAGING_DESCRIPTOR_ARTIFACT_KIND = "reconstruction_staging_descriptor_v2"
 
 _SOURCE_INPUT_STREAM_KIND = "reconstruction_observed_input_stream_v1"
 _SOURCE_CORE_STREAM_KIND = "reconstruction_observed_core_stream_v1"
 _CANDIDATE_STREAM_KIND = "reconstruction_candidate_stream_v1"
-_CANDIDATE_BATCH_LEDGER_KIND = "reconstruction_candidate_batch_ledger_v1"
+_CANDIDATE_BATCH_LEDGER_KIND = "reconstruction_candidate_batch_ledger_v2"
 _CARVED_STREAM_KIND = "reconstruction_carved_stream_v1"
-_CARVED_BATCH_LEDGER_KIND = "reconstruction_carved_batch_ledger_v1"
+_CARVED_BATCH_LEDGER_KIND = "reconstruction_carved_batch_ledger_v2"
 _CROSS_STREAM_KIND = "reconstruction_cross_reconciled_stream_v1"
 _DELIVERED_STREAM_KIND = "reconstruction_delivered_stream_v1"
 _MAX_CANDIDATE_BATCH_LEDGER_LINE_BYTES = 1_048_576
@@ -270,6 +285,16 @@ def source_enrichment_handler(
                 "source_quality_refused",
                 message="; ".join(item.reason for item in refused_evidence),
             )
+        cross_bundle, cross_ref, cross_use = _compile_cross_series_constraints(
+            invocation,
+            plan,
+            core_events,
+        )
+        if cross_use.status is CrossSeriesConstraintUseStatus.REFUSED:
+            return invocation.refused(
+                "source_cross_series_refused",
+                message=cross_use.reason,
+            )
         try:
             context, positioning = _window_context(plan, invocation)
             observation_operator = read_observation_operator_artifact(
@@ -337,6 +362,15 @@ def source_enrichment_handler(
                 symbol: item.to_dict()
                 for symbol, item in sorted(evidence_uses.items())
             },
+            "cross_series_constraint_refs": {
+                cross_bundle.bundle_id: cross_ref.to_dict()
+            },
+            "cross_series_constraint_bundle_ids": [cross_bundle.bundle_id],
+            "cross_series_constraint_window_ids": [
+                item.constraint_window_id for item in cross_bundle.windows
+            ],
+            "cross_series_constraint_use": cross_use.to_dict(),
+            "cross_series_constraint_decision_ids": [cross_use.decision_id],
             "immutable_anchor_content_sha256": anchor_hash,
             "source_row_identity": {
                 "inventory_basis": "zero-based-arrow-row-ordinal-v1",
@@ -360,7 +394,7 @@ def source_enrichment_handler(
                 "resolved immutable source, point-in-time quality evidence, "
                 "feed epoch, calendar, and CFTC context"
             ),
-            additional_refs=tuple(evidence_refs.values()),
+            additional_refs=(*tuple(evidence_refs.values()), cross_ref),
         )
     except asyncio.CancelledError:
         raise
@@ -383,6 +417,18 @@ def proposal_handler(
         plan = load_reconstruction_stage_plan(invocation.command)
         source = _prior_manifest(invocation, SOURCE_STAGE_ARTIFACT_KIND)
         streams = _read_stream_map(source, "input_stream_refs")
+        cross_bundles = _read_cross_series_constraints(source)
+        cross_use = cross_series_constraint_use(
+            cross_bundles,
+            stage="proposal",
+            used_at_ns=_evidence_stage_used_at(plan, invocation),
+            policy=_read_cross_series_constraint_policy(plan),
+        )
+        if cross_use.status is CrossSeriesConstraintUseStatus.REFUSED:
+            return invocation.refused(
+                "proposal_cross_series_refused",
+                message=cross_use.reason,
+            )
         index = read_modern_reference_motif_index(
             plan.execution_manifest.artifacts["motif_index"].path
         )
@@ -394,11 +440,16 @@ def proposal_handler(
             streams,
             conditions=conditions,
         )
-        synchronization_event_time_ns = _proposal_synchronization_event_time(
-            streams,
-            conditions=conditions,
+        (
+            synchronization_event_time_ns,
+            synchronization_constraint_window_id,
+        ) = select_constraint_synchronization_time(
+            cross_bundles,
             start_ns=invocation.task.window.core_start_ns,
             end_ns=invocation.task.window.core_end_ns,
+        )
+        require_constraint_support_for_synchronization_time(
+            cross_bundles, synchronization_event_time_ns
         )
         ledger_directory = _stage_directory(invocation, "proposal-batches")
         ledger_directory.mkdir(parents=True, exist_ok=True)
@@ -460,10 +511,15 @@ def proposal_handler(
                         else None
                     ),
                 )
+                candidate_evidence = _candidate_evidence(batch)
+                candidate_evidence["cross_series_constraint_use"] = (
+                    cross_use.to_dict()
+                )
+                candidate_evidence[
+                    "cross_series_synchronization_constraint_window_id"
+                ] = synchronization_constraint_window_id
                 encoded_evidence = (
-                    canonical_contract_json(_candidate_evidence(batch)).encode(
-                        "utf-8"
-                    )
+                    canonical_contract_json(candidate_evidence).encode("utf-8")
                     + b"\n"
                 )
                 if (
@@ -540,6 +596,9 @@ def proposal_handler(
             "refused_interval_count": refused,
             "synchronization_anchor_symbol": synchronization_anchor_symbol,
             "synchronization_event_time_ns": synchronization_event_time_ns,
+            "synchronization_constraint_window_id": (
+                synchronization_constraint_window_id
+            ),
             "motif_index_id": index.index_id,
             "immutable_anchor_content_sha256": source[
                 "immutable_anchor_content_sha256"
@@ -548,6 +607,25 @@ def proposal_handler(
                 "point_in_time_evidence_refs"
             ],
             "point_in_time_evidence_use": source["point_in_time_evidence_use"],
+            "cross_series_constraint_refs": source[
+                "cross_series_constraint_refs"
+            ],
+            "cross_series_constraint_bundle_ids": source[
+                "cross_series_constraint_bundle_ids"
+            ],
+            "cross_series_constraint_window_ids": source[
+                "cross_series_constraint_window_ids"
+            ],
+            "cross_series_constraint_use": cross_use.to_dict(),
+            "cross_series_constraint_decision_ids": [
+                *(
+                    str(value)
+                    for value in _sequence(
+                        source["cross_series_constraint_decision_ids"]
+                    )
+                ),
+                cross_use.decision_id,
+            ],
         }
         manifest = _write_json_artifact(
             invocation,
@@ -608,6 +686,18 @@ def carving_handler(
         )
         evidence_by_symbol = _read_source_evidence(source)
         evidence_policy = _read_evidence_policy(plan)
+        cross_bundles = _read_cross_series_constraints(source)
+        cross_use = cross_series_constraint_use(
+            cross_bundles,
+            stage="carving",
+            used_at_ns=_evidence_stage_used_at(plan, invocation),
+            policy=_read_cross_series_constraint_policy(plan),
+        )
+        if cross_use.status is CrossSeriesConstraintUseStatus.REFUSED:
+            return invocation.refused(
+                "carving_cross_series_refused",
+                message=cross_use.reason,
+            )
         index = read_modern_reference_motif_index(
             plan.execution_manifest.artifacts["motif_index"].path
         )
@@ -666,6 +756,7 @@ def carving_handler(
             carved_evidence["point_in_time_evidence_use"] = (
                 evidence_use.to_dict()
             )
+            carved_evidence["cross_series_constraint_use"] = cross_use.to_dict()
             encoded_evidence = (
                 canonical_contract_json(carved_evidence).encode("utf-8") + b"\n"
             )
@@ -765,6 +856,25 @@ def carving_handler(
                 item.status is ReconstructionEvidenceUseStatus.REFUSED
                 for item in evidence_decisions
             ),
+            "cross_series_constraint_refs": source[
+                "cross_series_constraint_refs"
+            ],
+            "cross_series_constraint_bundle_ids": source[
+                "cross_series_constraint_bundle_ids"
+            ],
+            "cross_series_constraint_window_ids": source[
+                "cross_series_constraint_window_ids"
+            ],
+            "cross_series_constraint_use": cross_use.to_dict(),
+            "cross_series_constraint_decision_ids": [
+                *(
+                    str(value)
+                    for value in _sequence(
+                        proposal["cross_series_constraint_decision_ids"]
+                    )
+                ),
+                cross_use.decision_id,
+            ],
         }
         manifest = _write_json_artifact(
             invocation,
@@ -815,6 +925,18 @@ def cross_series_reconciliation_handler(
         source = _prior_manifest(invocation, SOURCE_STAGE_ARTIFACT_KIND)
         carving = _prior_manifest(invocation, CARVING_STAGE_ARTIFACT_KIND)
         streams = _read_stream_map(carving, "stream_refs")
+        cross_bundles = _read_cross_series_constraints(source)
+        cross_use = cross_series_constraint_use(
+            cross_bundles,
+            stage="cross_series_reconciliation",
+            used_at_ns=_evidence_stage_used_at(plan, invocation),
+            policy=_read_cross_series_constraint_policy(plan),
+        )
+        if cross_use.status is CrossSeriesConstraintUseStatus.REFUSED:
+            return invocation.refused(
+                "reconciliation_cross_series_refused",
+                message=cross_use.reason,
+            )
         condition = CrossCurrencyConditionV1.from_dict(
             _mapping(source["cross_condition"])
         )
@@ -854,6 +976,25 @@ def cross_series_reconciliation_handler(
             ],
             "point_in_time_evidence_refusal_count": carving[
                 "point_in_time_evidence_refusal_count"
+            ],
+            "cross_series_constraint_refs": source[
+                "cross_series_constraint_refs"
+            ],
+            "cross_series_constraint_bundle_ids": source[
+                "cross_series_constraint_bundle_ids"
+            ],
+            "cross_series_constraint_window_ids": source[
+                "cross_series_constraint_window_ids"
+            ],
+            "cross_series_constraint_use": cross_use.to_dict(),
+            "cross_series_constraint_decision_ids": [
+                *(
+                    str(value)
+                    for value in _sequence(
+                        carving["cross_series_constraint_decision_ids"]
+                    )
+                ),
+                cross_use.decision_id,
             ],
         }
         manifest = _write_json_artifact(
@@ -936,6 +1077,18 @@ def delivery_projection_handler(
             "point_in_time_evidence_refusal_count": cross[
                 "point_in_time_evidence_refusal_count"
             ],
+            "cross_series_constraint_refs": cross[
+                "cross_series_constraint_refs"
+            ],
+            "cross_series_constraint_bundle_ids": cross[
+                "cross_series_constraint_bundle_ids"
+            ],
+            "cross_series_constraint_window_ids": cross[
+                "cross_series_constraint_window_ids"
+            ],
+            "cross_series_constraint_decision_ids": cross[
+                "cross_series_constraint_decision_ids"
+            ],
         }
         manifest = _write_json_artifact(
             invocation,
@@ -999,6 +1152,21 @@ def validation_handler(
             return invocation.refused(
                 "point_in_time_evidence_refused",
                 message=validation_evidence.reason,
+            )
+        cross_bundles = _read_cross_series_constraints(source)
+        cross_validation_use = cross_series_constraint_use(
+            cross_bundles,
+            stage="validation",
+            used_at_ns=_evidence_stage_used_at(plan, invocation),
+            policy=_read_cross_series_constraint_policy(plan),
+        )
+        if (
+            cross_validation_use.status
+            is CrossSeriesConstraintUseStatus.REFUSED
+        ):
+            return invocation.refused(
+                "validation_cross_series_refused",
+                message=cross_validation_use.reason,
             )
         core_streams = _read_stream_map(source, "core_stream_refs")
         anchors = tuple(
@@ -1069,6 +1237,27 @@ def validation_handler(
                 ),
                 validation_evidence.decision_id,
             ),
+            cross_series_constraint_bundle_ids=tuple(
+                str(value)
+                for value in _sequence(
+                    delivery["cross_series_constraint_bundle_ids"]
+                )
+            ),
+            cross_series_constraint_window_ids=tuple(
+                str(value)
+                for value in _sequence(
+                    delivery["cross_series_constraint_window_ids"]
+                )
+            ),
+            cross_series_constraint_decision_ids=(
+                *(
+                    str(value)
+                    for value in _sequence(
+                        delivery["cross_series_constraint_decision_ids"]
+                    )
+                ),
+                cross_validation_use.decision_id,
+            ),
             immutable_source_anchors=anchors,
             symbol_group_id=invocation.task.window.synchronization_unit_id,
             retention_plan=retention,
@@ -1098,6 +1287,18 @@ def validation_handler(
             ],
             "point_in_time_evidence_validation_use": (
                 validation_evidence.to_dict()
+            ),
+            "cross_series_constraint_bundle_ids": list(
+                staged.manifest.quality.cross_series_constraint_bundle_ids
+            ),
+            "cross_series_constraint_window_ids": list(
+                staged.manifest.quality.cross_series_constraint_window_ids
+            ),
+            "cross_series_constraint_decision_ids": list(
+                staged.manifest.quality.cross_series_constraint_decision_ids
+            ),
+            "cross_series_constraint_validation_use": (
+                cross_validation_use.to_dict()
             ),
         }
         descriptor = _write_json_artifact(
@@ -1465,6 +1666,73 @@ def _compile_source_evidence(
     return tuple(projections), refs, uses
 
 
+def _compile_cross_series_constraints(
+    invocation: ReconstructionStageInvocationV1,
+    plan: ReconstructionStagePlanV1,
+    source_events: Mapping[str, Sequence[SyntheticEventV1]],
+) -> tuple[
+    CrossSeriesConstraintBundleV1,
+    ArtifactRef,
+    CrossSeriesConstraintUseV1,
+]:
+    """Compile one bounded #331-backed synchronized evidence bundle."""
+    policy = _read_cross_series_constraint_policy(plan)
+    window = invocation.task.window
+    selected_partitions = plan.source_inventory.partitions_for_window(window)
+    dataset_version_id = invocation.run.source_version_ids[0]
+    bindings = tuple(
+        CrossSeriesSourceBindingV1(
+            provider_id="histdata.com",
+            dataset_version_id=dataset_version_id,
+            symbol=partition.symbol,
+            period=partition.period,
+            series_id=(
+                f"ascii-tick:{partition.symbol}:{partition.period}:"
+                f"sha256:{partition.artifact.sha256}"
+            ),
+            source_partition_id=partition.partition_id,
+            source_artifact_id=(
+                f"{partition.artifact.kind}:sha256:{partition.artifact.sha256}"
+            ),
+            source_artifact_sha256=partition.artifact.sha256,
+        )
+        for partition in selected_partitions
+    )
+    bundle = compile_histdata_cross_series_constraints(
+        source_events,
+        source_bindings=bindings,
+        synchronization_unit_id=window.synchronization_unit_id,
+        evidence_window_id=window.window_id,
+        dataset_version_ids=invocation.run.source_version_ids,
+        support_start_ns=window.core_start_ns,
+        support_end_ns=window.core_end_ns,
+        available_at_ns=window.core_end_ns,
+        as_of_ns=_evidence_stage_used_at(plan, invocation),
+        information_mode=plan.configuration.information_policy.information_mode,
+        policy=policy,
+    )
+    ref = _write_json_artifact(
+        invocation,
+        "cross-series-constraints",
+        CROSS_SERIES_CONSTRAINT_BUNDLE_ARTIFACT_KIND,
+        bundle.to_dict(),
+        metadata={
+            "bundle_id": bundle.bundle_id,
+            "synchronization_unit_id": bundle.synchronization_unit_id,
+            "status": bundle.status.value,
+            "window_count": len(bundle.windows),
+            "full_tick_rows_embedded": False,
+        },
+    )
+    use = cross_series_constraint_use(
+        (bundle,),
+        stage="source_enrichment",
+        used_at_ns=_evidence_stage_used_at(plan, invocation),
+        policy=policy,
+    )
+    return bundle, ref, use
+
+
 def _read_evidence_policy(
     plan: ReconstructionStagePlanV1,
 ) -> ReconstructionEvidencePolicyV1:
@@ -1477,6 +1745,45 @@ def _read_evidence_policy(
     if policy_ref.metadata.get("policy_id") != policy.policy_id:
         raise ValueError("evidence policy artifact identity differs")
     return policy
+
+
+def _read_cross_series_constraint_policy(
+    plan: ReconstructionStagePlanV1,
+) -> CrossSeriesConstraintPolicyV1:
+    """Restore the required strong cross-series constraint policy."""
+    policy_ref = plan.execution_manifest.artifacts.get(
+        "cross_series_constraint_policy"
+    )
+    if policy_ref is None:
+        raise ValueError("stage plan lacks a cross-series constraint policy")
+    if policy_ref.kind != CROSS_SERIES_CONSTRAINT_POLICY_ARTIFACT_KIND:
+        raise ValueError("cross-series policy artifact has the wrong kind")
+    verify_artifact_ref(policy_ref)
+    policy = read_cross_series_constraint_policy(policy_ref.path)
+    if policy_ref.metadata.get("policy_id") != policy.policy_id:
+        raise ValueError("cross-series policy artifact identity differs")
+    return policy
+
+
+def _read_cross_series_constraints(
+    source_manifest: Mapping[str, Any],
+) -> tuple[CrossSeriesConstraintBundleV1, ...]:
+    """Restore and verify source-stage synchronized constraint sidecars."""
+    bundles: list[CrossSeriesConstraintBundleV1] = []
+    for value in _mapping(
+        source_manifest["cross_series_constraint_refs"]
+    ).values():
+        ref = ArtifactRef.from_dict(_mapping(value))
+        if ref.kind != CROSS_SERIES_CONSTRAINT_BUNDLE_ARTIFACT_KIND:
+            raise ValueError("cross-series constraint reference has wrong kind")
+        verify_artifact_ref(ref)
+        bundle = read_cross_series_constraint_bundle(ref.path)
+        if ref.metadata.get("bundle_id") != bundle.bundle_id:
+            raise ValueError("cross-series constraint bundle identity differs")
+        bundles.append(bundle)
+    if not bundles:
+        raise ValueError("source stage lacks cross-series constraints")
+    return tuple(sorted(bundles, key=lambda item: item.bundle_id))
 
 
 def _read_source_evidence(
@@ -2306,7 +2613,9 @@ def _write_product_manifest_mirror(
 def _prior_manifest(
     invocation: ReconstructionStageInvocationV1, kind: str
 ) -> Mapping[str, Any]:
-    return _read_json_ref(_prior_ref(invocation, kind))
+    manifest = _read_json_ref(_prior_ref(invocation, kind))
+    _require_schema(manifest, RECONSTRUCTION_STAGE_ARTIFACT_SCHEMA_VERSION)
+    return manifest
 
 
 def _prior_ref(

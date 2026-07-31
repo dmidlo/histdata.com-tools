@@ -26,6 +26,10 @@ from typing import Any, cast
 from histdatacom.data_analytics.feed_epochs_v2 import (
     read_active_time_feed_epoch_definition,
 )
+from histdatacom.cross_series_constraints import (
+    CROSS_SERIES_CONSTRAINT_POLICY_ARTIFACT_KIND,
+    CrossSeriesConstraintPolicyV1,
+)
 from histdatacom.datasets import (
     DatasetContractError,
     DatasetFailureCode,
@@ -168,18 +172,18 @@ TICK_ONLY_INPUT_POLICY = (
 
 FIRST_PARTY_RECONSTRUCTION_HANDLERS: Mapping[ReconstructionStage, str] = {
     ReconstructionStage.SOURCE_ENRICHMENT: (
-        "histdatacom.reconstruction.source-enrichment.v2"
+        "histdatacom.reconstruction.source-enrichment.v3"
     ),
-    ReconstructionStage.PROPOSAL: "histdatacom.reconstruction.proposal.v6",
-    ReconstructionStage.CARVING: "histdatacom.reconstruction.carving.v3",
+    ReconstructionStage.PROPOSAL: "histdatacom.reconstruction.proposal.v7",
+    ReconstructionStage.CARVING: "histdatacom.reconstruction.carving.v4",
     ReconstructionStage.CROSS_SERIES_RECONCILIATION: (
-        "histdatacom.reconstruction.cross-series-reconciliation.v4"
+        "histdatacom.reconstruction.cross-series-reconciliation.v5"
     ),
     ReconstructionStage.BROKER_TRANSFER: (
-        "histdatacom.reconstruction.delivery-projection.v1"
+        "histdatacom.reconstruction.delivery-projection.v2"
     ),
     ReconstructionStage.VALIDATION: (
-        "histdatacom.reconstruction.validation.v1"
+        "histdatacom.reconstruction.validation.v2"
     ),
     ReconstructionStage.ATOMIC_PARTITION_COMMIT: (
         "histdatacom.reconstruction.atomic-partition-commit.v1"
@@ -981,7 +985,10 @@ class ReconstructionPlanExecutionManifestV1:
         }
         if self.delivery_mode is ReconstructionDeliveryMode.BROKER_CONDITIONED:
             required.add("broker_delivery")
-        allowed = required | {"evidence_policy"}
+        allowed = required | {
+            "evidence_policy",
+            "cross_series_constraint_policy",
+        }
         if not required.issubset(artifacts) or not set(artifacts).issubset(
             allowed
         ):
@@ -1481,6 +1488,7 @@ def build_synthetic_infill_plan(
     carving_constraints: HistoricalCarvingConstraintSetV1 | None = None,
     cross_currency_config: CrossCurrencyReconciliationConfigV1 | None = None,
     evidence_policy: ReconstructionEvidencePolicyV1 | None = None,
+    cross_series_constraint_policy: CrossSeriesConstraintPolicyV1 | None = None,
 ) -> SyntheticInfillPlanV1:
     """Resolve real artifacts and build one executable first-party plan."""
     selected_symbols = _symbols(tuple(symbols))
@@ -1604,8 +1612,7 @@ def build_synthetic_infill_plan(
         CURRENT_EVIDENCE_SOURCE_PROVIDER_ID,
     ):
         raise ReconstructionPlanCompatibilityError(
-            "the current reconstruction evidence policy supports only "
-            "HistData.com"
+            "the current reconstruction evidence policy supports only HistData.com"
         )
     evidence_policy_ref = _write_contract_artifact(
         selected_evidence_policy,
@@ -1613,6 +1620,26 @@ def build_synthetic_infill_plan(
         prefix="reconstruction-evidence-policy",
         kind=RECONSTRUCTION_EVIDENCE_POLICY_ARTIFACT_KIND,
         metadata={"policy_id": selected_evidence_policy.policy_id},
+    )
+    selected_cross_series_policy = (
+        cross_series_constraint_policy or CrossSeriesConstraintPolicyV1()
+    )
+    if selected_cross_series_policy.supported_provider_ids != (
+        CURRENT_EVIDENCE_SOURCE_PROVIDER_ID,
+    ):
+        raise ReconstructionPlanCompatibilityError(
+            "the current cross-series evidence adapter supports only HistData.com"
+        )
+    if selected_cross_series_policy.required_symbols != selected_symbols:
+        raise ReconstructionPlanCompatibilityError(
+            "cross-series evidence policy does not cover the complete triangle"
+        )
+    cross_series_policy_ref = _write_contract_artifact(
+        selected_cross_series_policy,
+        artifacts_dir,
+        prefix="cross-series-constraint-policy",
+        kind=CROSS_SERIES_CONSTRAINT_POLICY_ARTIFACT_KIND,
+        metadata={"policy_id": selected_cross_series_policy.policy_id},
     )
 
     selected_storage = storage_policy or ReconstructionStoragePolicyV1()
@@ -1674,6 +1701,9 @@ def build_synthetic_infill_plan(
         selected_carving.constraint_set_id: _contract_sha256(selected_carving),
         selected_cross.config_id: _contract_sha256(selected_cross),
         selected_evidence_policy.policy_id: evidence_policy_ref.sha256,
+        selected_cross_series_policy.policy_id: (
+            cross_series_policy_ref.sha256
+        ),
         resolved.feed_epoch_definition.definition_id: resolved.artifacts[
             "feed_epochs"
         ].sha256,
@@ -1758,6 +1788,7 @@ def build_synthetic_infill_plan(
             "source_inventory": inventory_ref,
             "configuration": configuration_ref,
             "evidence_policy": evidence_policy_ref,
+            "cross_series_constraint_policy": cross_series_policy_ref,
         },
         motif_profile=resolved.motif_profile,
         requested_start_ns=requested_start,
@@ -1826,6 +1857,7 @@ def build_synthetic_infill_plan(
         "source_inventory": inventory_ref,
         "configuration": configuration_ref,
         "evidence_policy": evidence_policy_ref,
+        "cross_series_constraint_policy": cross_series_policy_ref,
         "information_manifest": information_manifest_ref,
         "information_audit": information_audit_ref,
         "ensemble_plan": ensemble_ref,
@@ -2548,6 +2580,13 @@ def _build_information_evidence(
         ),
         (
             "evidence_policy",
+            InformationStage.FEATURE,
+            InformationScope.POINT_IN_TIME,
+            requested_start_ns,
+            None,
+        ),
+        (
+            "cross_series_constraint_policy",
             InformationStage.FEATURE,
             InformationScope.POINT_IN_TIME,
             requested_start_ns,

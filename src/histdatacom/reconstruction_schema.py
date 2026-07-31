@@ -20,6 +20,9 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+from histdatacom.cross_series_constraints import (
+    CrossSeriesConstraintPolicyV1,
+)
 from histdatacom.data_quality.training_features import (
     IDENTITY_COLUMNS,
     SYNTHETIC_PLACEHOLDER_COLUMNS,
@@ -359,6 +362,7 @@ _AUDITED_MODULES = (
     "histdatacom.market_context.positioning",
     "histdatacom.orchestration.reconstruction",
     "histdatacom.reconstruction",
+    "histdatacom.cross_series_constraints",
     "histdatacom.reconstruction_evidence",
     "histdatacom.synthetic.contracts",
     "histdatacom.synthetic.streaming",
@@ -401,6 +405,12 @@ _REQUIRED_SCHEMA_TOKENS = (
     "ascii-tick-training-features",
     "synthetic-event.v1",
     "reconstruction-event-batch",
+    "cross-series-constraint-window",
+    "cross-series-constraint",
+    "cross-series-alignment",
+    "cross-series-source-binding",
+    "cross-series-member-evidence",
+    "cross-series-residual-summary",
     "feed-epoch-definition.v2",
     "observation-operator.v1",
     "market-context-corpus",
@@ -476,6 +486,7 @@ _PLAN_FIELDS = frozenset(
         "window_size_ns",
         "delivery_mode",
         "evidence_policy",
+        "cross_series_constraint_policy",
         "broker_delivery_artifact",
         "source_format",
         "timeframe",
@@ -553,6 +564,8 @@ def reconstruction_schema_registry() -> ReconstructionSchemaRegistryV1:
         tuple(sorted(constants.get(TRAINING_SCHEMA_VERSION, ())))
     )
     for version, name, family, note, field_names in _RESERVED_CONTRACTS:
+        if version in contracts:
+            continue
         contracts[version] = _reserved_contract(
             version, name, family, note, field_names
         )
@@ -1005,6 +1018,49 @@ def _check_current_scope(
                 "v2.4 evidence compilation is qualified only for HistData.com.",
                 "Use only histdata.com; defer broker/OANDA evidence adapters.",
             )
+    cross_series_policy = payload.get("cross_series_constraint_policy")
+    if cross_series_policy is not None and not isinstance(
+        cross_series_policy, Mapping
+    ):
+        _finding(
+            findings,
+            "invalid_cross_series_constraint_policy",
+            ReconstructionCompatibilityStatus.INVALID,
+            "cross_series_constraint_policy",
+            "The cross-series constraint policy must be a v1 JSON object.",
+            "Supply a serialized CrossSeriesConstraintPolicyV1.",
+        )
+    elif isinstance(cross_series_policy, Mapping):
+        try:
+            validated_cross_series_policy = (
+                CrossSeriesConstraintPolicyV1.from_dict(cross_series_policy)
+            )
+        except (TypeError, ValueError) as err:
+            _finding(
+                findings,
+                "invalid_cross_series_constraint_policy",
+                ReconstructionCompatibilityStatus.INVALID,
+                "cross_series_constraint_policy",
+                str(err),
+                "Supply a valid CrossSeriesConstraintPolicyV1.",
+            )
+            validated_cross_series_policy = None
+        if validated_cross_series_policy is not None and (
+            validated_cross_series_policy.supported_provider_ids
+            != (HISTDATA_PROVIDER_ID,)
+            or validated_cross_series_policy.required_symbols
+            != SUPPORTED_SYMBOLS
+        ):
+            _finding(
+                findings,
+                "cross_series_scope_later_milestone",
+                ReconstructionCompatibilityStatus.UNSUPPORTED,
+                "cross_series_constraint_policy",
+                "v2.4 cross-series compilation is limited to the HistData "
+                "EURUSD/GBPUSD/EURGBP triangle.",
+                "Use the current HistData triangle policy; defer other "
+                "providers and instruments.",
+            )
     source_format = str(payload.get("source_format", "")).strip().lower()
     if source_format != SUPPORTED_SOURCE_FORMAT:
         _finding(
@@ -1427,6 +1483,8 @@ def _contract_status(
 
 
 def _family(module_name: str, version: str) -> str:
+    if "cross_series_constraints" in module_name:
+        return "cross_series_constraint"
     if "dataset" in module_name or "source-" in version:
         return "dataset"
     if "training" in module_name:
@@ -1482,6 +1540,13 @@ def _consumer_stages(family: str) -> tuple[str, ...]:
         "proposal": ("proposal",),
         "carving": ("carving",),
         "cross_series": ("cross_series_reconciliation", "validation"),
+        "cross_series_constraint": (
+            "source_enrichment",
+            "proposal",
+            "carving",
+            "cross_series_reconciliation",
+            "validation",
+        ),
         "ensemble": ("proposal", "validation"),
         "observation": ("source_enrichment", "delivery_projection"),
         "plan": ("planning", "preflight"),

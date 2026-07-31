@@ -8,6 +8,11 @@ preflight, estimates resources, and emits bounded
 ticks; the resulting requests are the input to the execution work tracked by
 #466.
 
+The current executable source is only HistData.com ASCII/T. Provider-neutral
+dataset, evidence, and cross-series contracts preserve future adapter seams,
+but OANDA, other providers, and live broker feeds are later-milestone work and
+are not admitted by this plan.
+
 The scientific claim is deliberately narrow:
 
 > Output is a plausible counterfactual ensemble conditioned on declared
@@ -26,6 +31,7 @@ are downstream projections from committed final ticks.
 | `ReconstructionSourcePartitionV1` | Strong hash, monthly ownership, Arrow row count, timestamp bounds, feed-epoch evidence, and immutable row-identity policy for one ASCII/T cache. |
 | `ReconstructionSourceInventoryV1` | Complete Cartesian inventory of the synchronized EURUSD/GBPUSD/EURGBP triangle over the selected common periods. |
 | `ReconstructionPlanConfigurationV1` | Information, generation, carving, cross-currency, ensemble, storage, delivery, window, and handler policies. |
+| `CrossSeriesConstraintPolicyV1` | Hash-bound alignment, tolerance, readiness, refusal, and artifact-size policy for synchronized source evidence; current admission is the complete HistData triangle only. |
 | `ReconstructionPlanExecutionManifestV1` | Content-addressed artifact graph plus durable output/checkpoint roots and disposable scratch root. |
 | `ReconstructionPlanRefusalV1` | Stable, bounded reason that a planned window cannot execute. Refused windows never become workflow tasks. |
 | `ReconstructionPlanResourceSummaryV1` | Source size, candidate amplification, peak memory/scratch, retained output, partition, window, member, and request estimates. |
@@ -40,7 +46,9 @@ row, or process-private configuration object is placed in Temporal history.
 Artifact, output, checkpoint, and scratch roots must be non-overlapping and
 must remain outside the immutable ASCII/T source tree. Execution manifests also
 reject durable input artifacts placed beneath scratch, so cleanup cannot cross
-an ownership boundary.
+an ownership boundary. The manifest contains strong references to both the
+point-in-time evidence policy and cross-series constraint policy, and both
+policy IDs participate in run configuration identity.
 Requests are split by ensemble member and bounded window chunks because
 different members share window boundaries and therefore cannot coexist in one
 request whose task cores must not overlap.

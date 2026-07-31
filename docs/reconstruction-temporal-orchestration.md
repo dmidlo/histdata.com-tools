@@ -48,12 +48,12 @@ idempotently registers the versioned handlers emitted by the first-party plan:
 
 | Stage | First-party action |
 | --- | --- |
-| source/enrichment | Hash-verifies ASCII/T Arrow partitions, maps the zero-based Arrow ordinal to the positive event-contract row ID, uses immutable partition/row order for same-timestamp `event_sequence`, rejects invalid quotes, and materializes input/core Parquet plus feed-epoch, calendar, and CFTC sidecars. |
-| proposal | Queries the qualified modern motif index and writes candidate rows to Parquet with a content-addressed canonical-JSON-lines batch ledger outside the compact stage manifest. |
-| carving | Applies the declared hard/advisory constraints, writes a content-addressed rejection/decision ledger outside the compact stage manifest, and materializes accepted core streams. |
-| cross-series reconciliation | Reconciles the complete EURUSD/GBPUSD/EURGBP group using exact event-time support. |
+| source/enrichment | Hash-verifies ASCII/T Arrow partitions, preserves complete source-row identity, compiles point-in-time quality and synchronized cross-series constraint sidecars from the HistData core window, and materializes input/core streams plus context. |
+| proposal | Selects an explicitly supported cross-series synchronization instant, queries the qualified modern motif index, and writes candidate rows plus constraint-use evidence to a content-addressed ledger. |
+| carving | Applies the declared hard/advisory and point-in-time constraints, writes quality and cross-series use decisions to a content-addressed ledger, and materializes accepted core streams. |
+| cross-series reconciliation | Rechecks constraint readiness and reconciles the complete EURUSD/GBPUSD/EURGBP group using exact nanosecond event-time support without forward filling. |
 | delivery projection | Applies explicit modern-reference identity delivery; it never invents a broker fingerprint. |
-| validation | Rechecks cross-instrument output, benchmark qualification, motif leakage, information safety, immutable anchors, retention, and storage before staging. |
+| validation | Rechecks cross-instrument output, synchronized constraint use, benchmark qualification, motif leakage, information safety, immutable anchors, retention, and storage before staging and durable lineage binding. |
 | atomic commit | Promotes or recovers the complete v2 Parquet transaction. |
 
 Applications do not register these handlers themselves. A deliberately custom

@@ -22,6 +22,7 @@ Data and reconstruction foundations
    provider-neutral-dataset-catalog
    reconstruction-schema-compatibility
    reconstruction-evidence-contracts
+   cross-series-constraint-contracts
 
 Empirical reconstruction pipeline
 ---------------------------------
