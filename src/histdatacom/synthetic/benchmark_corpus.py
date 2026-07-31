@@ -164,6 +164,12 @@ BENCHMARK_CANDIDATE_REPORT_SCHEMA_VERSION = (
 REVERSE_DEGRADATION_CAMPAIGN_SCHEMA_VERSION = (
     "histdatacom.reverse-degradation-campaign.v1"
 )
+BENCHMARK_WINDOW_METRIC_OBSERVATION_SCHEMA_VERSION = (
+    "histdatacom.reverse-degradation-window-metric-observation.v1"
+)
+BENCHMARK_WINDOW_METRIC_TRACE_SCHEMA_VERSION = (
+    "histdatacom.reverse-degradation-window-metric-trace.v1"
+)
 
 PREDECLARED_GATE_COMMIT = "0caec1480a957528ebefdff062e13012ea11e84d"
 DEFAULT_BENCHMARK_SYMBOLS = ("EURGBP", "EURUSD", "GBPUSD")
@@ -179,6 +185,8 @@ MAX_BENCHMARK_WINDOWS = 96
 MAX_BENCHMARK_EVENTS_PER_SYMBOL = 4096
 MAX_BENCHMARK_CANDIDATES = 32
 MAX_BENCHMARK_METRICS = 256
+MAX_BENCHMARK_TRACE_OBSERVATIONS = 32_768
+MAX_BENCHMARK_TRACE_METRICS = 96
 NANOSECONDS_PER_MILLISECOND = 1_000_000
 NANOSECONDS_PER_SECOND = 1_000_000_000
 PIP = 0.0001
@@ -1131,6 +1139,185 @@ class ReverseDegradationBenchmarkCampaignV1:
         return cls.from_dict(_json_mapping(text, DEFAULT_MAX_ARTIFACT_BYTES))
 
 
+@dataclass(frozen=True, slots=True)
+class BenchmarkWindowMetricObservationV1:
+    """One row-free reference/candidate feature comparison from a real run."""
+
+    candidate_id: str
+    method_name: str
+    role: str
+    split_kind: str
+    window_id: str
+    ensemble_member_id: str
+    reference_metrics: Mapping[str, float]
+    candidate_metrics: Mapping[str, float]
+    comparison_metrics: Mapping[str, float]
+    observation_id: str = ""
+    schema_version: str = BENCHMARK_WINDOW_METRIC_OBSERVATION_SCHEMA_VERSION
+
+    def __post_init__(self) -> None:
+        _require_schema_value(
+            self.schema_version,
+            BENCHMARK_WINDOW_METRIC_OBSERVATION_SCHEMA_VERSION,
+            "benchmark window metric observation",
+        )
+        for name in (
+            "candidate_id",
+            "method_name",
+            "window_id",
+            "ensemble_member_id",
+        ):
+            object.__setattr__(self, name, _required_text(getattr(self, name)))
+        if self.role not in {"baseline", "candidate", "negative_control"}:
+            raise ValueError("unsupported window metric observation role")
+        if self.split_kind not in {"validation", "final_holdout"}:
+            raise ValueError("window metric observation split is not protected")
+        reference = _trace_metric_mapping(
+            self.reference_metrics, "reference metric"
+        )
+        candidate = _trace_metric_mapping(
+            self.candidate_metrics, "candidate metric"
+        )
+        comparison = _trace_metric_mapping(
+            self.comparison_metrics, "comparison metric"
+        )
+        if set(reference) != set(candidate):
+            raise ValueError("reference/candidate feature names differ")
+        object.__setattr__(self, "reference_metrics", reference)
+        object.__setattr__(self, "candidate_metrics", candidate)
+        object.__setattr__(self, "comparison_metrics", comparison)
+        expected = _stable_id(
+            "benchmark-window-metric-observation", self.identity_payload()
+        )
+        supplied = _optional_text(self.observation_id)
+        if supplied is not None and supplied != expected:
+            raise ValueError("window metric observation identity differs")
+        object.__setattr__(self, "observation_id", expected)
+
+    def identity_payload(self) -> dict[str, JSONValue]:
+        return {
+            "schema_version": self.schema_version,
+            "candidate_id": self.candidate_id,
+            "method_name": self.method_name,
+            "role": self.role,
+            "split_kind": self.split_kind,
+            "window_id": self.window_id,
+            "ensemble_member_id": self.ensemble_member_id,
+            "reference_metrics": dict(self.reference_metrics),
+            "candidate_metrics": dict(self.candidate_metrics),
+            "comparison_metrics": dict(self.comparison_metrics),
+            "event_rows_embedded": False,
+        }
+
+    def to_dict(self) -> dict[str, JSONValue]:
+        return {
+            **self.identity_payload(),
+            "observation_id": self.observation_id,
+        }
+
+    @classmethod
+    def from_dict(
+        cls, data: Mapping[str, Any]
+    ) -> BenchmarkWindowMetricObservationV1:
+        if data.get("event_rows_embedded") is not False:
+            raise ValueError("window metric observation embeds event rows")
+        return cls(
+            candidate_id=str(data.get("candidate_id", "")),
+            method_name=str(data.get("method_name", "")),
+            role=str(data.get("role", "")),
+            split_kind=str(data.get("split_kind", "")),
+            window_id=str(data.get("window_id", "")),
+            ensemble_member_id=str(data.get("ensemble_member_id", "")),
+            reference_metrics=cast(
+                Mapping[str, float], _mapping(data.get("reference_metrics"))
+            ),
+            candidate_metrics=cast(
+                Mapping[str, float], _mapping(data.get("candidate_metrics"))
+            ),
+            comparison_metrics=cast(
+                Mapping[str, float], _mapping(data.get("comparison_metrics"))
+            ),
+            observation_id=str(data.get("observation_id", "")),
+            schema_version=str(data.get("schema_version", "")),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class BenchmarkWindowMetricTraceV1:
+    """Bounded process-local metric projection from one benchmark campaign."""
+
+    corpus_id: str
+    campaign_id: str
+    observations: tuple[BenchmarkWindowMetricObservationV1, ...]
+    trace_id: str = ""
+    schema_version: str = BENCHMARK_WINDOW_METRIC_TRACE_SCHEMA_VERSION
+
+    def __post_init__(self) -> None:
+        _require_schema_value(
+            self.schema_version,
+            BENCHMARK_WINDOW_METRIC_TRACE_SCHEMA_VERSION,
+            "benchmark window metric trace",
+        )
+        object.__setattr__(self, "corpus_id", _required_text(self.corpus_id))
+        object.__setattr__(
+            self, "campaign_id", _required_text(self.campaign_id)
+        )
+        observations = tuple(
+            sorted(self.observations, key=lambda item: item.observation_id)
+        )
+        if (
+            not observations
+            or len(observations) > MAX_BENCHMARK_TRACE_OBSERVATIONS
+        ):
+            raise ValueError("benchmark metric trace size is invalid")
+        if len({item.observation_id for item in observations}) != len(
+            observations
+        ):
+            raise ValueError("benchmark metric trace observations duplicate")
+        object.__setattr__(self, "observations", observations)
+        expected = _stable_id("benchmark-window-metric-trace", self.payload())
+        supplied = _optional_text(self.trace_id)
+        if supplied is not None and supplied != expected:
+            raise ValueError("benchmark window metric trace identity differs")
+        object.__setattr__(self, "trace_id", expected)
+        if len(self.to_json().encode("utf-8")) > DEFAULT_MAX_ARTIFACT_BYTES:
+            raise ValueError("benchmark window metric trace exceeds bound")
+
+    def payload(self) -> dict[str, JSONValue]:
+        return {
+            "schema_version": self.schema_version,
+            "corpus_id": self.corpus_id,
+            "campaign_id": self.campaign_id,
+            "observations": [item.to_dict() for item in self.observations],
+            "event_rows_embedded": False,
+        }
+
+    def to_dict(self) -> dict[str, JSONValue]:
+        return {**self.payload(), "trace_id": self.trace_id}
+
+    def to_json(self) -> str:
+        return str(canonical_contract_json(self.to_dict()))
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> BenchmarkWindowMetricTraceV1:
+        if data.get("event_rows_embedded") is not False:
+            raise ValueError("benchmark window metric trace embeds event rows")
+        return cls(
+            corpus_id=str(data.get("corpus_id", "")),
+            campaign_id=str(data.get("campaign_id", "")),
+            observations=tuple(
+                BenchmarkWindowMetricObservationV1.from_dict(_mapping(item))
+                for item in _sequence(data.get("observations"))
+            ),
+            trace_id=str(data.get("trace_id", "")),
+            schema_version=str(data.get("schema_version", "")),
+        )
+
+    @classmethod
+    def from_json(cls, text: str) -> BenchmarkWindowMetricTraceV1:
+        return cls.from_dict(_json_mapping(text, DEFAULT_MAX_ARTIFACT_BYTES))
+
+
 def build_reverse_degradation_benchmark_corpus(
     source_root: str | Path,
     *,
@@ -2056,10 +2243,13 @@ def run_reverse_degradation_benchmark_campaign(
     schrodinger_bridge_broker_target: (
         SchrodingerBridgeBrokerTargetV1 | None
     ) = None,
+    metric_trace_out: list[BenchmarkWindowMetricTraceV1] | None = None,
 ) -> tuple[ReverseDegradationBenchmarkCampaignV1, ReferenceMotifIndexV1]:
     """Run controls and every explicitly configured challenger family."""
     if not isinstance(corpus, ReverseDegradationBenchmarkCorpusV1):
         raise ValueError("benchmark campaign requires a v1 corpus")
+    if metric_trace_out is not None and metric_trace_out:
+        raise ValueError("benchmark metric trace output must start empty")
     started_wall = datetime.now(timezone.utc)
     started = time.monotonic()
     root = Path(source_root).expanduser().resolve()
@@ -2661,11 +2851,17 @@ def run_reverse_degradation_benchmark_campaign(
     for partition in evaluated:
         reference = events_by_window[partition.window_id]
         degraded = primary_degraded[partition.window_id]
-        accumulators["dense_identity"].consume(
-            _compare_streams(reference, reference, partition)
+        accumulators["dense_identity"].consume_streams(
+            reference,
+            reference,
+            partition,
+            ensemble_member_id="control",
         )
-        accumulators["degraded_identity"].consume(
-            _compare_streams(reference, degraded, partition)
+        accumulators["degraded_identity"].consume_streams(
+            reference,
+            degraded,
+            partition,
+            ensemble_member_id="control",
         )
         interpolated: list[BenchmarkEventV1] = []
         for symbol in corpus.profile.symbols:
@@ -2678,16 +2874,18 @@ def run_reverse_degradation_benchmark_campaign(
                     max_events=(corpus.profile.max_events_per_symbol * 8),
                 )
             )
-        accumulators["linear_interpolation"].consume(
-            _compare_streams(
-                reference,
-                tuple(_ordered_events(interpolated)),
-                partition,
-            )
+        accumulators["linear_interpolation"].consume_streams(
+            reference,
+            tuple(_ordered_events(interpolated)),
+            partition,
+            ensemble_member_id="control",
         )
         negative = _drop_first_anchor(degraded)
-        accumulators["negative_anchor_drop"].consume(
-            _compare_streams(reference, negative, partition)
+        accumulators["negative_anchor_drop"].consume_streams(
+            reference,
+            negative,
+            partition,
+            ensemble_member_id="control",
         )
 
         scenario = BenchmarkScenarioV1(
@@ -2751,12 +2949,11 @@ def run_reverse_degradation_benchmark_campaign(
             else:
                 if member_refused:
                     accumulators["empirical_motif"].refusals += 1
-                accumulators["empirical_motif"].consume(
-                    _compare_streams(
-                        reference,
-                        tuple(_ordered_events(generated)),
-                        partition,
-                    )
+                accumulators["empirical_motif"].consume_streams(
+                    reference,
+                    tuple(_ordered_events(generated)),
+                    partition,
+                    ensemble_member_id=member_id,
                 )
             for family, candidate in clock_candidates.items():
                 accumulator = accumulators[clock_keys[family]]
@@ -2786,12 +2983,11 @@ def run_reverse_degradation_benchmark_campaign(
                     for item in candidate_window.events
                 ):
                     accumulator.refusals += 1
-                accumulator.consume(
-                    _compare_streams(
-                        reference,
-                        candidate_window.events,
-                        partition,
-                    )
+                accumulator.consume_streams(
+                    reference,
+                    candidate_window.events,
+                    partition,
+                    ensemble_member_id=member_id,
                 )
             for structure, candidate in hawkes_candidates.items():
                 accumulator = accumulators[hawkes_keys[structure]]
@@ -2821,12 +3017,11 @@ def run_reverse_degradation_benchmark_campaign(
                     for item in candidate_window.events
                 ):
                     accumulator.refusals += 1
-                accumulator.consume(
-                    _compare_streams(
-                        reference,
-                        candidate_window.events,
-                        partition,
-                    )
+                accumulator.consume_streams(
+                    reference,
+                    candidate_window.events,
+                    partition,
+                    ensemble_member_id=member_id,
                 )
             for modulation, candidate in regime_candidates.items():
                 accumulator = accumulators[regime_keys[modulation]]
@@ -2856,12 +3051,11 @@ def run_reverse_degradation_benchmark_campaign(
                     for item in candidate_window.events
                 ):
                     accumulator.refusals += 1
-                accumulator.consume(
-                    _compare_streams(
-                        reference,
-                        candidate_window.events,
-                        partition,
-                    )
+                accumulator.consume_streams(
+                    reference,
+                    candidate_window.events,
+                    partition,
+                    ensemble_member_id=member_id,
                 )
             if neural_key is not None and neural_candidate is not None:
                 accumulator = accumulators[neural_key]
@@ -2890,12 +3084,11 @@ def run_reverse_degradation_benchmark_campaign(
                             for item in candidate_window.events
                         ):
                             accumulator.refusals += 1
-                        accumulator.consume(
-                            _compare_streams(
-                                reference,
-                                candidate_window.events,
-                                partition,
-                            )
+                        accumulator.consume_streams(
+                            reference,
+                            candidate_window.events,
+                            partition,
+                            ensemble_member_id=member_id,
                         )
             if add_thin_key is not None and add_thin_candidate is not None:
                 accumulator = accumulators[add_thin_key]
@@ -2954,12 +3147,11 @@ def run_reverse_degradation_benchmark_campaign(
                     else:
                         if evidence.status is AddThinGenerationStatus.EMPTY:
                             accumulator.refusals += 1
-                        accumulator.consume(
-                            _compare_streams(
-                                reference,
-                                result.events,
-                                partition,
-                            )
+                        accumulator.consume_streams(
+                            reference,
+                            result.events,
+                            partition,
+                            ensemble_member_id=member_id,
                         )
             if bridge_key is not None and bridge_candidate is not None:
                 accumulator = accumulators[bridge_key]
@@ -3016,12 +3208,11 @@ def run_reverse_degradation_benchmark_campaign(
                             is SchrodingerBridgeGenerationStatus.EMPTY
                         ):
                             accumulator.refusals += 1
-                        accumulator.consume(
-                            _compare_streams(
-                                reference,
-                                bridge_result.events,
-                                partition,
-                            )
+                        accumulator.consume_streams(
+                            reference,
+                            bridge_result.events,
+                            partition,
+                            ensemble_member_id=member_id,
                         )
         _enforce_runtime(started, corpus.profile.max_runtime_seconds)
 
@@ -3287,10 +3478,31 @@ def run_reverse_degradation_benchmark_campaign(
             ).values()
         )
         if measured == artifact_bytes:
+            if metric_trace_out is not None:
+                metric_trace_out.append(
+                    _build_window_metric_trace(
+                        corpus=corpus,
+                        campaign=campaign,
+                        accumulators=accumulators,
+                        subject_ids=subject_ids,
+                        method_names=method_names,
+                        roles=roles,
+                    )
+                )
             return campaign, motif_index
         artifact_bytes = measured
         campaign = campaign_for_size(artifact_bytes)
     raise RuntimeError("benchmark artifact byte measurement did not converge")
+
+
+@dataclass(frozen=True, slots=True)
+class _WindowMetricCell:
+    split_kind: str
+    window_id: str
+    ensemble_member_id: str
+    reference_metrics: Mapping[str, float]
+    candidate_metrics: Mapping[str, float]
+    comparison_metrics: Mapping[str, float]
 
 
 @dataclass(slots=True)
@@ -3298,12 +3510,70 @@ class _CandidateAccumulator:
     values: dict[str, list[float]] = field(
         default_factory=lambda: defaultdict(list)
     )
+    cells: list[_WindowMetricCell] = field(default_factory=list)
     failures: int = 0
     refusals: int = 0
 
     def consume(self, values: Mapping[str, float]) -> None:
+        """Retain aggregate-only compatibility for focused metric tests."""
         for name, value in values.items():
             self.values[name].append(_finite_float(value, name))
+
+    def consume_streams(
+        self,
+        reference: Sequence[BenchmarkEventV1],
+        candidate: Sequence[BenchmarkEventV1],
+        partition: BenchmarkWindowPartitionV1,
+        *,
+        ensemble_member_id: str,
+    ) -> None:
+        values = _compare_streams(reference, candidate, partition)
+        self.consume(values)
+        self.cells.append(
+            _WindowMetricCell(
+                split_kind=partition.split_kind,
+                window_id=partition.window_id,
+                ensemble_member_id=_required_text(ensemble_member_id),
+                reference_metrics=_predictive_feature_vector(
+                    reference, partition
+                ),
+                candidate_metrics=_predictive_feature_vector(
+                    candidate, partition
+                ),
+                comparison_metrics=dict(values),
+            )
+        )
+
+
+def _build_window_metric_trace(
+    *,
+    corpus: ReverseDegradationBenchmarkCorpusV1,
+    campaign: ReverseDegradationBenchmarkCampaignV1,
+    accumulators: Mapping[str, _CandidateAccumulator],
+    subject_ids: Mapping[str, str],
+    method_names: Mapping[str, str],
+    roles: Mapping[str, str],
+) -> BenchmarkWindowMetricTraceV1:
+    observations = tuple(
+        BenchmarkWindowMetricObservationV1(
+            candidate_id=subject_ids[name],
+            method_name=method_names[name],
+            role=roles[name],
+            split_kind=cell.split_kind,
+            window_id=cell.window_id,
+            ensemble_member_id=cell.ensemble_member_id,
+            reference_metrics=cell.reference_metrics,
+            candidate_metrics=cell.candidate_metrics,
+            comparison_metrics=cell.comparison_metrics,
+        )
+        for name, accumulator in sorted(accumulators.items())
+        for cell in accumulator.cells
+    )
+    return BenchmarkWindowMetricTraceV1(
+        corpus_id=corpus.corpus_id,
+        campaign_id=campaign.campaign_id,
+        observations=observations,
+    )
 
 
 def _candidate_report(
@@ -4227,7 +4497,33 @@ def _apply_degradation(
                 counts[key] += 1
     elif name == "missing_window":
         modulus = int(cast(int, config["window_modulus"]))
-        missing = int(partition.window_id[-8:], 16) % modulus == 0
+        peers = tuple(
+            item
+            for item in corpus.windows
+            if item.split_kind == partition.split_kind
+        )
+        selected_windows = tuple(
+            item
+            for item in peers
+            if int(item.window_id[-8:], 16) % modulus == 0
+        )
+        # A hash bucket is a reproducible assignment, but a finite corpus can
+        # legitimately leave that bucket empty.  Keep the predeclared bucket
+        # whenever it has support and deterministically select the lowest hash
+        # otherwise so every protected split exercises this negative control.
+        if not selected_windows:
+            selected_windows = (
+                min(
+                    peers,
+                    key=lambda item: (
+                        int(item.window_id[-8:], 16),
+                        item.window_id,
+                    ),
+                ),
+            )
+        missing = partition.window_id in {
+            item.window_id for item in selected_windows
+        }
         selected = [
             _degraded_event(item, name)
             for item in reference
@@ -4318,6 +4614,84 @@ def _anchor_violation_count(
     )
 
 
+def _predictive_feature_vector(
+    events: Sequence[BenchmarkEventV1],
+    partition: BenchmarkWindowPartitionV1,
+) -> dict[str, float]:
+    """Project a bounded synchronized stream into comparable observables."""
+    ordered = tuple(_ordered_events(events))
+    duration_seconds = max(
+        1e-9,
+        (partition.end_ns - partition.start_ns) / NANOSECONDS_PER_SECOND,
+    )
+    intervals = _interarrivals(ordered)
+    spreads_pips = [item.spread / PIP for item in ordered]
+    mids = _mids_by_symbol(ordered)
+    increments = _absolute_log_increments(mids)
+    update_shares = _update_proportions(ordered)
+    burst_count = sum(value <= 100_000_000 for value in intervals)
+    quiet_count = sum(value >= 5_000_000_000 for value in intervals)
+    interval_count = max(1, len(intervals))
+    features: dict[str, float] = {
+        "event_count": float(len(ordered)),
+        "window_duration_seconds": duration_seconds,
+        "event_rate_hz": len(ordered) / duration_seconds,
+        "interarrival_mean_seconds": _mean(intervals) / NANOSECONDS_PER_SECOND,
+        "interarrival_q10_seconds": _quantile(intervals, 0.10)
+        / NANOSECONDS_PER_SECOND,
+        "interarrival_q50_seconds": _quantile(intervals, 0.50)
+        / NANOSECONDS_PER_SECOND,
+        "interarrival_q90_seconds": _quantile(intervals, 0.90)
+        / NANOSECONDS_PER_SECOND,
+        "interarrival_lag1": _lag_one_correlation(intervals),
+        "count_dispersion": _dispersion(
+            _multiscale_counts(ordered, partition.start_ns, partition.end_ns)
+        ),
+        "burst_rate": burst_count / interval_count,
+        "quiet_rate": quiet_count / interval_count,
+        "spread_mean_pips": _mean(spreads_pips),
+        "spread_q50_pips": _quantile(spreads_pips, 0.50),
+        "spread_q95_pips": _quantile(spreads_pips, 0.95),
+        "spread_q99_pips": _quantile(spreads_pips, 0.99),
+        "spread_jump_mean_pips": _mean_absolute_difference(spreads_pips),
+        "stale_run_fraction": _longest_stale_run(ordered)
+        / max(1, len(ordered)),
+        "timestamp_quantum_ms": _timestamp_quantum(ordered)
+        / NANOSECONDS_PER_MILLISECOND,
+        "absolute_log_increment_mean": _mean(increments),
+        "absolute_log_increment_q95": _quantile(increments, 0.95),
+        "absolute_log_increment_q99": _quantile(increments, 0.99),
+        "path_realized_variation": sum(
+            _realized_variation(values) for values in mids.values()
+        ),
+        "path_excursion_pips": _path_excursion(mids) / PIP,
+        "triangle_residual_p99_pips": _triangle_residual_p99_pips(ordered),
+        "triangle_synchronization_rate": _triangle_sync_rate(ordered),
+    }
+    for symbol in DEFAULT_BENCHMARK_SYMBOLS:
+        selected = mids.get(symbol, ())
+        features[f"event_rate_hz.{symbol}"] = (
+            sum(item.symbol == symbol for item in ordered) / duration_seconds
+        )
+        features[f"path_realized_variation.{symbol}"] = _realized_variation(
+            selected
+        )
+        features[f"path_excursion_pips.{symbol}"] = (
+            (max(selected) - min(selected)) / PIP if selected else 0.0
+        )
+    for state in (
+        "unchanged",
+        "update_ask_only",
+        "update_bid_only",
+        "update_joint",
+    ):
+        features[f"mark_share.{state}"] = update_shares.get(state, 0.0)
+    return {
+        name: _finite_float(value, name)
+        for name, value in sorted(features.items())
+    }
+
+
 def _compare_streams(
     reference: Sequence[BenchmarkEventV1],
     candidate: Sequence[BenchmarkEventV1],
@@ -4365,6 +4739,14 @@ def _compare_streams(
     )
     left_increment = _absolute_log_increments(left_mids)
     right_increment = _absolute_log_increments(right_mids)
+    time_pits = _empirical_pit_values(
+        left_intervals,
+        right_intervals,
+        keys=tuple(item.source_event_id for item in left[1:]),
+    )
+    mark_pits = _categorical_pit_values(left, right_updates)
+    time_ks = _uniform_ks_statistic(time_pits)
+    mark_ks = _uniform_ks_statistic(mark_pits)
     return {
         "event_count_relative_error": _relative_error(
             float(len(left)), float(len(right))
@@ -4383,6 +4765,10 @@ def _compare_streams(
             _lag_one_correlation(left_intervals)
             - _lag_one_correlation(right_intervals)
         ),
+        "simulation_time_pit_ks": time_ks,
+        "simulation_time_pit_lag1_abs": abs(_lag_one_correlation(time_pits)),
+        "simulation_mark_pit_ks": mark_ks,
+        "joint_time_mark_max_ks": max(time_ks, mark_ks),
         "burst_quiet_rate_error": _burst_quiet_error(
             left_intervals, right_intervals
         ),
@@ -4424,6 +4810,86 @@ def _compare_streams(
         "inverse_consistency_error": 0.0,
         "unsupported_context_emission_count": float(unsupported),
     }
+
+
+def _empirical_pit_values(
+    observed: Sequence[float],
+    predictive: Sequence[float],
+    *,
+    keys: Sequence[str],
+) -> tuple[float, ...]:
+    """Return deterministic randomized ranks against one predictive sample."""
+    if not observed or not predictive:
+        return ()
+    ordered = tuple(
+        sorted(
+            _finite_float(item, "predictive interval") for item in predictive
+        )
+    )
+    result: list[float] = []
+    for index, value in enumerate(observed):
+        selected = _finite_float(value, "observed interval")
+        less = bisect_left(ordered, selected)
+        upper = less
+        while upper < len(ordered) and ordered[upper] == selected:
+            upper += 1
+        key = keys[index] if index < len(keys) else f"pit-{index}"
+        randomized = _hash_unit_interval(key)
+        rank = less + randomized * (upper - less) + 0.5
+        result.append(min(1.0 - 1e-12, max(1e-12, rank / len(ordered))))
+    return tuple(result)
+
+
+def _categorical_pit_values(
+    observed: Sequence[BenchmarkEventV1],
+    predictive_probabilities: Mapping[str, float],
+) -> tuple[float, ...]:
+    states = (
+        "unchanged",
+        "update_ask_only",
+        "update_bid_only",
+        "update_joint",
+    )
+    probabilities = [
+        max(0.0, _finite_float(predictive_probabilities.get(state, 0.0), state))
+        for state in states
+    ]
+    total = sum(probabilities)
+    if not observed or total <= 0.0:
+        return ()
+    probabilities = [value / total for value in probabilities]
+    cumulative = 0.0
+    intervals: dict[str, tuple[float, float]] = {}
+    for state, probability in zip(states, probabilities):
+        intervals[state] = (cumulative, cumulative + probability)
+        cumulative += probability
+    result: list[float] = []
+    for event in observed:
+        lower, upper = intervals.get(event.event_state, (0.0, 0.0))
+        if upper <= lower:
+            result.append(1e-12)
+            continue
+        value = lower + (upper - lower) * _hash_unit_interval(
+            event.source_event_id
+        )
+        result.append(min(1.0 - 1e-12, max(1e-12, value)))
+    return tuple(result)
+
+
+def _uniform_ks_statistic(values: Sequence[float]) -> float:
+    if not values:
+        return 1.0
+    ordered = sorted(_finite_float(item, "PIT value") for item in values)
+    count = len(ordered)
+    return max(
+        max((index + 1) / count - value, value - index / count)
+        for index, value in enumerate(ordered)
+    )
+
+
+def _hash_unit_interval(value: str) -> float:
+    digest = hashlib.sha256(_required_text(value).encode("utf-8")).digest()
+    return (int.from_bytes(digest[:8], "big") + 0.5) / 2**64
 
 
 def write_reverse_degradation_benchmark_artifacts(
@@ -4469,6 +4935,34 @@ def write_reverse_degradation_benchmark_artifacts(
             "combined benchmark artifact set exceeds configured bound"
         )
     return artifacts
+
+
+def write_benchmark_window_metric_trace(
+    trace: BenchmarkWindowMetricTraceV1,
+    artifact_directory: str | Path,
+) -> ArtifactRef:
+    """Write one bounded row-free trace as a content-addressed artifact."""
+    if not isinstance(trace, BenchmarkWindowMetricTraceV1):
+        raise TypeError("metric trace must use the v1 contract")
+    root = Path(artifact_directory).expanduser().resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    encoded = trace.to_json().encode("utf-8") + b"\n"
+    if len(encoded) > DEFAULT_MAX_ARTIFACT_BYTES:
+        raise ValueError("benchmark window metric trace exceeds bound")
+    digest = hashlib.sha256(encoded).hexdigest()
+    target = root / f"reverse-degradation-window-metric-trace-{digest}.json"
+    _write_once(target, encoded)
+    return ArtifactRef(
+        kind="reverse_degradation_window_metric_trace_v1",
+        path=str(target),
+        size_bytes=len(encoded),
+        sha256=digest,
+        metadata={
+            "corpus_id": trace.corpus_id,
+            "campaign_id": trace.campaign_id,
+            "trace_id": trace.trace_id,
+        },
+    )
 
 
 def _benchmark_artifact_payloads(
@@ -4570,6 +5064,18 @@ def read_reverse_degradation_benchmark_campaign(
         maximum=DEFAULT_MAX_ARTIFACT_BYTES,
     )
     return ReverseDegradationBenchmarkCampaignV1.from_dict(payload)
+
+
+def read_benchmark_window_metric_trace(
+    path: str | Path,
+) -> BenchmarkWindowMetricTraceV1:
+    """Read and hash-verify one content-addressed row-free metric trace."""
+    payload = _read_content_addressed_json(
+        path,
+        prefix="reverse-degradation-window-metric-trace",
+        maximum=DEFAULT_MAX_ARTIFACT_BYTES,
+    )
+    return BenchmarkWindowMetricTraceV1.from_dict(payload)
 
 
 def _ordered_events(
@@ -5123,6 +5629,18 @@ def _json_scalar(value: Any, name: str) -> JSONScalar:
     raise ValueError(f"{name} must be a finite JSON scalar")
 
 
+def _trace_metric_mapping(
+    value: Mapping[str, float], name: str
+) -> dict[str, float]:
+    selected = {
+        _required_text(key): _finite_float(metric, f"{name} {key}")
+        for key, metric in value.items()
+    }
+    if not selected or len(selected) > MAX_BENCHMARK_TRACE_METRICS:
+        raise ValueError(f"{name} mapping is empty or exceeds its bound")
+    return dict(sorted(selected.items()))
+
+
 def _mapping(value: Any) -> Mapping[str, Any]:
     if not isinstance(value, Mapping):
         raise ValueError("expected a mapping")
@@ -5167,21 +5685,27 @@ __all__ = [
     "BENCHMARK_CANDIDATE_REPORT_SCHEMA_VERSION",
     "BENCHMARK_CORPUS_PROFILE_SCHEMA_VERSION",
     "BENCHMARK_SOURCE_PARTITION_SCHEMA_VERSION",
+    "BENCHMARK_WINDOW_METRIC_OBSERVATION_SCHEMA_VERSION",
+    "BENCHMARK_WINDOW_METRIC_TRACE_SCHEMA_VERSION",
     "BENCHMARK_WINDOW_PARTITION_SCHEMA_VERSION",
     "PREDECLARED_GATE_COMMIT",
     "REVERSE_DEGRADATION_CAMPAIGN_SCHEMA_VERSION",
     "REVERSE_DEGRADATION_CORPUS_SCHEMA_VERSION",
     "BenchmarkCandidateReportV1",
     "BenchmarkSourcePartitionV1",
+    "BenchmarkWindowMetricObservationV1",
+    "BenchmarkWindowMetricTraceV1",
     "BenchmarkWindowPartitionV1",
     "ReverseDegradationBenchmarkCampaignV1",
     "ReverseDegradationBenchmarkCorpusV1",
     "ReverseDegradationCorpusProfileV1",
     "audit_holdout_neighbor_leakage",
     "build_reverse_degradation_benchmark_corpus",
+    "read_benchmark_window_metric_trace",
     "read_reverse_degradation_benchmark_campaign",
     "read_reverse_degradation_benchmark_corpus",
     "replay_reverse_degradation_benchmark_corpus",
     "run_reverse_degradation_benchmark_campaign",
+    "write_benchmark_window_metric_trace",
     "write_reverse_degradation_benchmark_artifacts",
 ]

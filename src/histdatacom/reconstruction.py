@@ -86,6 +86,10 @@ from histdatacom.synthetic.proposal_engines import (
     proposal_engine_registry,
     run_histdata_proposal_portfolio_evaluation,
 )
+from histdatacom.synthetic.qualification import (
+    PoweredQualificationDossierV1,
+    qualify_histdata_proposal_portfolio,
+)
 from histdatacom.synthetic.reconstruction_handlers import (
     register_first_party_reconstruction_handlers,
 )
@@ -230,6 +234,7 @@ class ReconstructionPlanSpecV1:
     proposal_engine_ids: tuple[str, ...] = ()
     selected_proposal_engine_ids: tuple[str, ...] = ()
     proposal_evaluation_paths: tuple[str, ...] = ()
+    qualification_dossier_path: str | None = None
     schema_version: str = RECONSTRUCTION_PLAN_SPEC_SCHEMA_VERSION
 
     def __post_init__(self) -> None:
@@ -350,8 +355,14 @@ class ReconstructionPlanSpecV1:
             str(Path(_required_text(value)).expanduser())
             for value in self.proposal_evaluation_paths
         )
+        qualification_path = _optional_text(self.qualification_dossier_path)
+        if qualification_path is not None:
+            qualification_path = str(Path(qualification_path).expanduser())
         if self.schema_version == RECONSTRUCTION_PLAN_SPEC_SCHEMA_VERSION and (
-            proposal_engine_ids or selected_engine_ids or evaluation_paths
+            proposal_engine_ids
+            or selected_engine_ids
+            or evaluation_paths
+            or qualification_path is not None
         ):
             raise ReconstructionUnsupportedError(
                 "v1 plan translation cannot declare proposal portfolio fields"
@@ -361,6 +372,9 @@ class ReconstructionPlanSpecV1:
             self, "selected_proposal_engine_ids", selected_engine_ids
         )
         object.__setattr__(self, "proposal_evaluation_paths", evaluation_paths)
+        object.__setattr__(
+            self, "qualification_dossier_path", qualification_path
+        )
         requested_start = self.requested_start_ns
         requested_end = self.requested_end_ns
         exact_bounds = (requested_start, requested_end)
@@ -451,6 +465,9 @@ class ReconstructionPlanSpecV1:
             )
             payload["proposal_evaluation_paths"] = list(
                 self.proposal_evaluation_paths
+            )
+            payload["qualification_dossier_path"] = (
+                self.qualification_dossier_path
             )
         return payload
 
@@ -564,6 +581,9 @@ class ReconstructionPlanSpecV1:
                 for value in _sequence(
                     data.get("proposal_evaluation_paths", ())
                 )
+            ),
+            qualification_dossier_path=_optional_text(
+                data.get("qualification_dossier_path")
             ),
             schema_version=str(data.get("schema_version", "")),
         )
@@ -1160,6 +1180,23 @@ class ReconstructionClient:
         except (OSError, TypeError, ValueError, RuntimeError) as err:
             raise ReconstructionValidationError(str(err)) from err
 
+    def qualify_proposal_portfolio(
+        self,
+        evaluation_path: str | Path,
+        experiment_path: str | Path,
+        *,
+        output_directory: str | Path,
+    ) -> PoweredQualificationDossierV1:
+        """Produce powered decisions for one exact evaluation and experiment."""
+        try:
+            return qualify_histdata_proposal_portfolio(
+                evaluation_path,
+                experiment_path,
+                output_directory=output_directory,
+            )
+        except (OSError, TypeError, ValueError, RuntimeError) as err:
+            raise ReconstructionValidationError(str(err)) from err
+
     def experiments(
         self, root: str | Path
     ) -> tuple[Mapping[str, JSONValue], ...]:
@@ -1280,6 +1317,7 @@ class ReconstructionClient:
                     spec.selected_proposal_engine_ids
                 ),
                 proposal_evaluation_paths=spec.proposal_evaluation_paths,
+                qualification_dossier_path=spec.qualification_dossier_path,
             )
             validate_synthetic_infill_plan_for_execution(plan)
             return plan

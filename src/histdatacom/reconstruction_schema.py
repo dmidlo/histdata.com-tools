@@ -389,6 +389,7 @@ _AUDITED_MODULES = (
     "histdatacom.synthetic.persistence",
     "histdatacom.synthetic.reconstruction_plan",
     "histdatacom.synthetic.proposal_engines",
+    "histdatacom.synthetic.qualification",
     "histdatacom.synthetic.reconstruction_handlers",
     "histdatacom.synthetic.certification",
     "histdatacom.synthetic.certification_campaign",
@@ -434,6 +435,11 @@ _REQUIRED_SCHEMA_TOKENS = (
     "proposal-engine-descriptor",
     "proposal-engine-registry",
     "proposal-engine-portfolio",
+    "point-process-residual-input",
+    "point-process-residual-report",
+    "predictive-score-report",
+    "qualification-power-study",
+    "powered-qualification-dossier",
     "reconstruction-experiment-manifest",
     "reconstruction-experiment-selection",
     "reconstruction-experiment-split-policy",
@@ -513,6 +519,7 @@ _PLAN_FIELDS = frozenset(
         "proposal_engine_ids",
         "selected_proposal_engine_ids",
         "proposal_evaluation_paths",
+        "qualification_dossier_path",
     }
 )
 
@@ -1009,7 +1016,10 @@ def _check_current_scope(
                 "A v2 plan requires an explicit selection from its portfolio.",
                 "Select only reconstruction-eligible engines in the portfolio.",
             )
-        elif selected_ids != ("histdatacom.empirical-motif-resampling",):
+        elif (
+            selected_ids != ("histdatacom.empirical-motif-resampling",)
+            and not str(payload.get("qualification_dossier_path", "")).strip()
+        ):
             _finding(
                 findings,
                 "unqualified_proposal_engine_selection",
@@ -1618,6 +1628,40 @@ def _inspect_artifacts(
                     "Proposal evidence is not a replay-verified no-winner campaign.",
                     "Regenerate the HistData proposal-engine campaign.",
                 )
+        qualification_path = str(
+            payload.get("qualification_dossier_path", "")
+        ).strip()
+        if qualification_path:
+            path = Path(qualification_path).expanduser()
+            try:
+                qualification = _read_artifact_mapping(path)
+            except (OSError, TypeError, ValueError) as err:
+                _finding(
+                    findings,
+                    "invalid_qualification_dossier",
+                    ReconstructionCompatibilityStatus.INVALID,
+                    "qualification_dossier_path",
+                    str(err),
+                    "Supply a bounded content-addressed powered qualification dossier.",
+                )
+            else:
+                if (
+                    qualification.get("schema_version")
+                    != "histdatacom.powered-qualification-dossier.v1"
+                    or qualification.get("provider_id") != HISTDATA_PROVIDER_ID
+                    or qualification.get("source_format")
+                    != SUPPORTED_SOURCE_FORMAT
+                    or qualification.get("timeframe") != SUPPORTED_TIMEFRAME
+                    or qualification.get("automatic_winner") is not False
+                ):
+                    _finding(
+                        findings,
+                        "qualification_dossier_scope_mismatch",
+                        ReconstructionCompatibilityStatus.INVALID,
+                        "qualification_dossier_path",
+                        "Qualification evidence is not a HistData-only no-winner dossier.",
+                        "Regenerate it with the installed reconstruction qualify command.",
+                    )
 
 
 def _read_artifact_mapping(path: Path) -> Mapping[str, Any]:

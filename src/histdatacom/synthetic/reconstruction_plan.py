@@ -139,6 +139,11 @@ from histdatacom.synthetic.proposal_engines import (
     proposal_evidence_from_campaigns,
     read_proposal_evidence_campaigns,
 )
+from histdatacom.synthetic.qualification import (
+    PoweredQualificationDossierV1,
+    read_powered_qualification_dossier,
+    verify_powered_qualification_dossier,
+)
 from histdatacom.synthetic.streaming import (
     ReconstructionResourceEstimateV1,
     ReconstructionRunV1,
@@ -179,6 +184,7 @@ PROPOSAL_ENGINE_CONFIG_ARTIFACT_KIND = "proposal_engine_config_v1"
 PROPOSAL_ENGINE_EVALUATION_ARTIFACT_KIND = (
     "proposal_engine_evaluation_scorecard_v1"
 )
+POWERED_QUALIFICATION_DOSSIER_ARTIFACT_KIND = "powered_qualification_dossier_v1"
 PLAN_EXECUTION_MANIFEST_ARTIFACT_KIND = (
     "reconstruction_plan_execution_manifest_v1"
 )
@@ -1716,6 +1722,7 @@ def build_synthetic_infill_plan(
     proposal_engine_ids: Iterable[str] = (),
     selected_proposal_engine_ids: Iterable[str] = (),
     proposal_evaluation_paths: Iterable[str | Path] = (),
+    qualification_dossier_path: str | Path | None = None,
 ) -> SyntheticInfillPlanV1:
     """Resolve real artifacts and build one executable first-party plan."""
     selected_symbols = _symbols(tuple(symbols))
@@ -2044,13 +2051,6 @@ def build_synthetic_infill_plan(
     }
     evaluation_paths = tuple(proposal_evaluation_paths)
     proposal_campaigns = read_proposal_evidence_campaigns(evaluation_paths)
-    if any(
-        campaign.corpus_id != resolved.benchmark_corpus.corpus_id
-        for campaign in proposal_campaigns
-    ):
-        raise ReconstructionPlanCompatibilityError(
-            "proposal evaluation corpus differs from planned benchmark"
-        )
     proposal_evidence = proposal_evidence_from_campaigns(proposal_campaigns)
     proposal_evaluation_refs = tuple(
         artifact_ref_for_file(
@@ -2058,6 +2058,41 @@ def build_synthetic_infill_plan(
         )
         for path in evaluation_paths
     )
+    qualification_dossier: PoweredQualificationDossierV1 | None = None
+    qualification_ref: ArtifactRef | None = None
+    if qualification_dossier_path is not None:
+        qualification_dossier = read_powered_qualification_dossier(
+            qualification_dossier_path
+        )
+        verify_powered_qualification_dossier(qualification_dossier)
+        if not proposal_campaigns:
+            raise ReconstructionPlanCompatibilityError(
+                "qualification dossier requires retained proposal evidence"
+            )
+        if any(
+            item.corpus_id != qualification_dossier.corpus_id
+            for item in proposal_campaigns
+        ):
+            raise ReconstructionPlanCompatibilityError(
+                "proposal evaluation corpus differs from qualification dossier"
+            )
+        if qualification_dossier.campaign_id not in {
+            item.campaign_id for item in proposal_campaigns
+        }:
+            raise ReconstructionPlanCompatibilityError(
+                "qualification campaign differs from retained proposal evidence"
+            )
+        qualification_ref = artifact_ref_for_file(
+            qualification_dossier_path,
+            kind=POWERED_QUALIFICATION_DOSSIER_ARTIFACT_KIND,
+        )
+    elif any(
+        campaign.corpus_id != resolved.benchmark_corpus.corpus_id
+        for campaign in proposal_campaigns
+    ):
+        raise ReconstructionPlanCompatibilityError(
+            "legacy proposal evaluation corpus differs from planned benchmark"
+        )
     common_context_refs = (
         resolved.artifacts["benchmark_manifest"],
         resolved.artifacts["feed_epochs"],
@@ -2075,6 +2110,11 @@ def build_synthetic_infill_plan(
             context_refs=common_context_refs,
             evidence_refs=(
                 *proposal_evaluation_refs,
+                *(
+                    (qualification_ref,)
+                    if qualification_ref is not None
+                    else ()
+                ),
                 *(
                     (
                         resolved.artifacts["motif_manifest"],
@@ -2101,6 +2141,7 @@ def build_synthetic_infill_plan(
         engine_ids=ordered_proposal_engine_ids,
         selected_engine_ids=selected_engine_ids,
         allow_legacy_motif_qualification=not evaluation_paths,
+        qualification_dossier=qualification_dossier,
     )
     proposal_portfolio_ref = _write_contract_artifact(
         proposal_portfolio,
@@ -2385,6 +2426,8 @@ def build_synthetic_infill_plan(
             for index, ref in enumerate(proposal_evaluation_refs)
         },
     }
+    if qualification_ref is not None:
+        graph["powered_qualification_dossier"] = qualification_ref
     if broker_ref is not None:
         graph["broker_delivery"] = broker_ref
     execution_manifest = ReconstructionPlanExecutionManifestV1(
@@ -2558,6 +2601,56 @@ def validate_synthetic_infill_plan_for_execution(
         if portfolio != configuration.proposal_portfolio:
             raise ReconstructionPlanCompatibilityError(
                 "proposal portfolio artifact differs from configuration"
+            )
+        if portfolio.qualification_dossier_id is not None:
+            qualification_ref = plan.artifact_graph.get(
+                "powered_qualification_dossier"
+            )
+            if qualification_ref is None:
+                raise ReconstructionPlanCompatibilityError(
+                    "qualified proposal portfolio lacks its dossier artifact"
+                )
+            if (
+                qualification_ref.kind
+                != POWERED_QUALIFICATION_DOSSIER_ARTIFACT_KIND
+            ):
+                raise ReconstructionPlanCompatibilityError(
+                    "proposal qualification artifact kind differs"
+                )
+            qualification = read_powered_qualification_dossier(
+                qualification_ref.path
+            )
+            verify_powered_qualification_dossier(qualification)
+            if (
+                portfolio.qualification_dossier_id != qualification.dossier_id
+                or portfolio.qualification_policy_id
+                != qualification.policy.policy_id
+                or portfolio.qualification_power_study_id
+                != qualification.power_study.study_id
+                or portfolio.qualification_portfolio_calibration_id
+                != qualification.portfolio_calibration.calibration_id
+                or portfolio.qualification_decision_ids
+                != {
+                    item.engine_id: item.decision_id
+                    for item in qualification.engine_decisions
+                    if item.engine_id
+                    in {entry.engine_id for entry in portfolio.entries}
+                }
+                or portfolio.portfolio_weights
+                != qualification.portfolio_calibration.weights
+            ):
+                raise ReconstructionPlanCompatibilityError(
+                    "proposal portfolio qualification binding differs"
+                )
+            if not set(portfolio.selected_engine_ids).issubset(
+                qualification.reconstruction_eligible_engine_ids
+            ):
+                raise ReconstructionPlanCompatibilityError(
+                    "proposal selection exceeds powered qualification"
+                )
+        elif "powered_qualification_dossier" in plan.artifact_graph:
+            raise ReconstructionPlanCompatibilityError(
+                "unbound proposal qualification artifact is present"
             )
         graph_values = {
             canonical_contract_json(ref.to_dict())

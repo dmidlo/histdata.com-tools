@@ -88,14 +88,18 @@ data rows remain in their source artifacts.
   ],
   "proposal_evaluation_paths": [
     "artifacts/reverse-degradation-scorecard-<sha256>.json"
-  ]
+  ],
+  "qualification_dossier_path": "artifacts/powered-qualification-dossier-<sha256>.json"
 }
 ```
 
-Portfolio order is not scientific rank. The example retains NHPP as a failed
-or benchmark-eligible candidate while selecting only the qualified motif
-engine. Selecting an unqualified engine is `research_only` and fails before
-submission. Inspect the resolved audits and evidence with:
+Portfolio order is not scientific rank. A powered dossier can only reduce the
+eligibility granted by retained campaign evidence. The current real dossier
+finds every executable HistData engine underpowered, so its honest product
+result is no decision: a specification that requests motif is refused during
+planning. The selection above illustrates the shape of a plan only and is
+executable only with a dossier that independently grants motif reconstruction
+eligibility. Inspect resolved audits and evidence with:
 
 ```sh
 histdatacom reconstruction --json portfolio \
@@ -105,6 +109,28 @@ histdatacom reconstruction --json portfolio \
 See
 [`proposal-engine-portfolios.md`](proposal-engine-portfolios.md) for discovery,
 single-engine evaluation, refusal, lineage, and no-fallback semantics.
+
+Produce the exact powered dossier through either installed surface:
+
+```sh
+histdatacom reconstruction --json qualify \
+  --evaluation work/proposal-evaluation/proposal-portfolio-evaluation-<sha256>.json \
+  --experiment work/experiment/reconstruction-experiment-<sha256>.json \
+  --output-directory work/qualification
+```
+
+```python
+dossier = ReconstructionClient().qualify_proposal_portfolio(
+    "work/proposal-evaluation/proposal-portfolio-evaluation-<sha256>.json",
+    "work/experiment/reconstruction-experiment-<sha256>.json",
+    output_directory="work/qualification",
+)
+```
+
+The CLI and API call the same verifier and writer and therefore reproduce the
+same content identity. See
+[`powered-reconstruction-qualification.md`](powered-reconstruction-qualification.md)
+for residual, score, power, holdout, and no-decision semantics.
 
 The omitted `evidence_policy` and `cross_series_constraint_policy` fields use
 their versioned HistData-only defaults. Supplying either field serializes the

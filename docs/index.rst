@@ -61,6 +61,7 @@ Persistence, projections, and validation
    strategy-sensitivity-contracts
    reverse-degradation-benchmark-contracts
    reverse-degradation-benchmark-corpus
+   powered-reconstruction-qualification
    reconstruction-certification-contracts
    reconstruction-temporal-orchestration
    reconstruction-public-interfaces

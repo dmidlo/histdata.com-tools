@@ -13,11 +13,15 @@ from histdatacom.synthetic.add_thin import default_add_thin_config
 from histdatacom.synthetic.benchmark import BenchmarkEventV1
 from histdatacom.synthetic.benchmark_corpus import (
     PREDECLARED_GATE_COMMIT,
+    BenchmarkWindowMetricObservationV1,
+    BenchmarkWindowMetricTraceV1,
     BenchmarkWindowPartitionV1,
     ReverseDegradationBenchmarkCorpusV1,
     ReverseDegradationCorpusProfileV1,
     audit_holdout_neighbor_leakage,
+    read_benchmark_window_metric_trace,
     read_reverse_degradation_benchmark_corpus,
+    write_benchmark_window_metric_trace,
 )
 from histdatacom.synthetic.benchmark_gates import (
     load_default_benchmark_promotion_gate_policy,
@@ -168,6 +172,44 @@ def test_manifest_reader_rejects_tamper(tmp_path: Path) -> None:
     bad.write_bytes(encoded)
     with pytest.raises(ValueError, match="content hash differs"):
         read_reverse_degradation_benchmark_corpus(bad)
+
+
+def test_window_metric_trace_is_bounded_row_free_and_content_addressed(
+    tmp_path: Path,
+) -> None:
+    observation = BenchmarkWindowMetricObservationV1(
+        candidate_id="candidate:one",
+        method_name="empirical_motif",
+        role="candidate",
+        split_kind="validation",
+        window_id="window:one",
+        ensemble_member_id="member-01",
+        reference_metrics={"event_rate_hz": 2.0, "spread_q95_pips": 1.1},
+        candidate_metrics={"event_rate_hz": 1.8, "spread_q95_pips": 1.2},
+        comparison_metrics={
+            "event_count_relative_error": 0.1,
+            "simulation_time_pit_ks": 0.2,
+        },
+    )
+    trace = BenchmarkWindowMetricTraceV1(
+        corpus_id="corpus:one",
+        campaign_id="campaign:one",
+        observations=(observation,),
+    )
+
+    artifact = write_benchmark_window_metric_trace(trace, tmp_path)
+
+    assert read_benchmark_window_metric_trace(artifact.path) == trace
+    assert artifact.metadata["trace_id"] == trace.trace_id
+    assert trace.to_dict()["event_rows_embedded"] is False
+    assert observation.to_dict()["event_rows_embedded"] is False
+
+    changed = Path(artifact.path).with_name(
+        f"reverse-degradation-window-metric-trace-{'0' * 64}.json"
+    )
+    changed.write_bytes(Path(artifact.path).read_bytes())
+    with pytest.raises(ValueError, match="content hash differs"):
+        read_benchmark_window_metric_trace(changed)
 
 
 def test_neighbor_leakage_detects_cross_split_overlap() -> None:
@@ -321,6 +363,39 @@ def test_time_degradations_preserve_protected_anchor_timestamps(
     )
 
 
+def test_missing_window_degradation_has_support_in_every_split() -> None:
+    corpus = _corpus()
+    affected: dict[str, int] = {
+        "calibration": 0,
+        "validation": 0,
+        "final_holdout": 0,
+    }
+    for partition in corpus.windows:
+        event = BenchmarkEventV1(
+            source_event_id=f"{partition.window_id}:ordinary",
+            symbol="EURUSD",
+            event_time_ns=partition.start_ns + 1,
+            event_sequence=1,
+            bid=1.1,
+            ask=1.1002,
+            epoch_id=partition.epoch_label,
+            session=partition.session,
+            event_state="update_joint",
+            sparsity="dense-reference",
+        )
+        degraded = corpus_module._apply_degradation(
+            (event,),
+            config={"name": "missing_window", "window_modulus": 2**32 + 1},
+            corpus=corpus,
+            partition=partition,
+            operator=None,
+            run_id="run-missing-window-support",
+        )
+        affected[partition.split_kind] += int(not degraded)
+
+    assert all(count == 1 for count in affected.values())
+
+
 def test_cli_exposes_installed_real_corpus_command() -> None:
     from histdatacom.data_analytics.cli import build_parser
 
@@ -429,7 +504,10 @@ def test_schrodinger_bridge_campaign_requires_config_and_target_together() -> (
     )
     assert corpus_module._validated_schrodinger_bridge_inputs(
         config, target
-    ) == (config, target)
+    ) == (
+        config,
+        target,
+    )
     with pytest.raises(ValueError, match="config and broker target together"):
         corpus_module._validated_schrodinger_bridge_inputs(config, None)
     with pytest.raises(TypeError, match="invalid config"):

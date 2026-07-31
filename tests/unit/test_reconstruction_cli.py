@@ -60,6 +60,7 @@ def test_installed_help_lists_complete_reconstruction_family(
         "engines",
         "portfolio",
         "engine-evaluate",
+        "qualify",
         "compatibility",
         "plan",
         "plan-set",
@@ -118,6 +119,21 @@ def test_cli_exposes_engine_discovery_portfolio_and_selected_evaluation(
             )
             return Result("histdatacom.proposal-portfolio-evaluation.v1")
 
+        def qualify_proposal_portfolio(
+            self,
+            evaluation,
+            experiment,
+            *,
+            output_directory,
+        ):
+            calls.append(
+                (
+                    "qualify",
+                    (evaluation, experiment, output_directory),
+                )
+            )
+            return Result("histdatacom.powered-qualification-dossier.v1")
+
     monkeypatch.setattr(reconstruction_cli, "_client", lambda _: FakeClient())
 
     assert reconstruction_cli.main(["--json", "engines"]) == 0
@@ -151,6 +167,24 @@ def test_cli_exposes_engine_discovery_portfolio_and_selected_evaluation(
     assert json.loads(capsys.readouterr().out)["schema_version"].endswith(
         "evaluation.v1"
     )
+    assert (
+        reconstruction_cli.main(
+            [
+                "--json",
+                "qualify",
+                "--evaluation",
+                "evaluation.json",
+                "--experiment",
+                "experiment.json",
+                "--output-directory",
+                "qualification",
+            ]
+        )
+        == 0
+    )
+    assert json.loads(capsys.readouterr().out)["schema_version"].endswith(
+        "dossier.v1"
+    )
     assert calls == [
         ("engines", None),
         ("portfolio", "plan.json"),
@@ -162,6 +196,10 @@ def test_cli_exposes_engine_discovery_portfolio_and_selected_evaluation(
                 "evaluation",
                 ("histdatacom.event-clock.nhpp",),
             ),
+        ),
+        (
+            "qualify",
+            ("evaluation.json", "experiment.json", "qualification"),
         ),
     ]
 

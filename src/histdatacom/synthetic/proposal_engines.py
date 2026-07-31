@@ -11,9 +11,10 @@ from __future__ import annotations
 import hashlib
 import inspect
 import json
+import math
 import os
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Any, TypeAlias, cast
@@ -32,10 +33,12 @@ from histdatacom.synthetic.add_thin import (
     default_add_thin_config,
 )
 from histdatacom.synthetic.benchmark_corpus import (
+    BenchmarkWindowMetricTraceV1,
     ReverseDegradationBenchmarkCampaignV1,
     read_reverse_degradation_benchmark_campaign,
     read_reverse_degradation_benchmark_corpus,
     run_reverse_degradation_benchmark_campaign,
+    write_benchmark_window_metric_trace,
     write_reverse_degradation_benchmark_artifacts,
 )
 from histdatacom.synthetic.contracts import (
@@ -816,6 +819,12 @@ class ProposalEnginePortfolioV1:
     bindings: tuple[ProposalEngineBindingV1, ...]
     eligibility_audits: tuple[ProposalEngineEligibilityAuditV1, ...]
     evidence: tuple[ProposalEngineEvidenceV1, ...]
+    qualification_dossier_id: str | None = None
+    qualification_policy_id: str | None = None
+    qualification_power_study_id: str | None = None
+    qualification_portfolio_calibration_id: str | None = None
+    qualification_decision_ids: Mapping[str, str] = field(default_factory=dict)
+    portfolio_weights: Mapping[str, float] = field(default_factory=dict)
     fallback_policy: str = PROPOSAL_PORTFOLIO_FALLBACK_POLICY
     portfolio_id: str = ""
     schema_version: str = PROPOSAL_ENGINE_PORTFOLIO_SCHEMA_VERSION
@@ -873,6 +882,68 @@ class ProposalEnginePortfolioV1:
                 raise ValueError(
                     "unqualified engine selected for reconstruction"
                 )
+        qualification_ids = (
+            self.qualification_dossier_id,
+            self.qualification_policy_id,
+            self.qualification_power_study_id,
+            self.qualification_portfolio_calibration_id,
+        )
+        decisions = {
+            _required_text(key): _required_text(value)
+            for key, value in self.qualification_decision_ids.items()
+        }
+        weights = {
+            _required_text(key): float(value)
+            for key, value in self.portfolio_weights.items()
+        }
+        if self.qualification_dossier_id is None:
+            if (
+                any(value is not None for value in qualification_ids[1:])
+                or decisions
+                or weights
+            ):
+                raise ValueError(
+                    "proposal portfolio has partial qualification evidence"
+                )
+        else:
+            for name in (
+                "qualification_dossier_id",
+                "qualification_policy_id",
+                "qualification_power_study_id",
+                "qualification_portfolio_calibration_id",
+            ):
+                object.__setattr__(
+                    self, name, _required_text(getattr(self, name))
+                )
+            entry_ids = {item.engine_id for item in entries}
+            if set(decisions) != entry_ids:
+                raise ValueError(
+                    "proposal qualification decisions do not cover entries"
+                )
+            if not weights or not set(weights).issubset(entry_ids):
+                raise ValueError(
+                    "proposal qualification weights differ from entries"
+                )
+            if any(
+                not math.isfinite(value) or value < 0.0
+                for value in weights.values()
+            ) or not math.isclose(sum(weights.values()), 1.0, abs_tol=1e-9):
+                raise ValueError("proposal qualification weights are invalid")
+            selected_ids = {
+                item.engine_id
+                for item in entries
+                if item.selected_for_reconstruction
+            }
+            if not selected_ids.issubset(set(weights)):
+                raise ValueError(
+                    "selected proposal engine is absent from qualification weights"
+                )
+        object.__setattr__(
+            self, "qualification_decision_ids", dict(sorted(decisions.items()))
+        )
+        object.__setattr__(
+            self, "portfolio_weights", dict(sorted(weights.items()))
+        )
         selected = tuple(
             item for item in entries if item.selected_for_reconstruction
         )
@@ -914,6 +985,14 @@ class ProposalEnginePortfolioV1:
                 item.to_dict() for item in self.eligibility_audits
             ],
             "evidence": [item.to_dict() for item in self.evidence],
+            "qualification_dossier_id": self.qualification_dossier_id,
+            "qualification_policy_id": self.qualification_policy_id,
+            "qualification_power_study_id": self.qualification_power_study_id,
+            "qualification_portfolio_calibration_id": (
+                self.qualification_portfolio_calibration_id
+            ),
+            "qualification_decision_ids": dict(self.qualification_decision_ids),
+            "portfolio_weights": dict(self.portfolio_weights),
             "fallback_policy": self.fallback_policy,
             "selected_engine_ids": list(self.selected_engine_ids),
             "portfolio_diversity_claim": (
@@ -951,6 +1030,39 @@ class ProposalEnginePortfolioV1:
                 ProposalEngineEvidenceV1.from_dict(_mapping(item))
                 for item in _sequence(data.get("evidence"))
             ),
+            qualification_dossier_id=(
+                str(data["qualification_dossier_id"])
+                if data.get("qualification_dossier_id") is not None
+                else None
+            ),
+            qualification_policy_id=(
+                str(data["qualification_policy_id"])
+                if data.get("qualification_policy_id") is not None
+                else None
+            ),
+            qualification_power_study_id=(
+                str(data["qualification_power_study_id"])
+                if data.get("qualification_power_study_id") is not None
+                else None
+            ),
+            qualification_portfolio_calibration_id=(
+                str(data["qualification_portfolio_calibration_id"])
+                if data.get("qualification_portfolio_calibration_id")
+                is not None
+                else None
+            ),
+            qualification_decision_ids={
+                str(key): str(value)
+                for key, value in _mapping(
+                    data.get("qualification_decision_ids", {})
+                ).items()
+            },
+            portfolio_weights={
+                str(key): float(value)
+                for key, value in _mapping(
+                    data.get("portfolio_weights", {})
+                ).items()
+            },
             fallback_policy=str(data.get("fallback_policy", "")),
             portfolio_id=str(data.get("portfolio_id", "")),
             schema_version=str(data.get("schema_version", "")),
@@ -1198,6 +1310,7 @@ def audit_proposal_engine_binding(
     evidence: Sequence[ProposalEngineEvidenceV1],
     motif_qualification: Mapping[str, Any] | None = None,
     allow_legacy_motif_qualification: bool = False,
+    qualification_decision: Any | None = None,
 ) -> ProposalEngineEligibilityAuditV1:
     """Derive maximum permission without silently promoting an engine."""
     if binding.engine_id != descriptor.engine_id:
@@ -1318,6 +1431,35 @@ def audit_proposal_engine_binding(
         else:
             eligibility = ProposalEligibility.BENCHMARK_ELIGIBLE
 
+    if qualification_decision is not None:
+        if qualification_decision.engine_id != descriptor.engine_id:
+            raise ValueError(
+                "qualification decision engine differs from descriptor"
+            )
+        benchmark_eligible = bool(
+            benchmark_eligible and qualification_decision.benchmark_eligible
+        )
+        reconstruction_eligible = bool(
+            reconstruction_eligible
+            and qualification_decision.reconstruction_eligible
+        )
+        ensemble_eligible = bool(
+            ensemble_eligible
+            and qualification_decision.ensemble_eligible
+            and reconstruction_eligible
+        )
+        if ensemble_eligible:
+            eligibility = ProposalEligibility.ENSEMBLE_ELIGIBLE
+        elif reconstruction_eligible:
+            eligibility = ProposalEligibility.RECONSTRUCTION_ELIGIBLE
+        elif benchmark_eligible:
+            eligibility = ProposalEligibility.BENCHMARK_ELIGIBLE
+        else:
+            eligibility = ProposalEligibility.RESEARCH_ONLY
+        evidence_ids = (*evidence_ids, qualification_decision.decision_id)
+        reasons.append(
+            f"powered_qualification_{qualification_decision.status.value}"
+        )
     return ProposalEngineEligibilityAuditV1(
         engine_id=descriptor.engine_id,
         descriptor_id=descriptor.descriptor_id,
@@ -1341,6 +1483,7 @@ def build_histdata_proposal_portfolio(
     engine_ids: Sequence[str] | None = None,
     selected_engine_ids: Sequence[str] | None = None,
     allow_legacy_motif_qualification: bool = False,
+    qualification_dossier: Any | None = None,
 ) -> ProposalEnginePortfolioV1:
     """Build an explicitly ordered portfolio without automatic fallback."""
     ordered_ids = tuple(
@@ -1365,6 +1508,43 @@ def build_histdata_proposal_portfolio(
     retained_evidence = tuple(
         item for item in evidence if item.engine_id in ordered_ids
     )
+    decisions: dict[str, Any] = {}
+    if qualification_dossier is not None:
+        from histdatacom.synthetic.qualification import (
+            PoweredQualificationDossierV1,
+            verify_powered_qualification_dossier,
+        )
+
+        if not isinstance(qualification_dossier, PoweredQualificationDossierV1):
+            raise TypeError("proposal qualification dossier must use v1")
+        verify_powered_qualification_dossier(qualification_dossier)
+        if qualification_dossier.registry_id != registry.registry_id:
+            raise ValueError("proposal qualification registry differs")
+        dossier_engine_ids = {
+            item.engine_id for item in qualification_dossier.engine_decisions
+        }
+        if set(ordered_ids) != dossier_engine_ids:
+            raise ValueError(
+                "proposal engines differ from exact qualification coverage"
+            )
+        if retained_evidence and qualification_dossier.corpus_id not in {
+            item.corpus_id for item in retained_evidence
+        }:
+            raise ValueError(
+                "proposal qualification corpus differs from evidence"
+            )
+        decisions = {
+            engine_id: qualification_dossier.decision(engine_id)
+            for engine_id in ordered_ids
+        }
+        retained_evidence_ids = {item.evidence_id for item in retained_evidence}
+        if any(
+            not set(decision.evidence_ids).issubset(retained_evidence_ids)
+            for decision in decisions.values()
+        ):
+            raise ValueError(
+                "proposal evidence differs from exact qualification decisions"
+            )
     audits = tuple(
         audit_proposal_engine_binding(
             descriptor,
@@ -1372,6 +1552,7 @@ def build_histdata_proposal_portfolio(
             evidence=retained_evidence,
             motif_qualification=motif_qualification,
             allow_legacy_motif_qualification=(allow_legacy_motif_qualification),
+            qualification_decision=decisions.get(descriptor.engine_id),
         )
         for descriptor in (
             registry.descriptor(engine_id) for engine_id in ordered_ids
@@ -1415,6 +1596,39 @@ def build_histdata_proposal_portfolio(
         bindings=tuple(bindings),
         eligibility_audits=audits,
         evidence=retained_evidence,
+        qualification_dossier_id=(
+            qualification_dossier.dossier_id
+            if qualification_dossier is not None
+            else None
+        ),
+        qualification_policy_id=(
+            qualification_dossier.policy.policy_id
+            if qualification_dossier is not None
+            else None
+        ),
+        qualification_power_study_id=(
+            qualification_dossier.power_study.study_id
+            if qualification_dossier is not None
+            else None
+        ),
+        qualification_portfolio_calibration_id=(
+            qualification_dossier.portfolio_calibration.calibration_id
+            if qualification_dossier is not None
+            else None
+        ),
+        qualification_decision_ids=(
+            {
+                engine_id: decisions[engine_id].decision_id
+                for engine_id in ordered_ids
+            }
+            if qualification_dossier is not None
+            else {}
+        ),
+        portfolio_weights=(
+            dict(qualification_dossier.portfolio_calibration.weights)
+            if qualification_dossier is not None
+            else {}
+        ),
     )
 
 
@@ -1458,6 +1672,7 @@ def run_histdata_proposal_portfolio_evaluation(
         if engine_id.startswith("histdatacom.regime-hawkes.")
     )
     corpus = read_reverse_degradation_benchmark_corpus(benchmark_manifest_path)
+    metric_trace_out: list[BenchmarkWindowMetricTraceV1] = []
     campaign, motif_index = run_reverse_degradation_benchmark_campaign(
         corpus,
         source_root,
@@ -1478,9 +1693,17 @@ def run_histdata_proposal_portfolio_evaluation(
         # Current HistData milestone deliberately supplies no broker target.
         schrodinger_bridge_config=None,
         schrodinger_bridge_broker_target=None,
+        metric_trace_out=metric_trace_out,
     )
-    refs = write_reverse_degradation_benchmark_artifacts(
-        corpus, campaign, motif_index, output_directory
+    if len(metric_trace_out) != 1:
+        raise RuntimeError("proposal evaluation did not emit one metric trace")
+    refs = dict(
+        write_reverse_degradation_benchmark_artifacts(
+            corpus, campaign, motif_index, output_directory
+        )
+    )
+    refs["window_metric_trace"] = write_benchmark_window_metric_trace(
+        metric_trace_out[0], output_directory
     )
     evidence = proposal_evidence_from_campaigns((campaign,))
     executed = tuple(item.engine_id for item in evidence)

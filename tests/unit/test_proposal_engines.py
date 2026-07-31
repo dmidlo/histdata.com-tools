@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from types import SimpleNamespace
 
 import pytest
 
@@ -17,6 +18,7 @@ from histdatacom.synthetic.proposal_engines import (
     proposal_engine_default_configs,
     proposal_engine_registry,
 )
+from histdatacom.synthetic.qualification import QualificationStatus
 from histdatacom.synthetic.schrodinger_bridge import SB_GENERATOR_ID
 
 
@@ -289,6 +291,77 @@ def test_conflicting_exact_config_evidence_revokes_product_eligibility() -> (
 
     assert not audit.reconstruction_eligible
     assert "conflicting_exact_config_promotion_evidence" in audit.reason_codes
+
+
+def test_powered_qualification_can_only_reduce_legacy_eligibility() -> None:
+    registry = proposal_engine_registry()
+    descriptor = registry.descriptor(EMPIRICAL_MOTIF_GENERATOR_ID)
+    binding = next(
+        item
+        for item in _bindings()
+        if item.engine_id == EMPIRICAL_MOTIF_GENERATOR_ID
+    )
+
+    def observation(promoted: bool) -> ProposalEngineEvidenceV1:
+        return ProposalEngineEvidenceV1(
+            engine_id=EMPIRICAL_MOTIF_GENERATOR_ID,
+            campaign_id="campaign:sha256:" + "1" * 64,
+            corpus_id="corpus:sha256:" + "0" * 64,
+            report_id="report:sha256:" + "2" * 64,
+            candidate_id="candidate:sha256:" + "3" * 64,
+            method_name="empirical_motif",
+            promotion_eligible=promoted,
+            provisional=False,
+            failure_count=0,
+            refusal_count=0,
+            failed_gate_ids=(() if promoted else ("candidate-event-count",)),
+            config_ids=(binding.config_id,),
+            fit_ids=(),
+            checkpoint_ids=(),
+            training_dataset_ids=(),
+        )
+
+    insufficient = SimpleNamespace(
+        engine_id=EMPIRICAL_MOTIF_GENERATOR_ID,
+        benchmark_eligible=True,
+        reconstruction_eligible=False,
+        ensemble_eligible=False,
+        decision_id="decision-insufficient:sha256:" + "4" * 64,
+        status=QualificationStatus.INSUFFICIENT_EVIDENCE,
+    )
+    reduced = audit_proposal_engine_binding(
+        descriptor,
+        binding,
+        evidence=(observation(True),),
+        motif_qualification={"qualified": True},
+        qualification_decision=insufficient,
+    )
+
+    assert reduced.benchmark_eligible
+    assert not reduced.reconstruction_eligible
+    assert not reduced.ensemble_eligible
+    assert "powered_qualification_insufficient_evidence" in (
+        reduced.reason_codes
+    )
+
+    passed = SimpleNamespace(
+        engine_id=EMPIRICAL_MOTIF_GENERATOR_ID,
+        benchmark_eligible=True,
+        reconstruction_eligible=True,
+        ensemble_eligible=True,
+        decision_id="decision-passed:sha256:" + "5" * 64,
+        status=QualificationStatus.PASSED,
+    )
+    not_promoted = audit_proposal_engine_binding(
+        descriptor,
+        binding,
+        evidence=(observation(False),),
+        motif_qualification={"qualified": True},
+        qualification_decision=passed,
+    )
+
+    assert not not_promoted.reconstruction_eligible
+    assert not not_promoted.ensemble_eligible
 
 
 def test_evaluation_contract_retains_execution_and_refusal_evidence() -> None:

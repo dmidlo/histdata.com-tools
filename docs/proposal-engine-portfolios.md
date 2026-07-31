@@ -37,6 +37,17 @@ fit schemas, deterministic seed policy, and bounded resources.
 - `selected_proposal_engine_ids`: the explicit product selection; and
 - `proposal_evaluation_paths`: strong retained HistData scorecards.
 
+It may also bind one `qualification_dossier_path`. When present, the planner
+verifies the exact #486 experiment, #489 evaluation, corpus, campaign, metric
+trace, installed registry, implementation hash, policy, power study, engine
+decisions, and validation-fitted portfolio weights. Powered qualification is
+an additional restriction: it can revoke a legacy permission but cannot
+promote an engine that failed its retained campaign or lacks runtime evidence.
+The powered proposal corpus is allowed to be newer than the benchmark artifact
+immutably bound inside an existing motif library; each chain is verified
+against its own role, and the retained proposal campaign must match the
+dossier exactly.
+
 The plan binds config, dataset resolution, point-in-time context, benchmark,
 qualification, leakage, and scorecard artifacts by SHA-256. Evidence is
 eligible only when its benchmark corpus and engine config identity match the
@@ -49,12 +60,18 @@ The v2.3 `ReconstructionPlanSpecV1` remains a deprecated compatibility input.
 It translates deterministically to an explicit motif-only portfolio; it does
 not silently add the other engines or import their evidence.
 
-Retained #454 HistData evidence qualifies empirical motif for reconstruction.
-Other non-broker engines remain benchmark-eligible after failed promotion
-gates. Consequently the honest current product is an explicitly documented
-single-qualified-engine portfolio. It reports
-`portfolio_diversity_claim=single-qualified-engine`; it does not describe
-ensemble-member variation as cross-model diversity.
+Retained #454 evidence historically qualified empirical motif under the legacy
+promotion policy. The #490 powered qualification campaign supersedes that
+permission for an exact plan: all 12 executable HistData engines are currently
+`insufficient_evidence` at the observed powered support, while the deferred
+broker-target bridge is `refused`. Consequently the honest powered result is
+no product selection. A plan bound to that dossier fails closed instead of
+constructing an executable portfolio or silently falling back to motif.
+
+Plans without a powered dossier retain the legacy v2.4 compatibility behavior
+and describe motif as a `single-qualified-engine`; they do not claim that
+ensemble-member variation is cross-model diversity. New qualification-aware
+work should bind the dossier and honor its stricter no-decision result.
 
 The ensemble plan may describe more seed members than the retention policy
 permits the product to publish. Only the predeclared retained-member set is
@@ -82,16 +99,28 @@ histdatacom reconstruction --json engine-evaluate \
   --source-root data/ASCII/T \
   --output-directory work/nhpp-evaluation \
   --engine histdatacom.event-clock.nhpp
+
+# Power-qualify that exact evaluation against a frozen HistData experiment.
+histdatacom reconstruction --json qualify \
+  --evaluation work/proposal-evaluation/proposal-portfolio-evaluation-<sha256>.json \
+  --experiment work/experiment/reconstruction-experiment-<sha256>.json \
+  --output-directory work/qualification
 ```
 
 The same operations are available as
-`ReconstructionClient.proposal_engines()`, `proposal_portfolio()`, and
-`evaluate_proposal_portfolio()`. Evaluation never promotes a winner. Product
+`ReconstructionClient.proposal_engines()`, `proposal_portfolio()`,
+`evaluate_proposal_portfolio()`, and `qualify_proposal_portfolio()`.
+Evaluation and qualification never promote an automatic winner. Product
 execution dispatches only a selected reconstruction-eligible engine through
 an installed first-party adapter, then uses generic carving, synchronized
 triangle reconciliation, ensemble-member handling, validation, atomic
 persistence, preview, and replay. Missing adapters and failed/research-only
 eligibility are refusals, never motif fallback.
+
+See
+[`powered-reconstruction-qualification.md`](powered-reconstruction-qualification.md)
+for residual methods, proper scores, power semantics, the retained real
+campaign, and the exact no-decision boundary.
 
 ## Lineage and failure semantics
 

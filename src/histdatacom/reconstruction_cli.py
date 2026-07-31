@@ -102,6 +102,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="evaluate one engine (repeat for an explicit portfolio)",
     )
 
+    qualify = subparsers.add_parser(
+        "qualify",
+        help="power-qualify one exact HistData experiment and engine evaluation",
+    )
+    qualify.add_argument("--evaluation", required=True, metavar="PATH")
+    qualify.add_argument("--experiment", required=True, metavar="PATH")
+    qualify.add_argument("--output-directory", required=True, metavar="PATH")
+
     compatibility = subparsers.add_parser(
         "compatibility",
         help="audit a proposed plan against installed executable contracts",
@@ -321,6 +329,13 @@ def _run_command(
             engine_ids=args.engine,
         )
         return evaluation.to_dict(), ReconstructionExitCode.SUCCESS
+    if command == "qualify":
+        dossier = client.qualify_proposal_portfolio(
+            args.evaluation,
+            args.experiment,
+            output_directory=args.output_directory,
+        )
+        return dossier.to_dict(), ReconstructionExitCode.SUCCESS
     if command == "compatibility":
         report = client.compatibility(args.plan)
         if report.executable:

@@ -2762,11 +2762,13 @@ module/document names is a benchmark role, not an optional post-certification
 architecture or a permanent product classification.
 
 The public v2 plan explicitly orders engines, binds config/dataset/context/
-evidence artifacts, and names the reconstruction selection. Retained evidence
-currently qualifies only empirical motif for product execution; failed
-non-broker engines remain benchmark-eligible and the broker-target bridge is
-research-only. The resulting product truthfully declares a single-qualified-
-engine portfolio and never silently falls back to motif. See
+evidence artifacts, and names the reconstruction selection. The powered #490
+campaign can only reduce legacy eligibility; at its observed support, all 12
+executable HistData engines are `insufficient_evidence` and the broker-target
+bridge is a deferred refusal. The resulting product decision is therefore no
+selection, and planning fails closed instead of silently falling back to
+motif. Legacy plans without a powered dossier retain their explicit
+single-qualified-engine compatibility behavior. See
 [`docs/proposal-engine-portfolios.md`](docs/proposal-engine-portfolios.md).
 
 #### Classical Event-Clock Proposal Engines
@@ -3428,13 +3430,20 @@ histdatacom reconstruction --json engine-evaluate \
   --benchmark-manifest artifacts/reverse-degradation-manifest-<sha256>.json \
   --source-root data/ASCII/T \
   --output-directory work/proposal-evaluation
+histdatacom reconstruction --json qualify \
+  --evaluation work/proposal-evaluation/proposal-portfolio-evaluation-<sha256>.json \
+  --experiment work/experiment/reconstruction-experiment-<sha256>.json \
+  --output-directory work/qualification
 histdatacom reconstruction --json portfolio \
   --plan work/plan-artifacts/synthetic-infill-plan-<sha256>.json
 ```
 
-Failed engines stay inspectable and benchmark-eligible; they cannot enter a
-committed product. The current plan selects one qualified motif engine and
-reports that it has no cross-model diversity. There is no silent fallback.
+Failed and underpowered engines stay inspectable; they cannot enter a committed
+product. Qualification binds the exact experiment, evaluation, row-free metric
+trace, power study, engine decisions, and validation-fitted portfolio weights.
+The current powered campaign preserves no decision and rejects an executable
+selection. There is no silent fallback. See
+[`docs/powered-reconstruction-qualification.md`](docs/powered-reconstruction-qualification.md).
 
 Only HistData.com ASCII/T and the complete EURGBP/EURUSD/GBPUSD triangle are
 accepted. M1, bar, partial-triangle, alternate-provider, OANDA, and broker
