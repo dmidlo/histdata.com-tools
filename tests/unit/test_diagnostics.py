@@ -410,6 +410,31 @@ def test_contracts_reject_local_publication_paths_and_broker_artifacts(
         )
 
 
+def test_source_identity_bounds_deep_content_addressed_product_paths(
+    tmp_path: Path,
+) -> None:
+    """Real partitioned manifests need a stable short publication locator."""
+    digest = "a" * 64
+    deep = tmp_path / ".histdatacom"
+    for index in range(12):
+        deep /= f"axis-{index}={digest}"
+    path = deep / "manifest.json"
+    source = diagnostics_module._source_identity(
+        ArtifactRef(
+            kind="reconstruction-product-manifest",
+            path=str(path),
+            size_bytes=100,
+            sha256=digest,
+        ),
+        {
+            "schema_version": "histdatacom.reconstruction-product.v2",
+            "manifest_id": f"reconstruction-manifest-v2:sha256:{digest}",
+        },
+    )
+
+    assert source.relative_locator == f"artifacts/{digest}.json"
+
+
 def test_renderer_orders_numeric_axes_numerically() -> None:
     assert _ordered_x_labels({"12", "24", "3", "48", "6"}) == [
         "3",

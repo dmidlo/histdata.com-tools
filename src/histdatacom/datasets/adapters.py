@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
 import csv
-from dataclasses import dataclass
-from datetime import datetime, timezone
 import hashlib
 import math
+from collections.abc import Iterable
+from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
@@ -24,6 +24,10 @@ from histdatacom.datasets.contracts import (
     SourceProviderDescriptorV1,
     normalize_period,
     normalize_symbol,
+)
+from histdatacom.histdata_ascii import (
+    MAX_HISTDATA_SOURCE_ORDER_REGRESSION_MS,
+    MAX_HISTDATA_SOURCE_ORDER_REGRESSIONS_PER_PARTITION,
 )
 from histdatacom.runtime_contracts import ArtifactRef
 
@@ -91,7 +95,7 @@ class HistDataProviderAdapter:
     def descriptor(self) -> ProviderAdapterDescriptorV1:
         return ProviderAdapterDescriptorV1(
             adapter_id=HISTDATA_ADAPTER_ID,
-            adapter_version="1.0.0",
+            adapter_version="1.1.0",
             source_provider_id=self.provider.source_provider_id,
             formats=("ascii",),
             granularities=("T",),
@@ -156,15 +160,24 @@ class HistDataProviderAdapter:
         digest = _file_sha256(path)
         _match_expected_hash(digest, expected_sha256, path)
         frame = _read_histdata_frame(path)
-        row_count, first_ms, last_ms = _validate_canonical_frame(frame, path)
+        validation = _validate_canonical_frame(
+            frame,
+            path,
+            maximum_timestamp_regression_ms=(
+                MAX_HISTDATA_SOURCE_ORDER_REGRESSION_MS
+            ),
+            maximum_timestamp_regression_count=(
+                MAX_HISTDATA_SOURCE_ORDER_REGRESSIONS_PER_PARTITION
+            ),
+        )
         month_start = _month_start_ns(normalized_period)
         month_end = _month_start_ns(_next_period(normalized_period))
         if not (
             month_start - _MAX_HISTDATA_MONTH_SPILL_NS
-            <= first_ms * 1_000_000
+            <= validation.first_ms * 1_000_000
             < month_end + _MAX_HISTDATA_MONTH_SPILL_NS
             and month_start - _MAX_HISTDATA_MONTH_SPILL_NS
-            <= last_ms * 1_000_000
+            <= validation.last_ms * 1_000_000
             < month_end + _MAX_HISTDATA_MONTH_SPILL_NS
         ):
             raise DatasetContractError(
@@ -189,13 +202,22 @@ class HistDataProviderAdapter:
                     "granularity": "T",
                     "symbol": normalized_symbol,
                     "period": normalized_period,
-                    "row_count": row_count,
-                    "first_timestamp_ms": first_ms,
-                    "last_timestamp_ms": last_ms,
+                    "row_count": validation.row_count,
+                    "first_timestamp_ms": validation.first_ms,
+                    "last_timestamp_ms": validation.last_ms,
+                    "timestamp_order_policy": (
+                        "source-order-preserved-bounded-regressions-v1"
+                    ),
+                    "timestamp_regression_count": (
+                        validation.timestamp_regression_count
+                    ),
+                    "maximum_timestamp_regression_ms": (
+                        validation.maximum_timestamp_regression_ms
+                    ),
                 },
             ),
             source_artifact_sha256=digest,
-            row_count=row_count,
+            row_count=validation.row_count,
             coverage_start_ns=month_start,
             coverage_end_ns=month_end,
             clock_policy_id=descriptor.clock_policy_id,
@@ -211,10 +233,17 @@ class HistDataProviderAdapter:
         _require_adapter_partition(partition, self.descriptor)
         _verify_partition_artifact(partition)
         frame = _read_histdata_frame(Path(partition.artifact.path))
-        row_count, _, _ = _validate_canonical_frame(
-            frame, Path(partition.artifact.path)
+        validation = _validate_canonical_frame(
+            frame,
+            Path(partition.artifact.path),
+            maximum_timestamp_regression_ms=(
+                MAX_HISTDATA_SOURCE_ORDER_REGRESSION_MS
+            ),
+            maximum_timestamp_regression_count=(
+                MAX_HISTDATA_SOURCE_ORDER_REGRESSIONS_PER_PARTITION
+            ),
         )
-        if row_count != partition.row_count:
+        if validation.row_count != partition.row_count:
             raise DatasetContractError(
                 DatasetFailureCode.INCONSISTENT_COVERAGE,
                 "HistData cache row count changed after inventory",
@@ -315,12 +344,12 @@ class FixtureProviderAdapter:
         digest = _file_sha256(path)
         _match_expected_hash(digest, expected_sha256, path)
         frame = _read_fixture_frame(path)
-        row_count, first_ms, last_ms = _validate_canonical_frame(frame, path)
+        validation = _validate_canonical_frame(frame, path)
         month_start = _month_start_ns(normalized_period)
         month_end = _month_start_ns(_next_period(normalized_period))
         if not (
-            month_start <= first_ms * 1_000_000 < month_end
-            and month_start <= last_ms * 1_000_000 < month_end
+            month_start <= validation.first_ms * 1_000_000 < month_end
+            and month_start <= validation.last_ms * 1_000_000 < month_end
         ):
             raise DatasetContractError(
                 DatasetFailureCode.INCONSISTENT_COVERAGE,
@@ -344,13 +373,13 @@ class FixtureProviderAdapter:
                     "granularity": "T",
                     "symbol": normalized_symbol,
                     "period": normalized_period,
-                    "row_count": row_count,
-                    "first_timestamp_ms": first_ms,
-                    "last_timestamp_ms": last_ms,
+                    "row_count": validation.row_count,
+                    "first_timestamp_ms": validation.first_ms,
+                    "last_timestamp_ms": validation.last_ms,
                 },
             ),
             source_artifact_sha256=digest,
-            row_count=row_count,
+            row_count=validation.row_count,
             coverage_start_ns=month_start,
             coverage_end_ns=month_end,
             clock_policy_id=descriptor.clock_policy_id,
@@ -367,10 +396,10 @@ class FixtureProviderAdapter:
         _require_adapter_partition(partition, self.descriptor)
         _verify_partition_artifact(partition)
         frame = _read_fixture_frame(Path(partition.artifact.path))
-        row_count, _, _ = _validate_canonical_frame(
+        validation = _validate_canonical_frame(
             frame, Path(partition.artifact.path)
         )
-        if row_count != partition.row_count:
+        if validation.row_count != partition.row_count:
             raise DatasetContractError(
                 DatasetFailureCode.INCONSISTENT_COVERAGE,
                 "fixture row count changed after inventory",
@@ -441,28 +470,30 @@ def build_observed_dataset_version(
 
 def histdata_cache_path(root: str | Path, symbol: str, period: str) -> Path:
     """Return the existing cache path policy owned by the HistData adapter."""
-    source_root = Path(root).expanduser().resolve()
+    source_root: Path = Path(root).expanduser().resolve()
     normalized_symbol = normalize_symbol(symbol).lower()
     normalized_period = normalize_period(period)
-    return (
+    cache_path: Path = (
         source_root
         / normalized_symbol
         / str(int(normalized_period[:4]))
         / str(int(normalized_period[4:]))
         / ".data"
     )
+    return cache_path
 
 
 def fixture_csv_path(root: str | Path, symbol: str, period: str) -> Path:
     """Return the distinct flat reference-provider partition path."""
-    source_root = Path(root).expanduser().resolve()
+    source_root: Path = Path(root).expanduser().resolve()
     normalized_symbol = normalize_symbol(symbol)
     normalized_period = normalize_period(period)
-    return (
+    fixture_path: Path = (
         source_root
         / normalized_symbol
         / f"{normalized_period[:4]}-{normalized_period[4:]}.csv"
     )
+    return fixture_path
 
 
 def _histdata_root(root: str | Path) -> Path:
@@ -561,8 +592,7 @@ def _read_fixture_frame(path: Path) -> Any:
                 except ValueError as err:
                     raise DatasetContractError(
                         DatasetFailureCode.MALFORMED_QUOTE,
-                        f"fixture row {source_row} contains non-numeric "
-                        "quote fields",
+                        f"fixture row {source_row} contains non-numeric quote fields",
                     ) from err
                 native = str(row.get("native_id", "") or "").strip() or None
                 rows.append((timestamp_ms, bid, ask, vol, native))
@@ -594,8 +624,7 @@ def _explicit_utc_ms(value: Any, row_number: int) -> int:
     if not text or (not text.endswith("Z") and not text.endswith("+00:00")):
         raise DatasetContractError(
             DatasetFailureCode.AMBIGUOUS_CLOCK,
-            f"fixture row {row_number} requires an explicit UTC RFC3339 "
-            "timestamp",
+            f"fixture row {row_number} requires an explicit UTC RFC3339 timestamp",
         )
     try:
         parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
@@ -612,7 +641,22 @@ def _explicit_utc_ms(value: Any, row_number: int) -> int:
     return int(parsed.timestamp() * 1000)
 
 
-def _validate_canonical_frame(frame: Any, path: Path) -> tuple[int, int, int]:
+@dataclass(frozen=True, slots=True)
+class _CanonicalFrameValidation:
+    row_count: int
+    first_ms: int
+    last_ms: int
+    timestamp_regression_count: int
+    maximum_timestamp_regression_ms: int
+
+
+def _validate_canonical_frame(
+    frame: Any,
+    path: Path,
+    *,
+    maximum_timestamp_regression_ms: int = 0,
+    maximum_timestamp_regression_count: int = 0,
+) -> _CanonicalFrameValidation:
     columns = set(getattr(frame, "columns", ()))
     if not {"datetime", "bid", "ask"}.issubset(columns):
         raise DatasetContractError(
@@ -636,6 +680,8 @@ def _validate_canonical_frame(frame: Any, path: Path) -> tuple[int, int, int]:
     bids = frame.get_column("bid").to_list()
     asks = frame.get_column("ask").to_list()
     previous: int | None = None
+    regression_count = 0
+    maximum_regression = 0
     for ordinal, (timestamp, bid_value, ask_value) in enumerate(
         zip(timestamps, bids, asks, strict=True), start=1
     ):
@@ -658,12 +704,25 @@ def _validate_canonical_frame(frame: Any, path: Path) -> tuple[int, int, int]:
                 f"partition row {ordinal} has invalid bid/ask",
             )
         if previous is not None and timestamp < previous:
-            raise DatasetContractError(
-                DatasetFailureCode.INCONSISTENT_COVERAGE,
-                f"partition row {ordinal} timestamp regresses",
-            )
+            regression = previous - timestamp
+            regression_count += 1
+            maximum_regression = max(maximum_regression, regression)
+            if (
+                regression > maximum_timestamp_regression_ms
+                or regression_count > maximum_timestamp_regression_count
+            ):
+                raise DatasetContractError(
+                    DatasetFailureCode.INCONSISTENT_COVERAGE,
+                    f"partition row {ordinal} timestamp regresses",
+                )
         previous = timestamp
-    return row_count, timestamps[0], timestamps[-1]
+    return _CanonicalFrameValidation(
+        row_count=row_count,
+        first_ms=min(timestamps),
+        last_ms=max(timestamps),
+        timestamp_regression_count=regression_count,
+        maximum_timestamp_regression_ms=maximum_regression,
+    )
 
 
 def _require_adapter_partition(

@@ -247,6 +247,16 @@ def test_real_triangle_is_deterministic_and_recovers_post_rename_crash(
     proposal_manifest = json.loads(
         Path(proposal_outcome.output_refs[0].path).read_text(encoding="utf-8")
     )
+    assert {
+        value["session_state"]
+        for value in proposal_manifest["query_conditions"].values()
+    } == {"asia"}
+    if proposal_manifest["proposal_engine_id"].startswith(
+        "histdatacom.marked-hawkes."
+    ):
+        assert proposal_manifest["proposal_generation_evidence"]["status"] == (
+            "generated"
+        )
     assert proposal_manifest["synchronization_constraint_window_id"] in (
         source_manifest["cross_series_constraint_window_ids"]
     )
@@ -384,12 +394,14 @@ def test_real_triangle_is_deterministic_and_recovers_post_rename_crash(
     )
 
 
-def test_real_validation_refusal_prevents_atomic_commit(tmp_path: Path) -> None:
-    """A schema-valid but failing qualification cannot become discoverable."""
+def test_real_scientific_evidence_refusal_prevents_atomic_commit(
+    tmp_path: Path,
+) -> None:
+    """Schema-valid cross-split leakage evidence cannot become discoverable."""
     case = _case(
         tmp_path / "negative-validation",
         max_parallel_windows=1,
-        failing_qualification=True,
+        failing_scientific_evidence=True,
     )
     register_first_party_reconstruction_handlers()
     state = asyncio.run(
@@ -582,7 +594,7 @@ def _case(
     root: Path,
     *,
     max_parallel_windows: int,
-    failing_qualification: bool = False,
+    failing_scientific_evidence: bool = False,
 ) -> _Case:
     plan = _real_plan()
     start = _real_start_ns()
@@ -605,12 +617,12 @@ def _case(
         original.commands[0].configuration_refs[0].path
     )
     artifacts = dict(old_execution.artifacts)
-    replacement_qualification: ArtifactRef | None = None
-    if failing_qualification:
-        replacement_qualification = _failing_qualification(
-            root / "artifacts", artifacts["motif_qualification"]
+    replacement_leakage: ArtifactRef | None = None
+    if failing_scientific_evidence:
+        replacement_leakage = _failing_scientific_evidence(
+            root / "artifacts", artifacts["motif_leakage_audit"]
         )
-        artifacts["motif_qualification"] = replacement_qualification
+        artifacts["motif_leakage_audit"] = replacement_leakage
     execution = replace(
         old_execution,
         artifacts=artifacts,
@@ -633,11 +645,11 @@ def _case(
     commands = []
     for ordinal, command in enumerate(original.commands):
         input_refs = command.input_manifest_refs
-        if replacement_qualification is not None:
+        if replacement_leakage is not None:
             input_refs = tuple(
                 (
-                    replacement_qualification
-                    if ref.kind == replacement_qualification.kind
+                    replacement_leakage
+                    if ref.kind == replacement_leakage.kind
                     else ref
                 )
                 for ref in input_refs
@@ -723,15 +735,17 @@ def _write_execution_manifest(
     )
 
 
-def _failing_qualification(root: Path, original: ArtifactRef) -> ArtifactRef:
+def _failing_scientific_evidence(
+    root: Path, original: ArtifactRef
+) -> ArtifactRef:
     payload: dict[str, Any] = json.loads(
         Path(original.path).read_text(encoding="utf-8")
     )
-    payload["candidate_promotion_eligible"] = False
+    payload["post_exclusion_cross_split_finding_count"] = 1
     encoded = canonical_contract_json(payload).encode("utf-8") + b"\n"
     digest = hashlib.sha256(encoded).hexdigest()
     root.mkdir(parents=True, exist_ok=True)
-    path = root / f"modern-reference-motif-qualification-{digest}.json"
+    path = root / f"modern-reference-motif-leakage-audit-{digest}.json"
     path.write_bytes(encoded)
     return ArtifactRef(
         kind=original.kind,

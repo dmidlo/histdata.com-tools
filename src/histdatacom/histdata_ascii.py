@@ -16,6 +16,11 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
 EST_NO_DST_OFFSET_MS = 18_000_000
+# Real HistData tick archives can preserve one one-hour source-order fallback
+# around the late-October clock transition.  The UTC conversion remains fixed
+# EST; this bound governs ordering diagnostics, not timezone conversion.
+MAX_HISTDATA_SOURCE_ORDER_REGRESSION_MS = 3_600_000
+MAX_HISTDATA_SOURCE_ORDER_REGRESSIONS_PER_PARTITION = 1
 UNIX_EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
 
 TICK = "T"

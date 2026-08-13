@@ -116,6 +116,7 @@ class BenchmarkSplitKind(str, Enum):
     CALIBRATION = "calibration"
     VALIDATION = "validation"
     FINAL_HOLDOUT = "final_holdout"
+    PRODUCT_INPUT = "product_input"
 
     @classmethod
     def from_value(

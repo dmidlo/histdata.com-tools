@@ -2763,13 +2763,16 @@ module/document names is a benchmark role, not an optional post-certification
 architecture or a permanent product classification.
 
 The public v2 plan explicitly orders engines, binds config/dataset/context/
-evidence artifacts, and names the reconstruction selection. The powered #490
-campaign can only reduce legacy eligibility; at its observed support, all 12
-executable HistData engines are `insufficient_evidence` and the broker-target
-bridge is a deferred refusal. The resulting product decision is therefore no
-selection, and planning fails closed instead of silently falling back to
-motif. Legacy plans without a powered dossier retain their explicit
-single-qualified-engine compatibility behavior. See
+evidence artifacts, and names the reconstruction selection. Powered
+qualification can only reduce legacy eligibility. July's 18-window pilot
+correctly returned no decision; the expanded campaign freezes 96 synchronized
+windows across separate calibration, validation, and final-holdout periods.
+Of the three powered marked-Hawkes variants, only diagonal self-excitation
+passes all ten hard gates and is eligible for reconstruction and ensemble use.
+The other registered engines retain their failed, underpowered, refused, or
+research-only decisions and cannot enter the product. There is no silent motif
+fallback and no automatic winner. Legacy plans without a powered dossier
+retain their explicit single-qualified-engine compatibility behavior. See
 [`docs/proposal-engine-portfolios.md`](docs/proposal-engine-portfolios.md).
 
 #### Classical Event-Clock Proposal Engines
@@ -3312,7 +3315,7 @@ stratification, restoration, terminal states, and resource bounds.
 #### EURUSD Triangle Reconstruction Certification
 
 `modern_reference_triangle_certification_policy()` predeclares the current
-v2.1.0 scientific, operational, reporting, repository, and release contract for
+v2.4.0 scientific, operational, reporting, repository, and release contract for
 the EURGBP/EURUSD/GBPUSD product over common support beginning at `200203`. It
 fixes `modern_reference` delivery with the `unconditioned_reference` claim and
 explicitly excludes broker adaptation. The common end month, source-readiness
@@ -3320,7 +3323,8 @@ contracts, scientific thresholds, and peak-memory/scratch/runtime/storage and
 candidate-amplification budgets participate in the deterministic policy
 identity. The older broker-bound `eurusd_triangle_certification_policy()` and
 V1 dossiers remain readable for evidence replay but are not the #449 release
-path.
+path; the current factory additionally binds #491's powered portfolio,
+information-mode, and coherent diagnostic evidence.
 
 Certification consumes compact, verified report artifacts bound to that exact
 policy identity, so evidence cannot be reused after scope or threshold drift.
@@ -3332,7 +3336,8 @@ artifact instead of silently turning synthetic reference output into a broker
 claim.
 
 `evaluate_modern_reference_reconstruction_certification()` covers all fifteen
-#449 gate groups plus the individual source-readiness and operations seams and
+#491 gate groups plus the individual portfolio, diagnostics, source-readiness,
+and operations seams and
 returns one bounded `ReconstructionCertificationDossierV2`. The dossier can be
 `incomplete`, `failed`, `ready-for-promotion`, or `certified`.
 `ready-for-promotion` is narrowly reserved for the state where every check has
@@ -3465,8 +3470,9 @@ histdatacom reconstruction --json portfolio \
 Failed and underpowered engines stay inspectable; they cannot enter a committed
 product. Qualification binds the exact experiment, evaluation, row-free metric
 trace, power study, engine decisions, and validation-fitted portfolio weights.
-The current powered campaign preserves no decision and rejects an executable
-selection. There is no silent fallback. See
+The current expanded campaign admits only the diagonal self-excitation
+marked-Hawkes variant; every nonpassing engine remains inspectable but is
+excluded from execution. There is no silent fallback or automatic winner. See
 [`docs/powered-reconstruction-qualification.md`](docs/powered-reconstruction-qualification.md).
 
 Only HistData.com ASCII/T and the complete EURGBP/EURUSD/GBPUSD triangle are

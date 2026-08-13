@@ -35,6 +35,7 @@ from histdatacom.reconstruction_experiment import (
     ReconstructionExperimentSplitUnitV1,
     audit_reconstruction_experiment_splits,
     build_legacy_histdata_catalog,
+    current_reconstruction_experiment_implementation,
     discover_reconstruction_experiments,
     freeze_histdata_reconstruction_experiment,
     read_reconstruction_experiment,
@@ -45,6 +46,21 @@ from histdatacom.runtime_contracts import ArtifactRef
 _SYMBOLS = ("EURGBP", "EURUSD", "GBPUSD")
 _PERIOD = "202001"
 _START_MS = int(datetime(2020, 1, 2, tzinfo=timezone.utc).timestamp() * 1000)
+
+
+def test_implementation_identity_covers_plan_runtime_api_and_science() -> None:
+    implementation = current_reconstruction_experiment_implementation()
+
+    assert {
+        "histdatacom.datasets.adapters",
+        "histdatacom.reconstruction",
+        "histdatacom.reconstruction_schema",
+        "histdatacom.synthetic.benchmark_corpus",
+        "histdatacom.synthetic.marked_hawkes",
+        "histdatacom.synthetic.qualification",
+        "histdatacom.synthetic.reconstruction_handlers",
+        "histdatacom.synthetic.reconstruction_plan",
+    }.issubset(implementation.module_sha256)
 
 
 def _write_triangle(root: Path) -> None:
@@ -312,8 +328,7 @@ def test_fixture_provider_catalog_is_rejected_by_histdata_experiment(
     csv_path = fixture_csv_path(source, "EURUSD", _PERIOD)
     csv_path.parent.mkdir(parents=True, exist_ok=True)
     csv_path.write_text(
-        "timestamp,bid,ask,vol,native_id\n"
-        "2020-01-02T00:00:00Z,1.0,1.1,0,native-1\n",
+        "timestamp,bid,ask,vol,native_id\n2020-01-02T00:00:00Z,1.0,1.1,0,native-1\n",
         encoding="utf-8",
     )
     _, quality_ref = _quality_artifact(tmp_path)

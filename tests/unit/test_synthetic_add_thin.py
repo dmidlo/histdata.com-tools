@@ -119,13 +119,15 @@ def _context(
     )
 
 
-def _calibration() -> tuple[
+def _calibration(
+    occurrences: int = 2,
+) -> tuple[
     tuple[EventClockCalibrationWindowV1, ...],
     tuple[AddThinWindowContextV1, ...],
 ]:
     windows = []
     contexts = []
-    for occurrence in range(2):
+    for occurrence in range(occurrences):
         for session_index, session in enumerate(SESSIONS):
             variant = occurrence * len(SESSIONS) + session_index
             start_ns = CALIBRATION_START + variant * 100 * SECOND
@@ -254,6 +256,26 @@ def test_config_dataset_checkpoint_fit_and_context_round_trip(
     assert (
         fit.checkpoint.tune_objective < fit.checkpoint.baseline_tune_objective
     )
+
+
+def test_calibration_split_scales_beyond_the_minimum_window_count() -> None:
+    config = _config()
+    windows, contexts = _calibration(occurrences=4)
+
+    fit = fit_add_thin_challenger(
+        config,
+        windows,
+        window_contexts=contexts,
+        information_mode=InformationMode.EX_POST_RECONSTRUCTION,
+    )
+
+    assert fit.status is AddThinFitStatus.FITTED, fit.failure_reason
+    assert fit.dataset_manifest is not None
+    role_counts = {
+        role: sum(item.role == role for item in fit.dataset_manifest.windows)
+        for role in ("train", "tune")
+    }
+    assert role_counts == {"train": 6, "tune": 6}
 
 
 def test_forward_corruption_and_reverse_schedule_coefficients() -> None:

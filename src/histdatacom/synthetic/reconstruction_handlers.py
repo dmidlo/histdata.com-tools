@@ -84,6 +84,11 @@ from histdatacom.reconstruction_evidence import (
 from histdatacom.reconstruction_experiment import read_reconstruction_experiment
 from histdatacom.resource_usage import peak_rss_bytes
 from histdatacom.runtime_contracts import ArtifactRef, JSONScalar, JSONValue
+from histdatacom.synthetic.benchmark import (
+    BenchmarkEventV1,
+    BenchmarkScenarioV1,
+    BenchmarkSplitKind,
+)
 from histdatacom.synthetic.benchmark_corpus import (
     read_reverse_degradation_benchmark_corpus,
 )
@@ -127,6 +132,17 @@ from histdatacom.synthetic.information import (
     InformationAuditReportV1,
     InformationMode,
 )
+from histdatacom.synthetic.marked_hawkes import (
+    MARKED_HAWKES_CANDIDATE_BATCH_SCHEMA_VERSION,
+    MarkedHawkesCandidateBatchV1,
+    MarkedHawkesCandidateLineageV1,
+    MarkedHawkesConfigV1,
+    MarkedHawkesFitResultV1,
+    MarkedHawkesGenerationEvidenceV1,
+    MarkedHawkesGenerationStatus,
+    build_fitted_marked_hawkes_generator,
+    build_marked_hawkes_candidate_batches,
+)
 from histdatacom.synthetic.motif_library import (
     read_modern_reference_motif_artifact,
     read_modern_reference_motif_index,
@@ -138,6 +154,7 @@ from histdatacom.synthetic.motifs import (
     ReferenceMotifQueryV1,
     query_reference_motifs,
     reference_motif_condition_from_quotes,
+    reference_session_for_ns,
 )
 from histdatacom.synthetic.observation import read_observation_operator_artifact
 from histdatacom.synthetic.persistence import (
@@ -153,6 +170,7 @@ from histdatacom.synthetic.proposal_engines import (
     ProposalEnginePortfolioV1,
     ProposalEngineRegistryV1,
     proposal_engine_registry,
+    read_proposal_engine_fit_artifact,
 )
 from histdatacom.synthetic.reconstruction_plan import (
     FIRST_PARTY_RECONSTRUCTION_HANDLERS,
@@ -225,13 +243,6 @@ _HANDLERS = {
     ReconstructionStage.BROKER_TRANSFER: "delivery_projection_handler",
     ReconstructionStage.VALIDATION: "validation_handler",
     ReconstructionStage.ATOMIC_PARTITION_COMMIT: "atomic_commit_handler",
-}
-
-# A selected engine reaches product execution only through an installed adapter.
-# Additional adapters are added here only after their eligibility audit can bind
-# all fitted/checkpoint artifacts; absence is a fail-closed runtime refusal.
-_PROPOSAL_RUNTIME_DISPATCH = {
-    EMPIRICAL_MOTIF_GENERATOR_ID: generate_empirical_motif_candidates,
 }
 
 
@@ -435,6 +446,8 @@ def proposal_handler(
         selected_binding = None
         selected_audit = None
         selected_engine_id = EMPIRICAL_MOTIF_GENERATOR_ID
+        selected_config: EmpiricalMotifGeneratorConfigV1 | MarkedHawkesConfigV1
+        selected_config = plan.configuration.generator_config
         if isinstance(plan.configuration, ReconstructionPlanConfigurationV2):
             portfolio = ProposalEnginePortfolioV1.from_dict(
                 _mapping(
@@ -468,12 +481,11 @@ def proposal_handler(
                 raise ValueError(
                     "proposal engine registry differs from installed code"
                 )
-            if len(portfolio.selected_engine_ids) != 1:
-                raise ValueError(
-                    "current HistData runtime refuses an unqualified or ambiguous "
-                    "proposal selection"
-                )
-            selected_engine_id = portfolio.selected_engine_ids[0]
+            selected_engine_id = _assigned_proposal_engine(
+                portfolio,
+                ensemble_member_id=invocation.task.window.ensemble_member_id,
+                ensemble_member_ids=invocation.run.ensemble_member_ids,
+            )
             selected_binding = portfolio.binding(selected_engine_id)
             selected_audit = next(
                 item
@@ -484,15 +496,33 @@ def proposal_handler(
                 raise ValueError(
                     "selected proposal engine is not reconstruction eligible"
                 )
-            if (
-                selected_binding.config_id
-                != plan.configuration.generator_config.config_id
-            ):
+            verify_artifact_ref(selected_binding.config_ref)
+            config_payload = _mapping(
+                json.loads(
+                    Path(selected_binding.config_ref.path).read_text(
+                        encoding="utf-8"
+                    )
+                )
+            )
+            if selected_engine_id == EMPIRICAL_MOTIF_GENERATOR_ID:
+                selected_config = EmpiricalMotifGeneratorConfigV1.from_dict(
+                    config_payload
+                )
+            elif selected_engine_id.startswith("histdatacom.marked-hawkes."):
+                selected_config = MarkedHawkesConfigV1.from_dict(config_payload)
+            else:
+                raise ValueError(
+                    "selected proposal engine has no qualified first-party "
+                    f"runtime adapter: {selected_engine_id}"
+                )
+            if selected_config.config_id != selected_binding.config_id:
                 raise ValueError(
                     "selected proposal binding differs from runtime config"
                 )
-        generator = _PROPOSAL_RUNTIME_DISPATCH.get(selected_engine_id)
-        if generator is None:
+        if (
+            selected_engine_id != EMPIRICAL_MOTIF_GENERATOR_ID
+            and not selected_engine_id.startswith("histdatacom.marked-hawkes.")
+        ):
             raise ValueError(
                 "selected proposal engine has no qualified first-party runtime "
                 f"adapter: {selected_engine_id}"
@@ -511,9 +541,6 @@ def proposal_handler(
                 "proposal_cross_series_refused",
                 message=cross_use.reason,
             )
-        index = read_modern_reference_motif_index(
-            plan.execution_manifest.artifacts["motif_index"].path
-        )
         conditions = {
             symbol: ReferenceMotifConditionV1.from_dict(_mapping(value))
             for symbol, value in _mapping(source["motif_conditions"]).items()
@@ -533,6 +560,58 @@ def proposal_handler(
         require_constraint_support_for_synchronization_time(
             cross_bundles, synchronization_event_time_ns
         )
+        index: ReferenceMotifIndexV1 | None = None
+        generation_evidence: MarkedHawkesGenerationEvidenceV1 | None = None
+        if selected_engine_id == EMPIRICAL_MOTIF_GENERATOR_ID:
+            if not isinstance(selected_config, EmpiricalMotifGeneratorConfigV1):
+                raise TypeError("motif runtime config type differs")
+            index = read_modern_reference_motif_index(
+                plan.execution_manifest.artifacts["motif_index"].path
+            )
+            proposal_batches: Iterable[Any] = (
+                _generate_empirical_runtime_batches(
+                    invocation,
+                    plan=plan,
+                    streams=streams,
+                    conditions=conditions,
+                    index=index,
+                    config=selected_config,
+                    synchronization_event_time_ns=(
+                        synchronization_event_time_ns
+                    ),
+                )
+            )
+        else:
+            assert selected_binding is not None
+            if (
+                not isinstance(selected_config, MarkedHawkesConfigV1)
+                or selected_binding.fit_ref is None
+            ):
+                raise ValueError("marked Hawkes runtime lacks exact fit/config")
+            fit = read_proposal_engine_fit_artifact(selected_binding.fit_ref)
+            if not isinstance(fit, MarkedHawkesFitResultV1):
+                raise TypeError("marked Hawkes runtime fit type differs")
+            proposal_batches, generation_evidence = (
+                _generate_marked_hawkes_runtime_batches(
+                    invocation,
+                    streams=streams,
+                    conditions=conditions,
+                    observation_operator_id=source["observation_operator_id"],
+                    config=selected_config,
+                    fit=fit,
+                )
+            )
+            if generation_evidence.status in {
+                MarkedHawkesGenerationStatus.REFUSED,
+                MarkedHawkesGenerationStatus.FAILED,
+            }:
+                return invocation.refused(
+                    "proposal_engine_generation_refused",
+                    message=(
+                        generation_evidence.failure_reason
+                        or "selected proposal engine generation failed"
+                    ),
+                )
         ledger_directory = _stage_directory(invocation, "proposal-batches")
         ledger_directory.mkdir(parents=True, exist_ok=True)
         descriptor, temporary_name = tempfile.mkstemp(
@@ -550,107 +629,62 @@ def proposal_handler(
         generated = 0
         refused = 0
         interval_count = sum(
-            max(0, len(stream.events) - 1) for stream in streams.values()
+            1
+            for stream in streams.values()
+            for left, right in zip(stream.events, stream.events[1:])
+            if right.event_time_ns > invocation.task.window.core_start_ns
+            and left.event_time_ns < invocation.task.window.core_end_ns
         )
-        completed_intervals = 0
-        for symbol, stream in sorted(streams.items()):
-            condition = conditions[symbol]
-            for left, right in zip(stream.events, stream.events[1:]):
-                _cancel_if_requested(invocation)
-                if (
-                    right.event_time_ns <= invocation.task.window.core_start_ns
-                    or left.event_time_ns >= invocation.task.window.core_end_ns
-                ):
-                    completed_intervals += 1
-                    continue
-                query = ReferenceMotifQueryV1(
-                    condition=condition,
-                    information_mode=(
-                        plan.configuration.information_policy.information_mode
-                    ),
-                    used_at_ns=right.event_time_ns,
-                    as_of_ns=(
-                        invocation.task.window.core_start_ns
-                        if plan.configuration.information_policy.information_mode.value
-                        == "ex_ante_simulation"
-                        else None
-                    ),
-                    max_results=index.config.max_matches,
-                )
-                result = query_reference_motifs(index, query)
-                batch = generator(
-                    run=invocation.run,
-                    window=invocation.task.window,
-                    left_anchor=left,
-                    right_anchor=right,
-                    query_result=result,
-                    config=plan.configuration.generator_config,
-                    required_event_time_ns=(
-                        synchronization_event_time_ns
-                        if left.event_time_ns
-                        < synchronization_event_time_ns
-                        < right.event_time_ns
-                        else None
-                    ),
-                )
-                candidate_evidence = _candidate_evidence(batch)
-                if portfolio is not None:
-                    assert registry is not None
-                    assert selected_binding is not None
-                    assert selected_audit is not None
-                    candidate_evidence.update(
-                        {
-                            "proposal_engine_id": selected_engine_id,
-                            "proposal_engine_registry_id": registry.registry_id,
-                            "proposal_portfolio_id": portfolio.portfolio_id,
-                            "proposal_binding_id": selected_binding.binding_id,
-                            "proposal_eligibility_audit_id": (
-                                selected_audit.audit_id
-                            ),
-                            "proposal_evidence_ids": list(
-                                selected_audit.evidence_ids
-                            ),
-                        }
-                    )
-                candidate_evidence["cross_series_constraint_use"] = (
-                    cross_use.to_dict()
-                )
-                candidate_evidence[
-                    "cross_series_synchronization_constraint_window_id"
-                ] = synchronization_constraint_window_id
-                encoded_evidence = (
-                    canonical_contract_json(candidate_evidence).encode("utf-8")
-                    + b"\n"
-                )
-                if (
-                    len(encoded_evidence)
-                    > _MAX_CANDIDATE_BATCH_LEDGER_LINE_BYTES
-                ):
-                    raise ValueError("candidate batch ledger row exceeds limit")
-                ledger_stream.write(encoded_evidence)
-                ledger_digest.update(encoded_evidence)
-                batch_count += 1
-                candidate_events[symbol].extend(batch.events)
-                generated += len(batch.events)
-                refused += int(batch.status.value == "refused")
-                completed_intervals += 1
-                if (
-                    completed_intervals
-                    % max(
-                        1, invocation.run.storage_policy.heartbeat_every_batches
-                    )
-                    == 0
-                ):
-                    invocation.heartbeat(
-                        sequence=completed_intervals,
-                        completed_units=completed_intervals,
-                        total_units=interval_count,
-                        candidate_event_count=generated,
-                        scratch_bytes=_tree_size(
-                            invocation.task.scratch_directory
+        for completed_intervals, batch in enumerate(proposal_batches, start=1):
+            _cancel_if_requested(invocation)
+            candidate_evidence = _candidate_evidence(batch)
+            if portfolio is not None:
+                assert registry is not None
+                assert selected_binding is not None
+                assert selected_audit is not None
+                candidate_evidence.update(
+                    {
+                        "proposal_engine_id": selected_engine_id,
+                        "proposal_engine_registry_id": registry.registry_id,
+                        "proposal_portfolio_id": portfolio.portfolio_id,
+                        "proposal_binding_id": selected_binding.binding_id,
+                        "proposal_eligibility_audit_id": selected_audit.audit_id,
+                        "proposal_evidence_ids": list(
+                            selected_audit.evidence_ids
                         ),
-                        message="qualified proposal-engine dispatch",
-                    )
+                    }
+                )
+            candidate_evidence["cross_series_constraint_use"] = (
+                cross_use.to_dict()
+            )
+            candidate_evidence[
+                "cross_series_synchronization_constraint_window_id"
+            ] = synchronization_constraint_window_id
+            encoded_evidence = (
+                canonical_contract_json(candidate_evidence).encode("utf-8")
+                + b"\n"
+            )
+            if len(encoded_evidence) > _MAX_CANDIDATE_BATCH_LEDGER_LINE_BYTES:
+                raise ValueError("candidate batch ledger row exceeds limit")
+            ledger_stream.write(encoded_evidence)
+            ledger_digest.update(encoded_evidence)
+            batch_count += 1
+            candidate_events[batch.symbol].extend(batch.events)
+            generated += len(batch.events)
+            refused += int(batch.status.value == "refused")
+            if (
+                completed_intervals
+                % max(1, invocation.run.storage_policy.heartbeat_every_batches)
+                == 0
+            ):
+                invocation.heartbeat(
+                    sequence=completed_intervals,
+                    completed_units=completed_intervals,
+                    total_units=max(interval_count, completed_intervals),
+                    candidate_event_count=generated,
+                    scratch_bytes=_tree_size(invocation.task.scratch_directory),
+                    message="qualified proposal-engine dispatch",
+                )
         ledger_stream.flush()
         os.fsync(ledger_stream.fileno())
         ledger_stream.close()
@@ -689,7 +723,7 @@ def proposal_handler(
                 symbol: condition.to_dict()
                 for symbol, condition in sorted(conditions.items())
             },
-            "generator_config": plan.configuration.generator_config.to_dict(),
+            "generator_config": selected_config.to_dict(),
             "proposal_engine_id": selected_engine_id,
             "proposal_engine_registry_id": (
                 registry.registry_id if registry is not None else None
@@ -710,7 +744,25 @@ def proposal_handler(
                 if selected_audit is not None
                 else []
             ),
+            "proposal_generation_evidence": (
+                generation_evidence.to_dict()
+                if generation_evidence is not None
+                else None
+            ),
             "proposal_fallback_used": False,
+            "proposal_member_assignment_policy": (
+                "calibrated-systematic-member-allocation-v1"
+                if portfolio is not None
+                else "legacy-single-engine-v1"
+            ),
+            "proposal_member_assignment_weights": cast(
+                dict[str, JSONValue],
+                (
+                    _selected_portfolio_weights(portfolio)
+                    if portfolio is not None
+                    else {EMPIRICAL_MOTIF_GENERATOR_ID: 1.0}
+                ),
+            ),
             "candidate_stream_refs": _refs_dict(candidate_refs),
             "batch_count": batch_count,
             "generated_event_count": generated,
@@ -720,7 +772,7 @@ def proposal_handler(
             "synchronization_constraint_window_id": (
                 synchronization_constraint_window_id
             ),
-            "motif_index_id": index.index_id,
+            "motif_index_id": index.index_id if index is not None else None,
             "immutable_anchor_content_sha256": source[
                 "immutable_anchor_content_sha256"
             ],
@@ -786,6 +838,211 @@ def proposal_handler(
             ledger_stream.close()
         if ledger_temporary is not None:
             ledger_temporary.unlink(missing_ok=True)
+
+
+def _selected_portfolio_weights(
+    portfolio: ProposalEnginePortfolioV1,
+) -> dict[str, float]:
+    selected = portfolio.selected_engine_ids
+    raw = {
+        engine_id: float(portfolio.portfolio_weights.get(engine_id, 0.0))
+        for engine_id in selected
+    }
+    total = sum(raw.values())
+    if not math.isfinite(total) or total <= 0.0:
+        if len(selected) != 1:
+            raise ValueError(
+                "multi-engine proposal portfolio lacks calibrated weights"
+            )
+        return {selected[0]: 1.0}
+    return {
+        engine_id: weight / total
+        for engine_id, weight in raw.items()
+        if weight > 0.0
+    }
+
+
+def _assigned_proposal_engine(
+    portfolio: ProposalEnginePortfolioV1,
+    *,
+    ensemble_member_id: str,
+    ensemble_member_ids: Sequence[str],
+) -> str:
+    """Assign one coherent engine to a member from frozen portfolio weights."""
+    members = tuple(sorted(ensemble_member_ids))
+    try:
+        ordinal = members.index(ensemble_member_id)
+    except ValueError as err:
+        raise ValueError(
+            "proposal member is absent from reconstruction run"
+        ) from err
+    weights = _selected_portfolio_weights(portfolio)
+    ordered = tuple(
+        entry.engine_id
+        for entry in portfolio.entries
+        if entry.engine_id in weights
+    )
+    point = (ordinal + 0.5) / len(members)
+    cumulative = 0.0
+    for engine_id in ordered:
+        cumulative += weights[engine_id]
+        if point <= cumulative or engine_id == ordered[-1]:
+            return str(engine_id)
+    raise RuntimeError("proposal member allocation is incomplete")
+
+
+def _generate_empirical_runtime_batches(
+    invocation: ReconstructionStageInvocationV1,
+    *,
+    plan: ReconstructionStagePlanV1,
+    streams: Mapping[str, SyntheticEventStreamV1],
+    conditions: Mapping[str, ReferenceMotifConditionV1],
+    index: ReferenceMotifIndexV1,
+    config: EmpiricalMotifGeneratorConfigV1,
+    synchronization_event_time_ns: int,
+) -> Iterable[EmpiricalMotifCandidateBatchV1]:
+    for symbol, stream in sorted(streams.items()):
+        condition = conditions[symbol]
+        for left, right in zip(stream.events, stream.events[1:]):
+            if (
+                right.event_time_ns <= invocation.task.window.core_start_ns
+                or left.event_time_ns >= invocation.task.window.core_end_ns
+            ):
+                continue
+            query = ReferenceMotifQueryV1(
+                condition=condition,
+                information_mode=(
+                    plan.configuration.information_policy.information_mode
+                ),
+                used_at_ns=right.event_time_ns,
+                as_of_ns=(
+                    invocation.task.window.core_start_ns
+                    if plan.configuration.information_policy.information_mode
+                    is InformationMode.EX_ANTE_SIMULATION
+                    else None
+                ),
+                max_results=index.config.max_matches,
+            )
+            yield generate_empirical_motif_candidates(
+                run=invocation.run,
+                window=invocation.task.window,
+                left_anchor=left,
+                right_anchor=right,
+                query_result=query_reference_motifs(index, query),
+                config=config,
+                required_event_time_ns=(
+                    synchronization_event_time_ns
+                    if left.event_time_ns
+                    < synchronization_event_time_ns
+                    < right.event_time_ns
+                    else None
+                ),
+            )
+
+
+def _generate_marked_hawkes_runtime_batches(
+    invocation: ReconstructionStageInvocationV1,
+    *,
+    streams: Mapping[str, SyntheticEventStreamV1],
+    conditions: Mapping[str, ReferenceMotifConditionV1],
+    observation_operator_id: Any,
+    config: MarkedHawkesConfigV1,
+    fit: MarkedHawkesFitResultV1,
+) -> tuple[
+    tuple[MarkedHawkesCandidateBatchV1, ...],
+    MarkedHawkesGenerationEvidenceV1,
+]:
+    if fit.information_mode is not InformationMode.EX_POST_RECONSTRUCTION:
+        raise ValueError(
+            "product reconstruction requires an ex-post Hawkes fit"
+        )
+    epochs = {item.feed_epoch_id for item in conditions.values()}
+    sessions = {item.session_state for item in conditions.values()}
+    if len(epochs) != 1 or len(sessions) != 1:
+        raise ValueError(
+            "marked Hawkes runtime requires one synchronized epoch/session"
+        )
+    benchmark_events: list[BenchmarkEventV1] = []
+    observed_events: list[SyntheticEventV1] = []
+    for symbol, stream in sorted(streams.items()):
+        condition = conditions[symbol]
+        previous: SyntheticEventV1 | None = None
+        for event in stream.events:
+            state = "unchanged"
+            if previous is not None:
+                bid_changed = event.bid != previous.bid
+                ask_changed = event.ask != previous.ask
+                state = (
+                    "update_joint"
+                    if bid_changed and ask_changed
+                    else (
+                        "update_bid_only"
+                        if bid_changed
+                        else ("update_ask_only" if ask_changed else "unchanged")
+                    )
+                )
+            benchmark_events.append(
+                BenchmarkEventV1.from_synthetic_event(
+                    event,
+                    epoch_id=condition.feed_epoch_id,
+                    session=condition.session_state,
+                    event_state=state,
+                    sparsity="historical-product-input",
+                )
+            )
+            observed_events.append(event)
+            previous = event
+    scenario = BenchmarkScenarioV1(
+        split_kind=BenchmarkSplitKind.PRODUCT_INPUT,
+        epoch_id=next(iter(epochs)),
+        severity_id="historical-product-input-unknown-missingness",
+        observation_operator_id=str(observation_operator_id),
+        degradation_parameters={
+            "runtime_role": "historical_product_input",
+            "missingness_identified": False,
+        },
+    )
+    generator = build_fitted_marked_hawkes_generator(
+        config,
+        fit,
+        ensemble_member_ids=invocation.run.ensemble_member_ids,
+    )
+    result = generator.generate_with_evidence(
+        benchmark_events,
+        scenario=scenario,
+        window=invocation.task.window,
+        ensemble_member_id=invocation.task.window.ensemble_member_id,
+    )
+    return (
+        build_marked_hawkes_candidate_batches(
+            run=invocation.run,
+            window=invocation.task.window,
+            config=config,
+            fit_result=fit,
+            generation_result=result,
+            observed_events=observed_events,
+            session_state=next(iter(sessions)),
+            special_tags=tuple(
+                sorted(
+                    {
+                        tag
+                        for item in conditions.values()
+                        for tag in item.special_tags
+                    }
+                )
+            ),
+            event_tags=tuple(
+                sorted(
+                    {
+                        tag
+                        for item in conditions.values()
+                        for tag in item.event_tags
+                    }
+                )
+            ),
+        ),
+        result.evidence,
+    )
 
 
 def carving_handler(
@@ -933,7 +1190,13 @@ def carving_handler(
                 symbol=symbol,
                 observed_events=core_streams[symbol].events,
                 synthetic_events=accepted_by_symbol[symbol],
-                source_version_ids=invocation.run.source_version_ids,
+                source_version_ids=_stream_source_version_ids(
+                    invocation,
+                    (
+                        *core_streams[symbol].events,
+                        *accepted_by_symbol[symbol],
+                    ),
+                ),
             )
             for symbol in invocation.run.symbols
         }
@@ -2199,7 +2462,7 @@ def _motif_conditions(
         result[symbol] = reference_motif_condition_from_quotes(
             symbol=symbol,
             feed_epoch_id=assignment.label,
-            session_state=calendar.session_state,
+            session_state=reference_session_for_ns(midpoint_ms * 1_000_000),
             event_times_ns=tuple(event.event_time_ns for event in events),
             bids=tuple(event.bid for event in events),
             asks=tuple(event.ask for event in events),
@@ -2264,12 +2527,6 @@ def _validate_scientific_evidence(
             failures.append(
                 "proposal portfolio differs from execution configuration"
             )
-        if proposal_portfolio.selected_engine_ids != (
-            "histdatacom.empirical-motif-resampling",
-        ):
-            failures.append(
-                "proposal portfolio selection is unqualified or ambiguous"
-            )
         selected_audits = tuple(
             item
             for item in proposal_portfolio.eligibility_audits
@@ -2279,12 +2536,24 @@ def _validate_scientific_evidence(
             not item.reconstruction_eligible for item in selected_audits
         ):
             failures.append("selected proposal engine failed eligibility audit")
-    if qualification.get("candidate_promotion_eligible") is not True:
-        failures.append("motif candidate is not promotion eligible")
-    if qualification.get("candidate_provisional") is not False:
-        failures.append("motif candidate remains provisional")
-    if not contracts or not all(value is True for value in contracts.values()):
-        failures.append("motif real-window contracts are not all passing")
+    motif_selected = bool(
+        proposal_portfolio is None
+        or EMPIRICAL_MOTIF_GENERATOR_ID
+        in proposal_portfolio.selected_engine_ids
+    )
+    if motif_selected:
+        if qualification.get("candidate_promotion_eligible") is not True:
+            failures.append(
+                "selected motif candidate is not promotion eligible"
+            )
+        if qualification.get("candidate_provisional") is not False:
+            failures.append("selected motif candidate remains provisional")
+        if not contracts or not all(
+            value is True for value in contracts.values()
+        ):
+            failures.append(
+                "selected motif real-window contracts are not passing"
+            )
     for name in (
         "retained_nontrain_fragment_count",
         "retained_holdout_fragment_count",
@@ -2312,6 +2581,16 @@ def _validate_scientific_evidence(
         ),
         "proposal_portfolio_id": (
             proposal_portfolio.portfolio_id if proposal_portfolio else None
+        ),
+        "selected_proposal_engine_ids": (
+            list(proposal_portfolio.selected_engine_ids)
+            if proposal_portfolio
+            else [EMPIRICAL_MOTIF_GENERATOR_ID]
+        ),
+        "proposal_portfolio_weights": (
+            dict(proposal_portfolio.portfolio_weights)
+            if proposal_portfolio
+            else {EMPIRICAL_MOTIF_GENERATOR_ID: 1.0}
         ),
         "proposal_selected_engine_ids": (
             list(proposal_portfolio.selected_engine_ids)
@@ -2407,9 +2686,15 @@ def _carved_evidence(
 
 
 def _candidate_evidence(
-    batch: EmpiricalMotifCandidateBatchV1,
+    batch: EmpiricalMotifCandidateBatchV1 | MarkedHawkesCandidateBatchV1,
 ) -> dict[str, JSONValue]:
     """Serialize bounded batch lineage while large reusable rows stay external."""
+    if isinstance(batch, MarkedHawkesCandidateBatchV1):
+        return {
+            **batch.metadata(),
+            "event_lineage": [item.to_dict() for item in batch.event_lineage],
+            "candidate_events_inline": False,
+        }
     return {
         "schema_version": batch.schema_version,
         "run_id": batch.run_id,
@@ -2438,7 +2723,7 @@ def _restore_candidate_batches(
     manifest: Mapping[str, Any],
     *,
     index: ReferenceMotifIndexV1,
-) -> Iterable[EmpiricalMotifCandidateBatchV1]:
+) -> Iterable[EmpiricalMotifCandidateBatchV1 | MarkedHawkesCandidateBatchV1]:
     """Yield verified batches without retaining motif fragments per interval."""
     streams = _read_stream_map(manifest, "candidate_stream_refs")
     events_by_interval: dict[str, list[SyntheticEventV1]] = {}
@@ -2479,12 +2764,23 @@ def _restore_candidate_batches(
         ).items()
     }
     shared_config_value = manifest.get("generator_config")
-    shared_config = (
-        EmpiricalMotifGeneratorConfigV1.from_dict(_mapping(shared_config_value))
-        if shared_config_value is not None
-        else None
-    )
-    if manifest.get("motif_index_id") != index.index_id:
+    engine_id = str(manifest.get("proposal_engine_id", ""))
+    shared_config: (
+        EmpiricalMotifGeneratorConfigV1 | MarkedHawkesConfigV1 | None
+    ) = None
+    if shared_config_value is not None:
+        if engine_id.startswith("histdatacom.marked-hawkes."):
+            shared_config = MarkedHawkesConfigV1.from_dict(
+                _mapping(shared_config_value)
+            )
+        else:
+            shared_config = EmpiricalMotifGeneratorConfigV1.from_dict(
+                _mapping(shared_config_value)
+            )
+    if (
+        engine_id == EMPIRICAL_MOTIF_GENERATOR_ID
+        and manifest.get("motif_index_id") != index.index_id
+    ):
         raise ValueError("proposal motif index differs from current artifact")
     consumed: set[str] = set()
     restored_batch_count = 0
@@ -2497,11 +2793,56 @@ def _restore_candidate_batches(
         events = tuple(events_by_interval.get(interval_id, ()))
         consumed.update(event.event_id for event in events)
         symbol = str(data.get("symbol", ""))
+        if (
+            data.get("schema_version")
+            == MARKED_HAWKES_CANDIDATE_BATCH_SCHEMA_VERSION
+        ):
+            if not isinstance(shared_config, MarkedHawkesConfigV1):
+                raise ValueError("marked Hawkes candidate config is absent")
+            if data.get("generator_config_id") != shared_config.config_id:
+                raise ValueError("Hawkes candidate config identity differs")
+            yield MarkedHawkesCandidateBatchV1(
+                run_id=str(data.get("run_id", "")),
+                window_id=str(data.get("window_id", "")),
+                ensemble_member_id=str(data.get("ensemble_member_id", "")),
+                symbol=symbol,
+                anchor_interval_id=interval_id,
+                left_anchor_event_id=str(data.get("left_anchor_event_id", "")),
+                right_anchor_event_id=str(
+                    data.get("right_anchor_event_id", "")
+                ),
+                generator_config_id=str(data.get("generator_config_id", "")),
+                information_mode=InformationMode.from_value(
+                    str(data.get("information_mode", ""))
+                ),
+                session_state=str(data.get("session_state", "")),
+                special_tags=tuple(
+                    str(item) for item in _sequence(data.get("special_tags"))
+                ),
+                event_tags=tuple(
+                    str(item) for item in _sequence(data.get("event_tags"))
+                ),
+                status=MotifGenerationStatus(str(data.get("status", ""))),
+                events=events,
+                event_lineage=tuple(
+                    MarkedHawkesCandidateLineageV1.from_dict(_mapping(item))
+                    for item in _sequence(data.get("event_lineage"))
+                ),
+                fit_id=str(data.get("fit_id", "")),
+                generation_evidence_id=str(
+                    data.get("generation_evidence_id", "")
+                ),
+                batch_id=str(data.get("batch_id", "")),
+                schema_version=str(data.get("schema_version", "")),
+            )
+            continue
         config = shared_config
         if config is None:
             config = EmpiricalMotifGeneratorConfigV1.from_dict(
                 _mapping(data.get("generator_config"))
             )
+        if not isinstance(config, EmpiricalMotifGeneratorConfigV1):
+            raise TypeError("motif candidate config type differs")
         if (
             data.get("generator_config_id", config.config_id)
             != config.config_id
@@ -2665,7 +3006,7 @@ def _write_streams(
             ensemble_member_id=invocation.task.window.ensemble_member_id,
             symbol=symbol,
             events=tuple(events),
-            source_version_ids=invocation.run.source_version_ids,
+            source_version_ids=_stream_source_version_ids(invocation, events),
         )
         descriptor, temporary_name = tempfile.mkstemp(
             prefix=f".{symbol.lower()}-", suffix=".parquet", dir=directory
@@ -2696,6 +3037,21 @@ def _write_streams(
         finally:
             temporary.unlink(missing_ok=True)
     return refs
+
+
+def _stream_source_version_ids(
+    invocation: ReconstructionStageInvocationV1,
+    events: Sequence[SyntheticEventV1],
+) -> tuple[str, ...]:
+    """Retain raw and generated lineage sources in every runtime stream."""
+    return tuple(
+        sorted(
+            {
+                *invocation.run.source_version_ids,
+                *(event.source_version_id for event in events),
+            }
+        )
+    )
 
 
 def _read_stream_map(

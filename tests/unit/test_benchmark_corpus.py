@@ -5,13 +5,16 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
+import polars as pl
 import pytest
 
+import histdatacom.data_analytics.cli as corpus_module_cli
 import histdatacom.synthetic.benchmark_corpus as corpus_module
 from histdatacom.runtime_contracts import ArtifactRef
 from histdatacom.synthetic.add_thin import default_add_thin_config
 from histdatacom.synthetic.benchmark import BenchmarkEventV1
 from histdatacom.synthetic.benchmark_corpus import (
+    DEFAULT_BENCHMARK_PERIODS,
     PREDECLARED_GATE_COMMIT,
     BenchmarkWindowMetricObservationV1,
     BenchmarkWindowMetricTraceV1,
@@ -37,32 +40,69 @@ from histdatacom.synthetic.schrodinger_bridge import (
 )
 
 
+def test_arrow_interval_reader_handles_bounded_source_order_regression(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "regressed.data"
+    start_ms = 1_700_000_000_000
+    frame = pl.DataFrame(
+        {
+            "datetime": [
+                start_ms,
+                start_ms + 3_599_000,
+                start_ms + 1_000,
+                start_ms + 2_000,
+                start_ms + 3_000,
+            ],
+            "bid": [1.0, 1.1, 1.01, 1.02, 1.03],
+            "ask": [1.001, 1.101, 1.011, 1.021, 1.031],
+            "vol": [0, 0, 0, 0, 0],
+        }
+    )
+    frame.write_ipc(path)
+
+    rows = corpus_module._read_arrow_interval(
+        path,
+        start_ns=start_ms * 1_000_000,
+        end_ns=(start_ms + 2_500) * 1_000_000,
+        maximum=8,
+    )
+
+    assert [(item.row_id, item.timestamp_ms) for item in rows] == [
+        (0, start_ms),
+        (2, start_ms + 1_000),
+        (3, start_ms + 2_000),
+    ]
+
+
 def _corpus() -> ReverseDegradationBenchmarkCorpusV1:
     profile = ReverseDegradationCorpusProfileV1()
     sources = []
     by_axis = {}
-    for period in profile.split_periods.values():
-        for symbol in profile.symbols:
-            source = corpus_module.BenchmarkSourcePartitionV1(
-                symbol=symbol,
-                period=period,
-                relative_path=f"{symbol.lower()}/{period}/.data",
-                size_bytes=1024,
-                row_count=1000,
-                sha256=hashlib.sha256(
-                    f"{symbol}:{period}".encode()
-                ).hexdigest(),
-            )
-            sources.append(source)
-            by_axis[(period, symbol)] = source
+    for periods in profile.split_periods.values():
+        for period in periods:
+            for symbol in profile.symbols:
+                source = corpus_module.BenchmarkSourcePartitionV1(
+                    symbol=symbol,
+                    period=period,
+                    relative_path=f"{symbol.lower()}/{period}/.data",
+                    size_bytes=1024,
+                    row_count=1000,
+                    sha256=hashlib.sha256(
+                        f"{symbol}:{period}".encode()
+                    ).hexdigest(),
+                )
+                sources.append(source)
+                by_axis[(period, symbol)] = source
     windows = []
     split_offsets = {
         "calibration": 1_200_000_000_000_000_000,
         "validation": 1_600_000_000_000_000_000,
         "final_holdout": 1_700_000_000_000_000_000,
     }
-    for split, period in profile.split_periods.items():
+    for split, periods in profile.split_periods.items():
         for index in range(profile.synchronized_windows_per_split):
+            period = periods[index % len(periods)]
             start = split_offsets[split] + index * 86_400_000_000_000
             windows.append(
                 BenchmarkWindowPartitionV1(
@@ -131,7 +171,10 @@ def test_profile_and_corpus_round_trip_are_content_addressed() -> None:
         == corpus
     )
     assert corpus.corpus_id.startswith("reverse-degradation-corpus:sha256:")
-    assert len(corpus.windows) == 18
+    assert len(corpus.windows) == (
+        len(corpus.profile.split_periods)
+        * corpus.profile.synchronized_windows_per_split
+    )
     assert set(corpus.split_hashes) == {
         "calibration",
         "validation",
@@ -419,36 +462,114 @@ def test_cli_exposes_installed_real_corpus_command() -> None:
 
     assert args.analytics_command == "reverse-degradation-benchmark-corpus"
     assert args.gate_policy_commit == PREDECLARED_GATE_COMMIT
-    assert args.windows_per_split == 6
+    assert args.windows_per_split == 32
+    assert args.ensemble_member_count == 8
+    assert args.calibration_period is None
+    assert args.validation_period is None
+    assert args.final_holdout_period is None
+    profile = corpus_module_cli._benchmark_profile(args)
+    assert profile.split_periods == DEFAULT_BENCHMARK_PERIODS
+
+    scaled = build_parser().parse_args(
+        [
+            "reverse-degradation-benchmark-corpus",
+            "--source-root",
+            "ticks",
+            "--definition",
+            "epochs.json",
+            "--observation-campaign",
+            "operator.json",
+            "--market-context-corpus",
+            "context.json",
+            "--cftc-positioning-corpus",
+            "positioning.json",
+            "--artifact-dir",
+            "artifacts",
+            "--ensemble-member-count",
+            "8",
+        ]
+    )
+    assert scaled.ensemble_member_count == 8
+    assert (
+        len(corpus_module_cli._benchmark_profile(scaled).ensemble_member_ids)
+        == 8
+    )
 
 
-def test_event_clock_campaign_requires_one_config_per_family() -> None:
+def test_benchmark_normalizes_engine_and_reference_update_state_names() -> None:
+    reference_states = (
+        "unchanged",
+        "update_ask_only",
+        "update_bid_only",
+        "update_joint",
+    )
+    engine_states = ("unchanged", "ask_only", "bid_only", "joint")
+
+    def events(
+        states: tuple[str, ...], source: str
+    ) -> tuple[BenchmarkEventV1, ...]:
+        return tuple(
+            BenchmarkEventV1(
+                source_event_id=f"{source}-{index}",
+                symbol="EURUSD",
+                event_time_ns=1_000_000_000 + index,
+                event_sequence=index,
+                bid=1.1 + index / 10_000,
+                ask=1.1002 + index / 10_000,
+                epoch_id="technology_epoch_03",
+                session="london",
+                event_state=state,
+                sparsity=source,
+            )
+            for index, state in enumerate(states)
+        )
+
+    reference = events(reference_states, "dense-reference")
+    candidate = events(engine_states, "engine-candidate")
+    reference_proportions = corpus_module._update_proportions(reference)
+    candidate_proportions = corpus_module._update_proportions(candidate)
+
+    assert reference_proportions == candidate_proportions
+    assert corpus_module._update_transitions(reference) == (
+        corpus_module._update_transitions(candidate)
+    )
+    pits = corpus_module._categorical_pit_values(
+        reference, candidate_proportions
+    )
+    assert len(pits) == len(reference)
+    assert all(0.0 < value < 1.0 for value in pits)
+
+
+def test_event_clock_campaign_accepts_unique_family_subsets() -> None:
     configs = default_event_clock_configs()
 
     assert corpus_module._validated_event_clock_configs(configs) == configs
-    with pytest.raises(ValueError, match="exactly one config per family"):
-        corpus_module._validated_event_clock_configs(configs[:-1])
-    with pytest.raises(ValueError, match="exactly one config per family"):
+    assert corpus_module._validated_event_clock_configs(configs[:-1]) == (
+        configs[:-1]
+    )
+    with pytest.raises(ValueError, match="duplicates a family"):
         corpus_module._validated_event_clock_configs((*configs, configs[0]))
 
 
-def test_marked_hawkes_campaign_requires_one_config_per_ablation() -> None:
+def test_marked_hawkes_campaign_accepts_unique_ablation_subsets() -> None:
     configs = default_marked_hawkes_configs()
 
     assert corpus_module._validated_marked_hawkes_configs(configs) == configs
-    with pytest.raises(ValueError, match="exactly one config per ablation"):
-        corpus_module._validated_marked_hawkes_configs(configs[:-1])
-    with pytest.raises(ValueError, match="exactly one config per ablation"):
+    assert corpus_module._validated_marked_hawkes_configs(configs[:-1]) == (
+        configs[:-1]
+    )
+    with pytest.raises(ValueError, match="duplicates an ablation"):
         corpus_module._validated_marked_hawkes_configs((*configs, configs[0]))
 
 
-def test_regime_hawkes_campaign_requires_one_config_per_ablation() -> None:
+def test_regime_hawkes_campaign_accepts_unique_ablation_subsets() -> None:
     configs = default_regime_hawkes_configs()
 
     assert corpus_module._validated_regime_hawkes_configs(configs) == configs
-    with pytest.raises(ValueError, match="exactly one config per ablation"):
-        corpus_module._validated_regime_hawkes_configs(configs[:-1])
-    with pytest.raises(ValueError, match="exactly one config per ablation"):
+    assert corpus_module._validated_regime_hawkes_configs(configs[:-1]) == (
+        configs[:-1]
+    )
+    with pytest.raises(ValueError, match="duplicates an ablation"):
         corpus_module._validated_regime_hawkes_configs((*configs, configs[0]))
 
 

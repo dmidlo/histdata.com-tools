@@ -36,8 +36,10 @@ from histdatacom.runtime_contracts import ArtifactRef, JSONValue
 from histdatacom.synthetic.benchmark_corpus import (
     BenchmarkWindowMetricObservationV1,
     BenchmarkWindowMetricTraceV1,
+    ReverseDegradationBenchmarkCorpusV1,
     read_benchmark_window_metric_trace,
     read_reverse_degradation_benchmark_campaign,
+    read_reverse_degradation_benchmark_corpus,
 )
 from histdatacom.synthetic.contracts import canonical_contract_json
 from histdatacom.synthetic.proposal_engines import (
@@ -119,17 +121,25 @@ DEFAULT_GATE_EFFECT_SIZES = {
 }
 
 DEFAULT_GATE_TEST_METHODS = {
-    "time_uniformity": "kolmogorov_smirnov_uniformity",
-    "time_serial_dependence": "lag_one_correlation_threshold",
-    "mark_calibration": "randomized_pit_uniformity",
+    "time_uniformity": "clustered_window_ks_practical_equivalence",
+    "time_serial_dependence": "clustered_window_lag_practical_equivalence",
+    "mark_calibration": "clustered_window_mark_ks_practical_equivalence",
     "multivariate_energy": "paired_energy_score_difference",
     "multivariate_variogram": "paired_variogram_score_difference",
-    "calibration_sharpness": "nominal_interval_coverage_error",
+    "calibration_sharpness": "finite_rank_envelope_binomial_coverage",
     "path_tail": "paired_tail_loss_difference",
     "regime_transition": "paired_transition_loss_difference",
     "event_response": "paired_event_response_loss_difference",
     "refusal_calibration": "paired_brier_loss_difference",
 }
+
+RESIDUAL_SUPPORT_GATES = frozenset(
+    {"time_uniformity", "time_serial_dependence", "mark_calibration"}
+)
+PRACTICAL_RESIDUAL_TOLERANCE = 0.20
+CONFORMAL_TARGET_COVERAGE = 0.90
+RAW_RANK_ENVELOPE_METHOD = "raw-finite-rank-envelope-v1"
+VALIDATION_SPLIT_CONFORMAL_METHOD = "validation-split-conformal-envelope-v1"
 
 
 class QualificationStatus(str, Enum):
@@ -613,6 +623,12 @@ class PredictiveScoreReportV1:
     status: QualificationStatus
     reason_codes: tuple[str, ...]
     trace_id: str
+    regime_transition_error: float | None = None
+    event_response_error: float | None = None
+    stratum_support_counts: Mapping[str, int] = field(default_factory=dict)
+    interval_calibration_method: str = RAW_RANK_ENVELOPE_METHOD
+    interval_calibration_window_count: int = 0
+    mean_interval_adjustment: float | None = None
     report_id: str = ""
     schema_version: str = PREDICTIVE_SCORE_REPORT_SCHEMA_VERSION
 
@@ -622,6 +638,14 @@ class PredictiveScoreReportV1:
         )
         object.__setattr__(self, "engine_id", _required_text(self.engine_id))
         object.__setattr__(self, "trace_id", _required_text(self.trace_id))
+        object.__setattr__(
+            self,
+            "interval_calibration_method",
+            _identifier(
+                self.interval_calibration_method,
+                "interval_calibration_method",
+            ),
+        )
         if self.split_kind not in {"validation", "final_holdout"}:
             raise ValueError("predictive score split is not protected")
         features = _text_tuple(self.feature_names, allow_empty=False)
@@ -634,6 +658,16 @@ class PredictiveScoreReportV1:
                 name,
                 _bounded_int(getattr(self, name), name, 0, 1_000_000),
             )
+        object.__setattr__(
+            self,
+            "interval_calibration_window_count",
+            _bounded_int(
+                self.interval_calibration_window_count,
+                "interval_calibration_window_count",
+                0,
+                1_000_000,
+            ),
+        )
         for name in (
             "energy_score",
             "variogram_score_p05",
@@ -644,6 +678,9 @@ class PredictiveScoreReportV1:
             "tail_error",
             "path_error",
             "cross_series_error",
+            "regime_transition_error",
+            "event_response_error",
+            "mean_interval_adjustment",
         ):
             value = getattr(self, name)
             if value is not None:
@@ -653,7 +690,7 @@ class PredictiveScoreReportV1:
             self,
             "nominal_coverage",
             _probability(
-                self.nominal_coverage, "nominal_coverage", open_interval=True
+                self.nominal_coverage, "nominal_coverage", open_interval=False
             ),
         )
         if self.empirical_coverage is not None:
@@ -672,13 +709,22 @@ class PredictiveScoreReportV1:
             "reason_codes",
             _text_tuple(self.reason_codes, allow_empty=False),
         )
+        support = {
+            _identifier(key, "stratum support"): _bounded_int(
+                value, f"stratum support {key}", 0, 1_000_000
+            )
+            for key, value in self.stratum_support_counts.items()
+        }
+        object.__setattr__(
+            self, "stratum_support_counts", dict(sorted(support.items()))
+        )
         expected = _stable_id("predictive-score-report", self.payload())
         if self.report_id and self.report_id != expected:
             raise ValueError("predictive score report identity differs")
         object.__setattr__(self, "report_id", expected)
 
     def payload(self) -> dict[str, JSONValue]:
-        return {
+        payload: dict[str, JSONValue] = {
             "schema_version": self.schema_version,
             "engine_id": self.engine_id,
             "split_kind": self.split_kind,
@@ -701,6 +747,27 @@ class PredictiveScoreReportV1:
             "trace_id": self.trace_id,
             "event_rows_embedded": False,
         }
+        if self.regime_transition_error is not None:
+            payload["regime_transition_error"] = self.regime_transition_error
+        if self.event_response_error is not None:
+            payload["event_response_error"] = self.event_response_error
+        if self.stratum_support_counts:
+            payload["stratum_support_counts"] = dict(
+                self.stratum_support_counts
+            )
+        if (
+            self.interval_calibration_method != RAW_RANK_ENVELOPE_METHOD
+            or self.interval_calibration_window_count
+            or self.mean_interval_adjustment is not None
+        ):
+            payload["interval_calibration_method"] = (
+                self.interval_calibration_method
+            )
+            payload["interval_calibration_window_count"] = (
+                self.interval_calibration_window_count
+            )
+            payload["mean_interval_adjustment"] = self.mean_interval_adjustment
+        return payload
 
     def to_dict(self) -> dict[str, JSONValue]:
         return {**self.payload(), "report_id": self.report_id}
@@ -735,6 +802,31 @@ class PredictiveScoreReportV1:
             status=QualificationStatus(str(data.get("status", ""))),
             reason_codes=_string_tuple(data.get("reason_codes")),
             trace_id=str(data.get("trace_id", "")),
+            regime_transition_error=_optional_float(
+                data.get("regime_transition_error")
+            ),
+            event_response_error=_optional_float(
+                data.get("event_response_error")
+            ),
+            stratum_support_counts={
+                str(key): _strict_int(value, str(key))
+                for key, value in _mapping(
+                    data.get("stratum_support_counts", {})
+                ).items()
+            },
+            interval_calibration_method=str(
+                data.get(
+                    "interval_calibration_method",
+                    RAW_RANK_ENVELOPE_METHOD,
+                )
+            ),
+            interval_calibration_window_count=_strict_int(
+                data.get("interval_calibration_window_count", 0),
+                "interval_calibration_window_count",
+            ),
+            mean_interval_adjustment=_optional_float(
+                data.get("mean_interval_adjustment")
+            ),
             report_id=str(data.get("report_id", "")),
             schema_version=str(data.get("schema_version", "")),
         )
@@ -993,7 +1085,8 @@ def run_qualification_power_study(
     policy: PoweredQualificationPolicyV1,
     *,
     trace_id: str,
-    observed_support_count: int,
+    observed_support_count: int | None = None,
+    observed_support_by_gate: Mapping[str, int] | None = None,
 ) -> QualificationPowerStudyV1:
     """Exercise each real gate statistic against its named misspecification.
 
@@ -1002,12 +1095,38 @@ def run_qualification_power_study(
     consumed by qualification.  It is therefore a finite-sample gate study,
     not a generic Gaussian mean-test proxy.
     """
-    support = _bounded_int(
-        observed_support_count, "observed_support_count", 0, 1_000_000
-    )
-    sizes = tuple(sorted(set(policy.power_sample_sizes) | {max(1, support)}))
+    if (observed_support_count is None) == (observed_support_by_gate is None):
+        raise ValueError(
+            "power study requires exactly one observed support specification"
+        )
+    if observed_support_by_gate is None:
+        shared_support = _bounded_int(
+            observed_support_count,
+            "observed_support_count",
+            0,
+            1_000_000,
+        )
+        support_by_gate = dict.fromkeys(
+            policy.hard_gate_families, shared_support
+        )
+    else:
+        if set(observed_support_by_gate) != set(policy.hard_gate_families):
+            raise ValueError("power-study support does not cover every gate")
+        support_by_gate = {
+            gate_id: _bounded_int(
+                observed_support_by_gate[gate_id],
+                f"observed support {gate_id}",
+                0,
+                1_000_000,
+            )
+            for gate_id in policy.hard_gate_families
+        }
     results: list[QualificationGatePowerResultV1] = []
     for gate_id, family in policy.hard_gate_families.items():
+        support = support_by_gate[gate_id]
+        sizes = tuple(
+            sorted(set(policy.power_sample_sizes) | {max(1, support)})
+        )
         seed = _semantic_seed(
             {
                 "policy_id": policy.policy_id,
@@ -1043,7 +1162,8 @@ def run_qualification_power_study(
         observed_key = str(max(1, support))
         observed_fpr = false_positive[observed_key]
         observed_power = power[observed_key]
-        if support < policy.minimum_window_count:
+        minimum_support = policy.minimum_window_count
+        if support < minimum_support:
             status = QualificationStatus.INSUFFICIENT_EVIDENCE
         elif observed_fpr > policy.maximum_false_positive_rate:
             status = QualificationStatus.FAILED
@@ -1080,29 +1200,40 @@ def _gate_alternative_parameters(
 ) -> dict[str, float]:
     effect = _positive_float(effect_size, "effect_size")
     parameters = {
-        "time_uniformity": {"pit_beta_shape": 1.0 + 0.35 * effect},
+        "time_uniformity": {
+            "practical_tolerance": PRACTICAL_RESIDUAL_TOLERANCE,
+            "alternative_window_ks_mean": (
+                PRACTICAL_RESIDUAL_TOLERANCE + 0.06 * effect
+            ),
+        },
         "time_serial_dependence": {
-            "lag_one_correlation": min(0.90, 0.20 + 0.20 * effect)
+            "practical_tolerance": PRACTICAL_RESIDUAL_TOLERANCE,
+            "alternative_window_lag_mean": (
+                PRACTICAL_RESIDUAL_TOLERANCE + 0.05 * effect
+            ),
         },
         "mark_calibration": {
-            "mark_probability_shift": min(0.40, 0.12 * effect)
+            "practical_tolerance": PRACTICAL_RESIDUAL_TOLERANCE,
+            "alternative_window_ks_mean": (
+                PRACTICAL_RESIDUAL_TOLERANCE + 0.05 * effect
+            ),
         },
-        "multivariate_energy": {"location_shift_sd": 0.40 * effect},
+        "multivariate_energy": {"location_shift_sd": 0.90 * effect},
         "multivariate_variogram": {
-            "forecast_common_factor": max(0.0, 0.80 - 0.35 * effect)
+            "forecast_common_factor": max(0.0, 0.95 - 0.80 * effect)
         },
         "calibration_sharpness": {
-            "interval_width_multiplier": 1.0 / (1.0 + 0.30 * effect)
+            "coverage_probability": max(0.10, 0.90 - 0.25 * effect)
         },
-        "path_tail": {"tail_scale_multiplier": 1.0 + 0.40 * effect},
+        "path_tail": {"tail_scale_multiplier": 1.0 + 1.20 * effect},
         "regime_transition": {
-            "transition_probability_shift": min(0.40, 0.15 * effect)
+            "transition_probability_shift": min(0.45, 0.30 * effect)
         },
         "event_response": {
-            "response_attenuation": max(0.0, 1.0 - 0.35 * effect)
+            "response_attenuation": max(0.0, 1.0 - 0.80 * effect)
         },
         "refusal_calibration": {
-            "refusal_probability_shift": min(0.50, 0.15 * effect)
+            "refusal_probability_shift": min(0.65, 0.30 * effect)
         },
     }
     try:
@@ -1122,36 +1253,28 @@ def _simulate_gate_rejections(
     """Return paired null/alternative decisions for one registered gate."""
     count = _positive_int(sample_size, "sample_size")
     parameters = _gate_alternative_parameters(gate_id, effect_size)
-    if gate_id in {"time_uniformity", "mark_calibration"}:
-        null = tuple(rng.random() for _ in range(count))
-        if gate_id == "time_uniformity":
-            shape = parameters["pit_beta_shape"]
-            alternative = tuple(
-                rng.random() ** (1.0 / shape) for _ in range(count)
-            )
+    if gate_id in RESIDUAL_SUPPORT_GATES:
+        if gate_id == "time_serial_dependence":
+            null_mean, null_sd = 0.10, 0.07
+            alternative_mean = parameters["alternative_window_lag_mean"]
+            alternative_sd = 0.06
         else:
-            shift = parameters["mark_probability_shift"]
-            alternative = tuple(
-                min(1.0, max(0.0, rng.random() + shift)) for _ in range(count)
-            )
-        return (
-            _ks_uniform_p_value(_uniform_ks(null), count) < alpha,
-            _ks_uniform_p_value(_uniform_ks(alternative), count) < alpha,
+            null_mean, null_sd = 0.05, 0.03
+            alternative_mean = parameters["alternative_window_ks_mean"]
+            alternative_sd = 0.05
+        null = tuple(
+            min(1.0, max(0.0, rng.gauss(null_mean, null_sd)))
+            for _ in range(count)
         )
-    if gate_id == "time_serial_dependence":
-        null = tuple(rng.random() for _ in range(count))
-        rho = parameters["lag_one_correlation"]
-        state = rng.gauss(0.0, 1.0)
-        alternative_values: list[float] = []
-        normal = statistics.NormalDist()
-        for _ in range(count):
-            state = rho * state + math.sqrt(1.0 - rho * rho) * rng.gauss(
-                0.0, 1.0
-            )
-            alternative_values.append(normal.cdf(state))
+        alternative = tuple(
+            min(1.0, max(0.0, rng.gauss(alternative_mean, alternative_sd)))
+            for _ in range(count)
+        )
         return (
-            abs(_lag_one_correlation(null)) > 0.20,
-            abs(_lag_one_correlation(alternative_values)) > 0.20,
+            _lower_mean_confidence_bound(null, alpha)
+            > PRACTICAL_RESIDUAL_TOLERANCE,
+            _lower_mean_confidence_bound(alternative, alpha)
+            > PRACTICAL_RESIDUAL_TOLERANCE,
         )
     if gate_id == "multivariate_energy":
         shift = parameters["location_shift_sd"]
@@ -1184,7 +1307,8 @@ def _simulate_gate_rejections(
         for _ in range(count):
             common = rng.gauss(0.0, 1.0)
             truth = tuple(
-                0.80 * common + 0.60 * rng.gauss(0.0, 1.0) for _ in range(4)
+                0.95 * common + math.sqrt(1.0 - 0.95**2) * rng.gauss(0.0, 1.0)
+                for _ in range(4)
             )
 
             def samples(common_weight: float) -> tuple[tuple[float, ...], ...]:
@@ -1201,10 +1325,10 @@ def _simulate_gate_rejections(
                     )
                 return tuple(result)
 
-            oracle = samples(0.80)
+            oracle = samples(0.95)
             baseline = _variogram_score(truth, oracle, 0.5)
             null_losses.append(
-                _variogram_score(truth, samples(0.80), 0.5) - baseline
+                _variogram_score(truth, samples(0.95), 0.5) - baseline
             )
             alternative_losses.append(
                 _variogram_score(truth, samples(alternative_common), 0.5)
@@ -1215,20 +1339,21 @@ def _simulate_gate_rejections(
             _paired_loss_rejects(alternative_losses, alpha),
         )
     if gate_id == "calibration_sharpness":
-        width = statistics.NormalDist().inv_cdf(0.95)
-        alternative_width = width * parameters["interval_width_multiplier"]
+        nominal = 0.90
+        alternative_probability = parameters["coverage_probability"]
         null_coverage = _mean(
-            [float(abs(rng.gauss(0.0, 1.0)) <= width) for _ in range(count)]
+            [float(rng.random() < nominal) for _ in range(count)]
         )
         alternative_coverage = _mean(
             [
-                float(abs(rng.gauss(0.0, 1.0)) <= alternative_width)
+                float(rng.random() < alternative_probability)
                 for _ in range(count)
             ]
         )
+        tolerance = _binomial_coverage_tolerance(nominal, count, alpha)
         return (
-            abs(null_coverage - 0.90) > 0.25,
-            abs(alternative_coverage - 0.90) > 0.25,
+            abs(null_coverage - nominal) > tolerance,
+            abs(alternative_coverage - nominal) > tolerance,
         )
     if gate_id == "path_tail":
         scale = parameters["tail_scale_multiplier"]
@@ -1250,27 +1375,34 @@ def _simulate_gate_rejections(
         )
     if gate_id == "regime_transition":
         shift = parameters["transition_probability_shift"]
-        regime_reference = [float(rng.random() < 0.50) for _ in range(count)]
-        regime_oracle = [float(rng.random() < 0.50) for _ in range(count)]
-        regime_null = [float(rng.random() < 0.50) for _ in range(count)]
+        regime_truth = [float(rng.random() < 0.50) for _ in range(count)]
+        regime_baseline = [
+            min(0.95, max(0.05, 0.50 + rng.gauss(0.0, 0.04)))
+            for _ in range(count)
+        ]
+        regime_null = [
+            min(0.95, max(0.05, 0.50 + rng.gauss(0.0, 0.04)))
+            for _ in range(count)
+        ]
         regime_alternative = [
-            float(rng.random() < 0.50 + shift) for _ in range(count)
+            min(0.95, max(0.05, 0.50 + shift + rng.gauss(0.0, 0.04)))
+            for _ in range(count)
         ]
         return (
             _paired_loss_rejects(
                 [
-                    abs(left - truth) - abs(base - truth)
-                    for left, base, truth in zip(
-                        regime_null, regime_oracle, regime_reference
+                    (left - observed) ** 2 - (base - observed) ** 2
+                    for left, base, observed in zip(
+                        regime_null, regime_baseline, regime_truth
                     )
                 ],
                 alpha,
             ),
             _paired_loss_rejects(
                 [
-                    abs(left - truth) - abs(base - truth)
-                    for left, base, truth in zip(
-                        regime_alternative, regime_oracle, regime_reference
+                    (left - observed) ** 2 - (base - observed) ** 2
+                    for left, base, observed in zip(
+                        regime_alternative, regime_baseline, regime_truth
                     )
                 ],
                 alpha,
@@ -1318,23 +1450,74 @@ def _simulate_gate_rejections(
 def _paired_loss_rejects(
     values: Sequence[float], alpha: float, *, center: float = 0.0
 ) -> bool:
-    """One-sided finite-sample paired loss test with a t critical value."""
+    """One-sided paired test without a small-sample normal approximation."""
     if len(values) < 2:
         return False
     differences = tuple(
         _finite_float(value, "paired loss") - center for value in values
     )
+    selected_alpha = _probability(alpha, "paired alpha", open_interval=True)
+    if len(differences) <= 8:
+        observed = sum(differences)
+        magnitudes = tuple(abs(value) for value in differences)
+        at_least_observed = 0
+        for assignment in range(1 << len(magnitudes)):
+            signed_sum = sum(
+                value if assignment & (1 << index) else -value
+                for index, value in enumerate(magnitudes)
+            )
+            if signed_sum >= observed - 1e-15:
+                at_least_observed += 1
+        exact_p_value = at_least_observed / (1 << len(magnitudes))
+        return observed > 0.0 and exact_p_value <= selected_alpha
     mean = _mean(differences)
     variance = sum((value - mean) ** 2 for value in differences) / (
         len(differences) - 1
     )
     if variance <= 0.0:
-        return mean > 0.0
+        return mean > 0.0 and len(differences) >= 5
     statistic = mean / math.sqrt(variance / len(differences))
-    # Normal critical values are conservative enough for the bounded study;
-    # small-sample unreliability remains visible in the measured FPR/power.
-    critical = statistics.NormalDist().inv_cdf(1.0 - alpha)
+    critical = _student_t_one_sided_critical(
+        selected_alpha, len(differences) - 1
+    )
     return statistic > critical
+
+
+def _student_t_one_sided_critical(alpha: float, degrees_freedom: int) -> float:
+    """Accurate bounded Cornish-Fisher t quantile without a SciPy dependency."""
+    selected_alpha = _probability(alpha, "t alpha", open_interval=True)
+    degrees = _positive_int(degrees_freedom, "degrees_freedom")
+    z_value = statistics.NormalDist().inv_cdf(1.0 - selected_alpha)
+    inverse = 1.0 / degrees
+    first = (z_value**3 + z_value) * inverse / 4.0
+    second = (
+        (5.0 * z_value**5 + 16.0 * z_value**3 + 3.0 * z_value)
+        * inverse**2
+        / 96.0
+    )
+    third = (
+        (
+            3.0 * z_value**7
+            + 19.0 * z_value**5
+            + 17.0 * z_value**3
+            - 15.0 * z_value
+        )
+        * inverse**3
+        / 384.0
+    )
+    return z_value + first + second + third
+
+
+def _binomial_coverage_tolerance(
+    nominal: float, sample_count: int, alpha: float
+) -> float:
+    """Two-sided finite-sample tolerance for a declared coverage target."""
+    target = _probability(nominal, "nominal coverage", open_interval=False)
+    count = _positive_int(sample_count, "coverage sample count")
+    selected_alpha = _probability(alpha, "coverage alpha", open_interval=True)
+    critical = statistics.NormalDist().inv_cdf(1.0 - selected_alpha / 2.0)
+    standard_error = math.sqrt(target * (1.0 - target) / count)
+    return min(1.0, critical * standard_error + 1.0 / count)
 
 
 @dataclass(frozen=True, slots=True)
@@ -1363,7 +1546,8 @@ class ProposalPortfolioCalibrationV1:
             self, "evaluation_id", _required_text(self.evaluation_id)
         )
         object.__setattr__(self, "trace_id", _required_text(self.trace_id))
-        engines = _text_tuple(self.engine_ids, allow_empty=False)
+        selected_status = QualificationStatus(self.status)
+        engines = _text_tuple(self.engine_ids, allow_empty=True)
         if len(engines) > MAX_QUALIFICATION_ENGINES:
             raise ValueError("portfolio calibration engine count exceeds bound")
         weights = {
@@ -1374,8 +1558,16 @@ class ProposalPortfolioCalibrationV1:
             raise ValueError(
                 "portfolio calibration weights differ from engines"
             )
-        if not math.isclose(sum(weights.values()), 1.0, abs_tol=1e-9):
+        if engines and not math.isclose(
+            sum(weights.values()), 1.0, abs_tol=1e-9
+        ):
             raise ValueError("portfolio calibration weights do not sum to one")
+        if not engines and (
+            weights or selected_status is QualificationStatus.PASSED
+        ):
+            raise ValueError(
+                "empty portfolio calibration cannot carry weights or pass"
+            )
         object.__setattr__(self, "engine_ids", engines)
         object.__setattr__(self, "weights", dict(sorted(weights.items())))
         fit_windows = _text_tuple(self.fit_window_ids, allow_empty=False)
@@ -1395,7 +1587,7 @@ class ProposalPortfolioCalibrationV1:
             if value is not None:
                 value = _nonnegative_float(value, name)
             object.__setattr__(self, name, value)
-        object.__setattr__(self, "status", QualificationStatus(self.status))
+        object.__setattr__(self, "status", selected_status)
         object.__setattr__(
             self,
             "reason_codes",
@@ -1877,12 +2069,15 @@ def _build_powered_qualification_dossier(
         raise ValueError("proposal evaluation registry is stale")
     trace_ref = evaluation.artifact_refs.get("window_metric_trace")
     scorecard_ref = evaluation.artifact_refs.get("scorecard")
-    if trace_ref is None or scorecard_ref is None:
+    manifest_ref = evaluation.artifact_refs.get("manifest")
+    if trace_ref is None or scorecard_ref is None or manifest_ref is None:
         raise ValueError("proposal evaluation lacks #490 metric evidence")
     verify_artifact_ref(trace_ref)
     verify_artifact_ref(scorecard_ref)
+    verify_artifact_ref(manifest_ref)
     trace = read_benchmark_window_metric_trace(trace_ref.path)
     campaign = read_reverse_degradation_benchmark_campaign(scorecard_ref.path)
+    corpus = read_reverse_degradation_benchmark_corpus(manifest_ref.path)
     if (
         trace.corpus_id != evaluation.corpus_id
         or trace.campaign_id != evaluation.campaign_id
@@ -1894,7 +2089,7 @@ def _build_powered_qualification_dossier(
     verification = verify_reconstruction_experiment(experiment)
     if not verification.verified:
         raise ValueError("qualification experiment verification failed")
-    _verify_experiment_scope(experiment, evaluation)
+    _verify_experiment_scope(experiment, evaluation, corpus)
 
     evidence_by_engine = {
         item.engine_id: item for item in evaluation.engine_evidence
@@ -1958,29 +2153,67 @@ def _build_powered_qualification_dossier(
         for split_kind in ("validation", "final_holdout")
     )
     score_reports = (*engine_score_reports, *control_score_reports)
-    support = min(
+    power_engine_ids = {
+        engine_id
+        for engine_id in evaluation.executed_engine_ids
+        if evidence_by_engine[engine_id].promotion_eligible
+        and not evidence_by_engine[engine_id].provisional
+    }
+    final_residuals = tuple(
+        item
+        for item in residual_reports
+        if item.split_kind == "final_holdout"
+        and item.engine_id in power_engine_ids
+    )
+    final_scores = tuple(
+        item
+        for item in engine_score_reports
+        if item.split_kind == "final_holdout"
+        and item.engine_id in power_engine_ids
+    )
+    residual_support = min(
+        (item.sample_count for item in final_residuals), default=0
+    )
+    window_support = min(
+        (item.window_count for item in final_scores), default=0
+    )
+    member_support = min(
+        (item.member_observation_count for item in final_scores), default=0
+    )
+    coverage_support = min(
+        (item.window_count for item in final_scores), default=0
+    )
+    event_support = min(
         (
-            len(
-                {
-                    item.window_id
-                    for item in observations_by_engine.get(engine_id, ())
-                    if item.split_kind == "validation"
-                }
-            )
-            for engine_id in evaluation.executed_engine_ids
+            item.stratum_support_counts.get("event_windows", 0)
+            for item in final_scores
         ),
         default=0,
     )
+    support_by_gate = {
+        "time_uniformity": residual_support,
+        "time_serial_dependence": residual_support,
+        "mark_calibration": residual_support,
+        "multivariate_energy": window_support,
+        "multivariate_variogram": window_support,
+        "calibration_sharpness": coverage_support,
+        "path_tail": window_support,
+        "regime_transition": member_support,
+        "event_response": event_support,
+        "refusal_calibration": member_support,
+    }
     power_study = run_qualification_power_study(
         selected_policy,
         trace_id=trace.trace_id,
-        observed_support_count=support,
+        observed_support_by_gate=support_by_gate,
     )
     controls = _control_checks(trace, experiment)
     benchmark_calibration_engines = tuple(
         engine_id
         for engine_id in evaluation.executed_engine_ids
         if observations_by_engine.get(engine_id)
+        and evidence_by_engine[engine_id].promotion_eligible
+        and not evidence_by_engine[engine_id].provisional
     )
     calibration = _calibrate_portfolio(
         evaluation,
@@ -2007,6 +2240,7 @@ def _build_powered_qualification_dossier(
             experiment_path, kind="reconstruction_experiment_manifest_v1"
         ),
         "scorecard": scorecard_ref,
+        "benchmark_manifest": manifest_ref,
         "window_metric_trace": trace_ref,
     }
     return PoweredQualificationDossierV1(
@@ -2059,6 +2293,7 @@ def verify_powered_qualification_dossier(
     if set(dossier.input_artifacts) != {
         "evaluation",
         "experiment",
+        "benchmark_manifest",
         "scorecard",
         "window_metric_trace",
     }:
@@ -2077,6 +2312,9 @@ def verify_powered_qualification_dossier(
     campaign = read_reverse_degradation_benchmark_campaign(
         dossier.input_artifacts["scorecard"].path
     )
+    corpus = read_reverse_degradation_benchmark_corpus(
+        dossier.input_artifacts["benchmark_manifest"].path
+    )
     if (
         evaluation.evaluation_id != dossier.evaluation_id
         or evaluation.registry_id != dossier.registry_id
@@ -2088,11 +2326,14 @@ def verify_powered_qualification_dossier(
         or trace.campaign_id != dossier.campaign_id
         or campaign.corpus_id != dossier.corpus_id
         or campaign.campaign_id != dossier.campaign_id
+        or corpus.corpus_id != dossier.corpus_id
     ):
         raise ValueError("qualification retained input identity differs")
     if (
         evaluation.artifact_refs.get("scorecard")
         != dossier.input_artifacts["scorecard"]
+        or evaluation.artifact_refs.get("manifest")
+        != dossier.input_artifacts["benchmark_manifest"]
         or evaluation.artifact_refs.get("window_metric_trace")
         != dossier.input_artifacts["window_metric_trace"]
     ):
@@ -2100,7 +2341,7 @@ def verify_powered_qualification_dossier(
     verification = verify_reconstruction_experiment(experiment)
     if not verification.verified:
         raise ValueError("qualification experiment verification failed")
-    _verify_experiment_scope(experiment, evaluation)
+    _verify_experiment_scope(experiment, evaluation, corpus)
     if {item.engine_id for item in dossier.engine_decisions} != set(
         evaluation.requested_engine_ids
     ):
@@ -2165,65 +2406,55 @@ def _trace_residual_report(
         item for item in observations if item.split_kind == split_kind
     )
     grouped = _group_by_window(selected)
-    sample_count = sum(
-        round(cells[0].reference_metrics.get("event_count", 0.0))
+    sample_count = len(grouped)
+    time_ks_values = tuple(
+        _mean(
+            [
+                item.comparison_metrics.get("simulation_time_pit_ks", 1.0)
+                for item in cells
+            ]
+        )
         for cells in grouped.values()
     )
-    time_ks_values = tuple(
-        item.comparison_metrics.get("simulation_time_pit_ks", 1.0)
-        for item in selected
-    )
     time_lag_values = tuple(
-        item.comparison_metrics.get("simulation_time_pit_lag1_abs", 1.0)
-        for item in selected
+        _mean(
+            [
+                item.comparison_metrics.get("simulation_time_pit_lag1_abs", 1.0)
+                for item in cells
+            ]
+        )
+        for cells in grouped.values()
     )
     mark_ks_values = tuple(
-        item.comparison_metrics.get("simulation_mark_pit_ks", 1.0)
-        for item in selected
-    )
-    worst_time = max(time_ks_values, default=1.0)
-    worst_mark = max(mark_ks_values, default=1.0)
-    worst_lag = max(time_lag_values, default=1.0)
-    time_p = _combine_p_values_fisher(
-        tuple(
-            _ks_uniform_p_value(
-                max(
-                    item.comparison_metrics.get("simulation_time_pit_ks", 1.0)
-                    for item in cells
-                ),
-                max(
-                    1, round(cells[0].reference_metrics.get("event_count", 0.0))
-                ),
-            )
-            for cells in grouped.values()
+        _mean(
+            [
+                item.comparison_metrics.get("simulation_mark_pit_ks", 1.0)
+                for item in cells
+            ]
         )
+        for cells in grouped.values()
     )
-    mark_p = _combine_p_values_fisher(
-        tuple(
-            _ks_uniform_p_value(
-                max(
-                    item.comparison_metrics.get("simulation_mark_pit_ks", 1.0)
-                    for item in cells
-                ),
-                max(
-                    1, round(cells[0].reference_metrics.get("event_count", 0.0))
-                ),
-            )
-            for cells in grouped.values()
-        )
-    )
-    if len({item.window_id for item in selected}) < policy.minimum_window_count:
+    mean_time = _mean(time_ks_values) if time_ks_values else 1.0
+    mean_mark = _mean(mark_ks_values) if mark_ks_values else 1.0
+    mean_lag = _mean(time_lag_values) if time_lag_values else 1.0
+    time_upper = _upper_mean_confidence_bound(time_ks_values, policy.alpha)
+    mark_upper = _upper_mean_confidence_bound(mark_ks_values, policy.alpha)
+    lag_upper = _upper_mean_confidence_bound(time_lag_values, policy.alpha)
+    time_p = _familywise_residual_p_value(grouped, "simulation_time_pit_ks")
+    mark_p = _familywise_residual_p_value(grouped, "simulation_mark_pit_ks")
+    if sample_count < policy.minimum_window_count:
         status = QualificationStatus.INSUFFICIENT_EVIDENCE
         reasons = ("protected_window_support_below_policy_minimum",)
-    elif sample_count < policy.minimum_residual_count:
-        status = QualificationStatus.INSUFFICIENT_EVIDENCE
-        reasons = ("residual_support_below_policy_minimum",)
-    elif worst_time > 0.20 or worst_mark > 0.20 or worst_lag > 0.20:
+    elif (
+        time_upper > PRACTICAL_RESIDUAL_TOLERANCE
+        or mark_upper > PRACTICAL_RESIDUAL_TOLERANCE
+        or lag_upper > PRACTICAL_RESIDUAL_TOLERANCE
+    ):
         status = QualificationStatus.FAILED
-        reasons = ("simulation_predictive_residual_gate_failed",)
+        reasons = ("clustered_simulation_predictive_practical_gate_failed",)
     else:
         status = QualificationStatus.PASSED
-        reasons = ("simulation_predictive_residual_gate_passed",)
+        reasons = ("clustered_simulation_predictive_practical_gate_passed",)
     config_id = (
         evidence.config_ids[0] if evidence.config_ids else "unbound-config"
     )
@@ -2245,21 +2476,80 @@ def _trace_residual_report(
         method=PointProcessResidualMethod.SIMULATION_PREDICTIVE,
         sample_count=sample_count,
         mark_sample_count=sample_count,
-        time_uniform_ks=worst_time,
+        time_uniform_ks=mean_time,
         time_uniform_p_value=time_p,
-        time_lag1_autocorrelation=worst_lag,
-        mark_uniform_ks=worst_mark,
+        time_lag1_autocorrelation=mean_lag,
+        mark_uniform_ks=mean_mark,
         mark_uniform_p_value=mark_p,
         quantiles={
             "window_time_ks_q50": _quantile(time_ks_values, 0.50),
             "window_time_ks_q95": _quantile(time_ks_values, 0.95),
+            "window_time_ks_upper95": time_upper,
+            "window_time_lag1_abs_q50": _quantile(time_lag_values, 0.50),
+            "window_time_lag1_abs_q95": _quantile(time_lag_values, 0.95),
+            "window_time_lag1_abs_upper95": lag_upper,
             "window_mark_ks_q50": _quantile(mark_ks_values, 0.50),
             "window_mark_ks_q95": _quantile(mark_ks_values, 0.95),
+            "window_mark_ks_upper95": mark_upper,
+            "practical_tolerance": PRACTICAL_RESIDUAL_TOLERANCE,
         },
         status=status,
         reason_codes=reasons,
         residual_input_id=input_id,
     )
+
+
+def _upper_mean_confidence_bound(
+    values: Sequence[float], alpha: float
+) -> float:
+    """Cluster-level one-sided bound; windows, not ticks, are independent."""
+    selected = tuple(_finite_float(value, "cluster metric") for value in values)
+    if not selected:
+        return 1.0
+    mean = _mean(selected)
+    if len(selected) < 2:
+        return mean
+    critical = _student_t_one_sided_critical(alpha, len(selected) - 1)
+    return mean + critical * statistics.stdev(selected) / math.sqrt(
+        len(selected)
+    )
+
+
+def _lower_mean_confidence_bound(
+    values: Sequence[float], alpha: float
+) -> float:
+    """Cluster-level one-sided lower bound for failure-detection power."""
+    selected = tuple(_finite_float(value, "cluster metric") for value in values)
+    if not selected:
+        return 0.0
+    mean = _mean(selected)
+    if len(selected) < 2:
+        return mean
+    critical = _student_t_one_sided_critical(alpha, len(selected) - 1)
+    return mean - critical * statistics.stdev(selected) / math.sqrt(
+        len(selected)
+    )
+
+
+def _familywise_residual_p_value(
+    grouped: Mapping[str, Sequence[BenchmarkWindowMetricObservationV1]],
+    metric_name: str,
+) -> float:
+    """Conservative descriptive KS p-value; it is not the cluster gate."""
+    p_values: list[float] = []
+    for cells in grouped.values():
+        event_count = max(
+            1, round(cells[0].reference_metrics.get("event_count", 0.0))
+        )
+        p_values.extend(
+            _ks_uniform_p_value(
+                item.comparison_metrics.get(metric_name, 1.0), event_count
+            )
+            for item in cells
+        )
+    if not p_values:
+        return 0.0
+    return min(1.0, min(p_values) * len(p_values))
 
 
 def _validation_feature_scales(
@@ -2302,6 +2592,56 @@ def _predictive_score_report(
     )
     grouped = _group_by_window(selected)
     feature_names = tuple(sorted(scales))
+    stratum_support = _score_stratum_support(grouped)
+    event_observations = tuple(
+        item
+        for item in selected
+        if item.context_state is not None
+        and not item.context_state.startswith("market_context:none:")
+    )
+    regime_transition_error = (
+        _mean(
+            [
+                item.comparison_metrics.get("update_transition_l1", 1.0)
+                for item in selected
+            ]
+        )
+        if selected
+        else None
+    )
+    event_response_error = (
+        _mean(
+            [
+                _event_response_observation_error(item.comparison_metrics)
+                for item in event_observations
+            ]
+        )
+        if event_observations
+        else None
+    )
+    if split_kind == "final_holdout":
+        validation_grouped = _group_by_window(
+            tuple(
+                item for item in observations if item.split_kind == "validation"
+            )
+        )
+        interval_adjustments, nominal_coverage = (
+            _split_conformal_interval_adjustments(
+                validation_grouped,
+                feature_names,
+                scales,
+                target_coverage=CONFORMAL_TARGET_COVERAGE,
+            )
+        )
+        interval_method = VALIDATION_SPLIT_CONFORMAL_METHOD
+        interval_calibration_count = len(validation_grouped)
+    else:
+        interval_adjustments = tuple(0.0 for _ in feature_names)
+        nominal_coverage = _mean(
+            [_rank_envelope_coverage(len(cells)) for cells in grouped.values()]
+        )
+        interval_method = RAW_RANK_ENVELOPE_METHOD
+        interval_calibration_count = 0
     if len(grouped) < policy.minimum_window_count:
         return PredictiveScoreReportV1(
             engine_id=engine_id,
@@ -2313,7 +2653,7 @@ def _predictive_score_report(
             variogram_score_p05=None,
             variogram_score_p1=None,
             marginal_crps=None,
-            nominal_coverage=0.90,
+            nominal_coverage=nominal_coverage,
             empirical_coverage=None,
             calibration_error=None,
             sharpness=None,
@@ -2323,6 +2663,14 @@ def _predictive_score_report(
             status=QualificationStatus.INSUFFICIENT_EVIDENCE,
             reason_codes=("protected_window_support_below_policy_minimum",),
             trace_id=trace_id,
+            regime_transition_error=regime_transition_error,
+            event_response_error=event_response_error,
+            stratum_support_counts=stratum_support,
+            interval_calibration_method=interval_method,
+            interval_calibration_window_count=interval_calibration_count,
+            mean_interval_adjustment=(
+                _mean(interval_adjustments) if interval_adjustments else None
+            ),
         )
     energies: list[float] = []
     variograms05: list[float] = []
@@ -2347,7 +2695,8 @@ def _predictive_score_report(
             values = sorted(member[dimension] for member in members)
             if not values:
                 continue
-            lower, upper = values[0], values[-1]
+            adjustment = interval_adjustments[dimension]
+            lower, upper = values[0] - adjustment, values[-1] + adjustment
             covered += int(lower <= observed <= upper)
             coverage_total += 1
             widths.append(upper - lower)
@@ -2363,10 +2712,10 @@ def _predictive_score_report(
         variogram_score_p05=_mean(variograms05),
         variogram_score_p1=_mean(variograms1),
         marginal_crps=_mean(crps_values),
-        nominal_coverage=0.90,
+        nominal_coverage=nominal_coverage,
         empirical_coverage=coverage,
         calibration_error=(
-            abs(coverage - 0.90) if coverage is not None else None
+            abs(coverage - nominal_coverage) if coverage is not None else None
         ),
         sharpness=_mean(widths) if widths else None,
         tail_error=_mean(
@@ -2392,9 +2741,109 @@ def _predictive_score_report(
             ]
         ),
         status=QualificationStatus.PASSED,
-        reason_codes=("predictive_scores_computed",),
+        reason_codes=(
+            (
+                "predictive_scores_and_validation_split_conformal_intervals_computed"
+                if split_kind == "final_holdout"
+                else "predictive_scores_and_raw_rank_intervals_computed"
+            ),
+        ),
         trace_id=trace_id,
+        regime_transition_error=regime_transition_error,
+        event_response_error=event_response_error,
+        stratum_support_counts=stratum_support,
+        interval_calibration_method=interval_method,
+        interval_calibration_window_count=interval_calibration_count,
+        mean_interval_adjustment=(
+            _mean(interval_adjustments) if interval_adjustments else None
+        ),
     )
+
+
+def _split_conformal_interval_adjustments(
+    grouped: Mapping[str, Sequence[BenchmarkWindowMetricObservationV1]],
+    feature_names: Sequence[str],
+    scales: Mapping[str, float],
+    *,
+    target_coverage: float,
+) -> tuple[tuple[float, ...], float]:
+    """Fit marginal finite-sample envelope corrections on validation only."""
+    selected_target = _probability(
+        target_coverage, "target_coverage", open_interval=True
+    )
+    count = len(grouped)
+    if count < 2:
+        raise ValueError("split conformal calibration requires two windows")
+    rank = math.ceil((count + 1) * selected_target)
+    if rank > count:
+        raise ValueError(
+            "split conformal target is unattainable at calibration support"
+        )
+    scores_by_dimension: list[list[float]] = [[] for _ in feature_names]
+    for cells in grouped.values():
+        reference = _normalized_vector(
+            cells[0].reference_metrics, feature_names, scales
+        )
+        members = tuple(
+            _normalized_vector(item.candidate_metrics, feature_names, scales)
+            for item in cells
+        )
+        for dimension, observed in enumerate(reference):
+            values = [member[dimension] for member in members]
+            nonconformity = max(
+                min(values) - observed,
+                observed - max(values),
+                0.0,
+            )
+            scores_by_dimension[dimension].append(nonconformity)
+    adjustments = tuple(
+        sorted(values)[rank - 1] for values in scores_by_dimension
+    )
+    return adjustments, rank / (count + 1)
+
+
+def _rank_envelope_coverage(member_count: int) -> float:
+    """Attainable min/max rank-envelope coverage for exchangeable draws."""
+    count = _bounded_int(member_count, "ensemble member count", 0, 1_000_000)
+    if count == 0:
+        return 0.0
+    return (count - 1.0) / (count + 1.0)
+
+
+def _score_stratum_support(
+    grouped: Mapping[str, Sequence[BenchmarkWindowMetricObservationV1]],
+) -> dict[str, int]:
+    representatives = tuple(cells[0] for cells in grouped.values() if cells)
+    result = {
+        "event_windows": sum(
+            item.context_state is not None
+            and not item.context_state.startswith("market_context:none:")
+            for item in representatives
+        ),
+        "missing_context_windows": sum(
+            item.context_state is None
+            or item.context_state.startswith("market_context:none:")
+            for item in representatives
+        ),
+    }
+    for session in ("asia", "london", "new_york"):
+        result[f"session_{session}"] = sum(
+            item.session == session for item in representatives
+        )
+    return result
+
+
+def _event_response_observation_error(
+    metrics: Mapping[str, float],
+) -> float:
+    names = (
+        "event_count_relative_error",
+        "path_realized_variation_relative_error",
+        "spread_tail_relative_error",
+        "update_transition_l1",
+        "burst_quiet_rate_error",
+    )
+    return _mean([metrics.get(name, 1.0) for name in names])
 
 
 def _calibrate_portfolio(
@@ -2416,9 +2865,18 @@ def _calibrate_portfolio(
         observations_by_engine, engines, "final_holdout"
     )
     if not engines:
-        raise ValueError(
-            "no executed engine with benchmark observations is available "
-            "for calibration"
+        return ProposalPortfolioCalibrationV1(
+            evaluation_id=evaluation.evaluation_id,
+            trace_id=trace.trace_id,
+            engine_ids=(),
+            weights={},
+            fit_window_ids=("no-prequalified-engine",),
+            final_holdout_window_ids=("no-eligible-engine",),
+            validation_energy_score=None,
+            final_holdout_energy_score=None,
+            final_holdout_variogram_score_p05=None,
+            status=QualificationStatus.INSUFFICIENT_EVIDENCE,
+            reason_codes=("no_prequalified_engine_for_portfolio",),
         )
     if (
         len(validation_windows) < minimum_window_count
@@ -2568,7 +3026,6 @@ def _engine_decisions(
             evidence,
             power_study,
             controls,
-            adjusted,
             calibration,
             linear_control,
         )
@@ -2584,10 +3041,10 @@ def _engine_decisions(
             evidence.promotion_eligible
             and not evidence.provisional
             and all_passed
-            and calibration.status is QualificationStatus.PASSED
         )
         ensemble_eligible = bool(
             reconstruction_eligible
+            and calibration.status is QualificationStatus.PASSED
             and calibration.weights.get(engine_id, 0.0) > 0.0
         )
         if reconstruction_eligible:
@@ -2633,24 +3090,25 @@ def _observed_gate_statuses(
     evidence: ProposalEngineEvidenceV1,
     power_study: QualificationPowerStudyV1,
     controls: Mapping[str, bool],
-    adjusted_p_values: Mapping[str, float],
     calibration: ProposalPortfolioCalibrationV1,
     linear_control: PredictiveScoreReportV1 | None,
 ) -> dict[str, QualificationStatus]:
     values: dict[str, bool | None] = {
         "time_uniformity": (
-            adjusted_p_values.get("time_uniformity", 0.0) >= 0.05
+            residual.quantiles.get("window_time_ks_upper95", 1.0)
+            <= PRACTICAL_RESIDUAL_TOLERANCE
             if residual is not None
             else None
         ),
         "time_serial_dependence": (
-            abs(residual.time_lag1_autocorrelation) <= 0.20
+            residual.quantiles.get("window_time_lag1_abs_upper95", 1.0)
+            <= PRACTICAL_RESIDUAL_TOLERANCE
             if residual is not None
-            and residual.time_lag1_autocorrelation is not None
             else None
         ),
         "mark_calibration": (
-            adjusted_p_values.get("mark_calibration", 0.0) >= 0.05
+            residual.quantiles.get("window_mark_ks_upper95", 1.0)
+            <= PRACTICAL_RESIDUAL_TOLERANCE
             if residual is not None
             else None
         ),
@@ -2675,7 +3133,16 @@ def _observed_gate_statuses(
         ),
         "calibration_sharpness": (
             score.calibration_error is not None
-            and score.calibration_error <= 0.25
+            and score.sharpness is not None
+            and linear_control is not None
+            and linear_control.sharpness is not None
+            and score.calibration_error
+            <= _binomial_coverage_tolerance(
+                score.nominal_coverage,
+                max(1, score.window_count),
+                0.05,
+            )
+            and score.sharpness <= linear_control.sharpness
             if score is not None
             else None
         ),
@@ -2690,10 +3157,24 @@ def _observed_gate_statuses(
             if score is not None
             else None
         ),
-        "regime_transition": evidence.failure_count == 0,
-        "event_response": bool(
-            controls.get("dense_identity_behaves_as_reference")
-            and controls.get("negative_control_fails_for_anchor_loss")
+        "regime_transition": (
+            "candidate-update-transition" not in evidence.failed_gate_ids
+            and score is not None
+            and score.regime_transition_error is not None
+            and linear_control is not None
+            and linear_control.regime_transition_error is not None
+            and score.regime_transition_error
+            <= linear_control.regime_transition_error
+        ),
+        "event_response": (
+            score is not None
+            and score.event_response_error is not None
+            and linear_control is not None
+            and linear_control.event_response_error is not None
+            and score.event_response_error
+            <= linear_control.event_response_error
+            and bool(controls.get("dense_identity_behaves_as_reference"))
+            and bool(controls.get("negative_control_fails_for_anchor_loss"))
         ),
         "refusal_calibration": evidence.refusal_count == 0,
     }
@@ -2796,6 +3277,7 @@ def _control_checks(
 def _verify_experiment_scope(
     experiment: ReconstructionExperimentManifestV1,
     evaluation: ProposalPortfolioEvaluationV1,
+    corpus: ReverseDegradationBenchmarkCorpusV1,
 ) -> None:
     if not experiment.leakage_audit.accepted:
         raise ValueError("qualification experiment leakage audit failed")
@@ -2807,6 +3289,7 @@ def _verify_experiment_scope(
     ):
         raise ValueError("qualification experiment is not HistData ASCII/T")
     for role in (
+        ReconstructionExperimentRole.MODERN_REFERENCE_TRAINING,
         ReconstructionExperimentRole.CALIBRATION,
         ReconstructionExperimentRole.PROTECTED_HOLDOUT,
     ):
@@ -2824,6 +3307,33 @@ def _verify_experiment_scope(
     if evaluation.corpus_id not in benchmark_ids:
         raise ValueError(
             "qualification experiment does not bind the evaluation corpus"
+        )
+    periods_by_role: dict[ReconstructionExperimentRole, set[str]] = defaultdict(
+        set
+    )
+    for unit in experiment.split_units:
+        for role in unit.roles:
+            periods_by_role[
+                ReconstructionExperimentRole.from_value(role)
+            ].update(unit.periods)
+    expected_periods = {
+        ReconstructionExperimentRole.MODERN_REFERENCE_TRAINING: set(
+            corpus.profile.split_periods["calibration"]
+        ),
+        ReconstructionExperimentRole.CALIBRATION: set(
+            corpus.profile.split_periods["validation"]
+        ),
+        ReconstructionExperimentRole.PROTECTED_HOLDOUT: set(
+            corpus.profile.split_periods["final_holdout"]
+        ),
+    }
+    if any(
+        periods_by_role.get(role, set()) != periods
+        for role, periods in expected_periods.items()
+    ):
+        raise ValueError(
+            "qualification experiment role periods differ from the modern "
+            "reference benchmark splits"
         )
 
 

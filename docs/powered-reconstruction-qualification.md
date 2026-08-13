@@ -151,7 +151,7 @@ requires its corpus/campaign to match retained evaluation evidence, embeds the
 policy/power/calibration/decision identities and weights in the proposal
 portfolio, and re-verifies them during plan validation.
 
-## July 2026 retained HistData campaign
+## Retained HistData campaigns
 
 The first attempted final holdout, October 2025, contained a synchronized
 one-hour timestamp regression in all three source files. HistData documents
@@ -183,8 +183,27 @@ failed closed because the requested motif engine was no longer reconstruction
 eligible under powered qualification.
 
 This result does not say all engines are scientifically equivalent or bad. It
-says the retained experiment cannot support a product promotion at the
+says that exact retained experiment cannot support a product promotion at the
 predeclared reliability target.
+
+For #491, a second predeclared campaign expanded support to 96 synchronized
+ten-minute windows across 18 HistData months: 32 calibration windows in the
+first half of 2024, 32 validation windows in the second half of 2024, and 32
+protected final-holdout windows in the second half of 2025. The catalog-bound
+experiment covers 54 source partitions and freezes all assignments before
+candidate results. The final holdout is evaluated once after validation-only
+portfolio fitting.
+
+The powered comparison retains three marked-Hawkes ablations. Diagonal
+self-excitation passes all ten hard gate families and is the sole
+reconstruction- and ensemble-eligible variant. Full self/cross excitation
+fails time-uniformity; zero excitation fails time-uniformity and path/tail
+behavior. Nonpassing variants remain in the evidence graph but cannot enter
+the selected product. This is an eligibility decision, not an automatic
+winner, historical-truth claim, broker claim, or investment recommendation.
+The content-addressed v2.4 identities are published with the final #491
+certification so implementation or release-version changes cannot reuse a
+stale dossier.
 
 ## Scientific interpretation
 

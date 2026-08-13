@@ -361,6 +361,59 @@ def test_public_builder_is_deterministic_bounded_and_stage_consumable(
     assert broker_command.input_manifest_refs == ()
 
 
+def test_non_motif_portfolio_does_not_require_motif_generator_promotion(
+    planned_environment: tuple[Path, dict[str, Any]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_root, kwargs = planned_environment
+    resolved = plan_module._resolve_plan_inputs(
+        feed_epoch_definition_path=kwargs["feed_epoch_definition_path"],
+        observation_operator_path=kwargs["observation_operator_path"],
+        market_context_corpus_path=kwargs["market_context_corpus_path"],
+        cftc_positioning_corpus_path=kwargs["cftc_positioning_corpus_path"],
+        benchmark_manifest_path=kwargs["benchmark_manifest_path"],
+        motif_manifest_path=kwargs["motif_manifest_path"],
+        motif_index_path=kwargs["motif_index_path"],
+        motif_qualification_path=kwargs["motif_qualification_path"],
+        motif_leakage_audit_path=kwargs["motif_leakage_audit_path"],
+        symbols=_SYMBOLS,
+        require_motif_promotion=False,
+    )
+    observed: dict[str, bool] = {}
+
+    def capture_resolution(**arguments: Any) -> Any:
+        observed["require_motif_promotion"] = arguments[
+            "require_motif_promotion"
+        ]
+        return resolved
+
+    monkeypatch.setattr(plan_module, "_resolve_plan_inputs", capture_resolution)
+    engine_id = "histdatacom.marked-hawkes.diagonal_self_excitation"
+    monkeypatch.setattr(
+        plan_module,
+        "read_proposal_evidence_campaigns",
+        lambda _: (),
+    )
+    monkeypatch.setattr(
+        plan_module,
+        "proposal_evidence_from_campaigns",
+        lambda _: (),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="selected proposal engines are not reconstruction eligible",
+    ):
+        build_synthetic_infill_plan(
+            source_root,
+            **kwargs,
+            proposal_engine_ids=(engine_id,),
+            selected_proposal_engine_ids=(engine_id,),
+        )
+
+    assert observed == {"require_motif_promotion": False}
+
+
 def test_v2_spec_round_trips_explicit_portfolio_without_hidden_default(
     planned_environment: tuple[Path, dict[str, Any]],
     monkeypatch: pytest.MonkeyPatch,

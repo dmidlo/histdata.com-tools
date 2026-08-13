@@ -21,12 +21,17 @@ from collections import Counter, defaultdict
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, cast
 
 from histdatacom.data_analytics.feed_epochs_v2 import (
     FeedEpochDefinitionV2,
     read_active_time_feed_epoch_definition,
+)
+from histdatacom.histdata_ascii import (
+    MAX_HISTDATA_SOURCE_ORDER_REGRESSION_MS,
+    MAX_HISTDATA_SOURCE_ORDER_REGRESSIONS_PER_PARTITION,
 )
 from histdatacom.resource_usage import peak_rss_bytes
 from histdatacom.runtime_contracts import ArtifactRef, JSONScalar, JSONValue
@@ -91,6 +96,8 @@ from histdatacom.synthetic.marked_hawkes import (
     fit_marked_hawkes_challenger,
 )
 from histdatacom.synthetic.motifs import (
+    MAX_REFERENCE_MOTIF_FRAGMENTS,
+    MAX_REFERENCE_MOTIF_SOURCE_WINDOWS,
     ReferenceMotifConditionV1,
     ReferenceMotifIndexConfigV1,
     ReferenceMotifIndexV1,
@@ -100,6 +107,7 @@ from histdatacom.synthetic.motifs import (
     ReferenceMotifSplitV1,
     build_reference_motif_index,
     reference_motif_condition_from_quotes,
+    reference_session_for_ns,
 )
 from histdatacom.synthetic.neural_tpp import (
     FittedNeuralTPPBenchmarkGeneratorV1,
@@ -174,9 +182,9 @@ BENCHMARK_WINDOW_METRIC_TRACE_SCHEMA_VERSION = (
 PREDECLARED_GATE_COMMIT = "0caec1480a957528ebefdff062e13012ea11e84d"
 DEFAULT_BENCHMARK_SYMBOLS = ("EURGBP", "EURUSD", "GBPUSD")
 DEFAULT_BENCHMARK_PERIODS = {
-    "calibration": "201001",
-    "validation": "202401",
-    "final_holdout": "202510",
+    "calibration": tuple(f"2024{month:02d}" for month in range(1, 7)),
+    "validation": tuple(f"2024{month:02d}" for month in range(7, 13)),
+    "final_holdout": tuple(f"2025{month:02d}" for month in range(7, 13)),
 }
 DEFAULT_SESSION_HOURS = (0, 8, 14)
 DEFAULT_MAX_ARTIFACT_BYTES = 64 * 1024 * 1024
@@ -190,6 +198,21 @@ MAX_BENCHMARK_TRACE_METRICS = 96
 NANOSECONDS_PER_MILLISECOND = 1_000_000
 NANOSECONDS_PER_SECOND = 1_000_000_000
 PIP = 0.0001
+BENCHMARK_MARK_STATES = (
+    "unchanged",
+    "update_ask_only",
+    "update_bid_only",
+    "update_joint",
+)
+_CANONICAL_UPDATE_STATE = {
+    "unchanged": "unchanged",
+    "ask_only": "update_ask_only",
+    "update_ask_only": "update_ask_only",
+    "bid_only": "update_bid_only",
+    "update_bid_only": "update_bid_only",
+    "joint": "update_joint",
+    "update_joint": "update_joint",
+}
 _PERIOD = re.compile(r"^[0-9]{6}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _COMMIT = re.compile(r"^[0-9a-f]{40}$")
@@ -200,17 +223,19 @@ class ReverseDegradationCorpusProfileV1:
     """Bounded selection, replay, and execution policy."""
 
     symbols: tuple[str, ...] = DEFAULT_BENCHMARK_SYMBOLS
-    split_periods: Mapping[str, str] = field(
+    split_periods: Mapping[str, str | tuple[str, ...]] = field(
         default_factory=lambda: dict(DEFAULT_BENCHMARK_PERIODS)
     )
-    synchronized_windows_per_split: int = 6
+    synchronized_windows_per_split: int = 32
     window_duration_seconds: int = 600
     minimum_events_per_symbol: int = 64
     max_events_per_symbol: int = 256
     neighbor_guard_seconds: int = 1800
-    ensemble_member_ids: tuple[str, ...] = ("member-01", "member-02")
-    max_source_bytes: int = MAX_BENCHMARK_SOURCE_BYTES
-    max_runtime_seconds: float = 900.0
+    ensemble_member_ids: tuple[str, ...] = tuple(
+        f"member-{index:02d}" for index in range(1, 9)
+    )
+    max_source_bytes: int = 4 * 1024**3
+    max_runtime_seconds: float = 1800.0
     max_peak_memory_bytes: int = 2 * 1024**3
     max_artifact_bytes: int = DEFAULT_MAX_ARTIFACT_BYTES
     profile_id: str = ""
@@ -228,20 +253,32 @@ class ReverseDegradationCorpusProfileV1:
                 "benchmark corpus requires the EUR/GBP/USD triangle"
             )
         object.__setattr__(self, "symbols", symbols)
-        periods = {
-            str(key): str(value) for key, value in self.split_periods.items()
-        }
+        periods: dict[str, tuple[str, ...]] = {}
+        for raw_key, raw_value in self.split_periods.items():
+            key = str(raw_key)
+            values = (
+                (raw_value,)
+                if isinstance(raw_value, str)
+                else tuple(str(item) for item in raw_value)
+            )
+            if not values or len(values) != len(set(values)):
+                raise ValueError(
+                    "benchmark split periods must be nonempty and unique"
+                )
+            periods[key] = tuple(sorted(values))
         if set(periods) != set(DEFAULT_BENCHMARK_PERIODS):
             raise ValueError(
                 "benchmark split periods must cover all blocked roles"
             )
-        if any(not _PERIOD.fullmatch(value) for value in periods.values()):
-            raise ValueError("benchmark split periods must use YYYYMM")
-        if (
-            not periods["calibration"]
-            < periods["validation"]
-            < periods["final_holdout"]
+        if any(
+            not _PERIOD.fullmatch(value)
+            for values in periods.values()
+            for value in values
         ):
+            raise ValueError("benchmark split periods must use YYYYMM")
+        if not max(periods["calibration"]) < min(
+            periods["validation"]
+        ) or not max(periods["validation"]) < min(periods["final_holdout"]):
             raise ValueError("benchmark split periods must be chronological")
         object.__setattr__(self, "split_periods", dict(sorted(periods.items())))
         _bounded_int(
@@ -298,7 +335,10 @@ class ReverseDegradationCorpusProfileV1:
         return {
             "schema_version": self.schema_version,
             "symbols": list(self.symbols),
-            "split_periods": dict(self.split_periods),
+            "split_periods": {
+                name: (values[0] if len(values) == 1 else list(values))
+                for name, values in self.split_periods.items()
+            },
             "synchronized_windows_per_split": self.synchronized_windows_per_split,
             "window_duration_seconds": self.window_duration_seconds,
             "minimum_events_per_symbol": self.minimum_events_per_symbol,
@@ -322,8 +362,12 @@ class ReverseDegradationCorpusProfileV1:
         return cls(
             symbols=_string_tuple(data.get("symbols")),
             split_periods={
-                str(k): str(v)
-                for k, v in _mapping(data.get("split_periods")).items()
+                str(key): (
+                    str(value)
+                    if isinstance(value, str)
+                    else tuple(str(item) for item in _sequence(value))
+                )
+                for key, value in _mapping(data.get("split_periods")).items()
             },
             synchronized_windows_per_split=_strict_int(
                 data.get("synchronized_windows_per_split"), "window count"
@@ -620,9 +664,9 @@ class ReverseDegradationBenchmarkCorpusV1:
         sources = tuple(
             sorted(self.sources, key=lambda item: (item.period, item.symbol))
         )
-        expected_source_count = len(self.profile.split_periods) * len(
-            self.profile.symbols
-        )
+        expected_source_count = sum(
+            len(values) for values in self.profile.split_periods.values()
+        ) * len(self.profile.symbols)
         if len(sources) != expected_source_count or len(
             {v.partition_id for v in sources}
         ) != len(sources):
@@ -1152,6 +1196,10 @@ class BenchmarkWindowMetricObservationV1:
     reference_metrics: Mapping[str, float]
     candidate_metrics: Mapping[str, float]
     comparison_metrics: Mapping[str, float]
+    session: str | None = None
+    epoch_label: str | None = None
+    context_state: str | None = None
+    positioning_state: str | None = None
     observation_id: str = ""
     schema_version: str = BENCHMARK_WINDOW_METRIC_OBSERVATION_SCHEMA_VERSION
 
@@ -1186,6 +1234,23 @@ class BenchmarkWindowMetricObservationV1:
         object.__setattr__(self, "reference_metrics", reference)
         object.__setattr__(self, "candidate_metrics", candidate)
         object.__setattr__(self, "comparison_metrics", comparison)
+        metadata = {
+            name: _optional_text(getattr(self, name))
+            for name in (
+                "session",
+                "epoch_label",
+                "context_state",
+                "positioning_state",
+            )
+        }
+        if any(value is not None for value in metadata.values()) and not all(
+            value is not None for value in metadata.values()
+        ):
+            raise ValueError(
+                "benchmark observation stratum metadata is incomplete"
+            )
+        for name, value in metadata.items():
+            object.__setattr__(self, name, value)
         expected = _stable_id(
             "benchmark-window-metric-observation", self.identity_payload()
         )
@@ -1195,7 +1260,7 @@ class BenchmarkWindowMetricObservationV1:
         object.__setattr__(self, "observation_id", expected)
 
     def identity_payload(self) -> dict[str, JSONValue]:
-        return {
+        payload: dict[str, JSONValue] = {
             "schema_version": self.schema_version,
             "candidate_id": self.candidate_id,
             "method_name": self.method_name,
@@ -1208,6 +1273,16 @@ class BenchmarkWindowMetricObservationV1:
             "comparison_metrics": dict(self.comparison_metrics),
             "event_rows_embedded": False,
         }
+        if self.session is not None:
+            payload.update(
+                {
+                    "session": self.session,
+                    "epoch_label": self.epoch_label,
+                    "context_state": self.context_state,
+                    "positioning_state": self.positioning_state,
+                }
+            )
+        return payload
 
     def to_dict(self) -> dict[str, JSONValue]:
         return {
@@ -1237,6 +1312,10 @@ class BenchmarkWindowMetricObservationV1:
             comparison_metrics=cast(
                 Mapping[str, float], _mapping(data.get("comparison_metrics"))
             ),
+            session=_optional_text(data.get("session")),
+            epoch_label=_optional_text(data.get("epoch_label")),
+            context_state=_optional_text(data.get("context_state")),
+            positioning_state=_optional_text(data.get("positioning_state")),
             observation_id=str(data.get("observation_id", "")),
             schema_version=str(data.get("schema_version", "")),
         )
@@ -1393,17 +1472,44 @@ def build_reverse_degradation_benchmark_corpus(
     source_by_axis = {(item.period, item.symbol): item for item in sources}
     windows: list[BenchmarkWindowPartitionV1] = []
     for split_kind in ("calibration", "validation", "final_holdout"):
-        period = selected.split_periods[split_kind]
-        candidates = _candidate_intervals(
-            period,
-            duration_seconds=selected.window_duration_seconds,
-            context_event_times=tuple(
-                event.event_time_ns
-                for event in context_corpus.timeline.events
-                if _period_for_ns(event.event_time_ns) == period
-            ),
+        periods = selected.split_periods[split_kind]
+        context_candidates_by_period: dict[
+            str, tuple[tuple[int, int, str], ...]
+        ] = {}
+        ordinary_candidates_by_period: dict[
+            str, tuple[tuple[int, int, str], ...]
+        ] = {}
+        for period in periods:
+            context_candidates, ordinary_candidates = _candidate_interval_pools(
+                period,
+                duration_seconds=selected.window_duration_seconds,
+                maximum_context_windows=MAX_BENCHMARK_WINDOWS,
+                context_event_times=tuple(
+                    event.event_time_ns
+                    for event in context_corpus.timeline.events
+                    if _period_for_ns(event.event_time_ns) == period
+                ),
+            )
+            context_candidates_by_period[period] = context_candidates
+            ordinary_candidates_by_period[period] = ordinary_candidates
+        context_candidates = _interleave_period_candidates(
+            context_candidates_by_period
         )
-        for start_ns, end_ns, session in candidates:
+        ordinary_candidates = _interleave_period_candidates(
+            ordinary_candidates_by_period
+        )
+        minimum_session_windows = min(
+            4, max(1, selected.synchronized_windows_per_split // 8)
+        )
+        selected_session_counts: Counter[str] = Counter()
+        selected_period_counts: Counter[str] = Counter()
+        selected_windows: list[BenchmarkWindowPartitionV1] = []
+
+        def try_candidate(
+            candidate: tuple[int, int, str],
+        ) -> BenchmarkWindowPartitionV1 | None:
+            start_ns, end_ns, session = candidate
+            period = _period_for_ns(start_ns)
             rows_by_symbol: dict[str, tuple[_TickRow, ...]] = {}
             for symbol in selected.symbols:
                 source = source_by_axis[(period, symbol)]
@@ -1417,14 +1523,14 @@ def build_reverse_degradation_benchmark_corpus(
                 len(values) < selected.minimum_events_per_symbol
                 for values in rows_by_symbol.values()
             ):
-                continue
+                return None
             assignment = definition.assign(
                 symbol="EURUSD",
                 timestamp_utc_ms=((start_ns + end_ns) // 2)
                 // NANOSECONDS_PER_MILLISECOND,
             )
             if assignment.assignment_kind not in {"epoch", "transition"}:
-                continue
+                return None
             context_query = query_market_context_corpus(
                 context_corpus,
                 start_ns=start_ns,
@@ -1453,46 +1559,94 @@ def build_reverse_degradation_benchmark_corpus(
                 )
                 and positioning_query.status is CftcPositioningQueryStatus.READY
             )
-            windows.append(
-                BenchmarkWindowPartitionV1(
-                    split_kind=split_kind,
-                    period=period,
-                    session=session,
-                    start_ns=start_ns,
-                    end_ns=end_ns,
-                    epoch_label=assignment.label,
-                    source_partition_ids=tuple(
-                        source_by_axis[(period, symbol)].partition_id
-                        for symbol in selected.symbols
-                    ),
-                    symbol_event_counts={
-                        symbol: len(values)
-                        for symbol, values in rows_by_symbol.items()
-                    },
-                    symbol_partition_sha256={
-                        symbol: _tick_rows_sha256(values)
-                        for symbol, values in rows_by_symbol.items()
-                    },
-                    event_state_counts=_tick_event_state_counts(rows_by_symbol),
-                    context_state=market_context_benchmark_event_state(
-                        context_query
-                    ),
-                    positioning_state=cftc_positioning_state_label(
-                        positioning_query
-                    ),
-                    context_supported=context_supported,
-                )
+            return BenchmarkWindowPartitionV1(
+                split_kind=split_kind,
+                period=period,
+                session=session,
+                start_ns=start_ns,
+                end_ns=end_ns,
+                epoch_label=assignment.label,
+                source_partition_ids=tuple(
+                    source_by_axis[(period, symbol)].partition_id
+                    for symbol in selected.symbols
+                ),
+                symbol_event_counts={
+                    symbol: len(values)
+                    for symbol, values in rows_by_symbol.items()
+                },
+                symbol_partition_sha256={
+                    symbol: _tick_rows_sha256(values)
+                    for symbol, values in rows_by_symbol.items()
+                },
+                event_state_counts=_tick_event_state_counts(rows_by_symbol),
+                context_state=market_context_benchmark_event_state(
+                    context_query
+                ),
+                positioning_state=cftc_positioning_state_label(
+                    positioning_query
+                ),
+                context_supported=context_supported,
             )
-            if (
-                sum(item.split_kind == split_kind for item in windows)
-                == selected.synchronized_windows_per_split
-            ):
+
+        for candidate in (*context_candidates, *ordinary_candidates):
+            if len(selected_windows) == selected.synchronized_windows_per_split:
                 break
-        actual = sum(item.split_kind == split_kind for item in windows)
+            start_ns, _end_ns, session = candidate
+            period = _period_for_ns(start_ns)
+            if candidate in ordinary_candidates:
+                missing_periods = {
+                    value
+                    for value in periods
+                    if selected_period_counts[value] == 0
+                }
+                missing_sessions = {
+                    value
+                    for value in ("asia", "london", "new_york")
+                    if selected_session_counts[value] < minimum_session_windows
+                }
+                if (missing_periods or missing_sessions) and (
+                    period not in missing_periods
+                    and session not in missing_sessions
+                ):
+                    continue
+            partition = try_candidate(candidate)
+            if partition is None:
+                continue
+            selected_windows.append(partition)
+            selected_session_counts[partition.session] += 1
+            selected_period_counts[partition.period] += 1
+        windows.extend(selected_windows)
+        actual = len(selected_windows)
         if actual != selected.synchronized_windows_per_split:
             raise ValueError(
                 f"only {actual} synchronized {split_kind} windows satisfy "
                 "the real-data event minimum"
+            )
+        if any(
+            selected_session_counts[session] < minimum_session_windows
+            for session in ("asia", "london", "new_york")
+        ):
+            raise ValueError(
+                f"{split_kind} synchronized windows lack minimum session support"
+            )
+        if set(selected_period_counts) != set(periods):
+            raise ValueError(
+                f"{split_kind} synchronized windows lack period coverage"
+            )
+        event_window_count = sum(
+            not item.context_state.startswith("market_context:none:")
+            for item in selected_windows
+        )
+        minimum_event_windows = (
+            24
+            if len(periods) > 1
+            and selected.synchronized_windows_per_split >= 30
+            else 1
+        )
+        if event_window_count < minimum_event_windows:
+            raise ValueError(
+                f"{split_kind} has only {event_window_count} independent "
+                f"event windows; {minimum_event_windows} are required"
             )
         _enforce_runtime(started, selected.max_runtime_seconds)
 
@@ -1644,7 +1798,9 @@ def _discover_source_partitions(
     root: Path, profile: ReverseDegradationCorpusProfileV1
 ) -> tuple[BenchmarkSourcePartitionV1, ...]:
     sources: list[BenchmarkSourcePartitionV1] = []
-    for period in profile.split_periods.values():
+    for period in sorted(
+        value for values in profile.split_periods.values() for value in values
+    ):
         year, month = int(period[:4]), int(period[4:])
         for symbol in profile.symbols:
             relative = Path(symbol.lower()) / str(year) / str(month) / ".data"
@@ -1670,8 +1826,36 @@ def _candidate_intervals(
     period: str,
     *,
     duration_seconds: int,
+    maximum_context_windows: int = 3,
     context_event_times: Sequence[int] = (),
 ) -> tuple[tuple[int, int, str], ...]:
+    """Return event-priority then ordinary candidates for one period."""
+    contexts, ordinary = _candidate_interval_pools(
+        period,
+        duration_seconds=duration_seconds,
+        maximum_context_windows=maximum_context_windows,
+        context_event_times=context_event_times,
+    )
+    return (*contexts, *ordinary)
+
+
+def _candidate_interval_pools(
+    period: str,
+    *,
+    duration_seconds: int,
+    maximum_context_windows: int = 3,
+    context_event_times: Sequence[int] = (),
+) -> tuple[
+    tuple[tuple[int, int, str], ...],
+    tuple[tuple[int, int, str], ...],
+]:
+    """Build disjoint event and ordinary candidate pools for one month."""
+    context_limit = _bounded_int(
+        maximum_context_windows,
+        "maximum context windows",
+        1,
+        MAX_BENCHMARK_WINDOWS,
+    )
     year, month = int(period[:4]), int(period[4:])
     names = {0: "asia", 8: "london", 14: "new_york"}
     ordinary: list[tuple[int, int, str]] = []
@@ -1689,46 +1873,84 @@ def _candidate_intervals(
                     names[hour],
                 )
             )
-    baseline = tuple(
-        next(value for value in ordinary if value[2] == session)
-        for session in ("asia", "london", "new_york")
-    )
-    contexts: list[tuple[int, int, str]] = []
+    sessions = ("asia", "london", "new_york")
+    contexts: dict[str, list[tuple[int, int, str]]] = {
+        session: [] for session in sessions
+    }
     for start_ns in sorted(set(context_event_times)):
         if _period_for_ns(start_ns) != period:
             continue
         end_ns = start_ns + duration_seconds * NANOSECONDS_PER_SECOND
-        candidate = (start_ns, end_ns, _session_for_ns(start_ns))
+        candidate = (start_ns, end_ns, reference_session_for_ns(start_ns))
         if any(
             left < end_ns and start_ns < right
-            for left, right, _ in (*baseline, *contexts)
+            for left, right, _ in (
+                item for values in contexts.values() for item in values
+            )
         ):
             continue
-        contexts.append(candidate)
-        if len(contexts) == 3:
+        contexts[candidate[2]].append(candidate)
+        if sum(len(values) for values in contexts.values()) == context_limit:
             break
-    used = {(start, end) for start, end, _ in (*baseline, *contexts)}
-    remainder = tuple(
-        value for value in ordinary if (value[0], value[1]) not in used
+    context_intervals = {
+        (start, end)
+        for start, end, _ in (
+            item for values in contexts.values() for item in values
+        )
+    }
+    ordinary_by_session = {
+        session: [
+            value
+            for value in ordinary
+            if value[2] == session
+            and not any(
+                left < value[1] and value[0] < right
+                for left, right in context_intervals
+            )
+        ]
+        for session in sessions
+    }
+    return (
+        _interleave_session_candidates(contexts),
+        _interleave_session_candidates(ordinary_by_session),
     )
-    return (*baseline, *contexts, *remainder)
+
+
+def _interleave_session_candidates(
+    values: Mapping[str, Sequence[tuple[int, int, str]]],
+) -> tuple[tuple[int, int, str], ...]:
+    """Round-robin sessions without treating repeated rows as evidence."""
+    sessions = ("asia", "london", "new_york")
+    result: list[tuple[int, int, str]] = []
+    maximum = max(
+        (len(values.get(session, ())) for session in sessions), default=0
+    )
+    for index in range(maximum):
+        for session in sessions:
+            selected = values.get(session, ())
+            if index < len(selected):
+                result.append(selected[index])
+    return tuple(result)
+
+
+def _interleave_period_candidates(
+    values: Mapping[str, Sequence[tuple[int, int, str]]],
+) -> tuple[tuple[int, int, str], ...]:
+    """Round-robin months so no single month exhausts a blocked split."""
+    periods = tuple(sorted(values))
+    result: list[tuple[int, int, str]] = []
+    maximum = max((len(values[period]) for period in periods), default=0)
+    for index in range(maximum):
+        for period in periods:
+            if index < len(values[period]):
+                result.append(values[period][index])
+    return tuple(result)
 
 
 def _period_for_ns(value: int) -> str:
     return datetime.fromtimestamp(
         value / NANOSECONDS_PER_SECOND, tz=timezone.utc
     ).strftime("%Y%m")
-
-
-def _session_for_ns(value: int) -> str:
-    hour = datetime.fromtimestamp(
-        value / NANOSECONDS_PER_SECOND, tz=timezone.utc
-    ).hour
-    if hour < 7:
-        return "asia"
-    if hour < 12:
-        return "london"
-    return "new_york"
 
 
 def _arrow_row_count(path: Path) -> int:
@@ -1747,8 +1969,18 @@ def _read_arrow_interval(
     pa, ipc = _pyarrow()
     start_ms = start_ns // NANOSECONDS_PER_MILLISECOND
     end_ms = (end_ns - 1) // NANOSECONDS_PER_MILLISECOND + 1
-    rows: list[_TickRow] = []
+    rows: list[tuple[int, int, _TickRow]] = []
     row_offset = 0
+    stat = path.stat()
+    regression_bound_ms = _arrow_timestamp_regression_bound(
+        str(path.resolve()),
+        stat.st_size,
+        stat.st_mtime_ns,
+        stat.st_dev,
+        stat.st_ino,
+        stat.st_ctime_ns,
+    )
+    safe_stop_ms = end_ms + regression_bound_ms
     with pa.memory_map(str(path), "r") as source:
         reader = ipc.open_file(source)
         required = {"datetime", "bid", "ask"}
@@ -1760,33 +1992,67 @@ def _read_arrow_interval(
             timestamps = batch.column(batch.schema.get_field_index("datetime"))
             if count == 0:
                 continue
-            first = int(timestamps[0].as_py())
-            last = int(timestamps[count - 1].as_py())
-            if last < start_ms:
-                row_offset += count
-                continue
-            if first >= end_ms:
-                break
             bids = batch.column(batch.schema.get_field_index("bid"))
             asks = batch.column(batch.schema.get_field_index("ask"))
             for index in range(count):
                 timestamp = int(timestamps[index].as_py())
+                if timestamp >= safe_stop_ms:
+                    return tuple(item[2] for item in rows)
                 if timestamp < start_ms:
                     continue
                 if timestamp >= end_ms:
-                    break
-                rows.append(
-                    _TickRow(
-                        row_id=row_offset + index,
-                        timestamp_ms=timestamp,
-                        bid=float(bids[index].as_py()),
-                        ask=float(asks[index].as_py()),
-                    )
+                    continue
+                row = _TickRow(
+                    row_id=row_offset + index,
+                    timestamp_ms=timestamp,
+                    bid=float(bids[index].as_py()),
+                    ask=float(asks[index].as_py()),
                 )
-                if len(rows) == maximum:
-                    return tuple(rows)
+                key = (row.timestamp_ms, row.row_id, row)
+                insertion = bisect_left(rows, key)
+                if insertion < maximum:
+                    rows.insert(insertion, key)
+                    if len(rows) > maximum:
+                        rows.pop()
             row_offset += count
-    return tuple(rows)
+    return tuple(item[2] for item in rows)
+
+
+@lru_cache(maxsize=256)
+def _arrow_timestamp_regression_bound(
+    path: str,
+    size_bytes: int,
+    modified_at_ns: int,
+    device: int,
+    inode: int,
+    changed_at_ns: int,
+) -> int:
+    """Return a validated source-order lookahead bound for one Arrow file."""
+    del size_bytes, modified_at_ns, device, inode, changed_at_ns
+    import polars as pl
+
+    differences = pl.col("datetime").cast(pl.Int64).diff()
+    diagnostics = (
+        pl.scan_ipc(path)
+        .select(
+            differences.lt(0).sum().alias("regression_count"),
+            (-differences.filter(differences.lt(0)))
+            .max()
+            .fill_null(0)
+            .alias("maximum_regression_ms"),
+        )
+        .collect()
+    )
+    regression_count = int(diagnostics.item(0, "regression_count"))
+    maximum_regression = int(diagnostics.item(0, "maximum_regression_ms"))
+    if (
+        regression_count > MAX_HISTDATA_SOURCE_ORDER_REGRESSIONS_PER_PARTITION
+        or maximum_regression > MAX_HISTDATA_SOURCE_ORDER_REGRESSION_MS
+    ):
+        raise ValueError(
+            "benchmark Arrow cache exceeds timestamp regression policy"
+        )
+    return maximum_regression
 
 
 def _tick_rows_sha256(rows: Sequence[_TickRow]) -> str:
@@ -1933,13 +2199,8 @@ def _validated_event_clock_configs(
     configs = tuple(values)
     if any(not isinstance(item, EventClockConfigV1) for item in configs):
         raise TypeError("event-clock campaign received an invalid config")
-    if configs and (
-        len(configs) != len(EventClockFamily)
-        or {item.family for item in configs} != set(EventClockFamily)
-    ):
-        raise ValueError(
-            "event-clock campaign requires exactly one config per family"
-        )
+    if len({item.family for item in configs}) != len(configs):
+        raise ValueError("event-clock campaign duplicates a family")
     if len({item.config_id for item in configs}) != len(configs):
         raise ValueError("event-clock campaign config identities collide")
     return configs
@@ -1951,14 +2212,8 @@ def _validated_marked_hawkes_configs(
     configs = tuple(values)
     if any(not isinstance(item, MarkedHawkesConfigV1) for item in configs):
         raise TypeError("marked Hawkes campaign received an invalid config")
-    if configs and (
-        len(configs) != len(HawkesExcitationStructure)
-        or {item.excitation_structure for item in configs}
-        != set(HawkesExcitationStructure)
-    ):
-        raise ValueError(
-            "marked Hawkes campaign requires exactly one config per ablation"
-        )
+    if len({item.excitation_structure for item in configs}) != len(configs):
+        raise ValueError("marked Hawkes campaign duplicates an ablation")
     if len({item.config_id for item in configs}) != len(configs):
         raise ValueError("marked Hawkes campaign config identities collide")
     return configs
@@ -1970,13 +2225,8 @@ def _validated_regime_hawkes_configs(
     configs = tuple(values)
     if any(not isinstance(item, RegimeHawkesConfigV1) for item in configs):
         raise TypeError("regime Hawkes campaign received an invalid config")
-    if configs and (
-        len(configs) != len(RegimeHawkesModulation)
-        or {item.modulation for item in configs} != set(RegimeHawkesModulation)
-    ):
-        raise ValueError(
-            "regime Hawkes campaign requires exactly one config per ablation"
-        )
+    if len({item.modulation for item in configs}) != len(configs):
+        raise ValueError("regime Hawkes campaign duplicates an ablation")
     if len({item.config_id for item in configs}) != len(configs):
         raise ValueError("regime Hawkes campaign config identities collide")
     return configs
@@ -2244,12 +2494,15 @@ def run_reverse_degradation_benchmark_campaign(
         SchrodingerBridgeBrokerTargetV1 | None
     ) = None,
     metric_trace_out: list[BenchmarkWindowMetricTraceV1] | None = None,
+    fit_result_out: list[Any] | None = None,
 ) -> tuple[ReverseDegradationBenchmarkCampaignV1, ReferenceMotifIndexV1]:
     """Run controls and every explicitly configured challenger family."""
     if not isinstance(corpus, ReverseDegradationBenchmarkCorpusV1):
         raise ValueError("benchmark campaign requires a v1 corpus")
     if metric_trace_out is not None and metric_trace_out:
         raise ValueError("benchmark metric trace output must start empty")
+    if fit_result_out is not None and fit_result_out:
+        raise ValueError("benchmark fit-result output must start empty")
     started_wall = datetime.now(timezone.utc)
     started = time.monotonic()
     root = Path(source_root).expanduser().resolve()
@@ -2723,6 +2976,18 @@ def run_reverse_degradation_benchmark_campaign(
                     item.window_id: item for item in bridge_generation_contexts
                 },
             )
+
+    if fit_result_out is not None:
+        fit_result_out.extend(
+            (
+                *clock_fits.values(),
+                *hawkes_fits.values(),
+                *regime_fits.values(),
+                *((neural_fit,) if neural_fit is not None else ()),
+                *((add_thin_fit,) if add_thin_fit is not None else ()),
+                *((bridge_fit,) if bridge_fit is not None else ()),
+            )
+        )
 
     degradation_coverage = dict.fromkeys(_degradation_config_names(), 0)
     degradation_effect_coverage = dict.fromkeys(_degradation_config_names(), 0)
@@ -3554,6 +3819,7 @@ def _build_window_metric_trace(
     method_names: Mapping[str, str],
     roles: Mapping[str, str],
 ) -> BenchmarkWindowMetricTraceV1:
+    window_by_id = {item.window_id: item for item in corpus.windows}
     observations = tuple(
         BenchmarkWindowMetricObservationV1(
             candidate_id=subject_ids[name],
@@ -3565,6 +3831,10 @@ def _build_window_metric_trace(
             reference_metrics=cell.reference_metrics,
             candidate_metrics=cell.candidate_metrics,
             comparison_metrics=cell.comparison_metrics,
+            session=window_by_id[cell.window_id].session,
+            epoch_label=window_by_id[cell.window_id].epoch_label,
+            context_state=window_by_id[cell.window_id].context_state,
+            positioning_state=window_by_id[cell.window_id].positioning_state,
         )
         for name, accumulator in sorted(accumulators.items())
         for cell in accumulator.cells
@@ -4192,8 +4462,10 @@ def _gate_observations(
         if name
         in {
             requirement.metric_name
-            for requirement in load_default_benchmark_promotion_gate_policy().requirements_for(
-                scope
+            for requirement in (
+                load_default_benchmark_promotion_gate_policy().requirements_for(
+                    scope
+                )
             )
         }
     )
@@ -4353,13 +4625,28 @@ def _build_real_reference_motif_index(
                         available_at_ns=chunk[-1].event_time_ns,
                     )
                 )
+    chunks_per_symbol = math.ceil(corpus.profile.max_events_per_symbol / 16)
+    maximum_source_windows = (
+        len(corpus.windows) * len(corpus.profile.symbols) * chunks_per_symbol
+    )
+    maximum_training_fragments = (
+        sum(item.split_kind == "calibration" for item in corpus.windows)
+        * len(corpus.profile.symbols)
+        * chunks_per_symbol
+    )
+    if maximum_source_windows > MAX_REFERENCE_MOTIF_SOURCE_WINDOWS:
+        raise ValueError(
+            "benchmark motif source-window preflight exceeds bound"
+        )
+    if maximum_training_fragments > MAX_REFERENCE_MOTIF_FRAGMENTS:
+        raise ValueError("benchmark motif fragment preflight exceeds bound")
     return build_reference_motif_index(
         windows,
         splits=splits,
         config=ReferenceMotifIndexConfigV1(
             min_cell_support=1,
-            max_source_windows=2048,
-            max_fragments=512,
+            max_source_windows=maximum_source_windows,
+            max_fragments=maximum_training_fragments,
             max_matches=16,
             source_overlap_guard_ns=(
                 corpus.profile.neighbor_guard_seconds * NANOSECONDS_PER_SECOND
@@ -4679,12 +4966,7 @@ def _predictive_feature_vector(
         features[f"path_excursion_pips.{symbol}"] = (
             (max(selected) - min(selected)) / PIP if selected else 0.0
         )
-    for state in (
-        "unchanged",
-        "update_ask_only",
-        "update_bid_only",
-        "update_joint",
-    ):
+    for state in BENCHMARK_MARK_STATES:
         features[f"mark_share.{state}"] = update_shares.get(state, 0.0)
     return {
         name: _finite_float(value, name)
@@ -4844,12 +5126,7 @@ def _categorical_pit_values(
     observed: Sequence[BenchmarkEventV1],
     predictive_probabilities: Mapping[str, float],
 ) -> tuple[float, ...]:
-    states = (
-        "unchanged",
-        "update_ask_only",
-        "update_bid_only",
-        "update_joint",
-    )
+    states = BENCHMARK_MARK_STATES
     probabilities = [
         max(0.0, _finite_float(predictive_probabilities.get(state, 0.0), state))
         for state in states
@@ -4865,7 +5142,7 @@ def _categorical_pit_values(
         cumulative += probability
     result: list[float] = []
     for event in observed:
-        lower, upper = intervals.get(event.event_state, (0.0, 0.0))
+        lower, upper = intervals[_canonical_update_state(event.event_state)]
         if upper <= lower:
             result.append(1e-12)
             continue
@@ -4996,7 +5273,9 @@ def _benchmark_artifact_payloads(
                 "split_hashes": dict(corpus.split_hashes),
                 "neighbor_guard_seconds": corpus.profile.neighbor_guard_seconds,
                 "holdout_neighbor_leakage_count": corpus.neighbor_leakage_count,
-                "motif_cross_split_comparison_count": motif_index.leakage_comparison_count,
+                "motif_cross_split_comparison_count": (
+                    motif_index.leakage_comparison_count
+                ),
                 "motif_indexed_splits": [ReferenceMotifSplitKind.TRAIN.value],
                 "information_audit_violation_count": campaign.campaign_metrics[
                     "information_audit_violation_count"
@@ -5237,7 +5516,9 @@ def _burst_quiet_error(left: Sequence[float], right: Sequence[float]) -> float:
 
 
 def _update_proportions(events: Sequence[BenchmarkEventV1]) -> dict[str, float]:
-    counts = Counter(item.event_state for item in events)
+    counts = Counter(
+        _canonical_update_state(item.event_state) for item in events
+    )
     total = max(1, len(events))
     return {name: count / total for name, count in counts.items()}
 
@@ -5247,9 +5528,20 @@ def _update_transitions(events: Sequence[BenchmarkEventV1]) -> dict[str, float]:
     total = 0
     for selected in _events_by_symbol(events).values():
         for left, right in zip(selected, selected[1:]):
-            counts[f"{left.event_state}->{right.event_state}"] += 1
+            left_state = _canonical_update_state(left.event_state)
+            right_state = _canonical_update_state(right.event_state)
+            counts[f"{left_state}->{right_state}"] += 1
             total += 1
     return {name: count / max(1, total) for name, count in counts.items()}
+
+
+def _canonical_update_state(value: str) -> str:
+    try:
+        return _CANONICAL_UPDATE_STATE[value]
+    except KeyError as error:
+        raise ValueError(
+            f"unsupported benchmark update state: {value!r}"
+        ) from error
 
 
 def _mapping_l1(left: Mapping[str, float], right: Mapping[str, float]) -> float:

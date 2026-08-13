@@ -582,6 +582,7 @@ from histdatacom.synthetic.motifs import (
     read_reference_motif_index,
     reference_motif_condition_from_quotes,
     reference_motif_information_inputs,
+    reference_session_for_ns,
     reference_motif_source_window_from_training_frame,
     write_reference_motif_index,
 )
@@ -1410,6 +1411,7 @@ __all__ = [
     "reconstruction_information_window_plan_id",
     "reference_motif_information_inputs",
     "reference_motif_condition_from_quotes",
+    "reference_session_for_ns",
     "reference_motif_source_window_from_training_frame",
     "require_reconstruction_information_audit",
     "synthetic_event_arrow_schema",

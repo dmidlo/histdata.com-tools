@@ -61,17 +61,27 @@ It translates deterministically to an explicit motif-only portfolio; it does
 not silently add the other engines or import their evidence.
 
 Retained #454 evidence historically qualified empirical motif under the legacy
-promotion policy. The #490 powered qualification campaign supersedes that
-permission for an exact plan: all 12 executable HistData engines are currently
-`insufficient_evidence` at the observed powered support, while the deferred
-broker-target bridge is `refused`. Consequently the honest powered result is
-no product selection. A plan bound to that dossier fails closed instead of
-constructing an executable portfolio or silently falling back to motif.
+promotion policy. July's first #490 powered campaign superseded that permission
+for its exact plan and returned no decision: all 12 executable HistData engines
+were `insufficient_evidence` at 18-window support, while the deferred
+broker-target bridge was `refused`. That retained dossier still fails closed
+instead of silently falling back to motif.
+
+The expanded #491 campaign freezes 96 synchronized HistData windows: 32 each
+for calibration, validation, and final holdout across 2024 and 2025. The
+diagonal self-excitation marked-Hawkes variant passes all ten powered hard
+gates. The full self/cross variant fails time-uniformity; the zero-excitation
+control fails time-uniformity and path/tail behavior. Only the diagonal variant
+is reconstruction- and ensemble-eligible. Other registered variants preserve
+their retained nonpassing decisions and cannot enter the selected product.
+Validation-fitted weights and selected engine IDs are separate declarations;
+the final holdout is evaluated once and never chooses a winner.
 
 Plans without a powered dossier retain the legacy v2.4 compatibility behavior
 and describe motif as a `single-qualified-engine`; they do not claim that
 ensemble-member variation is cross-model diversity. New qualification-aware
-work should bind the dossier and honor its stricter no-decision result.
+work must bind the powered dossier and may select only its exact eligible
+engine set.
 
 The ensemble plan may describe more seed members than the retention policy
 permits the product to publish. Only the predeclared retained-member set is

@@ -3168,7 +3168,7 @@ def _source_identity(
     if not subject_id:
         subject_id = f"artifact:sha256:{strong.sha256}"
     locator = publish_safe_path(strong.path)
-    if not locator:
+    if not locator or len(locator) > MAX_DIAGNOSTIC_TEXT:
         locator = f"artifacts/{strong.sha256}.json"
     return DiagnosticSourceV1(
         kind=strong.kind,

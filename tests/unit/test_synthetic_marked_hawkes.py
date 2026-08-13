@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import random
 from dataclasses import replace
+from itertools import pairwise
 
 import pytest
 
@@ -30,7 +32,12 @@ from histdatacom.synthetic.contracts import SyntheticEventV1
 from histdatacom.synthetic.event_clock import EventClockCalibrationWindowV1
 from histdatacom.synthetic.information import InformationMode
 from histdatacom.synthetic.marked_hawkes import (
+    LEGACY_MARK_POLICY,
+    LEGACY_UNBOUNDED_CARDINALITY_POLICY,
+    OPERATOR_CONDITIONED_CARDINALITY_POLICY,
+    TRANSITION_CONDITIONED_MARK_POLICY,
     HawkesExcitationStructure,
+    MarkedHawkesCandidateLineageV1,
     MarkedHawkesConfigV1,
     MarkedHawkesFitResultV1,
     MarkedHawkesFitStatus,
@@ -51,6 +58,96 @@ SYMBOLS = ("EURGBP", "EURUSD", "GBPUSD")
 SECOND = 1_000_000_000
 CALIBRATION_START = 1_600_000_000_000_000_000
 GENERATION_START = 1_700_000_000_000_000_000
+
+
+def test_operator_conditioned_count_predictive_is_deterministic_and_variable() -> (
+    None
+):
+    def draw(seed: int) -> tuple[int, ...]:
+        rng = random.Random(seed)
+        return tuple(
+            hawkes_module._sample_negative_binomial_failures(4, 0.35, rng)
+            for _ in range(32)
+        )
+
+    draws = draw(451)
+
+    assert draws == draw(451)
+    assert len(set(draws)) > 1
+    assert all(value >= 0 for value in draws)
+
+    config = MarkedHawkesConfigV1(HawkesExcitationStructure.DIAGONAL)
+    first = hawkes_module._operator_conditioned_missing_counts(
+        config,
+        _anchors(),
+        scenario=_scenario(),
+        ensemble_member_id="member-01",
+    )
+    replay = hawkes_module._operator_conditioned_missing_counts(
+        config,
+        _anchors(),
+        scenario=_scenario(),
+        ensemble_member_id="member-01",
+    )
+    ensemble = {
+        tuple(
+            sorted(
+                hawkes_module._operator_conditioned_missing_counts(
+                    config,
+                    _anchors(),
+                    scenario=_scenario(),
+                    ensemble_member_id=f"member-{index:02d}",
+                ).items()
+            )
+        )
+        for index in range(1, 17)
+    }
+
+    assert first == replay
+    assert len(ensemble) > 1
+
+
+def test_operator_conditioned_count_predictive_fails_closed_at_resource_bound() -> (
+    None
+):
+    with pytest.raises(
+        hawkes_module.MarkedHawkesGenerationError,
+        match="exceeds generation bound",
+    ):
+        hawkes_module._sample_negative_binomial_failures(
+            4,
+            1e-12,
+            random.Random(451),
+            maximum_failures=5,
+        )
+
+    config = MarkedHawkesConfigV1(
+        HawkesExcitationStructure.DIAGONAL,
+        limits=replace(
+            hawkes_module.MarkedHawkesResourceLimitsV1(),
+            max_generated_events_per_interval=5,
+            max_generated_events_per_window=5,
+            max_candidate_amplification=1.0,
+            limits_id="",
+        ),
+    )
+    scenario = BenchmarkScenarioV1(
+        split_kind=BenchmarkSplitKind.VALIDATION,
+        epoch_id="technology_epoch_03",
+        severity_id="uniform-thinning-near-zero",
+        observation_operator_id="operator-1",
+        degradation_parameters={"retention_probability": 1e-12},
+    )
+    with pytest.raises(
+        hawkes_module.MarkedHawkesGenerationError,
+        match="exceeds generation bound",
+    ):
+        hawkes_module._operator_conditioned_missing_counts(
+            config,
+            _anchors(),
+            scenario=scenario,
+            ensemble_member_id="member-01",
+        )
 
 
 def _events(
@@ -132,7 +229,11 @@ def _anchors(
             session=session,
             event_state="observed",
             sparsity="uniform-thinning-0.35",
-            anchor_id=f"anchor-{epoch_id}-{symbol}-{index}",
+            anchor_id=(
+                f"anchor-{epoch_id}-{symbol}-{index}"
+                if index in {0, 4}
+                else None
+            ),
         )
         for symbol_index, symbol in enumerate(SYMBOLS)
         for index in range(5)
@@ -193,6 +294,7 @@ def test_fixed_ablation_registry_is_nested_and_has_no_default() -> None:
     assert tuple(item.excitation_structure for item in configs) == tuple(
         HawkesExcitationStructure
     )
+    assert all(item.limits.max_fit_events >= 32 * 3 * 256 for item in configs)
     assert len({item.config_id for item in configs}) == 3
     for config in configs:
         fit = fit_marked_hawkes_challenger(config, _calibration_windows())
@@ -218,6 +320,36 @@ def test_fixed_ablation_registry_is_nested_and_has_no_default() -> None:
                 for source, value in enumerate(row)
                 if destination != source
             )
+
+
+def test_transition_conditioned_policy_is_default_and_legacy_fits_replay() -> (
+    None
+):
+    current = MarkedHawkesConfigV1(HawkesExcitationStructure.DIAGONAL)
+    assert current.mark_policy == TRANSITION_CONDITIONED_MARK_POLICY
+    assert current.cardinality_policy == OPERATOR_CONDITIONED_CARDINALITY_POLICY
+    current_fit = fit_marked_hawkes_challenger(current, _calibration_windows())
+    assert current_fit.parameters["mark_policy"] == current.mark_policy
+    for model in current_fit.parameters["conditioning_models"].values():
+        assert set(model["mark_transition_counts"]) == set(SYMBOLS)
+
+    legacy = MarkedHawkesConfigV1(
+        HawkesExcitationStructure.DIAGONAL,
+        mark_policy=LEGACY_MARK_POLICY,
+        cardinality_policy=LEGACY_UNBOUNDED_CARDINALITY_POLICY,
+    )
+    legacy_payload = legacy.to_dict()
+    assert "cardinality_policy" not in legacy_payload
+    assert "cardinality_estimator" not in legacy_payload
+    assert "conditional_path_draw_limit" not in legacy_payload
+    assert "conditional_oversample_factor" not in legacy_payload
+    assert MarkedHawkesConfigV1.from_dict(legacy_payload) == legacy
+    legacy_fit = fit_marked_hawkes_challenger(legacy, _calibration_windows())
+    legacy_parameters = json.loads(json.dumps(legacy_fit.parameters))
+    legacy_parameters.pop("mark_policy")
+    old_shape = replace(legacy_fit, parameters=legacy_parameters, fit_id="")
+
+    assert MarkedHawkesFitResultV1.from_json(old_shape.to_json()) == old_shape
 
 
 def test_unstable_or_structurally_tampered_fit_fails_at_construction() -> None:
@@ -345,6 +477,9 @@ def test_generation_is_deterministic_synchronized_marked_and_anchor_safe(
         for item in first.events
         if item.sparsity.startswith("marked-hawkes-")
     )
+    assert proposals
+    assert len(proposals) <= 45
+    assert {item.symbol for item in proposals} <= set(SYMBOLS)
     assert len(proposals) == len(first.event_lineage)
     assert {item.event_state for item in proposals} <= {
         "ask_only",
@@ -358,8 +493,33 @@ def test_generation_is_deterministic_synchronized_marked_and_anchor_safe(
         ]
         assert any(
             left.event_time_ns < proposal.event_time_ns < right.event_time_ns
-            for left, right in zip(symbol_anchors, symbol_anchors[1:])
+            for left, right in pairwise(symbol_anchors)
         )
+    by_lineage = {item.source_event_id: item for item in first.event_lineage}
+    for symbol in SYMBOLS:
+        ordered = sorted(
+            (item for item in first.events if item.symbol == symbol),
+            key=lambda item: (
+                item.event_time_ns,
+                item.event_sequence,
+                item.benchmark_event_id,
+            ),
+        )
+        for previous, event in pairwise(ordered):
+            if event.source_event_id not in by_lineage:
+                continue
+            bid_changed = event.bid != previous.bid
+            ask_changed = event.ask != previous.ask
+            realized = (
+                "joint"
+                if bid_changed and ask_changed
+                else (
+                    "bid_only"
+                    if bid_changed
+                    else "ask_only" if ask_changed else "unchanged"
+                )
+            )
+            assert by_lineage[event.source_event_id].event_state == realized
 
 
 def test_conditioning_uses_exact_then_documented_session_backoff() -> None:
@@ -472,7 +632,11 @@ def test_resource_overflow_refuses_without_partial_rows() -> None:
         max_generated_events_per_window=1,
         max_ogata_proposals=1,
     )
-    config = MarkedHawkesConfigV1(HawkesExcitationStructure.FULL, limits=limits)
+    config = MarkedHawkesConfigV1(
+        HawkesExcitationStructure.FULL,
+        cardinality_policy=LEGACY_UNBOUNDED_CARDINALITY_POLICY,
+        limits=limits,
+    )
     fit = fit_marked_hawkes_challenger(config, _calibration_windows())
     generator = build_fitted_marked_hawkes_generator(
         config, fit, ensemble_member_ids=("member-01",)
@@ -560,6 +724,13 @@ def test_hawkes_batches_use_shared_carving_and_detect_anchor_tampering() -> (
         )
     batch = next(item for item in batches if item.status.value == "generated")
     assert isinstance(batch, ReconstructionCandidateBatchV1)
+    assert (
+        tuple(
+            MarkedHawkesCandidateLineageV1.from_dict(item.to_dict())
+            for item in batch.event_lineage
+        )
+        == batch.event_lineage
+    )
     calendar = MarketContextCalendarStateV1(
         timestamp_utc_ns=window.core_start_ns,
         session_state="active",

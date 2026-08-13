@@ -2011,16 +2011,21 @@ def _build_dataset(
         context = context_by_window[window.window_id]
         by_session[context.session].append(window)
     if len(by_session) != 3 or any(
-        len(items) != 2 for items in by_session.values()
+        len(items) < 2 for items in by_session.values()
     ):
         raise AddThinFitError(
-            "Add-Thin split requires exactly two windows for each of three sessions"
+            "Add-Thin split requires at least two windows for each of three sessions"
         )
     roles: dict[str, str] = {}
     for items in by_session.values():
         ranked = sorted(items, key=lambda item: (item.start_ns, item.window_id))
-        roles[ranked[0].window_id] = "train"
-        roles[ranked[1].window_id] = "tune"
+        cut = max(1, len(ranked) // 2)
+        roles.update(
+            {
+                item.window_id: "train" if index < cut else "tune"
+                for index, item in enumerate(ranked)
+            }
+        )
     paired: list[
         tuple[AddThinDatasetWindowV1, EventClockCalibrationWindowV1]
     ] = []

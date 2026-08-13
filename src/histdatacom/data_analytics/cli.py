@@ -14,12 +14,6 @@ from histdatacom.cli_config import (
     add_config_argument,
     configured_analytics_argv,
 )
-from histdatacom.data_analytics.feed_regimes import (
-    DEFAULT_QUIET_GAP_MS,
-    analyze_feed_regimes,
-    format_feed_regime_console_summary,
-    write_feed_regime_report,
-)
 from histdatacom.data_analytics.feed_epochs import (
     FeedEpochFitConfigV1,
     write_feed_epoch_definition,
@@ -30,24 +24,25 @@ from histdatacom.data_analytics.feed_epochs_v2 import (
     read_active_time_feed_epoch_definition,
     write_active_time_feed_epoch_campaign,
 )
+from histdatacom.data_analytics.feed_regimes import (
+    DEFAULT_QUIET_GAP_MS,
+    analyze_feed_regimes,
+    format_feed_regime_console_summary,
+    write_feed_regime_report,
+)
 from histdatacom.market_context import (
     DEFAULT_MARKET_CONTEXT_SOURCES,
     DEFAULT_ONS_QUERIES,
-    MarketContextFetchProfileV1,
     CftcPositioningFetchProfileV1,
-    build_live_market_context_corpus,
+    MarketContextFetchProfileV1,
     build_live_cftc_positioning_corpus,
+    build_live_market_context_corpus,
     read_cftc_positioning_corpus,
-    write_market_context_corpus,
     write_cftc_positioning_corpus,
-)
-from histdatacom.synthetic.observation_calibration import (
-    ObservationCalibrationProfileV2,
-    calibrate_historical_observation_operators,
-    read_feed_epoch_evidence_v2,
-    write_observation_calibration_campaign,
+    write_market_context_corpus,
 )
 from histdatacom.synthetic.benchmark_corpus import (
+    DEFAULT_BENCHMARK_PERIODS,
     PREDECLARED_GATE_COMMIT,
     ReverseDegradationCorpusProfileV1,
     build_reverse_degradation_benchmark_corpus,
@@ -59,6 +54,12 @@ from histdatacom.synthetic.motif_library import (
     ModernReferenceMotifProfileV1,
     build_modern_reference_motif_library,
     write_modern_reference_motif_artifacts,
+)
+from histdatacom.synthetic.observation_calibration import (
+    ObservationCalibrationProfileV2,
+    calibrate_historical_observation_operators,
+    read_feed_epoch_evidence_v2,
+    write_observation_calibration_campaign,
 )
 from histdatacom.verbosity import configure_logging
 
@@ -490,16 +491,32 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="PATH",
         help="write content-addressed benchmark evidence artifacts",
     )
-    benchmark.add_argument("--calibration-period", default="201001")
-    benchmark.add_argument("--validation-period", default="202401")
-    benchmark.add_argument("--final-holdout-period", default="202510")
-    benchmark.add_argument("--windows-per-split", type=int, default=6)
+    benchmark.add_argument(
+        "--calibration-period",
+        action="append",
+        default=None,
+        help="repeat YYYYMM to form the blocked training split",
+    )
+    benchmark.add_argument(
+        "--validation-period",
+        action="append",
+        default=None,
+        help="repeat YYYYMM to form the portfolio-calibration split",
+    )
+    benchmark.add_argument(
+        "--final-holdout-period",
+        action="append",
+        default=None,
+        help="repeat YYYYMM to form the protected final split",
+    )
+    benchmark.add_argument("--windows-per-split", type=int, default=32)
+    benchmark.add_argument("--ensemble-member-count", type=int, default=8)
     benchmark.add_argument("--window-duration-seconds", type=int, default=600)
     benchmark.add_argument("--minimum-events-per-symbol", type=int, default=64)
     benchmark.add_argument("--max-events-per-symbol", type=int, default=256)
     benchmark.add_argument("--neighbor-guard-seconds", type=int, default=1800)
-    benchmark.add_argument("--max-source-bytes", type=int, default=2 * 1024**3)
-    benchmark.add_argument("--max-runtime-seconds", type=float, default=900.0)
+    benchmark.add_argument("--max-source-bytes", type=int, default=4 * 1024**3)
+    benchmark.add_argument("--max-runtime-seconds", type=float, default=1800.0)
     benchmark.add_argument(
         "--max-peak-memory-bytes", type=int, default=2 * 1024**3
     )
@@ -604,22 +621,7 @@ def main(argv: list[str] | None = None) -> int:
                 observation_campaign_path=args.observation_campaign,
                 market_context_corpus_path=args.market_context_corpus,
                 cftc_positioning_corpus_path=args.cftc_positioning_corpus,
-                profile=ReverseDegradationCorpusProfileV1(
-                    split_periods={
-                        "calibration": args.calibration_period,
-                        "validation": args.validation_period,
-                        "final_holdout": args.final_holdout_period,
-                    },
-                    synchronized_windows_per_split=args.windows_per_split,
-                    window_duration_seconds=args.window_duration_seconds,
-                    minimum_events_per_symbol=args.minimum_events_per_symbol,
-                    max_events_per_symbol=args.max_events_per_symbol,
-                    neighbor_guard_seconds=args.neighbor_guard_seconds,
-                    max_source_bytes=args.max_source_bytes,
-                    max_runtime_seconds=args.max_runtime_seconds,
-                    max_peak_memory_bytes=args.max_peak_memory_bytes,
-                    max_artifact_bytes=args.max_artifact_bytes,
-                ),
+                profile=_benchmark_profile(args),
                 gate_policy_commit=args.gate_policy_commit,
             )
             benchmark_campaign, motif_index = (
@@ -664,6 +666,11 @@ def main(argv: list[str] | None = None) -> int:
                 for name, artifact in sorted(benchmark_artifacts.items())
             },
         }
+        campaign_state = (
+            "pass"
+            if benchmark_campaign.campaign_gate_decision.promotion_eligible
+            else "fail"
+        )
         if args.json:
             print(
                 json.dumps(benchmark_payload, indent=2, sort_keys=True)
@@ -673,8 +680,7 @@ def main(argv: list[str] | None = None) -> int:
                 "Real reverse-degradation benchmark\n"
                 f"sources: {len(benchmark_corpus.sources)}\n"
                 f"synchronized windows: {len(benchmark_corpus.windows)}\n"
-                f"campaign gate: "
-                f"{'pass' if benchmark_campaign.campaign_gate_decision.promotion_eligible else 'fail'}\n"
+                f"campaign gate: {campaign_state}\n"
                 f"manifest: {benchmark_artifacts['manifest'].path}\n"
                 f"scorecard: {benchmark_artifacts['scorecard'].path}"
             )
@@ -924,6 +930,40 @@ def main(argv: list[str] | None = None) -> int:
             summary += f"\nepoch artifact: {epoch_artifact.path}"
         print(summary)  # noqa:T201
     return 0
+
+
+def _benchmark_profile(
+    args: argparse.Namespace,
+) -> ReverseDegradationCorpusProfileV1:
+    return ReverseDegradationCorpusProfileV1(
+        split_periods={
+            "calibration": tuple(
+                args.calibration_period
+                or DEFAULT_BENCHMARK_PERIODS["calibration"]
+            ),
+            "validation": tuple(
+                args.validation_period
+                or DEFAULT_BENCHMARK_PERIODS["validation"]
+            ),
+            "final_holdout": tuple(
+                args.final_holdout_period
+                or DEFAULT_BENCHMARK_PERIODS["final_holdout"]
+            ),
+        },
+        synchronized_windows_per_split=args.windows_per_split,
+        window_duration_seconds=args.window_duration_seconds,
+        minimum_events_per_symbol=args.minimum_events_per_symbol,
+        max_events_per_symbol=args.max_events_per_symbol,
+        neighbor_guard_seconds=args.neighbor_guard_seconds,
+        ensemble_member_ids=tuple(
+            f"member-{index:02d}"
+            for index in range(1, args.ensemble_member_count + 1)
+        ),
+        max_source_bytes=args.max_source_bytes,
+        max_runtime_seconds=args.max_runtime_seconds,
+        max_peak_memory_bytes=args.max_peak_memory_bytes,
+        max_artifact_bytes=args.max_artifact_bytes,
+    )
 
 
 def _fit_config_from_args(

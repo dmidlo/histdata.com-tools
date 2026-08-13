@@ -30,6 +30,7 @@ from histdatacom.synthetic.add_thin import (
     ADD_THIN_IMPLEMENTATION_VERSION,
     ADD_THIN_WINDOW_CONTEXT_SCHEMA_VERSION,
     AddThinConfigV1,
+    AddThinFitResultV1,
     default_add_thin_config,
 )
 from histdatacom.synthetic.benchmark_corpus import (
@@ -55,6 +56,7 @@ from histdatacom.synthetic.event_clock import (
     NHPP_GENERATOR_ID,
     EventClockConfigurationV1,
     EventClockFamily,
+    EventClockFitResultV1,
     default_event_clock_configs,
 )
 from histdatacom.synthetic.generation import (
@@ -69,6 +71,7 @@ from histdatacom.synthetic.marked_hawkes import (
     MARKED_HAWKES_IMPLEMENTATION_VERSION,
     HawkesExcitationStructure,
     MarkedHawkesConfigV1,
+    MarkedHawkesFitResultV1,
     default_marked_hawkes_configs,
 )
 from histdatacom.synthetic.neural_tpp import (
@@ -80,6 +83,7 @@ from histdatacom.synthetic.neural_tpp import (
     NEURAL_TPP_IMPLEMENTATION_VERSION,
     NEURAL_TPP_WINDOW_CONTEXT_SCHEMA_VERSION,
     NeuralTPPConfigV1,
+    NeuralTPPFitResultV1,
     default_neural_tpp_config,
 )
 from histdatacom.synthetic.regime_hawkes import (
@@ -88,6 +92,7 @@ from histdatacom.synthetic.regime_hawkes import (
     REGIME_HAWKES_IMPLEMENTATION_VERSION,
     REGIME_HAWKES_WINDOW_CONTEXT_SCHEMA_VERSION,
     RegimeHawkesConfigV1,
+    RegimeHawkesFitResultV1,
     RegimeHawkesModulation,
     default_regime_hawkes_configs,
 )
@@ -100,6 +105,7 @@ from histdatacom.synthetic.schrodinger_bridge import (
     SB_IMPLEMENTATION_VERSION,
     SB_WINDOW_CONTEXT_SCHEMA_VERSION,
     SchrodingerBridgeConfigV1,
+    SchrodingerBridgeFitResultV1,
     default_schrodinger_bridge_config,
 )
 
@@ -152,6 +158,15 @@ ProposalEngineConfigV1: TypeAlias = (
     | NeuralTPPConfigV1
     | AddThinConfigV1
     | SchrodingerBridgeConfigV1
+)
+
+ProposalEngineFitResultV1: TypeAlias = (
+    EventClockFitResultV1
+    | MarkedHawkesFitResultV1
+    | RegimeHawkesFitResultV1
+    | NeuralTPPFitResultV1
+    | AddThinFitResultV1
+    | SchrodingerBridgeFitResultV1
 )
 
 
@@ -1406,22 +1421,56 @@ def audit_proposal_engine_binding(
             reasons.append("retained_campaign_failed_promotion_gates")
         if descriptor.fit_schema_versions and binding.fit_ref is None:
             reasons.append("reconstruction_fit_artifact_absent")
+        fit_artifact_eligible = not descriptor.fit_schema_versions
+        if binding.fit_ref is not None:
+            promoted_fit_ids = {
+                fit_id for item in promoted for fit_id in item.fit_ids
+            }
+            fit_artifact_eligible = bool(
+                binding.fit_ref.metadata.get("engine_id")
+                == descriptor.engine_id
+                and binding.fit_ref.metadata.get("config_id")
+                == binding.config_id
+                and binding.fit_ref.metadata.get("schema_version")
+                in descriptor.fit_schema_versions
+                and binding.fit_ref.metadata.get("status") == "fitted"
+                and binding.fit_ref.metadata.get("fit_id") in promoted_fit_ids
+            )
+            if not fit_artifact_eligible:
+                reasons.append(
+                    "reconstruction_fit_artifact_not_promoted_or_fitted"
+                )
         if (
             descriptor.checkpoint_schema_versions
             and binding.checkpoint_ref is None
         ):
             reasons.append("reconstruction_checkpoint_artifact_absent")
+        checkpoint_artifact_eligible = not descriptor.checkpoint_schema_versions
+        if binding.checkpoint_ref is not None:
+            promoted_checkpoint_ids = {
+                checkpoint_id
+                for item in promoted
+                for checkpoint_id in item.checkpoint_ids
+            }
+            checkpoint_artifact_eligible = bool(
+                binding.checkpoint_ref.metadata.get("engine_id")
+                == descriptor.engine_id
+                and binding.checkpoint_ref.metadata.get("config_id")
+                == binding.config_id
+                and binding.checkpoint_ref.metadata.get("schema_version")
+                in descriptor.checkpoint_schema_versions
+                and binding.checkpoint_ref.metadata.get("checkpoint_id")
+                in promoted_checkpoint_ids
+            )
+            if not checkpoint_artifact_eligible:
+                reasons.append(
+                    "reconstruction_checkpoint_artifact_not_promoted"
+                )
         can_reconstruct = (
             bool(promoted)
             and not contradicted
-            and (
-                not descriptor.fit_schema_versions
-                or binding.fit_ref is not None
-            )
-            and (
-                not descriptor.checkpoint_schema_versions
-                or binding.checkpoint_ref is not None
-            )
+            and fit_artifact_eligible
+            and checkpoint_artifact_eligible
         )
         if can_reconstruct:
             reconstruction_eligible = True
@@ -1673,6 +1722,7 @@ def run_histdata_proposal_portfolio_evaluation(
     )
     corpus = read_reverse_degradation_benchmark_corpus(benchmark_manifest_path)
     metric_trace_out: list[BenchmarkWindowMetricTraceV1] = []
+    fit_result_out: list[Any] = []
     campaign, motif_index = run_reverse_degradation_benchmark_campaign(
         corpus,
         source_root,
@@ -1694,6 +1744,7 @@ def run_histdata_proposal_portfolio_evaluation(
         schrodinger_bridge_config=None,
         schrodinger_bridge_broker_target=None,
         metric_trace_out=metric_trace_out,
+        fit_result_out=fit_result_out,
     )
     if len(metric_trace_out) != 1:
         raise RuntimeError("proposal evaluation did not emit one metric trace")
@@ -1704,6 +1755,17 @@ def run_histdata_proposal_portfolio_evaluation(
     )
     refs["window_metric_trace"] = write_benchmark_window_metric_trace(
         metric_trace_out[0], output_directory
+    )
+    refs.update(
+        _write_proposal_fit_artifacts(
+            fit_result_out,
+            configs={
+                engine_id: configs[engine_id]
+                for engine_id in requested
+                if engine_id in configs
+            },
+            output_directory=output_directory,
+        )
     )
     evidence = proposal_evidence_from_campaigns((campaign,))
     executed = tuple(item.engine_id for item in evidence)
@@ -1732,6 +1794,150 @@ def run_histdata_proposal_portfolio_evaluation(
     return result
 
 
+def _write_proposal_fit_artifacts(
+    fit_results: Sequence[Any],
+    *,
+    configs: Mapping[str, ProposalEngineConfigV1],
+    output_directory: str | Path,
+) -> dict[str, ArtifactRef]:
+    """Persist every exact fit and its separately addressable model inputs.
+
+    Failed and refused fits are evidence too, so they are retained even when
+    they expose no checkpoint or dataset.  Product reconstruction may consume
+    only the exact fitted artifact selected by a powered qualification; it must
+    never refit from the historical product input.
+    """
+    config_to_engine = {
+        config.config_id: engine_id for engine_id, config in configs.items()
+    }
+    if len(config_to_engine) != len(configs):
+        raise RuntimeError("proposal engine configuration identities collide")
+    by_engine: dict[str, Any] = {}
+    for fit in fit_results:
+        config_id = _required_text(getattr(fit, "config_id", None))
+        try:
+            engine_id = config_to_engine[config_id]
+        except KeyError as err:
+            raise ValueError(
+                "proposal fit has no requested engine configuration"
+            ) from err
+        if engine_id in by_engine:
+            raise ValueError(
+                "proposal evaluation emitted duplicate engine fits"
+            )
+        by_engine[engine_id] = fit
+
+    expected = {
+        engine_id
+        for engine_id, config in configs.items()
+        if not isinstance(config, EmpiricalMotifGeneratorConfigV1)
+        and not isinstance(config, SchrodingerBridgeConfigV1)
+    }
+    if set(by_engine) != expected:
+        raise ValueError("proposal fit output differs from requested engines")
+
+    refs: dict[str, ArtifactRef] = {}
+    for index, (engine_id, fit) in enumerate(sorted(by_engine.items())):
+        fit_id = _required_text(getattr(fit, "fit_id", None))
+        schema_version = _required_text(getattr(fit, "schema_version", None))
+        status_value = getattr(getattr(fit, "status", None), "value", None)
+        fit_ref = _write_serialized_proposal_artifact(
+            fit,
+            output_directory,
+            prefix="proposal-engine-fit",
+            kind="proposal_engine_fit_v1",
+            metadata={
+                "artifact_role": "fit",
+                "engine_id": engine_id,
+                "config_id": fit.config_id,
+                "fit_id": fit_id,
+                "schema_version": schema_version,
+                "status": _required_text(status_value),
+            },
+        )
+        refs[f"engine_fit_{index:02d}"] = fit_ref
+
+        dataset = getattr(fit, "dataset_manifest", None)
+        if dataset is not None:
+            dataset_id = _required_text(getattr(dataset, "dataset_id", None))
+            refs[f"engine_training_dataset_{index:02d}"] = (
+                _write_serialized_proposal_artifact(
+                    dataset,
+                    output_directory,
+                    prefix="proposal-engine-training-dataset",
+                    kind="proposal_engine_training_dataset_v1",
+                    metadata={
+                        "artifact_role": "training_dataset",
+                        "engine_id": engine_id,
+                        "config_id": fit.config_id,
+                        "fit_id": fit_id,
+                        "dataset_id": dataset_id,
+                        "schema_version": _required_text(
+                            getattr(dataset, "schema_version", None)
+                        ),
+                    },
+                )
+            )
+
+        checkpoint = getattr(fit, "checkpoint", None)
+        if checkpoint is not None:
+            checkpoint_id = _required_text(
+                getattr(checkpoint, "checkpoint_id", None)
+            )
+            refs[f"engine_checkpoint_{index:02d}"] = (
+                _write_serialized_proposal_artifact(
+                    checkpoint,
+                    output_directory,
+                    prefix="proposal-engine-checkpoint",
+                    kind="proposal_engine_checkpoint_v1",
+                    metadata={
+                        "artifact_role": "checkpoint",
+                        "engine_id": engine_id,
+                        "config_id": fit.config_id,
+                        "fit_id": fit_id,
+                        "checkpoint_id": checkpoint_id,
+                        "schema_version": _required_text(
+                            getattr(checkpoint, "schema_version", None)
+                        ),
+                    },
+                )
+            )
+    return refs
+
+
+def _write_serialized_proposal_artifact(
+    value: Any,
+    root: str | Path,
+    *,
+    prefix: str,
+    kind: str,
+    metadata: Mapping[str, JSONValue],
+) -> ArtifactRef:
+    serializer = getattr(value, "to_json", None)
+    if not callable(serializer):
+        raise TypeError("proposal artifact does not support canonical JSON")
+    encoded = str(serializer()).encode("utf-8") + b"\n"
+    if len(encoded) > MAX_PROPOSAL_ARTIFACT_BYTES:
+        raise ValueError("proposal artifact exceeds size limit")
+    directory = Path(root).expanduser().resolve()
+    directory.mkdir(parents=True, exist_ok=True)
+    digest = hashlib.sha256(encoded).hexdigest()
+    target = directory / f"{prefix}-{digest}.json"
+    if target.exists() and target.read_bytes() != encoded:
+        raise ValueError("proposal artifact content-address collision")
+    if not target.exists():
+        temporary = target.with_name(f".{target.name}.{os.getpid()}.tmp")
+        temporary.write_bytes(encoded)
+        os.replace(temporary, target)
+    return ArtifactRef(
+        kind=kind,
+        path=str(target),
+        size_bytes=len(encoded),
+        sha256=digest,
+        metadata=dict(metadata),
+    )
+
+
 def read_proposal_portfolio_evaluation(
     path: str | Path,
 ) -> ProposalPortfolioEvaluationV1:
@@ -1739,6 +1945,73 @@ def read_proposal_portfolio_evaluation(
         path, "proposal-portfolio-evaluation"
     )
     return ProposalPortfolioEvaluationV1.from_dict(payload)
+
+
+def proposal_evaluation_engine_artifacts(
+    evaluation: ProposalPortfolioEvaluationV1,
+    engine_id: str,
+) -> Mapping[str, ArtifactRef]:
+    """Return the unique retained model artifacts for one evaluated engine."""
+    selected_engine = _required_text(engine_id)
+    selected: dict[str, ArtifactRef] = {}
+    for ref in evaluation.artifact_refs.values():
+        if ref.metadata.get("engine_id") != selected_engine:
+            continue
+        role_value = ref.metadata.get("artifact_role")
+        if role_value not in {"fit", "checkpoint", "training_dataset"}:
+            continue
+        role = str(role_value)
+        if role in selected:
+            raise ValueError(
+                f"proposal evaluation has duplicate {role} artifacts for "
+                f"{selected_engine}"
+            )
+        selected[role] = ref
+    return dict(sorted(selected.items()))
+
+
+def read_proposal_engine_fit_artifact(
+    ref: ArtifactRef,
+) -> ProposalEngineFitResultV1:
+    """Hash-verify and restore one exact proposal-engine fit artifact."""
+    if not isinstance(ref, ArtifactRef):
+        raise TypeError("proposal fit reference must be an ArtifactRef")
+    payload = _read_content_addressed_json(ref.path, "proposal-engine-fit")
+    selected = Path(ref.path).expanduser().resolve()
+    content = selected.read_bytes()
+    if (
+        ref.kind != "proposal_engine_fit_v1"
+        or ref.size_bytes != len(content)
+        or ref.sha256 != hashlib.sha256(content).hexdigest()
+        or ref.metadata.get("artifact_role") != "fit"
+    ):
+        raise ValueError("proposal fit strong reference differs from bytes")
+    schema = str(payload.get("schema_version", ""))
+    readers: Mapping[str, Any] = {
+        EVENT_CLOCK_FIT_RESULT_SCHEMA_VERSION: EventClockFitResultV1.from_dict,
+        MARKED_HAWKES_FIT_RESULT_SCHEMA_VERSION: (
+            MarkedHawkesFitResultV1.from_dict
+        ),
+        REGIME_HAWKES_FIT_RESULT_SCHEMA_VERSION: (
+            RegimeHawkesFitResultV1.from_dict
+        ),
+        NEURAL_TPP_FIT_RESULT_SCHEMA_VERSION: NeuralTPPFitResultV1.from_dict,
+        ADD_THIN_FIT_RESULT_SCHEMA_VERSION: AddThinFitResultV1.from_dict,
+        SB_FIT_RESULT_SCHEMA_VERSION: SchrodingerBridgeFitResultV1.from_dict,
+    }
+    try:
+        fit = cast(ProposalEngineFitResultV1, readers[schema](payload))
+    except KeyError as err:
+        raise ValueError("proposal fit schema is unsupported") from err
+    status = _required_text(getattr(fit.status, "value", None))
+    if (
+        ref.metadata.get("schema_version") != fit.schema_version
+        or ref.metadata.get("config_id") != fit.config_id
+        or ref.metadata.get("fit_id") != fit.fit_id
+        or ref.metadata.get("status") != status
+    ):
+        raise ValueError("proposal fit metadata differs from restored model")
+    return fit
 
 
 def _descriptor_for_config(
@@ -2108,6 +2381,7 @@ __all__ = [
     "ProposalEngineEligibilityAuditV1",
     "ProposalEngineEvidenceV1",
     "ProposalEngineFamily",
+    "ProposalEngineFitResultV1",
     "ProposalEnginePortfolioEntryV1",
     "ProposalEnginePortfolioV1",
     "ProposalEngineRegistryV1",
@@ -2116,7 +2390,9 @@ __all__ = [
     "build_histdata_proposal_portfolio",
     "proposal_engine_default_configs",
     "proposal_engine_registry",
+    "proposal_evaluation_engine_artifacts",
     "proposal_evidence_from_campaigns",
+    "read_proposal_engine_fit_artifact",
     "read_proposal_evidence_campaigns",
     "read_proposal_portfolio_evaluation",
     "run_histdata_proposal_portfolio_evaluation",

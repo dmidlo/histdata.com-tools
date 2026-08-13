@@ -16,7 +16,7 @@ import random
 import time
 from collections import Counter, defaultdict
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum
 from itertools import groupby, pairwise
 from typing import Any, cast
@@ -67,7 +67,10 @@ MARKED_HAWKES_CANDIDATE_LINEAGE_SCHEMA_VERSION = (
 MARKED_HAWKES_CANDIDATE_BATCH_SCHEMA_VERSION = (
     "histdatacom.marked-hawkes-candidate-batch.v1"
 )
-MARKED_HAWKES_IMPLEMENTATION_VERSION = "1.0.0"
+MARKED_HAWKES_LEGACY_IMPLEMENTATION_VERSION = "1.0.0"
+MARKED_HAWKES_TRANSITION_MARK_IMPLEMENTATION_VERSION = "1.1.0"
+MARKED_HAWKES_HT_IMPLEMENTATION_VERSION = "1.2.0"
+MARKED_HAWKES_IMPLEMENTATION_VERSION = "1.3.0"
 MARKED_HAWKES_GENERATOR_PREFIX = "histdatacom.marked-hawkes"
 
 NANOSECONDS_PER_SECOND = 1_000_000_000
@@ -83,6 +86,29 @@ MAX_HAWKES_HISTORY_NS = 7 * 86_400 * NANOSECONDS_PER_SECOND
 MAX_HAWKES_PARAMETERS_BYTES = 4_000_000
 MAX_HAWKES_DIAGNOSTICS = 128
 MARK_STATES = ("ask_only", "bid_only", "joint", "unchanged")
+LEGACY_MARK_POLICY = "quote-transition-source-destination-v1"
+TRANSITION_CONDITIONED_MARK_POLICY = (
+    "quote-transition-conditioned-source-destination-v2"
+)
+MARK_POLICIES = frozenset(
+    {LEGACY_MARK_POLICY, TRANSITION_CONDITIONED_MARK_POLICY}
+)
+LEGACY_UNBOUNDED_CARDINALITY_POLICY = "unbounded-ogata-cardinality-v1"
+DETERMINISTIC_HT_CARDINALITY_POLICY = (
+    "operator-conditioned-horvitz-thompson-cardinality-v2"
+)
+OPERATOR_CONDITIONED_CARDINALITY_POLICY = (
+    "operator-conditioned-negative-binomial-cardinality-v3"
+)
+CARDINALITY_POLICIES = frozenset(
+    {
+        LEGACY_UNBOUNDED_CARDINALITY_POLICY,
+        DETERMINISTIC_HT_CARDINALITY_POLICY,
+        OPERATOR_CONDITIONED_CARDINALITY_POLICY,
+    }
+)
+OPERATOR_CONDITIONED_PATH_DRAWS = 32
+OPERATOR_CONDITIONED_OVERSAMPLE_FACTOR = 1.25
 
 
 class HawkesExcitationStructure(str, Enum):
@@ -122,7 +148,9 @@ class MarkedHawkesGenerationError(ValueError):
 class MarkedHawkesResourceLimitsV1:
     """Hard fit, parameter, history, proposal, and output limits."""
 
-    max_fit_events: int = 20_000
+    # Covers the certified 32-window x 3-symbol x 256-event calibration
+    # envelope without relaxing the 100k implementation hard stop.
+    max_fit_events: int = 25_000
     max_fit_windows: int = 96
     max_iterations: int = 256
     max_dimensions: int = 8
@@ -353,6 +381,8 @@ class MarkedHawkesConfigV1:
     convergence_tolerance: float = 1e-3
     parameter_floor: float = 1e-10
     mark_smoothing_count: float = 1.0
+    mark_policy: str = TRANSITION_CONDITIONED_MARK_POLICY
+    cardinality_policy: str = OPERATOR_CONDITIONED_CARDINALITY_POLICY
     minimum_events_per_symbol: int = 8
     minimum_conditioning_events: int = 2
     base_seed: int = 451_000
@@ -398,6 +428,14 @@ class MarkedHawkesConfigV1:
         if floor >= 1.0:
             raise ValueError("parameter floor must be below one")
         _positive_float(self.mark_smoothing_count, "mark_smoothing_count")
+        mark_policy = str(self.mark_policy).strip()
+        if mark_policy not in MARK_POLICIES:
+            raise ValueError("marked Hawkes mark policy is unsupported")
+        object.__setattr__(self, "mark_policy", mark_policy)
+        cardinality_policy = str(self.cardinality_policy).strip()
+        if cardinality_policy not in CARDINALITY_POLICIES:
+            raise ValueError("marked Hawkes cardinality policy is unsupported")
+        object.__setattr__(self, "cardinality_policy", cardinality_policy)
         _bounded_int(
             self.minimum_events_per_symbol,
             "minimum_events_per_symbol",
@@ -419,7 +457,7 @@ class MarkedHawkesConfigV1:
         object.__setattr__(self, "config_id", expected)
 
     def identity_payload(self) -> dict[str, JSONValue]:
-        return {
+        payload: dict[str, JSONValue] = {
             "schema_version": self.schema_version,
             "excitation_structure": self.excitation_structure.value,
             "kernel": "exponential-integrated-mass-v1",
@@ -429,7 +467,7 @@ class MarkedHawkesConfigV1:
             "maximum_branching_ratio": self.maximum_branching_ratio,
             "convergence_tolerance": self.convergence_tolerance,
             "parameter_floor": self.parameter_floor,
-            "mark_policy": "quote-transition-source-destination-v1",
+            "mark_policy": self.mark_policy,
             "mark_states": list(MARK_STATES),
             "mark_smoothing_count": self.mark_smoothing_count,
             "minimum_events_per_symbol": self.minimum_events_per_symbol,
@@ -437,10 +475,36 @@ class MarkedHawkesConfigV1:
             "conditioning_policy": "exact-epoch-session-then-session-v1",
             "uncertainty_method": "responsibility-count-wald-95-v1",
             "fit_boundary_policy": "reset-each-calibration-window-v1",
-            "generation_algorithm": "bounded-ogata-thinning-v1",
+            "generation_algorithm": (
+                "bounded-ogata-thinning-v1"
+                if self.cardinality_policy
+                == LEGACY_UNBOUNDED_CARDINALITY_POLICY
+                else "bounded-ogata-conditional-path-bank-resampling-v2"
+            ),
             "base_seed": self.base_seed,
             "limits": self.limits.to_dict(),
         }
+        # The config schema predates operator-conditioned cardinality. Preserve
+        # the exact legacy identity so retained v1 artifacts remain readable.
+        if self.cardinality_policy != LEGACY_UNBOUNDED_CARDINALITY_POLICY:
+            payload.update(
+                {
+                    "cardinality_policy": self.cardinality_policy,
+                    "cardinality_estimator": (
+                        "horvitz-thompson-retained-nonanchor-count-v1"
+                        if self.cardinality_policy
+                        == DETERMINISTIC_HT_CARDINALITY_POLICY
+                        else "negative-binomial-posterior-predictive-count-v1"
+                    ),
+                    "conditional_path_draw_limit": (
+                        OPERATOR_CONDITIONED_PATH_DRAWS
+                    ),
+                    "conditional_oversample_factor": (
+                        OPERATOR_CONDITIONED_OVERSAMPLE_FACTOR
+                    ),
+                }
+            )
+        return payload
 
     def to_dict(self) -> dict[str, JSONValue]:
         return {**self.identity_payload(), "config_id": self.config_id}
@@ -452,11 +516,9 @@ class MarkedHawkesConfigV1:
     def from_dict(cls, data: Mapping[str, Any]) -> MarkedHawkesConfigV1:
         _require_schema(data, MARKED_HAWKES_CONFIG_SCHEMA_VERSION)
         _require_literal(data, "kernel", "exponential-integrated-mass-v1")
-        _require_literal(
-            data,
-            "mark_policy",
-            "quote-transition-source-destination-v1",
-        )
+        mark_policy = str(data.get("mark_policy", ""))
+        if mark_policy not in MARK_POLICIES:
+            raise ValueError("marked Hawkes mark policy is unsupported")
         _require_literal(
             data,
             "conditioning_policy",
@@ -472,9 +534,48 @@ class MarkedHawkesConfigV1:
             "fit_boundary_policy",
             "reset-each-calibration-window-v1",
         )
-        _require_literal(
-            data, "generation_algorithm", "bounded-ogata-thinning-v1"
+        cardinality_policy = str(
+            data.get("cardinality_policy", LEGACY_UNBOUNDED_CARDINALITY_POLICY)
         )
+        if cardinality_policy not in CARDINALITY_POLICIES:
+            raise ValueError("marked Hawkes cardinality policy is unsupported")
+        expected_generation_algorithm = (
+            "bounded-ogata-thinning-v1"
+            if cardinality_policy == LEGACY_UNBOUNDED_CARDINALITY_POLICY
+            else "bounded-ogata-conditional-path-bank-resampling-v2"
+        )
+        _require_literal(
+            data, "generation_algorithm", expected_generation_algorithm
+        )
+        expected_estimator = (
+            "horvitz-thompson-retained-nonanchor-count-v1"
+            if cardinality_policy == DETERMINISTIC_HT_CARDINALITY_POLICY
+            else "negative-binomial-posterior-predictive-count-v1"
+        )
+        if cardinality_policy != LEGACY_UNBOUNDED_CARDINALITY_POLICY:
+            _require_literal(data, "cardinality_estimator", expected_estimator)
+            if (
+                _strict_int(
+                    data.get("conditional_path_draw_limit"),
+                    "conditional_path_draw_limit",
+                )
+                != OPERATOR_CONDITIONED_PATH_DRAWS
+            ):
+                raise ValueError(
+                    "marked Hawkes conditional draw policy differs"
+                )
+            if not math.isclose(
+                _finite_float(
+                    data.get("conditional_oversample_factor"),
+                    "conditional_oversample_factor",
+                ),
+                OPERATOR_CONDITIONED_OVERSAMPLE_FACTOR,
+                rel_tol=0.0,
+                abs_tol=1e-12,
+            ):
+                raise ValueError(
+                    "marked Hawkes conditional oversample policy differs"
+                )
         if _string_tuple(data.get("mark_states")) != MARK_STATES:
             raise ValueError("marked Hawkes mark-state registry differs")
         return cls(
@@ -498,6 +599,8 @@ class MarkedHawkesConfigV1:
             mark_smoothing_count=_finite_float(
                 data.get("mark_smoothing_count"), "mark_smoothing_count"
             ),
+            mark_policy=mark_policy,
+            cardinality_policy=cardinality_policy,
             minimum_events_per_symbol=_strict_int(
                 data.get("minimum_events_per_symbol"),
                 "minimum_events_per_symbol",
@@ -1034,6 +1137,24 @@ class MarkedHawkesCandidateLineageV1:
             "event_state": self.event_state,
         }
 
+    @classmethod
+    def from_dict(
+        cls, data: Mapping[str, Any]
+    ) -> "MarkedHawkesCandidateLineageV1":
+        """Restore one persisted candidate-lineage pointer."""
+        return cls(
+            event_id=str(data.get("event_id", "")),
+            transformation_id=str(data.get("transformation_id", "")),
+            generation_lineage_id=str(data.get("generation_lineage_id", "")),
+            excitation_source_symbol=(
+                str(data["excitation_source_symbol"])
+                if data.get("excitation_source_symbol") is not None
+                else None
+            ),
+            event_state=str(data.get("event_state", "")),
+            schema_version=str(data.get("schema_version", "")),
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class MarkedHawkesCandidateBatchV1:
@@ -1492,6 +1613,7 @@ def fit_marked_hawkes_challenger(
             "kernel": "exponential-integrated-mass-v1",
             "excitation_structure": config.excitation_structure.value,
             "symbols": list(symbols),
+            "mark_policy": config.mark_policy,
             "mark_states": list(MARK_STATES),
             "conditioning_policy": "exact-epoch-session-then-session-v1",
             "fit_boundary_policy": "reset-each-calibration-window-v1",
@@ -1574,7 +1696,7 @@ def build_marked_hawkes_benchmark_candidate(
     return BenchmarkCandidateV1(
         kind=BenchmarkCandidateKind.CANDIDATE,
         method_id=_generator_id(config.excitation_structure),
-        implementation_version=MARKED_HAWKES_IMPLEMENTATION_VERSION,
+        implementation_version=_implementation_version(config),
         parameters={
             "config_id": config.config_id,
             "fit_id": fit_result.fit_id,
@@ -1718,7 +1840,7 @@ def build_marked_hawkes_candidate_batches(
                     right_anchor_event_id=right_anchor.event_id,
                     anchor_interval_id=interval_id,
                     generator_id=_generator_id(config.excitation_structure),
-                    generator_version=MARKED_HAWKES_IMPLEMENTATION_VERSION,
+                    generator_version=_implementation_version(config),
                     generator_config_id=config.config_id,
                     reference_id=item.source_event_id,
                     motif_id=_generator_id(config.excitation_structure),
@@ -1939,6 +2061,7 @@ def _fit_conditioning_model(
         baseline,
         excitation,
     )
+    transition_counts = _mark_transition_counts(windows, symbols)
     exposure_seconds = sum(
         (end_ns - start_ns) / NANOSECONDS_PER_SECOND
         for start_ns, end_ns, _events in indexed_windows
@@ -1958,6 +2081,8 @@ def _fit_conditioning_model(
         "immigrant_mark_probabilities": cast(JSONValue, mark_parameters[0]),
         "excitation_mark_probabilities": cast(JSONValue, mark_parameters[1]),
     }
+    if config.mark_policy == TRANSITION_CONDITIONED_MARK_POLICY:
+        model["mark_transition_counts"] = cast(JSONValue, transition_counts)
     uncertainty = _fit_uncertainty(
         baseline,
         excitation,
@@ -2290,6 +2415,49 @@ def _mark_parameters(
     return immigrant_probs, excitation_probs
 
 
+def _mark_transition_counts(
+    windows: Sequence[EventClockCalibrationWindowV1],
+    symbols: Sequence[str],
+) -> dict[str, JSONValue]:
+    """Count quote-derived mark transitions without losing duplicate row order."""
+    counts: Counter[tuple[str, str, str]] = Counter()
+    for window in windows:
+        marks = _window_marks(window.events)
+        by_symbol: dict[str, list[BenchmarkEventV1]] = defaultdict(list)
+        for event in window.events:
+            by_symbol[event.symbol].append(event)
+        for symbol, events in by_symbol.items():
+            ordered = sorted(
+                events,
+                key=lambda item: (
+                    item.event_time_ns,
+                    item.event_sequence,
+                    item.benchmark_event_id,
+                ),
+            )
+            for left, right in pairwise(ordered):
+                counts[
+                    (
+                        symbol,
+                        marks[left.benchmark_event_id],
+                        marks[right.benchmark_event_id],
+                    )
+                ] += 1
+    return {
+        symbol: cast(
+            JSONValue,
+            {
+                previous: {
+                    mark: float(counts[(symbol, previous, mark)])
+                    for mark in MARK_STATES
+                }
+                for previous in MARK_STATES
+            },
+        )
+        for symbol in symbols
+    }
+
+
 def _fit_uncertainty(
     baseline: Sequence[float],
     excitation: Sequence[Sequence[float]],
@@ -2388,11 +2556,128 @@ def _generate_events(
     tuple[MarkedHawkesGenerationLineageV1, ...],
     int,
 ]:
+    if len(proposal_counter) != 1 or proposal_counter[0] != 0:
+        raise ValueError("proposal counter must start at zero")
+    target_by_symbol = _operator_conditioned_missing_counts(
+        config,
+        anchors,
+        scenario=scenario,
+        ensemble_member_id=ensemble_member_id,
+    )
+    if target_by_symbol is None:
+        return _simulate_events(
+            config,
+            fit,
+            model,
+            anchors,
+            scenario=scenario,
+            window=window,
+            ensemble_member_id=ensemble_member_id,
+            history_events=history_events,
+            proposal_counter=proposal_counter,
+        )
+    target_count = sum(target_by_symbol.values())
+    if target_count == 0:
+        ordered = tuple(
+            sorted(
+                anchors,
+                key=lambda item: (
+                    item.event_time_ns,
+                    item.symbol,
+                    item.event_sequence,
+                    item.benchmark_event_id,
+                ),
+            )
+        )
+        return ordered, (), proposal_counter[0]
+    if target_count > config.limits.max_generated_events_per_window:
+        raise MarkedHawkesGenerationError(
+            "operator-conditioned event target exceeds window limit"
+        )
+    if target_count > max(
+        1,
+        math.floor(len(anchors) * config.limits.max_candidate_amplification),
+    ):
+        raise MarkedHawkesGenerationError(
+            "operator-conditioned event target exceeds amplification limit"
+        )
+
+    base_scale = _missing_intensity_scale(scenario)
+    simulation_scale = min(
+        1.0,
+        base_scale * OPERATOR_CONDITIONED_OVERSAMPLE_FACTOR,
+    )
+    pooled_events: list[BenchmarkEventV1] = []
+    pooled_lineages: list[MarkedHawkesGenerationLineageV1] = []
+    for draw_index in range(OPERATOR_CONDITIONED_PATH_DRAWS):
+        events, lineages, _ = _simulate_events(
+            config,
+            fit,
+            model,
+            anchors,
+            scenario=scenario,
+            window=window,
+            ensemble_member_id=ensemble_member_id,
+            history_events=history_events,
+            proposal_counter=proposal_counter,
+            simulation_draw_index=draw_index,
+            missing_scale_override=simulation_scale,
+        )
+        lineage_ids = {item.source_event_id for item in lineages}
+        pooled_events.extend(
+            item for item in events if item.source_event_id in lineage_ids
+        )
+        pooled_lineages.extend(lineages)
+        support = Counter(item.destination_symbol for item in pooled_lineages)
+        if all(
+            support[symbol] >= target
+            for symbol, target in target_by_symbol.items()
+        ):
+            conditioned_events, conditioned_lineages = (
+                _condition_operator_cardinality(
+                    anchors,
+                    pooled_events,
+                    pooled_lineages,
+                    target_by_symbol=target_by_symbol,
+                )
+            )
+            return (
+                conditioned_events,
+                conditioned_lineages,
+                proposal_counter[0],
+            )
+    raise MarkedHawkesGenerationError(
+        "operator-conditioned Hawkes path bank lacks target support: "
+        + ",".join(
+            f"{symbol}={support[symbol]}/{target_by_symbol[symbol]}"
+            for symbol in sorted(target_by_symbol)
+        )
+    )
+
+
+def _simulate_events(
+    config: MarkedHawkesConfigV1,
+    fit: MarkedHawkesFitResultV1,
+    model: Mapping[str, Any],
+    anchors: Sequence[BenchmarkEventV1],
+    *,
+    scenario: BenchmarkScenarioV1,
+    window: ReconstructionWindowV1,
+    ensemble_member_id: str,
+    history_events: Sequence[BenchmarkEventV1],
+    proposal_counter: list[int],
+    simulation_draw_index: int = 0,
+    missing_scale_override: float | None = None,
+) -> tuple[
+    tuple[BenchmarkEventV1, ...],
+    tuple[MarkedHawkesGenerationLineageV1, ...],
+    int,
+]:
     if ensemble_member_id != window.ensemble_member_id:
         raise MarkedHawkesGenerationError(
             "ensemble member differs from reconstruction window"
         )
-    if set(item.upper() for item in window.symbols) != set(fit.symbols):
+    if {item.upper() for item in window.symbols} != set(fit.symbols):
         raise MarkedHawkesGenerationError(
             "generation symbols differ from fitted synchronized dimensions"
         )
@@ -2437,6 +2722,11 @@ def _generate_events(
     excitation_marks = _mapping(
         model.get("excitation_mark_probabilities"), "excitation marks"
     )
+    transition_counts = (
+        _mapping(model.get("mark_transition_counts"), "mark transition counts")
+        if config.mark_policy == TRANSITION_CONDITIONED_MARK_POLICY
+        else None
+    )
     estimated_generation_bytes = (
         len(anchors) + config.limits.max_generated_events_per_window
     ) * config.limits.estimated_bytes_per_generated_event
@@ -2444,23 +2734,30 @@ def _generate_events(
         raise MarkedHawkesGenerationError(
             "generation memory estimate exceeds limit"
         )
-    seed = _semantic_seed(
-        config.base_seed,
+    seed_parts: list[str] = [
         fit.fit_id,
         scenario.scenario_id,
         window.window_id,
         ensemble_member_id,
         _benchmark_content_sha256(anchors),
         _benchmark_content_sha256(history_events),
-    )
+    ]
+    if config.cardinality_policy == OPERATOR_CONDITIONED_CARDINALITY_POLICY:
+        seed_parts.append(str(simulation_draw_index))
+    seed = _semantic_seed(config.base_seed, *seed_parts)
     rng = random.Random(seed)
     recursion = [0.0] * dimension
+    previous_mark_by_symbol: dict[str, str] = {}
+    last_quote_by_symbol: dict[str, BenchmarkEventV1] = {}
     for event in history_events:
         elapsed = (
             window.core_start_ns - event.event_time_ns
         ) / NANOSECONDS_PER_SECOND
         if elapsed <= config.limits.max_history_ns / NANOSECONDS_PER_SECOND:
             recursion[symbol_index[event.symbol]] += math.exp(-decay * elapsed)
+        if event.event_state in MARK_STATES:
+            previous_mark_by_symbol[event.symbol] = event.event_state
+        last_quote_by_symbol[event.symbol] = event
     ordered_anchors = tuple(
         sorted(
             anchors,
@@ -2477,10 +2774,12 @@ def _generate_events(
     generated: list[BenchmarkEventV1] = []
     lineages: list[MarkedHawkesGenerationLineageV1] = []
     per_interval: Counter[tuple[str, str, str]] = Counter()
-    if len(proposal_counter) != 1 or proposal_counter[0] != 0:
-        raise ValueError("proposal counter must start at zero")
     generation_started = time.perf_counter()
-    missing_scale = _missing_intensity_scale(scenario)
+    missing_scale = (
+        _missing_intensity_scale(scenario)
+        if missing_scale_override is None
+        else _positive_float(missing_scale_override, "missing intensity scale")
+    )
 
     while current_ns < window.core_end_ns:
         next_anchor_ns = (
@@ -2493,9 +2792,11 @@ def _generate_events(
                 anchor_index < len(ordered_anchors)
                 and ordered_anchors[anchor_index].event_time_ns == current_ns
             ):
-                recursion[
-                    symbol_index[ordered_anchors[anchor_index].symbol]
-                ] += 1.0
+                anchor = ordered_anchors[anchor_index]
+                recursion[symbol_index[anchor.symbol]] += 1.0
+                if anchor.event_state in MARK_STATES:
+                    previous_mark_by_symbol[anchor.symbol] = anchor.event_state
+                last_quote_by_symbol[anchor.symbol] = anchor
                 anchor_index += 1
             continue
         active_intervals = _active_intervals(by_symbol, current_ns)
@@ -2616,40 +2917,57 @@ def _generate_events(
                 "excitation source marks",
             )
         )
+        if transition_counts is not None:
+            mark_probabilities = _transition_conditioned_mark_probabilities(
+                transition_counts,
+                destination_symbol=destination_symbol,
+                previous_mark=previous_mark_by_symbol.get(destination_symbol),
+                component_probabilities=mark_probabilities,
+                smoothing_count=config.mark_smoothing_count,
+            )
         mark = _sample_mark(mark_probabilities, rng)
-        bid, ask = _project_quote(left, right, current_ns, mark)
+        projection_left = (
+            last_quote_by_symbol.get(destination_symbol, left)
+            if config.mark_policy == TRANSITION_CONDITIONED_MARK_POLICY
+            else left
+        )
+        bid, ask = _project_quote(projection_left, right, current_ns, mark)
+        if config.mark_policy == TRANSITION_CONDITIONED_MARK_POLICY:
+            mark = _quote_transition_mark(projection_left, bid=bid, ask=ask)
         candidate_mid = (bid + ask) / 2.0
         ordinal = len(generated) + 1
+        event_identity: dict[str, JSONValue] = {
+            "fit_id": fit.fit_id,
+            "scenario_id": scenario.scenario_id,
+            "window_id": window.window_id,
+            "ensemble_member_id": ensemble_member_id,
+            "destination_symbol": destination_symbol,
+            "source_symbol": source_symbol,
+            "event_time_ns": current_ns,
+            "ordinal": ordinal,
+        }
+        if config.cardinality_policy == OPERATOR_CONDITIONED_CARDINALITY_POLICY:
+            event_identity["simulation_draw_index"] = simulation_draw_index
         source_event_id = _stable_id(
             "marked-hawkes-generated-event",
-            {
-                "fit_id": fit.fit_id,
-                "scenario_id": scenario.scenario_id,
-                "window_id": window.window_id,
-                "ensemble_member_id": ensemble_member_id,
-                "destination_symbol": destination_symbol,
-                "source_symbol": source_symbol,
-                "event_time_ns": current_ns,
-                "ordinal": ordinal,
-            },
+            event_identity,
         )
-        generated.append(
-            BenchmarkEventV1(
-                source_event_id=source_event_id,
-                symbol=destination_symbol,
-                event_time_ns=current_ns,
-                event_sequence=ordinal,
-                bid=bid,
-                ask=ask,
-                epoch_id=scenario.epoch_id,
-                session=left.session,
-                event_state=mark,
-                sparsity=("marked-hawkes-" + config.excitation_structure.value),
-                ensemble_member_id=ensemble_member_id,
-                support_lower_mid=min(left.mid, right.mid, candidate_mid),
-                support_upper_mid=max(left.mid, right.mid, candidate_mid),
-            )
+        generated_event = BenchmarkEventV1(
+            source_event_id=source_event_id,
+            symbol=destination_symbol,
+            event_time_ns=current_ns,
+            event_sequence=ordinal,
+            bid=bid,
+            ask=ask,
+            epoch_id=scenario.epoch_id,
+            session=left.session,
+            event_state=mark,
+            sparsity=("marked-hawkes-" + config.excitation_structure.value),
+            ensemble_member_id=ensemble_member_id,
+            support_lower_mid=min(left.mid, right.mid, candidate_mid),
+            support_upper_mid=max(left.mid, right.mid, candidate_mid),
         )
+        generated.append(generated_event)
         lineages.append(
             MarkedHawkesGenerationLineageV1(
                 source_event_id=source_event_id,
@@ -2659,6 +2977,8 @@ def _generate_events(
                 conditional_intensity=proposed_intensities[destination],
             )
         )
+        previous_mark_by_symbol[destination_symbol] = mark
+        last_quote_by_symbol[destination_symbol] = generated_event
         recursion[destination] += 1.0
     combined = tuple(
         sorted(
@@ -2676,6 +2996,219 @@ def _generate_events(
             "generation changed immutable anchors"
         )
     return combined, tuple(lineages), proposal_counter[0]
+
+
+def _operator_conditioned_missing_counts(
+    config: MarkedHawkesConfigV1,
+    anchors: Sequence[BenchmarkEventV1],
+    *,
+    scenario: BenchmarkScenarioV1,
+    ensemble_member_id: str,
+) -> dict[str, int] | None:
+    if config.cardinality_policy == LEGACY_UNBOUNDED_CARDINALITY_POLICY:
+        return None
+    raw = scenario.degradation_parameters.get("retention_probability")
+    if raw is None:
+        return None
+    symbols = tuple(sorted({item.symbol for item in anchors}))
+    if isinstance(raw, Mapping):
+        rates = {
+            symbol: _finite_float(raw.get(symbol), f"{symbol} retention")
+            for symbol in symbols
+        }
+    else:
+        rate = _finite_float(raw, "retention_probability")
+        rates = dict.fromkeys(symbols, rate)
+    result: dict[str, int] = {}
+    predictive_rng = random.Random(
+        _semantic_seed(
+            config.base_seed,
+            config.config_id,
+            scenario.scenario_id,
+            _benchmark_content_sha256(anchors),
+            _required_text(ensemble_member_id),
+            "operator-conditioned-cardinality-v3",
+        )
+    )
+    maximum_target = min(
+        config.limits.max_generated_events_per_window,
+        max(
+            1,
+            math.floor(
+                len(anchors) * config.limits.max_candidate_amplification
+            ),
+        ),
+    )
+    total_target = 0
+    for symbol in symbols:
+        retention = rates[symbol]
+        if retention < 0.0 or retention > 1.0:
+            raise MarkedHawkesGenerationError(
+                "retention probability is outside [0,1]"
+            )
+        retained_random = sum(
+            item.symbol == symbol and item.anchor_id is None for item in anchors
+        )
+        if retention == 0.0:
+            raise MarkedHawkesGenerationError(
+                "zero-retention cardinality is not identifiable from anchors"
+            )
+        estimated_missing = retained_random * (1.0 - retention) / retention
+        if config.cardinality_policy == DETERMINISTIC_HT_CARDINALITY_POLICY:
+            result[symbol] = math.floor(estimated_missing + 0.5)
+        else:
+            result[symbol] = _sample_negative_binomial_failures(
+                retained_random + 1,
+                retention,
+                predictive_rng,
+                maximum_failures=maximum_target - total_target,
+            )
+        total_target += result[symbol]
+        if total_target > maximum_target:
+            raise MarkedHawkesGenerationError(
+                "operator-conditioned event target exceeds generation bound"
+            )
+    return result
+
+
+def _sample_negative_binomial_failures(
+    success_count: int,
+    success_probability: float,
+    rng: random.Random,
+    *,
+    maximum_failures: int = MAX_HAWKES_GENERATED_EVENTS,
+) -> int:
+    """Draw failures before successes from the conjugate count predictive."""
+    successes = _bounded_int(
+        success_count, "success_count", 1, MAX_HAWKES_GENERATED_EVENTS
+    )
+    probability = _finite_float(success_probability, "success_probability")
+    if not 0.0 < probability <= 1.0:
+        raise ValueError("success probability is outside (0,1]")
+    maximum = _bounded_int(
+        maximum_failures,
+        "maximum_failures",
+        0,
+        MAX_HAWKES_GENERATED_EVENTS,
+    )
+    failures = 0
+    for _ in range(successes):
+        while rng.random() > probability:
+            if failures >= maximum:
+                raise MarkedHawkesGenerationError(
+                    "operator-conditioned cardinality draw exceeds generation bound"
+                )
+            failures += 1
+    return failures
+
+
+def _condition_operator_cardinality(
+    anchors: Sequence[BenchmarkEventV1],
+    simulated_events: Sequence[BenchmarkEventV1],
+    lineages: Sequence[MarkedHawkesGenerationLineageV1],
+    *,
+    target_by_symbol: Mapping[str, int],
+) -> tuple[
+    tuple[BenchmarkEventV1, ...],
+    tuple[MarkedHawkesGenerationLineageV1, ...],
+]:
+    lineage_by_source = {item.source_event_id: item for item in lineages}
+    if len(lineage_by_source) != len(lineages):
+        raise MarkedHawkesGenerationError(
+            "operator-conditioned path contains duplicate lineage"
+        )
+    generated_by_symbol: dict[str, list[BenchmarkEventV1]] = defaultdict(list)
+    for event in simulated_events:
+        if event.source_event_id in lineage_by_source:
+            generated_by_symbol[event.symbol].append(event)
+    selected_ids: set[str] = set()
+    for symbol, target in sorted(target_by_symbol.items()):
+        values = sorted(
+            generated_by_symbol[symbol],
+            key=lambda item: (
+                item.event_time_ns,
+                item.event_sequence,
+                item.benchmark_event_id,
+            ),
+        )
+        if len(values) < target:
+            raise MarkedHawkesGenerationError(
+                "operator-conditioned path support changed during selection"
+            )
+        if target:
+            indices = tuple(
+                math.floor((ordinal + 0.5) * len(values) / target)
+                for ordinal in range(target)
+            )
+            if len(set(indices)) != target:
+                raise MarkedHawkesGenerationError(
+                    "operator-conditioned systematic selection duplicated a row"
+                )
+            selected_ids.update(
+                values[index].source_event_id for index in indices
+            )
+
+    combined = sorted(
+        (
+            *anchors,
+            *(
+                item
+                for item in simulated_events
+                if item.source_event_id in selected_ids
+            ),
+        ),
+        key=lambda item: (
+            item.symbol,
+            item.event_time_ns,
+            item.event_sequence,
+            item.benchmark_event_id,
+        ),
+    )
+    normalized_events: list[BenchmarkEventV1] = []
+    normalized_lineage: list[MarkedHawkesGenerationLineageV1] = []
+    for _, symbol_events in groupby(combined, key=lambda item: item.symbol):
+        previous: BenchmarkEventV1 | None = None
+        for event in symbol_events:
+            lineage = lineage_by_source.get(event.source_event_id)
+            if lineage is not None:
+                if previous is None:
+                    raise MarkedHawkesGenerationError(
+                        "conditioned proposal precedes its first anchor"
+                    )
+                event_state = _quote_transition_mark(
+                    previous, bid=event.bid, ask=event.ask
+                )
+                event = replace(
+                    event,
+                    event_state=event_state,
+                    benchmark_event_id="",
+                )
+                normalized_lineage.append(
+                    replace(
+                        lineage,
+                        event_state=event_state,
+                        lineage_id="",
+                    )
+                )
+            normalized_events.append(event)
+            previous = event
+    ordered = tuple(
+        sorted(
+            normalized_events,
+            key=lambda item: (
+                item.event_time_ns,
+                item.symbol,
+                item.event_sequence,
+                item.benchmark_event_id,
+            ),
+        )
+    )
+    if _benchmark_anchor_sha256(ordered) != _benchmark_anchor_sha256(anchors):
+        raise MarkedHawkesGenerationError(
+            "operator-conditioned selection changed immutable anchors"
+        )
+    normalized_lineage.sort(key=lambda item: item.source_event_id)
+    return ordered, tuple(normalized_lineage)
 
 
 def _active_intervals(
@@ -2750,6 +3283,20 @@ def _project_quote(
     return bid, ask
 
 
+def _quote_transition_mark(
+    previous: BenchmarkEventV1, *, bid: float, ask: float
+) -> str:
+    bid_changed = bid != previous.bid
+    ask_changed = ask != previous.ask
+    if bid_changed and ask_changed:
+        return "joint"
+    if bid_changed:
+        return "bid_only"
+    if ask_changed:
+        return "ask_only"
+    return "unchanged"
+
+
 def _validated_history(
     events: Sequence[BenchmarkEventV1],
     *,
@@ -2804,6 +3351,9 @@ def _validate_fit_against_config(
     ):
         raise MarkedHawkesFitError("marked Hawkes fit is not usable by config")
     parameters = _mapping(fit.parameters, "fit parameters")
+    fitted_mark_policy = str(parameters.get("mark_policy", LEGACY_MARK_POLICY))
+    if fitted_mark_policy != config.mark_policy:
+        raise MarkedHawkesFitError("fit mark policy differs from config")
     if len(canonical_contract_json(parameters).encode()) > (
         config.limits.max_parameters_bytes
     ):
@@ -2891,6 +3441,9 @@ def _validate_fitted_parameters(
         raise ValueError("Hawkes fitted symbols differ")
     if _string_tuple(parameters.get("mark_states")) != MARK_STATES:
         raise ValueError("Hawkes fitted mark-state registry differs")
+    mark_policy = str(parameters.get("mark_policy", LEGACY_MARK_POLICY))
+    if mark_policy not in MARK_POLICIES:
+        raise ValueError("Hawkes fitted mark policy is unsupported")
     _require_literal(
         parameters,
         "conditioning_policy",
@@ -2948,6 +3501,13 @@ def _validate_fitted_parameters(
                 _validate_mark_probabilities(
                     _mapping(by_source[source], "excited source mark cell")
                 )
+        if mark_policy == TRANSITION_CONDITIONED_MARK_POLICY:
+            transitions = _mapping(
+                model.get("mark_transition_counts"), "mark transition counts"
+            )
+            _validate_mark_transition_counts(
+                transitions, expected_symbols=expected_symbols
+            )
 
 
 def _validate_model_stability(
@@ -3087,6 +3647,61 @@ def _validate_mark_probabilities(values: Mapping[str, Any]) -> None:
         value < 0.0 or value > 1.0 for value in probabilities
     ) or not math.isclose(sum(probabilities), 1.0, rel_tol=1e-9, abs_tol=1e-9):
         raise ValueError("Hawkes mark probabilities are invalid")
+
+
+def _validate_mark_transition_counts(
+    values: Mapping[str, Any], *, expected_symbols: Sequence[str]
+) -> None:
+    if set(values) != set(expected_symbols):
+        raise ValueError("Hawkes mark-transition destinations differ")
+    for symbol in expected_symbols:
+        by_previous = _mapping(values[symbol], "mark-transition destination")
+        if set(by_previous) != set(MARK_STATES):
+            raise ValueError("Hawkes prior-mark states differ")
+        for previous in MARK_STATES:
+            row = _mapping(by_previous[previous], "mark-transition row")
+            if set(row) != set(MARK_STATES) or any(
+                _finite_float(row[mark], f"mark-transition count {mark}") < 0.0
+                for mark in MARK_STATES
+            ):
+                raise ValueError("Hawkes mark-transition counts are invalid")
+
+
+def _transition_conditioned_mark_probabilities(
+    transition_counts: Mapping[str, Any],
+    *,
+    destination_symbol: str,
+    previous_mark: str | None,
+    component_probabilities: Mapping[str, Any],
+    smoothing_count: float,
+) -> dict[str, float]:
+    _validate_mark_probabilities(component_probabilities)
+    if previous_mark not in MARK_STATES:
+        return {
+            mark: float(component_probabilities[mark]) for mark in MARK_STATES
+        }
+    by_previous = _mapping(
+        transition_counts[destination_symbol], "mark-transition destination"
+    )
+    row = _mapping(by_previous[previous_mark], "mark-transition row")
+    smoothing = _positive_float(smoothing_count, "mark_smoothing_count")
+    return _normalized_probabilities(
+        {
+            mark: _finite_float(row[mark], f"mark-transition count {mark}")
+            + smoothing * float(component_probabilities[mark])
+            for mark in MARK_STATES
+        }
+    )
+
+
+def _implementation_version(config: MarkedHawkesConfigV1) -> str:
+    if config.cardinality_policy == OPERATOR_CONDITIONED_CARDINALITY_POLICY:
+        return MARKED_HAWKES_IMPLEMENTATION_VERSION
+    if config.cardinality_policy == DETERMINISTIC_HT_CARDINALITY_POLICY:
+        return MARKED_HAWKES_HT_IMPLEMENTATION_VERSION
+    if config.mark_policy == TRANSITION_CONDITIONED_MARK_POLICY:
+        return MARKED_HAWKES_TRANSITION_MARK_IMPLEMENTATION_VERSION
+    return MARKED_HAWKES_LEGACY_IMPLEMENTATION_VERSION
 
 
 def _sample_mark(values: Mapping[str, Any], rng: random.Random) -> str:
@@ -3390,8 +4005,9 @@ def _json_scalar(value: Any, name: str) -> JSONScalar:
 
 
 __all__ = [
-    "FittedMarkedHawkesBenchmarkGeneratorV1",
-    "HawkesExcitationStructure",
+    "LEGACY_MARK_POLICY",
+    "LEGACY_UNBOUNDED_CARDINALITY_POLICY",
+    "DETERMINISTIC_HT_CARDINALITY_POLICY",
     "MARKED_HAWKES_CANDIDATE_BATCH_SCHEMA_VERSION",
     "MARKED_HAWKES_CANDIDATE_LINEAGE_SCHEMA_VERSION",
     "MARKED_HAWKES_CONFIG_SCHEMA_VERSION",
@@ -3399,7 +4015,13 @@ __all__ = [
     "MARKED_HAWKES_GENERATION_EVIDENCE_SCHEMA_VERSION",
     "MARKED_HAWKES_GENERATION_LINEAGE_SCHEMA_VERSION",
     "MARKED_HAWKES_IMPLEMENTATION_VERSION",
+    "MARKED_HAWKES_HT_IMPLEMENTATION_VERSION",
     "MARKED_HAWKES_RESOURCE_LIMITS_SCHEMA_VERSION",
+    "MARKED_HAWKES_TRANSITION_MARK_IMPLEMENTATION_VERSION",
+    "OPERATOR_CONDITIONED_CARDINALITY_POLICY",
+    "TRANSITION_CONDITIONED_MARK_POLICY",
+    "FittedMarkedHawkesBenchmarkGeneratorV1",
+    "HawkesExcitationStructure",
     "MarkedHawkesCandidateBatchV1",
     "MarkedHawkesCandidateLineageV1",
     "MarkedHawkesConfigV1",

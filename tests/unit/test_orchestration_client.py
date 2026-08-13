@@ -50,6 +50,7 @@ class _FakeTemporalClient:
         result_error: BaseException | None = None,
     ) -> None:
         self.started: list[dict[str, object]] = []
+        self.get_handle_calls: list[tuple[str, str]] = []
         self.list_query = ""
         self.handles: dict[str, _FakeWorkflowHandle] = {}
         self.status_payload = status_payload
@@ -98,6 +99,7 @@ class _FakeTemporalClient:
         run_id: str = "",
     ) -> "_FakeWorkflowHandle":
         """Return a fake handle for status/control calls."""
+        self.get_handle_calls.append((workflow_id, run_id))
         return self.handles.setdefault(
             workflow_id,
             _FakeWorkflowHandle(
@@ -1493,6 +1495,26 @@ def test_inspect_job_status_queries_workflow_status(tmp_path: Path) -> None:
     assert offline.workflow_id == "histdatacom-run-test"
     assert offline.logs[0].message == "URLs validated"
     assert offline.artifacts[0].kind == "manifest"
+
+
+def test_inspect_job_status_treats_legacy_none_run_id_as_absent(
+    tmp_path: Path,
+) -> None:
+    """Receipts written with the old ``str(None)`` bug remain inspectable."""
+    config = _config(tmp_path)
+    temporal_client = _FakeTemporalClient()
+
+    snapshot = asyncio.run(
+        client.inspect_job_status(
+            "histdatacom-run-test",
+            run_id="None",
+            config=config,
+            client=temporal_client,
+        )
+    )
+
+    assert snapshot.run_id == "run-fake"
+    assert temporal_client.get_handle_calls == [("histdatacom-run-test", "")]
 
 
 def test_cancel_job_requests_temporal_cancel_and_reports_state(

@@ -136,8 +136,11 @@ from histdatacom.synthetic.proposal_engines import (
     build_histdata_proposal_portfolio,
     proposal_engine_default_configs,
     proposal_engine_registry,
+    proposal_evaluation_engine_artifacts,
     proposal_evidence_from_campaigns,
+    read_proposal_engine_fit_artifact,
     read_proposal_evidence_campaigns,
+    read_proposal_portfolio_evaluation,
 )
 from histdatacom.synthetic.qualification import (
     PoweredQualificationDossierV1,
@@ -730,20 +733,15 @@ class ReconstructionPlanConfigurationV2:
             raise TypeError("configuration v2 requires a v1 translation base")
         if not isinstance(self.proposal_portfolio, ProposalEnginePortfolioV1):
             raise TypeError("configuration v2 requires a proposal portfolio")
-        if self.proposal_portfolio.selected_engine_ids != (
-            "histdatacom.empirical-motif-resampling",
-        ):
-            raise ValueError(
-                "current HistData configuration requires the single qualified "
-                "empirical-motif engine"
-            )
         if (
-            self.proposal_portfolio.binding(
-                "histdatacom.empirical-motif-resampling"
+            EMPIRICAL_MOTIF_GENERATOR_ID
+            in self.proposal_portfolio.selected_engine_ids
+            and self.proposal_portfolio.binding(
+                EMPIRICAL_MOTIF_GENERATOR_ID
             ).config_id
             != self.base_configuration.generator_config.config_id
         ):
-            raise ValueError("v1 translation generator differs from portfolio")
+            raise ValueError("v1 motif adapter differs from selected portfolio")
         expected = _stable_id(
             "reconstruction-plan-configuration", self.identity_payload()
         )
@@ -803,7 +801,7 @@ class ReconstructionPlanConfigurationV2:
             "proposal_portfolio": self.proposal_portfolio.to_dict(),
             "portfolio_schema_version": PROPOSAL_ENGINE_PORTFOLIO_SCHEMA_VERSION,
             "fallback_policy": "refuse-no-silent-fallback-v1",
-            "v2_3_translation": "explicit-empirical-motif-adapter",
+            "v2_3_translation": "retained-empirical-motif-adapter",
             "current_provider_scope": "histdata.com-ascii-T-only",
             "scientific_nonclaim": SCIENTIFIC_NONCLAIM,
         }
@@ -833,7 +831,7 @@ class ReconstructionPlanConfigurationV2:
             data, "fallback_policy", "refuse-no-silent-fallback-v1"
         )
         _require_derived(
-            data, "v2_3_translation", "explicit-empirical-motif-adapter"
+            data, "v2_3_translation", "retained-empirical-motif-adapter"
         )
         _require_derived(
             data, "current_provider_scope", "histdata.com-ascii-T-only"
@@ -1193,12 +1191,20 @@ class ReconstructionPlanExecutionManifestV1:
             "proposal_engine_registry",
             "proposal_engine_portfolio",
             "proposal_dataset_resolution",
+            "proposal_portfolio_evaluation",
+            "powered_qualification_dossier",
         }
         allowed.update(
             name
             for name in artifacts
             if name.startswith(
-                ("proposal_engine_config_", "proposal_engine_evidence_")
+                (
+                    "proposal_engine_config_",
+                    "proposal_engine_evidence_",
+                    "proposal_engine_fit_",
+                    "proposal_engine_checkpoint_",
+                    "proposal_engine_training_dataset_",
+                )
             )
         )
         if not required.issubset(artifacts) or not set(artifacts).issubset(
@@ -1726,6 +1732,11 @@ def build_synthetic_infill_plan(
 ) -> SyntheticInfillPlanV1:
     """Resolve real artifacts and build one executable first-party plan."""
     selected_symbols = _symbols(tuple(symbols))
+    requested_selected_engine_ids = tuple(selected_proposal_engine_ids)
+    require_motif_promotion = (
+        not requested_selected_engine_ids
+        or EMPIRICAL_MOTIF_GENERATOR_ID in requested_selected_engine_ids
+    )
     if selected_symbols != tuple(EURUSD_TRIANGLE_SYMBOLS):
         raise ReconstructionPlanCompatibilityError(
             "v2.1 requires the complete EURUSD/GBPUSD/EURGBP tick triangle"
@@ -1789,6 +1800,7 @@ def build_synthetic_infill_plan(
         motif_qualification_path=motif_qualification_path,
         motif_leakage_audit_path=motif_leakage_audit_path,
         symbols=selected_symbols,
+        require_motif_promotion=require_motif_promotion,
     )
     all_common_periods = _common_source_periods(
         resolved.feed_epoch_definition, selected_symbols
@@ -1994,7 +2006,7 @@ def build_synthetic_infill_plan(
     ordered_proposal_engine_ids = tuple(proposal_engine_ids) or (
         EMPIRICAL_MOTIF_GENERATOR_ID,
     )
-    selected_engine_ids = tuple(selected_proposal_engine_ids) or (
+    selected_engine_ids = requested_selected_engine_ids or (
         EMPIRICAL_MOTIF_GENERATOR_ID,
     )
     if len(set(ordered_proposal_engine_ids)) != len(
@@ -2060,6 +2072,8 @@ def build_synthetic_infill_plan(
     )
     qualification_dossier: PoweredQualificationDossierV1 | None = None
     qualification_ref: ArtifactRef | None = None
+    qualification_evaluation_ref: ArtifactRef | None = None
+    proposal_model_refs: dict[str, Mapping[str, ArtifactRef]] = {}
     if qualification_dossier_path is not None:
         qualification_dossier = read_powered_qualification_dossier(
             qualification_dossier_path
@@ -2086,6 +2100,72 @@ def build_synthetic_infill_plan(
             qualification_dossier_path,
             kind=POWERED_QUALIFICATION_DOSSIER_ARTIFACT_KIND,
         )
+        qualification_evaluation_ref = qualification_dossier.input_artifacts[
+            "evaluation"
+        ]
+        evaluation = read_proposal_portfolio_evaluation(
+            qualification_evaluation_ref.path
+        )
+        if (
+            evaluation.evaluation_id != qualification_dossier.evaluation_id
+            or evaluation.registry_id != proposal_registry.registry_id
+            or evaluation.corpus_id != qualification_dossier.corpus_id
+            or evaluation.campaign_id != qualification_dossier.campaign_id
+        ):
+            raise ReconstructionPlanCompatibilityError(
+                "proposal evaluation differs from powered qualification"
+            )
+        evidence_by_engine = {
+            item.engine_id: item for item in evaluation.engine_evidence
+        }
+        for engine_id in selected_engine_ids:
+            descriptor = proposal_registry.descriptor(engine_id)
+            model_refs = proposal_evaluation_engine_artifacts(
+                evaluation, engine_id
+            )
+            fit_ref = model_refs.get("fit")
+            if descriptor.fit_schema_versions:
+                if fit_ref is None:
+                    raise ReconstructionPlanCompatibilityError(
+                        f"selected engine lacks retained fit: {engine_id}"
+                    )
+                fit = read_proposal_engine_fit_artifact(fit_ref)
+                evidence_item = evidence_by_engine.get(engine_id)
+                if (
+                    fit.config_id != proposal_configs[engine_id].config_id
+                    or fit.schema_version not in descriptor.fit_schema_versions
+                    or fit_ref.metadata.get("status") != "fitted"
+                    or evidence_item is None
+                    or fit.fit_id not in evidence_item.fit_ids
+                ):
+                    raise ReconstructionPlanCompatibilityError(
+                        f"selected engine fit is not exact promoted evidence: "
+                        f"{engine_id}"
+                    )
+            checkpoint_ref = model_refs.get("checkpoint")
+            if descriptor.checkpoint_schema_versions:
+                if checkpoint_ref is None:
+                    raise ReconstructionPlanCompatibilityError(
+                        f"selected engine lacks retained checkpoint: {engine_id}"
+                    )
+                verify_artifact_ref(checkpoint_ref)
+                evidence_item = evidence_by_engine.get(engine_id)
+                if (
+                    checkpoint_ref.metadata.get("config_id")
+                    != proposal_configs[engine_id].config_id
+                    or checkpoint_ref.metadata.get("schema_version")
+                    not in descriptor.checkpoint_schema_versions
+                    or evidence_item is None
+                    or checkpoint_ref.metadata.get("checkpoint_id")
+                    not in evidence_item.checkpoint_ids
+                ):
+                    raise ReconstructionPlanCompatibilityError(
+                        "selected engine checkpoint differs from promoted "
+                        f"evidence: {engine_id}"
+                    )
+            for ref in model_refs.values():
+                verify_artifact_ref(ref)
+            proposal_model_refs[engine_id] = model_refs
     elif any(
         campaign.corpus_id != resolved.benchmark_corpus.corpus_id
         for campaign in proposal_campaigns
@@ -2111,6 +2191,11 @@ def build_synthetic_infill_plan(
             evidence_refs=(
                 *proposal_evaluation_refs,
                 *(
+                    (qualification_evaluation_ref,)
+                    if qualification_evaluation_ref is not None
+                    else ()
+                ),
+                *(
                     (qualification_ref,)
                     if qualification_ref is not None
                     else ()
@@ -2125,7 +2210,22 @@ def build_synthetic_infill_plan(
                     if descriptor.engine_id == EMPIRICAL_MOTIF_GENERATOR_ID
                     else ()
                 ),
+                *(
+                    tuple(
+                        ref
+                        for role, ref in proposal_model_refs.get(
+                            descriptor.engine_id, {}
+                        ).items()
+                        if role == "training_dataset"
+                    )
+                ),
             ),
+            fit_ref=proposal_model_refs.get(descriptor.engine_id, {}).get(
+                "fit"
+            ),
+            checkpoint_ref=proposal_model_refs.get(
+                descriptor.engine_id, {}
+            ).get("checkpoint"),
         )
         for descriptor in (
             proposal_registry.descriptor(engine_id)
@@ -2238,6 +2338,20 @@ def build_synthetic_infill_plan(
         **{
             config.config_id: proposal_config_refs[engine_id].sha256
             for engine_id, config in proposal_configs.items()
+        },
+        **{
+            str(
+                ref.metadata.get(
+                    {
+                        "fit": "fit_id",
+                        "checkpoint": "checkpoint_id",
+                        "training_dataset": "dataset_id",
+                    }[role],
+                    ref.sha256,
+                )
+            ): ref.sha256
+            for refs in proposal_model_refs.values()
+            for role, ref in refs.items()
         },
         information_policy.policy_id: _contract_sha256(information_policy),
         selected_generator.config_id: _contract_sha256(selected_generator),
@@ -2425,9 +2539,18 @@ def build_synthetic_infill_plan(
             f"proposal_engine_evidence_{index:02d}": ref
             for index, ref in enumerate(proposal_evaluation_refs)
         },
+        **{
+            f"proposal_engine_{role}_{index:02d}": ref
+            for index, (engine_id, refs) in enumerate(
+                sorted(proposal_model_refs.items())
+            )
+            for role, ref in sorted(refs.items())
+        },
     }
     if qualification_ref is not None:
         graph["powered_qualification_dossier"] = qualification_ref
+    if qualification_evaluation_ref is not None:
+        graph["proposal_portfolio_evaluation"] = qualification_evaluation_ref
     if broker_ref is not None:
         graph["broker_delivery"] = broker_ref
     execution_manifest = ReconstructionPlanExecutionManifestV1(
@@ -2708,6 +2831,67 @@ def validate_synthetic_infill_plan_for_execution(
                 raise ReconstructionPlanCompatibilityError(
                     "proposal engine dataset binding differs"
                 )
+            evidence_items = tuple(
+                item
+                for item in portfolio.evidence
+                if item.engine_id == binding.engine_id
+                and binding.config_id in item.config_ids
+                and item.promotion_eligible
+                and not item.provisional
+            )
+            promoted_fit_ids = {
+                fit_id for item in evidence_items for fit_id in item.fit_ids
+            }
+            if (
+                binding.engine_id in portfolio.selected_engine_ids
+                and descriptor.fit_schema_versions
+            ):
+                if binding.fit_ref is None:
+                    raise ReconstructionPlanCompatibilityError(
+                        "selected proposal engine lacks its exact fit"
+                    )
+                fit = read_proposal_engine_fit_artifact(binding.fit_ref)
+                if (
+                    fit.config_id != binding.config_id
+                    or fit.schema_version not in descriptor.fit_schema_versions
+                    or fit.fit_id not in promoted_fit_ids
+                    or binding.fit_ref.metadata.get("engine_id")
+                    != binding.engine_id
+                    or binding.fit_ref.metadata.get("status") != "fitted"
+                ):
+                    raise ReconstructionPlanCompatibilityError(
+                        "proposal engine fit differs from promoted evidence"
+                    )
+            promoted_checkpoint_ids = {
+                checkpoint_id
+                for item in evidence_items
+                for checkpoint_id in item.checkpoint_ids
+            }
+            if (
+                binding.engine_id in portfolio.selected_engine_ids
+                and descriptor.checkpoint_schema_versions
+            ):
+                if binding.checkpoint_ref is None:
+                    raise ReconstructionPlanCompatibilityError(
+                        "selected proposal engine lacks its exact checkpoint"
+                    )
+                verify_artifact_ref(binding.checkpoint_ref)
+                checkpoint_payload = _read_content_addressed_json(
+                    binding.checkpoint_ref.path,
+                    "proposal-engine-checkpoint",
+                )
+                if (
+                    checkpoint_payload.get("schema_version")
+                    not in descriptor.checkpoint_schema_versions
+                    or checkpoint_payload.get("config_id") != binding.config_id
+                    or checkpoint_payload.get("checkpoint_id")
+                    not in promoted_checkpoint_ids
+                    or binding.checkpoint_ref.metadata.get("engine_id")
+                    != binding.engine_id
+                ):
+                    raise ReconstructionPlanCompatibilityError(
+                        "proposal checkpoint differs from promoted evidence"
+                    )
             required_refs = (
                 binding.config_ref,
                 binding.dataset_ref,
@@ -2878,6 +3062,7 @@ def _resolve_plan_inputs(
     motif_qualification_path: str | Path,
     motif_leakage_audit_path: str | Path,
     symbols: tuple[str, ...],
+    require_motif_promotion: bool,
 ) -> _ResolvedPlanInputs:
     """Resolve qualified inputs once per unchanged stat-identity set."""
     identities = tuple(
@@ -2894,13 +3079,16 @@ def _resolve_plan_inputs(
             motif_leakage_audit_path,
         )
     )
-    return _resolve_plan_inputs_for_identity(identities, symbols)
+    return _resolve_plan_inputs_for_identity(
+        identities, symbols, require_motif_promotion
+    )
 
 
 @lru_cache(maxsize=4)
 def _resolve_plan_inputs_for_identity(
     identities: tuple[tuple[str, int, int, int, int, int], ...],
     symbols: tuple[str, ...],
+    require_motif_promotion: bool,
 ) -> _ResolvedPlanInputs:
     paths = tuple(item[0] for item in identities)
     return _resolve_plan_inputs_uncached(
@@ -2914,6 +3102,7 @@ def _resolve_plan_inputs_for_identity(
         motif_qualification_path=paths[7],
         motif_leakage_audit_path=paths[8],
         symbols=symbols,
+        require_motif_promotion=require_motif_promotion,
     )
 
 
@@ -2929,6 +3118,7 @@ def _resolve_plan_inputs_uncached(
     motif_qualification_path: str | Path,
     motif_leakage_audit_path: str | Path,
     symbols: tuple[str, ...],
+    require_motif_promotion: bool,
 ) -> _ResolvedPlanInputs:
     feed_ref = artifact_ref_for_file(
         feed_epoch_definition_path, kind="feed_epoch_definition_v2"
@@ -3059,15 +3249,21 @@ def _resolve_plan_inputs_uncached(
     )
     campaign = _mapping(qualification.get("campaign"))
     campaign_gate = _mapping(campaign.get("campaign_gate_decision"))
+    real_window_contracts = _mapping(qualification.get("real_window_contracts"))
     if (
         qualification.get("library_id") != motif_manifest.get("library_id")
-        or qualification.get("candidate_promotion_eligible") is not True
+        or (
+            require_motif_promotion
+            and qualification.get("candidate_promotion_eligible") is not True
+        )
         or qualification.get("candidate_provisional") is not False
         or qualification.get("frozen_gate_policy_commit")
         != PREDECLARED_GATE_COMMIT
         or campaign.get("corpus_id") != benchmark.corpus_id
         or campaign.get("source_replay_verified") is not True
         or campaign_gate.get("promotion_eligible") is not True
+        or not real_window_contracts
+        or not all(value is True for value in real_window_contracts.values())
     ):
         raise ReconstructionPlanCompatibilityError(
             "modern reference motif qualification is missing or stale"
@@ -3895,9 +4091,17 @@ def _stage_commands(
                     "proposal_engine_registry",
                     "proposal_engine_portfolio",
                     "proposal_dataset_resolution",
+                    "proposal_portfolio_evaluation",
+                    "powered_qualification_dossier",
                 }
                 or name.startswith(
-                    ("proposal_engine_config_", "proposal_engine_evidence_")
+                    (
+                        "proposal_engine_config_",
+                        "proposal_engine_evidence_",
+                        "proposal_engine_fit_",
+                        "proposal_engine_checkpoint_",
+                        "proposal_engine_training_dataset_",
+                    )
                 )
             ),
         ),

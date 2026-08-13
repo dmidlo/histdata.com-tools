@@ -1852,15 +1852,32 @@ def _training_evaluation_pair(
 def _default_module_paths() -> dict[str, Path]:
     root = Path(__file__).resolve().parent
     return {
+        "histdatacom.datasets.adapters": root / "datasets" / "adapters.py",
         "histdatacom.datasets.catalog": root / "datasets" / "catalog.py",
         "histdatacom.datasets.contracts": root / "datasets" / "contracts.py",
+        "histdatacom.datasets.projection": root / "datasets" / "projection.py",
+        "histdatacom.reconstruction": root / "reconstruction.py",
         "histdatacom.reconstruction_experiment": Path(__file__).resolve(),
-        "histdatacom.synthetic.reconstruction_plan": (
-            root / "synthetic" / "reconstruction_plan.py"
+        "histdatacom.reconstruction_schema": root / "reconstruction_schema.py",
+        "histdatacom.synthetic.benchmark_corpus": (
+            root / "synthetic" / "benchmark_corpus.py"
+        ),
+        "histdatacom.synthetic.marked_hawkes": (
+            root / "synthetic" / "marked_hawkes.py"
         ),
         "histdatacom.synthetic.proposal_engines": (
             root / "synthetic" / "proposal_engines.py"
         ),
+        "histdatacom.synthetic.qualification": (
+            root / "synthetic" / "qualification.py"
+        ),
+        "histdatacom.synthetic.reconstruction_handlers": (
+            root / "synthetic" / "reconstruction_handlers.py"
+        ),
+        "histdatacom.synthetic.reconstruction_plan": (
+            root / "synthetic" / "reconstruction_plan.py"
+        ),
+        "histdatacom.synthetic.streaming": root / "synthetic" / "streaming.py",
     }
 
 

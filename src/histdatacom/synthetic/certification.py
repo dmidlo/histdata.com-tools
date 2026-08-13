@@ -678,12 +678,14 @@ class ReconstructionCertificationPolicyV1:
 
 @dataclass(frozen=True, slots=True)
 class ReconstructionCertificationPolicyV2:
-    """Modern-reference v2.1.0 scope without broker-specific claims.
+    """Versioned modern-reference scope without broker-specific claims.
 
     Version one remains replayable with its mandatory broker fingerprint.  This
     version is intentionally a separate contract because removing that field or
     changing required evidence in-place would invalidate the meaning of already
-    published V1 policy identities.
+    published V1 policy identities.  The product version remains part of every
+    V2 identity, so embedded policies from earlier releases remain replayable
+    while the factory can predeclare the current release train.
     """
 
     product_version: str
@@ -790,7 +792,9 @@ class ReconstructionCertificationPolicyV2:
             "max_payload_bytes": self.max_payload_bytes,
             "coverage_policy": "common-supported-period-only",
             "promotion_policy": "coverage-once-at-dev-to-main-boundary",
-            "broker_adaptation": "excluded-from-v2.1.0-certification",
+            "broker_adaptation": (
+                f"excluded-from-v{self.product_version}-certification"
+            ),
         }
 
     def to_dict(self) -> dict[str, JSONValue]:
@@ -808,7 +812,11 @@ class ReconstructionCertificationPolicyV2:
         for name, expected in (
             ("coverage_policy", "common-supported-period-only"),
             ("promotion_policy", "coverage-once-at-dev-to-main-boundary"),
-            ("broker_adaptation", "excluded-from-v2.1.0-certification"),
+            (
+                "broker_adaptation",
+                "excluded-from-v"
+                f"{str(data.get('product_version', ''))}-certification",
+            ),
         ):
             _require_derived(data, name, expected)
         return cls(
@@ -1626,12 +1634,13 @@ def modern_reference_triangle_certification_policy(
     storage_budget_bytes: int,
     candidate_amplification_budget: float,
 ) -> ReconstructionCertificationPolicyV2:
-    """Return the complete broker-neutral v2.1.0 certification policy.
+    """Return the complete broker-neutral v2.4.0 certification policy.
 
-    The policy maps every #449 source-readiness, scientific-integrity,
-    product/operations, and release-discipline seam to content-bound evidence.
-    Broker capture, fingerprints, clocks, and transfer checks are deliberately
-    absent because they are separately qualified optional extensions.
+    The policy extends the retained #449 vertical-slice evidence with #491's
+    qualified proposal portfolio, distinct information-mode audits, coherent
+    diagnostics, product/operations, and release-discipline evidence. Broker
+    capture, fingerprints, clocks, and transfer checks are deliberately absent
+    because they are separately qualified optional extensions.
     """
     requirements = (
         _requirement(
@@ -1707,6 +1716,14 @@ def modern_reference_triangle_certification_policy(
             "No ex-post or ex-ante claim lacks a point-in-time audit.",
         ),
         _requirement(
+            CertificationGate.INFORMATION_SAFETY,
+            "information_modes_audited_separately",
+            CertificationComparator.TRUE,
+            True,
+            ("information-audit-report",),
+            "Ex-post reconstruction and ex-ante simulation have distinct passing audits.",
+        ),
+        _requirement(
             CertificationGate.REVERSE_DEGRADATION,
             "benchmark_corpus_valid",
             CertificationComparator.TRUE,
@@ -1748,11 +1765,11 @@ def modern_reference_triangle_certification_policy(
         ),
         _requirement(
             CertificationGate.CONDITIONED_SCORECARDS,
-            "motif_artifact_valid",
+            "qualified_portfolio_artifact_valid",
             CertificationComparator.TRUE,
             True,
-            ("motif-qualification",),
-            "The selected empirical motif artifact passes split, leakage, and support checks.",
+            ("powered-qualification-dossier",),
+            "Every selected engine and frozen portfolio weight comes from the powered qualification dossier.",
         ),
         _requirement(
             CertificationGate.CONDITIONED_SCORECARDS,
@@ -1990,6 +2007,14 @@ def modern_reference_triangle_certification_policy(
             "The machine-readable evidence manifest is published.",
         ),
         _requirement(
+            CertificationGate.DOSSIER_PUBLICATION,
+            "diagnostic_publication_valid",
+            CertificationComparator.TRUE,
+            True,
+            ("diagnostic-publication-manifest",),
+            "All twelve diagnostic families are published from this campaign's verified evidence graph.",
+        ),
+        _requirement(
             CertificationGate.REPOSITORY_GATES,
             "declared_test_dependencies_installed",
             CertificationComparator.TRUE,
@@ -2031,7 +2056,7 @@ def modern_reference_triangle_certification_policy(
         ),
     )
     return ReconstructionCertificationPolicyV2(
-        product_version="2.1.0",
+        product_version="2.4.0",
         symbols=EURUSD_TRIANGLE_SYMBOLS,
         common_start_period=EURUSD_TRIANGLE_COMMON_START_PERIOD,
         common_end_period=common_end_period,

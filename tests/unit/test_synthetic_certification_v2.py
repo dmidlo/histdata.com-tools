@@ -122,7 +122,7 @@ def _dossier(
 
 
 def test_policy_covers_all_live_issue_seams_without_broker_evidence() -> None:
-    """V2 binds the current #449 scope and leaves V1 semantics untouched."""
+    """V2 binds the complete #491 scope and leaves old identities readable."""
     policy = _policy()
     checks = {item.check_id for item in policy.requirements}
     kinds = {
@@ -133,6 +133,7 @@ def test_policy_covers_all_live_issue_seams_without_broker_evidence() -> None:
 
     assert policy.delivery_mode == MODERN_REFERENCE_DELIVERY_MODE
     assert policy.delivery_claim == MODERN_REFERENCE_DELIVERY_CLAIM
+    assert policy.product_version == "2.4.0"
     assert all("broker" not in value for value in checks | kinds)
     assert {
         "source_inventory_reconciled",
@@ -141,7 +142,9 @@ def test_policy_covers_all_live_issue_seams_without_broker_evidence() -> None:
         "feed_epoch_artifact_valid",
         "observation_operator_valid",
         "benchmark_corpus_valid",
-        "motif_artifact_valid",
+        "qualified_portfolio_artifact_valid",
+        "information_modes_audited_separately",
+        "diagnostic_publication_valid",
         "representative_window_class_missing_count",
         "substantial_multi_period_run_passed",
         "cancellation_publishable_partial_count",
@@ -150,9 +153,25 @@ def test_policy_covers_all_live_issue_seams_without_broker_evidence() -> None:
         "public_cli_api_evidence_chain_passed",
         "declared_test_dependencies_installed",
     }.issubset(checks)
+    assert "motif-qualification" not in kinds
+    assert "powered-qualification-dossier" in kinds
+    assert "diagnostic-publication-manifest" in kinds
     assert (
         ReconstructionCertificationPolicyV2.from_dict(policy.to_dict())
         == policy
+    )
+
+
+def test_embedded_v2_1_policy_remains_replayable() -> None:
+    """The derived broker boundary follows the embedded product version."""
+    current = _policy()
+    legacy = replace(current, product_version="2.1.0", policy_id="")
+
+    assert legacy.to_dict()["broker_adaptation"] == (
+        "excluded-from-v2.1.0-certification"
+    )
+    assert ReconstructionCertificationPolicyV2.from_dict(legacy.to_dict()) == (
+        legacy
     )
 
 
