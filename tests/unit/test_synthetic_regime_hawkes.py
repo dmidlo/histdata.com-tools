@@ -862,11 +862,16 @@ def test_generation_memory_preflight_refuses_without_partial_output() -> None:
     assert not result.event_lineage
 
 
-def test_generation_enforces_aggregate_synchronized_bin_limit() -> None:
+def test_generation_enforces_aggregate_synchronized_bin_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def two_events_per_symbol(*_args: object) -> tuple[int, int]:
+        return 2, 1
+
+    monkeypatch.setattr(regime_module, "_poisson", two_events_per_symbol)
     base = default_regime_hawkes_configs()[1]
     config = replace(
         base,
-        base_seed=452_038,
         limits=replace(
             base.limits,
             max_generated_events_per_bin=3,
