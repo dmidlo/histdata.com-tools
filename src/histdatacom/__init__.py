@@ -50,7 +50,7 @@ __all__ = [
 ]
 
 
-__version__ = "2.3.0"
+__version__ = "2.4.0"
 __author__ = "David Midlo"
 
 _RECONSTRUCTION_EXPORTS = frozenset(
