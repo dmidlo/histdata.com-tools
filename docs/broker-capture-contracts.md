@@ -1,5 +1,10 @@
 # Live broker delivery capture contracts
 
+> **Later milestone:** these provider-neutral research contracts are not an
+> executable v2.4 data source. Current reconstruction is qualified only for
+> HistData.com ASCII/T caches. No OANDA or other live broker adapter is
+> selected, and broker-specific work remains blocked on feed capability.
+
 The `histdatacom.broker_capture` domain records how a broker feed was delivered
 to one collector. It is measurement evidence for a later broker-delivery
 fingerprint; it is not historical reconstruction, synthetic output, a claim

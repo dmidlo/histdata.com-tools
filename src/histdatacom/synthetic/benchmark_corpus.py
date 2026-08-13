@@ -21,14 +21,32 @@ from collections import Counter, defaultdict
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, cast
 
 from histdatacom.data_analytics.feed_epochs_v2 import (
+    FeedEpochDefinitionV2,
     read_active_time_feed_epoch_definition,
+)
+from histdatacom.histdata_ascii import (
+    MAX_HISTDATA_SOURCE_ORDER_REGRESSION_MS,
+    MAX_HISTDATA_SOURCE_ORDER_REGRESSIONS_PER_PARTITION,
 )
 from histdatacom.resource_usage import peak_rss_bytes
 from histdatacom.runtime_contracts import ArtifactRef, JSONScalar, JSONValue
+from histdatacom.synthetic.add_thin import (
+    AddThinConfigV1,
+    AddThinFitResultV1,
+    AddThinFitStatus,
+    AddThinGenerationStatus,
+    AddThinWindowContextV1,
+    FittedAddThinBenchmarkGeneratorV1,
+    build_add_thin_benchmark_candidate,
+    build_add_thin_protected_window,
+    build_fitted_add_thin_generator,
+    fit_add_thin_challenger,
+)
 from histdatacom.synthetic.benchmark import (
     BenchmarkCandidateKind,
     BenchmarkCandidateV1,
@@ -49,13 +67,37 @@ from histdatacom.synthetic.benchmark_gates import (
     load_default_benchmark_promotion_gate_policy,
 )
 from histdatacom.synthetic.contracts import canonical_contract_json
+from histdatacom.synthetic.event_clock import (
+    EventClockCalibrationWindowV1,
+    EventClockConfigurationV1,
+    EventClockConfigV1,
+    EventClockFamily,
+    EventClockFitResultV1,
+    EventClockFitStatus,
+    FittedEventClockBenchmarkGeneratorV1,
+    build_event_clock_benchmark_candidate,
+    build_fitted_event_clock_generator,
+    fit_event_clock_challenger,
+)
 from histdatacom.synthetic.generation import (
     EMPIRICAL_MOTIF_GENERATOR_ID,
     EmpiricalMotifBenchmarkGeneratorV1,
     EmpiricalMotifGeneratorConfigV1,
 )
 from histdatacom.synthetic.information import InformationMode
+from histdatacom.synthetic.marked_hawkes import (
+    FittedMarkedHawkesBenchmarkGeneratorV1,
+    HawkesExcitationStructure,
+    MarkedHawkesConfigV1,
+    MarkedHawkesFitResultV1,
+    MarkedHawkesFitStatus,
+    build_fitted_marked_hawkes_generator,
+    build_marked_hawkes_benchmark_candidate,
+    fit_marked_hawkes_challenger,
+)
 from histdatacom.synthetic.motifs import (
+    MAX_REFERENCE_MOTIF_FRAGMENTS,
+    MAX_REFERENCE_MOTIF_SOURCE_WINDOWS,
     ReferenceMotifConditionV1,
     ReferenceMotifIndexConfigV1,
     ReferenceMotifIndexV1,
@@ -65,10 +107,46 @@ from histdatacom.synthetic.motifs import (
     ReferenceMotifSplitV1,
     build_reference_motif_index,
     reference_motif_condition_from_quotes,
+    reference_session_for_ns,
+)
+from histdatacom.synthetic.neural_tpp import (
+    FittedNeuralTPPBenchmarkGeneratorV1,
+    NeuralTPPConfigV1,
+    NeuralTPPFitResultV1,
+    NeuralTPPFitStatus,
+    NeuralTPPWindowContextV1,
+    build_fitted_neural_tpp_generator,
+    build_neural_tpp_benchmark_candidate,
+    build_neural_tpp_protected_window,
+    fit_neural_tpp_challenger,
 )
 from histdatacom.synthetic.observation import ObservationOperatorV1
 from histdatacom.synthetic.observation_calibration import (
     read_observation_calibration_campaign,
+)
+from histdatacom.synthetic.regime_hawkes import (
+    FittedRegimeHawkesBenchmarkGeneratorV1,
+    RegimeHawkesConfigV1,
+    RegimeHawkesFitResultV1,
+    RegimeHawkesFitStatus,
+    RegimeHawkesModulation,
+    RegimeHawkesWindowContextV1,
+    build_fitted_regime_hawkes_generator,
+    build_regime_hawkes_benchmark_candidate,
+    fit_regime_hawkes_challenger,
+)
+from histdatacom.synthetic.schrodinger_bridge import (
+    FittedSchrodingerBridgeBenchmarkGeneratorV1,
+    SchrodingerBridgeBrokerTargetV1,
+    SchrodingerBridgeConfigV1,
+    SchrodingerBridgeFitResultV1,
+    SchrodingerBridgeFitStatus,
+    SchrodingerBridgeGenerationStatus,
+    SchrodingerBridgeWindowContextV1,
+    build_fitted_schrodinger_bridge_generator,
+    build_schrodinger_bridge_benchmark_candidate,
+    build_schrodinger_bridge_protected_window,
+    fit_schrodinger_bridge_challenger,
 )
 from histdatacom.synthetic.streaming import (
     ReconstructionRunV1,
@@ -94,24 +172,47 @@ BENCHMARK_CANDIDATE_REPORT_SCHEMA_VERSION = (
 REVERSE_DEGRADATION_CAMPAIGN_SCHEMA_VERSION = (
     "histdatacom.reverse-degradation-campaign.v1"
 )
+BENCHMARK_WINDOW_METRIC_OBSERVATION_SCHEMA_VERSION = (
+    "histdatacom.reverse-degradation-window-metric-observation.v1"
+)
+BENCHMARK_WINDOW_METRIC_TRACE_SCHEMA_VERSION = (
+    "histdatacom.reverse-degradation-window-metric-trace.v1"
+)
 
 PREDECLARED_GATE_COMMIT = "0caec1480a957528ebefdff062e13012ea11e84d"
 DEFAULT_BENCHMARK_SYMBOLS = ("EURGBP", "EURUSD", "GBPUSD")
 DEFAULT_BENCHMARK_PERIODS = {
-    "calibration": "201001",
-    "validation": "202401",
-    "final_holdout": "202510",
+    "calibration": tuple(f"2024{month:02d}" for month in range(1, 7)),
+    "validation": tuple(f"2024{month:02d}" for month in range(7, 13)),
+    "final_holdout": tuple(f"2025{month:02d}" for month in range(7, 13)),
 }
 DEFAULT_SESSION_HOURS = (0, 8, 14)
 DEFAULT_MAX_ARTIFACT_BYTES = 64 * 1024 * 1024
 MAX_BENCHMARK_SOURCE_BYTES = 2 * 1024**3
 MAX_BENCHMARK_WINDOWS = 96
 MAX_BENCHMARK_EVENTS_PER_SYMBOL = 4096
-MAX_BENCHMARK_CANDIDATES = 16
+MAX_BENCHMARK_CANDIDATES = 32
 MAX_BENCHMARK_METRICS = 256
+MAX_BENCHMARK_TRACE_OBSERVATIONS = 32_768
+MAX_BENCHMARK_TRACE_METRICS = 96
 NANOSECONDS_PER_MILLISECOND = 1_000_000
 NANOSECONDS_PER_SECOND = 1_000_000_000
 PIP = 0.0001
+BENCHMARK_MARK_STATES = (
+    "unchanged",
+    "update_ask_only",
+    "update_bid_only",
+    "update_joint",
+)
+_CANONICAL_UPDATE_STATE = {
+    "unchanged": "unchanged",
+    "ask_only": "update_ask_only",
+    "update_ask_only": "update_ask_only",
+    "bid_only": "update_bid_only",
+    "update_bid_only": "update_bid_only",
+    "joint": "update_joint",
+    "update_joint": "update_joint",
+}
 _PERIOD = re.compile(r"^[0-9]{6}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _COMMIT = re.compile(r"^[0-9a-f]{40}$")
@@ -122,17 +223,19 @@ class ReverseDegradationCorpusProfileV1:
     """Bounded selection, replay, and execution policy."""
 
     symbols: tuple[str, ...] = DEFAULT_BENCHMARK_SYMBOLS
-    split_periods: Mapping[str, str] = field(
+    split_periods: Mapping[str, str | tuple[str, ...]] = field(
         default_factory=lambda: dict(DEFAULT_BENCHMARK_PERIODS)
     )
-    synchronized_windows_per_split: int = 6
+    synchronized_windows_per_split: int = 32
     window_duration_seconds: int = 600
     minimum_events_per_symbol: int = 64
     max_events_per_symbol: int = 256
     neighbor_guard_seconds: int = 1800
-    ensemble_member_ids: tuple[str, ...] = ("member-01", "member-02")
-    max_source_bytes: int = MAX_BENCHMARK_SOURCE_BYTES
-    max_runtime_seconds: float = 900.0
+    ensemble_member_ids: tuple[str, ...] = tuple(
+        f"member-{index:02d}" for index in range(1, 9)
+    )
+    max_source_bytes: int = 4 * 1024**3
+    max_runtime_seconds: float = 1800.0
     max_peak_memory_bytes: int = 2 * 1024**3
     max_artifact_bytes: int = DEFAULT_MAX_ARTIFACT_BYTES
     profile_id: str = ""
@@ -150,20 +253,32 @@ class ReverseDegradationCorpusProfileV1:
                 "benchmark corpus requires the EUR/GBP/USD triangle"
             )
         object.__setattr__(self, "symbols", symbols)
-        periods = {
-            str(key): str(value) for key, value in self.split_periods.items()
-        }
+        periods: dict[str, tuple[str, ...]] = {}
+        for raw_key, raw_value in self.split_periods.items():
+            key = str(raw_key)
+            values = (
+                (raw_value,)
+                if isinstance(raw_value, str)
+                else tuple(str(item) for item in raw_value)
+            )
+            if not values or len(values) != len(set(values)):
+                raise ValueError(
+                    "benchmark split periods must be nonempty and unique"
+                )
+            periods[key] = tuple(sorted(values))
         if set(periods) != set(DEFAULT_BENCHMARK_PERIODS):
             raise ValueError(
                 "benchmark split periods must cover all blocked roles"
             )
-        if any(not _PERIOD.fullmatch(value) for value in periods.values()):
-            raise ValueError("benchmark split periods must use YYYYMM")
-        if (
-            not periods["calibration"]
-            < periods["validation"]
-            < periods["final_holdout"]
+        if any(
+            not _PERIOD.fullmatch(value)
+            for values in periods.values()
+            for value in values
         ):
+            raise ValueError("benchmark split periods must use YYYYMM")
+        if not max(periods["calibration"]) < min(
+            periods["validation"]
+        ) or not max(periods["validation"]) < min(periods["final_holdout"]):
             raise ValueError("benchmark split periods must be chronological")
         object.__setattr__(self, "split_periods", dict(sorted(periods.items())))
         _bounded_int(
@@ -220,7 +335,10 @@ class ReverseDegradationCorpusProfileV1:
         return {
             "schema_version": self.schema_version,
             "symbols": list(self.symbols),
-            "split_periods": dict(self.split_periods),
+            "split_periods": {
+                name: (values[0] if len(values) == 1 else list(values))
+                for name, values in self.split_periods.items()
+            },
             "synchronized_windows_per_split": self.synchronized_windows_per_split,
             "window_duration_seconds": self.window_duration_seconds,
             "minimum_events_per_symbol": self.minimum_events_per_symbol,
@@ -244,8 +362,12 @@ class ReverseDegradationCorpusProfileV1:
         return cls(
             symbols=_string_tuple(data.get("symbols")),
             split_periods={
-                str(k): str(v)
-                for k, v in _mapping(data.get("split_periods")).items()
+                str(key): (
+                    str(value)
+                    if isinstance(value, str)
+                    else tuple(str(item) for item in _sequence(value))
+                )
+                for key, value in _mapping(data.get("split_periods")).items()
             },
             synchronized_windows_per_split=_strict_int(
                 data.get("synchronized_windows_per_split"), "window count"
@@ -542,9 +664,9 @@ class ReverseDegradationBenchmarkCorpusV1:
         sources = tuple(
             sorted(self.sources, key=lambda item: (item.period, item.symbol))
         )
-        expected_source_count = len(self.profile.split_periods) * len(
-            self.profile.symbols
-        )
+        expected_source_count = sum(
+            len(values) for values in self.profile.split_periods.values()
+        ) * len(self.profile.symbols)
         if len(sources) != expected_source_count or len(
             {v.partition_id for v in sources}
         ) != len(sources):
@@ -1061,6 +1183,220 @@ class ReverseDegradationBenchmarkCampaignV1:
         return cls.from_dict(_json_mapping(text, DEFAULT_MAX_ARTIFACT_BYTES))
 
 
+@dataclass(frozen=True, slots=True)
+class BenchmarkWindowMetricObservationV1:
+    """One row-free reference/candidate feature comparison from a real run."""
+
+    candidate_id: str
+    method_name: str
+    role: str
+    split_kind: str
+    window_id: str
+    ensemble_member_id: str
+    reference_metrics: Mapping[str, float]
+    candidate_metrics: Mapping[str, float]
+    comparison_metrics: Mapping[str, float]
+    session: str | None = None
+    epoch_label: str | None = None
+    context_state: str | None = None
+    positioning_state: str | None = None
+    observation_id: str = ""
+    schema_version: str = BENCHMARK_WINDOW_METRIC_OBSERVATION_SCHEMA_VERSION
+
+    def __post_init__(self) -> None:
+        _require_schema_value(
+            self.schema_version,
+            BENCHMARK_WINDOW_METRIC_OBSERVATION_SCHEMA_VERSION,
+            "benchmark window metric observation",
+        )
+        for name in (
+            "candidate_id",
+            "method_name",
+            "window_id",
+            "ensemble_member_id",
+        ):
+            object.__setattr__(self, name, _required_text(getattr(self, name)))
+        if self.role not in {"baseline", "candidate", "negative_control"}:
+            raise ValueError("unsupported window metric observation role")
+        if self.split_kind not in {"validation", "final_holdout"}:
+            raise ValueError("window metric observation split is not protected")
+        reference = _trace_metric_mapping(
+            self.reference_metrics, "reference metric"
+        )
+        candidate = _trace_metric_mapping(
+            self.candidate_metrics, "candidate metric"
+        )
+        comparison = _trace_metric_mapping(
+            self.comparison_metrics, "comparison metric"
+        )
+        if set(reference) != set(candidate):
+            raise ValueError("reference/candidate feature names differ")
+        object.__setattr__(self, "reference_metrics", reference)
+        object.__setattr__(self, "candidate_metrics", candidate)
+        object.__setattr__(self, "comparison_metrics", comparison)
+        metadata = {
+            name: _optional_text(getattr(self, name))
+            for name in (
+                "session",
+                "epoch_label",
+                "context_state",
+                "positioning_state",
+            )
+        }
+        if any(value is not None for value in metadata.values()) and not all(
+            value is not None for value in metadata.values()
+        ):
+            raise ValueError(
+                "benchmark observation stratum metadata is incomplete"
+            )
+        for name, value in metadata.items():
+            object.__setattr__(self, name, value)
+        expected = _stable_id(
+            "benchmark-window-metric-observation", self.identity_payload()
+        )
+        supplied = _optional_text(self.observation_id)
+        if supplied is not None and supplied != expected:
+            raise ValueError("window metric observation identity differs")
+        object.__setattr__(self, "observation_id", expected)
+
+    def identity_payload(self) -> dict[str, JSONValue]:
+        payload: dict[str, JSONValue] = {
+            "schema_version": self.schema_version,
+            "candidate_id": self.candidate_id,
+            "method_name": self.method_name,
+            "role": self.role,
+            "split_kind": self.split_kind,
+            "window_id": self.window_id,
+            "ensemble_member_id": self.ensemble_member_id,
+            "reference_metrics": dict(self.reference_metrics),
+            "candidate_metrics": dict(self.candidate_metrics),
+            "comparison_metrics": dict(self.comparison_metrics),
+            "event_rows_embedded": False,
+        }
+        if self.session is not None:
+            payload.update(
+                {
+                    "session": self.session,
+                    "epoch_label": self.epoch_label,
+                    "context_state": self.context_state,
+                    "positioning_state": self.positioning_state,
+                }
+            )
+        return payload
+
+    def to_dict(self) -> dict[str, JSONValue]:
+        return {
+            **self.identity_payload(),
+            "observation_id": self.observation_id,
+        }
+
+    @classmethod
+    def from_dict(
+        cls, data: Mapping[str, Any]
+    ) -> BenchmarkWindowMetricObservationV1:
+        if data.get("event_rows_embedded") is not False:
+            raise ValueError("window metric observation embeds event rows")
+        return cls(
+            candidate_id=str(data.get("candidate_id", "")),
+            method_name=str(data.get("method_name", "")),
+            role=str(data.get("role", "")),
+            split_kind=str(data.get("split_kind", "")),
+            window_id=str(data.get("window_id", "")),
+            ensemble_member_id=str(data.get("ensemble_member_id", "")),
+            reference_metrics=cast(
+                Mapping[str, float], _mapping(data.get("reference_metrics"))
+            ),
+            candidate_metrics=cast(
+                Mapping[str, float], _mapping(data.get("candidate_metrics"))
+            ),
+            comparison_metrics=cast(
+                Mapping[str, float], _mapping(data.get("comparison_metrics"))
+            ),
+            session=_optional_text(data.get("session")),
+            epoch_label=_optional_text(data.get("epoch_label")),
+            context_state=_optional_text(data.get("context_state")),
+            positioning_state=_optional_text(data.get("positioning_state")),
+            observation_id=str(data.get("observation_id", "")),
+            schema_version=str(data.get("schema_version", "")),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class BenchmarkWindowMetricTraceV1:
+    """Bounded process-local metric projection from one benchmark campaign."""
+
+    corpus_id: str
+    campaign_id: str
+    observations: tuple[BenchmarkWindowMetricObservationV1, ...]
+    trace_id: str = ""
+    schema_version: str = BENCHMARK_WINDOW_METRIC_TRACE_SCHEMA_VERSION
+
+    def __post_init__(self) -> None:
+        _require_schema_value(
+            self.schema_version,
+            BENCHMARK_WINDOW_METRIC_TRACE_SCHEMA_VERSION,
+            "benchmark window metric trace",
+        )
+        object.__setattr__(self, "corpus_id", _required_text(self.corpus_id))
+        object.__setattr__(
+            self, "campaign_id", _required_text(self.campaign_id)
+        )
+        observations = tuple(
+            sorted(self.observations, key=lambda item: item.observation_id)
+        )
+        if (
+            not observations
+            or len(observations) > MAX_BENCHMARK_TRACE_OBSERVATIONS
+        ):
+            raise ValueError("benchmark metric trace size is invalid")
+        if len({item.observation_id for item in observations}) != len(
+            observations
+        ):
+            raise ValueError("benchmark metric trace observations duplicate")
+        object.__setattr__(self, "observations", observations)
+        expected = _stable_id("benchmark-window-metric-trace", self.payload())
+        supplied = _optional_text(self.trace_id)
+        if supplied is not None and supplied != expected:
+            raise ValueError("benchmark window metric trace identity differs")
+        object.__setattr__(self, "trace_id", expected)
+        if len(self.to_json().encode("utf-8")) > DEFAULT_MAX_ARTIFACT_BYTES:
+            raise ValueError("benchmark window metric trace exceeds bound")
+
+    def payload(self) -> dict[str, JSONValue]:
+        return {
+            "schema_version": self.schema_version,
+            "corpus_id": self.corpus_id,
+            "campaign_id": self.campaign_id,
+            "observations": [item.to_dict() for item in self.observations],
+            "event_rows_embedded": False,
+        }
+
+    def to_dict(self) -> dict[str, JSONValue]:
+        return {**self.payload(), "trace_id": self.trace_id}
+
+    def to_json(self) -> str:
+        return str(canonical_contract_json(self.to_dict()))
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> BenchmarkWindowMetricTraceV1:
+        if data.get("event_rows_embedded") is not False:
+            raise ValueError("benchmark window metric trace embeds event rows")
+        return cls(
+            corpus_id=str(data.get("corpus_id", "")),
+            campaign_id=str(data.get("campaign_id", "")),
+            observations=tuple(
+                BenchmarkWindowMetricObservationV1.from_dict(_mapping(item))
+                for item in _sequence(data.get("observations"))
+            ),
+            trace_id=str(data.get("trace_id", "")),
+            schema_version=str(data.get("schema_version", "")),
+        )
+
+    @classmethod
+    def from_json(cls, text: str) -> BenchmarkWindowMetricTraceV1:
+        return cls.from_dict(_json_mapping(text, DEFAULT_MAX_ARTIFACT_BYTES))
+
+
 def build_reverse_degradation_benchmark_corpus(
     source_root: str | Path,
     *,
@@ -1136,17 +1472,44 @@ def build_reverse_degradation_benchmark_corpus(
     source_by_axis = {(item.period, item.symbol): item for item in sources}
     windows: list[BenchmarkWindowPartitionV1] = []
     for split_kind in ("calibration", "validation", "final_holdout"):
-        period = selected.split_periods[split_kind]
-        candidates = _candidate_intervals(
-            period,
-            duration_seconds=selected.window_duration_seconds,
-            context_event_times=tuple(
-                event.event_time_ns
-                for event in context_corpus.timeline.events
-                if _period_for_ns(event.event_time_ns) == period
-            ),
+        periods = selected.split_periods[split_kind]
+        context_candidates_by_period: dict[
+            str, tuple[tuple[int, int, str], ...]
+        ] = {}
+        ordinary_candidates_by_period: dict[
+            str, tuple[tuple[int, int, str], ...]
+        ] = {}
+        for period in periods:
+            context_candidates, ordinary_candidates = _candidate_interval_pools(
+                period,
+                duration_seconds=selected.window_duration_seconds,
+                maximum_context_windows=MAX_BENCHMARK_WINDOWS,
+                context_event_times=tuple(
+                    event.event_time_ns
+                    for event in context_corpus.timeline.events
+                    if _period_for_ns(event.event_time_ns) == period
+                ),
+            )
+            context_candidates_by_period[period] = context_candidates
+            ordinary_candidates_by_period[period] = ordinary_candidates
+        context_candidates = _interleave_period_candidates(
+            context_candidates_by_period
         )
-        for start_ns, end_ns, session in candidates:
+        ordinary_candidates = _interleave_period_candidates(
+            ordinary_candidates_by_period
+        )
+        minimum_session_windows = min(
+            4, max(1, selected.synchronized_windows_per_split // 8)
+        )
+        selected_session_counts: Counter[str] = Counter()
+        selected_period_counts: Counter[str] = Counter()
+        selected_windows: list[BenchmarkWindowPartitionV1] = []
+
+        def try_candidate(
+            candidate: tuple[int, int, str],
+        ) -> BenchmarkWindowPartitionV1 | None:
+            start_ns, end_ns, session = candidate
+            period = _period_for_ns(start_ns)
             rows_by_symbol: dict[str, tuple[_TickRow, ...]] = {}
             for symbol in selected.symbols:
                 source = source_by_axis[(period, symbol)]
@@ -1160,14 +1523,14 @@ def build_reverse_degradation_benchmark_corpus(
                 len(values) < selected.minimum_events_per_symbol
                 for values in rows_by_symbol.values()
             ):
-                continue
+                return None
             assignment = definition.assign(
                 symbol="EURUSD",
                 timestamp_utc_ms=((start_ns + end_ns) // 2)
                 // NANOSECONDS_PER_MILLISECOND,
             )
             if assignment.assignment_kind not in {"epoch", "transition"}:
-                continue
+                return None
             context_query = query_market_context_corpus(
                 context_corpus,
                 start_ns=start_ns,
@@ -1196,46 +1559,94 @@ def build_reverse_degradation_benchmark_corpus(
                 )
                 and positioning_query.status is CftcPositioningQueryStatus.READY
             )
-            windows.append(
-                BenchmarkWindowPartitionV1(
-                    split_kind=split_kind,
-                    period=period,
-                    session=session,
-                    start_ns=start_ns,
-                    end_ns=end_ns,
-                    epoch_label=assignment.label,
-                    source_partition_ids=tuple(
-                        source_by_axis[(period, symbol)].partition_id
-                        for symbol in selected.symbols
-                    ),
-                    symbol_event_counts={
-                        symbol: len(values)
-                        for symbol, values in rows_by_symbol.items()
-                    },
-                    symbol_partition_sha256={
-                        symbol: _tick_rows_sha256(values)
-                        for symbol, values in rows_by_symbol.items()
-                    },
-                    event_state_counts=_tick_event_state_counts(rows_by_symbol),
-                    context_state=market_context_benchmark_event_state(
-                        context_query
-                    ),
-                    positioning_state=cftc_positioning_state_label(
-                        positioning_query
-                    ),
-                    context_supported=context_supported,
-                )
+            return BenchmarkWindowPartitionV1(
+                split_kind=split_kind,
+                period=period,
+                session=session,
+                start_ns=start_ns,
+                end_ns=end_ns,
+                epoch_label=assignment.label,
+                source_partition_ids=tuple(
+                    source_by_axis[(period, symbol)].partition_id
+                    for symbol in selected.symbols
+                ),
+                symbol_event_counts={
+                    symbol: len(values)
+                    for symbol, values in rows_by_symbol.items()
+                },
+                symbol_partition_sha256={
+                    symbol: _tick_rows_sha256(values)
+                    for symbol, values in rows_by_symbol.items()
+                },
+                event_state_counts=_tick_event_state_counts(rows_by_symbol),
+                context_state=market_context_benchmark_event_state(
+                    context_query
+                ),
+                positioning_state=cftc_positioning_state_label(
+                    positioning_query
+                ),
+                context_supported=context_supported,
             )
-            if (
-                sum(item.split_kind == split_kind for item in windows)
-                == selected.synchronized_windows_per_split
-            ):
+
+        for candidate in (*context_candidates, *ordinary_candidates):
+            if len(selected_windows) == selected.synchronized_windows_per_split:
                 break
-        actual = sum(item.split_kind == split_kind for item in windows)
+            start_ns, _end_ns, session = candidate
+            period = _period_for_ns(start_ns)
+            if candidate in ordinary_candidates:
+                missing_periods = {
+                    value
+                    for value in periods
+                    if selected_period_counts[value] == 0
+                }
+                missing_sessions = {
+                    value
+                    for value in ("asia", "london", "new_york")
+                    if selected_session_counts[value] < minimum_session_windows
+                }
+                if (missing_periods or missing_sessions) and (
+                    period not in missing_periods
+                    and session not in missing_sessions
+                ):
+                    continue
+            partition = try_candidate(candidate)
+            if partition is None:
+                continue
+            selected_windows.append(partition)
+            selected_session_counts[partition.session] += 1
+            selected_period_counts[partition.period] += 1
+        windows.extend(selected_windows)
+        actual = len(selected_windows)
         if actual != selected.synchronized_windows_per_split:
             raise ValueError(
                 f"only {actual} synchronized {split_kind} windows satisfy "
                 "the real-data event minimum"
+            )
+        if any(
+            selected_session_counts[session] < minimum_session_windows
+            for session in ("asia", "london", "new_york")
+        ):
+            raise ValueError(
+                f"{split_kind} synchronized windows lack minimum session support"
+            )
+        if set(selected_period_counts) != set(periods):
+            raise ValueError(
+                f"{split_kind} synchronized windows lack period coverage"
+            )
+        event_window_count = sum(
+            not item.context_state.startswith("market_context:none:")
+            for item in selected_windows
+        )
+        minimum_event_windows = (
+            24
+            if len(periods) > 1
+            and selected.synchronized_windows_per_split >= 30
+            else 1
+        )
+        if event_window_count < minimum_event_windows:
+            raise ValueError(
+                f"{split_kind} has only {event_window_count} independent "
+                f"event windows; {minimum_event_windows} are required"
             )
         _enforce_runtime(started, selected.max_runtime_seconds)
 
@@ -1387,7 +1798,9 @@ def _discover_source_partitions(
     root: Path, profile: ReverseDegradationCorpusProfileV1
 ) -> tuple[BenchmarkSourcePartitionV1, ...]:
     sources: list[BenchmarkSourcePartitionV1] = []
-    for period in profile.split_periods.values():
+    for period in sorted(
+        value for values in profile.split_periods.values() for value in values
+    ):
         year, month = int(period[:4]), int(period[4:])
         for symbol in profile.symbols:
             relative = Path(symbol.lower()) / str(year) / str(month) / ".data"
@@ -1413,8 +1826,36 @@ def _candidate_intervals(
     period: str,
     *,
     duration_seconds: int,
+    maximum_context_windows: int = 3,
     context_event_times: Sequence[int] = (),
 ) -> tuple[tuple[int, int, str], ...]:
+    """Return event-priority then ordinary candidates for one period."""
+    contexts, ordinary = _candidate_interval_pools(
+        period,
+        duration_seconds=duration_seconds,
+        maximum_context_windows=maximum_context_windows,
+        context_event_times=context_event_times,
+    )
+    return (*contexts, *ordinary)
+
+
+def _candidate_interval_pools(
+    period: str,
+    *,
+    duration_seconds: int,
+    maximum_context_windows: int = 3,
+    context_event_times: Sequence[int] = (),
+) -> tuple[
+    tuple[tuple[int, int, str], ...],
+    tuple[tuple[int, int, str], ...],
+]:
+    """Build disjoint event and ordinary candidate pools for one month."""
+    context_limit = _bounded_int(
+        maximum_context_windows,
+        "maximum context windows",
+        1,
+        MAX_BENCHMARK_WINDOWS,
+    )
     year, month = int(period[:4]), int(period[4:])
     names = {0: "asia", 8: "london", 14: "new_york"}
     ordinary: list[tuple[int, int, str]] = []
@@ -1432,46 +1873,84 @@ def _candidate_intervals(
                     names[hour],
                 )
             )
-    baseline = tuple(
-        next(value for value in ordinary if value[2] == session)
-        for session in ("asia", "london", "new_york")
-    )
-    contexts: list[tuple[int, int, str]] = []
+    sessions = ("asia", "london", "new_york")
+    contexts: dict[str, list[tuple[int, int, str]]] = {
+        session: [] for session in sessions
+    }
     for start_ns in sorted(set(context_event_times)):
         if _period_for_ns(start_ns) != period:
             continue
         end_ns = start_ns + duration_seconds * NANOSECONDS_PER_SECOND
-        candidate = (start_ns, end_ns, _session_for_ns(start_ns))
+        candidate = (start_ns, end_ns, reference_session_for_ns(start_ns))
         if any(
             left < end_ns and start_ns < right
-            for left, right, _ in (*baseline, *contexts)
+            for left, right, _ in (
+                item for values in contexts.values() for item in values
+            )
         ):
             continue
-        contexts.append(candidate)
-        if len(contexts) == 3:
+        contexts[candidate[2]].append(candidate)
+        if sum(len(values) for values in contexts.values()) == context_limit:
             break
-    used = {(start, end) for start, end, _ in (*baseline, *contexts)}
-    remainder = tuple(
-        value for value in ordinary if (value[0], value[1]) not in used
+    context_intervals = {
+        (start, end)
+        for start, end, _ in (
+            item for values in contexts.values() for item in values
+        )
+    }
+    ordinary_by_session = {
+        session: [
+            value
+            for value in ordinary
+            if value[2] == session
+            and not any(
+                left < value[1] and value[0] < right
+                for left, right in context_intervals
+            )
+        ]
+        for session in sessions
+    }
+    return (
+        _interleave_session_candidates(contexts),
+        _interleave_session_candidates(ordinary_by_session),
     )
-    return (*baseline, *contexts, *remainder)
+
+
+def _interleave_session_candidates(
+    values: Mapping[str, Sequence[tuple[int, int, str]]],
+) -> tuple[tuple[int, int, str], ...]:
+    """Round-robin sessions without treating repeated rows as evidence."""
+    sessions = ("asia", "london", "new_york")
+    result: list[tuple[int, int, str]] = []
+    maximum = max(
+        (len(values.get(session, ())) for session in sessions), default=0
+    )
+    for index in range(maximum):
+        for session in sessions:
+            selected = values.get(session, ())
+            if index < len(selected):
+                result.append(selected[index])
+    return tuple(result)
+
+
+def _interleave_period_candidates(
+    values: Mapping[str, Sequence[tuple[int, int, str]]],
+) -> tuple[tuple[int, int, str], ...]:
+    """Round-robin months so no single month exhausts a blocked split."""
+    periods = tuple(sorted(values))
+    result: list[tuple[int, int, str]] = []
+    maximum = max((len(values[period]) for period in periods), default=0)
+    for index in range(maximum):
+        for period in periods:
+            if index < len(values[period]):
+                result.append(values[period][index])
+    return tuple(result)
 
 
 def _period_for_ns(value: int) -> str:
     return datetime.fromtimestamp(
         value / NANOSECONDS_PER_SECOND, tz=timezone.utc
     ).strftime("%Y%m")
-
-
-def _session_for_ns(value: int) -> str:
-    hour = datetime.fromtimestamp(
-        value / NANOSECONDS_PER_SECOND, tz=timezone.utc
-    ).hour
-    if hour < 7:
-        return "asia"
-    if hour < 12:
-        return "london"
-    return "new_york"
 
 
 def _arrow_row_count(path: Path) -> int:
@@ -1490,8 +1969,18 @@ def _read_arrow_interval(
     pa, ipc = _pyarrow()
     start_ms = start_ns // NANOSECONDS_PER_MILLISECOND
     end_ms = (end_ns - 1) // NANOSECONDS_PER_MILLISECOND + 1
-    rows: list[_TickRow] = []
+    rows: list[tuple[int, int, _TickRow]] = []
     row_offset = 0
+    stat = path.stat()
+    regression_bound_ms = _arrow_timestamp_regression_bound(
+        str(path.resolve()),
+        stat.st_size,
+        stat.st_mtime_ns,
+        stat.st_dev,
+        stat.st_ino,
+        stat.st_ctime_ns,
+    )
+    safe_stop_ms = end_ms + regression_bound_ms
     with pa.memory_map(str(path), "r") as source:
         reader = ipc.open_file(source)
         required = {"datetime", "bid", "ask"}
@@ -1503,33 +1992,67 @@ def _read_arrow_interval(
             timestamps = batch.column(batch.schema.get_field_index("datetime"))
             if count == 0:
                 continue
-            first = int(timestamps[0].as_py())
-            last = int(timestamps[count - 1].as_py())
-            if last < start_ms:
-                row_offset += count
-                continue
-            if first >= end_ms:
-                break
             bids = batch.column(batch.schema.get_field_index("bid"))
             asks = batch.column(batch.schema.get_field_index("ask"))
             for index in range(count):
                 timestamp = int(timestamps[index].as_py())
+                if timestamp >= safe_stop_ms:
+                    return tuple(item[2] for item in rows)
                 if timestamp < start_ms:
                     continue
                 if timestamp >= end_ms:
-                    break
-                rows.append(
-                    _TickRow(
-                        row_id=row_offset + index,
-                        timestamp_ms=timestamp,
-                        bid=float(bids[index].as_py()),
-                        ask=float(asks[index].as_py()),
-                    )
+                    continue
+                row = _TickRow(
+                    row_id=row_offset + index,
+                    timestamp_ms=timestamp,
+                    bid=float(bids[index].as_py()),
+                    ask=float(asks[index].as_py()),
                 )
-                if len(rows) == maximum:
-                    return tuple(rows)
+                key = (row.timestamp_ms, row.row_id, row)
+                insertion = bisect_left(rows, key)
+                if insertion < maximum:
+                    rows.insert(insertion, key)
+                    if len(rows) > maximum:
+                        rows.pop()
             row_offset += count
-    return tuple(rows)
+    return tuple(item[2] for item in rows)
+
+
+@lru_cache(maxsize=256)
+def _arrow_timestamp_regression_bound(
+    path: str,
+    size_bytes: int,
+    modified_at_ns: int,
+    device: int,
+    inode: int,
+    changed_at_ns: int,
+) -> int:
+    """Return a validated source-order lookahead bound for one Arrow file."""
+    del size_bytes, modified_at_ns, device, inode, changed_at_ns
+    import polars as pl
+
+    differences = pl.col("datetime").cast(pl.Int64).diff()
+    diagnostics = (
+        pl.scan_ipc(path)
+        .select(
+            differences.lt(0).sum().alias("regression_count"),
+            (-differences.filter(differences.lt(0)))
+            .max()
+            .fill_null(0)
+            .alias("maximum_regression_ms"),
+        )
+        .collect()
+    )
+    regression_count = int(diagnostics.item(0, "regression_count"))
+    maximum_regression = int(diagnostics.item(0, "maximum_regression_ms"))
+    if (
+        regression_count > MAX_HISTDATA_SOURCE_ORDER_REGRESSIONS_PER_PARTITION
+        or maximum_regression > MAX_HISTDATA_SOURCE_ORDER_REGRESSION_MS
+    ):
+        raise ValueError(
+            "benchmark Arrow cache exceeds timestamp regression policy"
+        )
+    return maximum_regression
 
 
 def _tick_rows_sha256(rows: Sequence[_TickRow]) -> str:
@@ -1670,16 +2193,316 @@ def _split_hashes(
     return result
 
 
+def _validated_event_clock_configs(
+    values: Sequence[EventClockConfigurationV1],
+) -> tuple[EventClockConfigurationV1, ...]:
+    configs = tuple(values)
+    if any(not isinstance(item, EventClockConfigV1) for item in configs):
+        raise TypeError("event-clock campaign received an invalid config")
+    if len({item.family for item in configs}) != len(configs):
+        raise ValueError("event-clock campaign duplicates a family")
+    if len({item.config_id for item in configs}) != len(configs):
+        raise ValueError("event-clock campaign config identities collide")
+    return configs
+
+
+def _validated_marked_hawkes_configs(
+    values: Sequence[MarkedHawkesConfigV1],
+) -> tuple[MarkedHawkesConfigV1, ...]:
+    configs = tuple(values)
+    if any(not isinstance(item, MarkedHawkesConfigV1) for item in configs):
+        raise TypeError("marked Hawkes campaign received an invalid config")
+    if len({item.excitation_structure for item in configs}) != len(configs):
+        raise ValueError("marked Hawkes campaign duplicates an ablation")
+    if len({item.config_id for item in configs}) != len(configs):
+        raise ValueError("marked Hawkes campaign config identities collide")
+    return configs
+
+
+def _validated_regime_hawkes_configs(
+    values: Sequence[RegimeHawkesConfigV1],
+) -> tuple[RegimeHawkesConfigV1, ...]:
+    configs = tuple(values)
+    if any(not isinstance(item, RegimeHawkesConfigV1) for item in configs):
+        raise TypeError("regime Hawkes campaign received an invalid config")
+    if len({item.modulation for item in configs}) != len(configs):
+        raise ValueError("regime Hawkes campaign duplicates an ablation")
+    if len({item.config_id for item in configs}) != len(configs):
+        raise ValueError("regime Hawkes campaign config identities collide")
+    return configs
+
+
+def _validated_neural_tpp_config(
+    value: NeuralTPPConfigV1 | None,
+) -> NeuralTPPConfigV1 | None:
+    if value is not None and not isinstance(value, NeuralTPPConfigV1):
+        raise TypeError("neural TPP campaign received an invalid config")
+    return value
+
+
+def _validated_add_thin_config(
+    value: AddThinConfigV1 | None,
+) -> AddThinConfigV1 | None:
+    if value is not None and not isinstance(value, AddThinConfigV1):
+        raise TypeError("Add-Thin campaign received an invalid config")
+    return value
+
+
+def _validated_schrodinger_bridge_inputs(
+    config: SchrodingerBridgeConfigV1 | None,
+    target: SchrodingerBridgeBrokerTargetV1 | None,
+) -> tuple[
+    SchrodingerBridgeConfigV1 | None,
+    SchrodingerBridgeBrokerTargetV1 | None,
+]:
+    if (config is None) != (target is None):
+        raise ValueError(
+            "Schrödinger-bridge campaign requires config and broker target together"
+        )
+    if config is not None and not isinstance(config, SchrodingerBridgeConfigV1):
+        raise TypeError(
+            "Schrödinger-bridge campaign received an invalid config"
+        )
+    if target is not None and not isinstance(
+        target, SchrodingerBridgeBrokerTargetV1
+    ):
+        raise TypeError(
+            "Schrödinger-bridge campaign received an invalid target"
+        )
+    if (
+        config is not None
+        and target is not None
+        and len(target.time_bin_weights) != config.time_bin_count
+    ):
+        raise ValueError("Schrödinger-bridge campaign target shape differs")
+    return config, target
+
+
+def _regime_hawkes_window_context(
+    partition: BenchmarkWindowPartitionV1,
+    *,
+    feed_epoch_definition: FeedEpochDefinitionV2,
+) -> RegimeHawkesWindowContextV1:
+    """Bind one corpus window to v2 epoch/transition evidence."""
+    assignment = feed_epoch_definition.assign(
+        symbol="EURUSD",
+        timestamp_utc_ms=(partition.start_ns + partition.end_ns)
+        // 2
+        // NANOSECONDS_PER_MILLISECOND,
+    )
+    if assignment.assignment_kind not in {"epoch", "transition"}:
+        raise ValueError("benchmark window is outside feed epoch scope")
+    if assignment.label != partition.epoch_label:
+        raise ValueError("benchmark window feed epoch label differs")
+    if assignment.assignment_kind == "epoch":
+        if assignment.epoch_id is None:
+            raise ValueError("stable benchmark epoch lacks identity")
+        return RegimeHawkesWindowContextV1(
+            window_id=partition.window_id,
+            session=partition.session,
+            technology_assignment_kind="epoch",
+            technology_label=assignment.label,
+            feed_epoch_definition_id=feed_epoch_definition.definition_id,
+            epoch_id=assignment.epoch_id,
+        )
+    boundary = next(
+        (
+            item
+            for item in feed_epoch_definition.boundaries
+            if item.boundary_id == assignment.boundary_id
+        ),
+        None,
+    )
+    if boundary is None:
+        raise ValueError("transition benchmark window lacks boundary evidence")
+    return RegimeHawkesWindowContextV1(
+        window_id=partition.window_id,
+        session=partition.session,
+        technology_assignment_kind="transition",
+        technology_label=assignment.label,
+        feed_epoch_definition_id=feed_epoch_definition.definition_id,
+        boundary_id=boundary.boundary_id,
+        boundary_support=boundary.support,
+        uncertainty_start_period=boundary.uncertainty_start_period,
+        uncertainty_end_period=boundary.uncertainty_end_period,
+    )
+
+
+def _neural_tpp_window_context(
+    partition: BenchmarkWindowPartitionV1,
+    *,
+    feed_epoch_definition: FeedEpochDefinitionV2,
+) -> NeuralTPPWindowContextV1:
+    """Bind one corpus window to the neural challenger's v2 context."""
+    assignment = feed_epoch_definition.assign(
+        symbol="EURUSD",
+        timestamp_utc_ms=(partition.start_ns + partition.end_ns)
+        // 2
+        // NANOSECONDS_PER_MILLISECOND,
+    )
+    if assignment.assignment_kind not in {"epoch", "transition"}:
+        raise ValueError("benchmark window is outside feed epoch scope")
+    if assignment.label != partition.epoch_label:
+        raise ValueError("benchmark window feed epoch label differs")
+    if assignment.assignment_kind == "epoch":
+        if assignment.epoch_id is None:
+            raise ValueError("stable benchmark epoch lacks identity")
+        return NeuralTPPWindowContextV1(
+            window_id=partition.window_id,
+            session=partition.session,
+            technology_assignment_kind="epoch",
+            technology_label=assignment.label,
+            feed_epoch_definition_id=feed_epoch_definition.definition_id,
+            epoch_id=assignment.epoch_id,
+        )
+    boundary = next(
+        (
+            item
+            for item in feed_epoch_definition.boundaries
+            if item.boundary_id == assignment.boundary_id
+        ),
+        None,
+    )
+    if boundary is None:
+        raise ValueError("transition benchmark window lacks boundary evidence")
+    return NeuralTPPWindowContextV1(
+        window_id=partition.window_id,
+        session=partition.session,
+        technology_assignment_kind="transition",
+        technology_label=assignment.label,
+        feed_epoch_definition_id=feed_epoch_definition.definition_id,
+        boundary_id=boundary.boundary_id,
+        boundary_support=boundary.support,
+        uncertainty_start_period=boundary.uncertainty_start_period,
+        uncertainty_end_period=boundary.uncertainty_end_period,
+    )
+
+
+def _add_thin_window_context(
+    partition: BenchmarkWindowPartitionV1,
+    *,
+    feed_epoch_definition: FeedEpochDefinitionV2,
+) -> AddThinWindowContextV1:
+    """Bind one corpus window to the Add-Thin v2 context seam."""
+    assignment = feed_epoch_definition.assign(
+        symbol="EURUSD",
+        timestamp_utc_ms=(partition.start_ns + partition.end_ns)
+        // 2
+        // NANOSECONDS_PER_MILLISECOND,
+    )
+    if assignment.assignment_kind not in {"epoch", "transition"}:
+        raise ValueError("benchmark window is outside feed epoch scope")
+    if assignment.label != partition.epoch_label:
+        raise ValueError("benchmark window feed epoch label differs")
+    if assignment.assignment_kind == "epoch":
+        if assignment.epoch_id is None:
+            raise ValueError("stable benchmark epoch lacks identity")
+        return AddThinWindowContextV1(
+            window_id=partition.window_id,
+            session=partition.session,
+            technology_assignment_kind="epoch",
+            technology_label=assignment.label,
+            feed_epoch_definition_id=feed_epoch_definition.definition_id,
+            epoch_id=assignment.epoch_id,
+        )
+    boundary = next(
+        (
+            item
+            for item in feed_epoch_definition.boundaries
+            if item.boundary_id == assignment.boundary_id
+        ),
+        None,
+    )
+    if boundary is None:
+        raise ValueError("transition benchmark window lacks boundary evidence")
+    return AddThinWindowContextV1(
+        window_id=partition.window_id,
+        session=partition.session,
+        technology_assignment_kind="transition",
+        technology_label=assignment.label,
+        feed_epoch_definition_id=feed_epoch_definition.definition_id,
+        boundary_id=boundary.boundary_id,
+        boundary_support=boundary.support,
+        uncertainty_start_period=boundary.uncertainty_start_period,
+        uncertainty_end_period=boundary.uncertainty_end_period,
+    )
+
+
+def _schrodinger_bridge_window_context(
+    partition: BenchmarkWindowPartitionV1,
+    *,
+    feed_epoch_definition: FeedEpochDefinitionV2,
+) -> SchrodingerBridgeWindowContextV1:
+    """Bind one corpus window to the bridge's immutable feed evidence."""
+    assignment = feed_epoch_definition.assign(
+        symbol="EURUSD",
+        timestamp_utc_ms=(partition.start_ns + partition.end_ns)
+        // 2
+        // NANOSECONDS_PER_MILLISECOND,
+    )
+    if assignment.assignment_kind not in {"epoch", "transition"}:
+        raise ValueError("benchmark window is outside feed epoch scope")
+    if assignment.label != partition.epoch_label:
+        raise ValueError("benchmark window feed epoch label differs")
+    if assignment.assignment_kind == "epoch":
+        if assignment.epoch_id is None:
+            raise ValueError("stable benchmark epoch lacks identity")
+        return SchrodingerBridgeWindowContextV1(
+            window_id=partition.window_id,
+            session=partition.session,
+            technology_assignment_kind="epoch",
+            technology_label=assignment.label,
+            feed_epoch_definition_id=feed_epoch_definition.definition_id,
+            epoch_id=assignment.epoch_id,
+        )
+    boundary = next(
+        (
+            item
+            for item in feed_epoch_definition.boundaries
+            if item.boundary_id == assignment.boundary_id
+        ),
+        None,
+    )
+    if boundary is None:
+        raise ValueError("transition benchmark window lacks boundary evidence")
+    return SchrodingerBridgeWindowContextV1(
+        window_id=partition.window_id,
+        session=partition.session,
+        technology_assignment_kind="transition",
+        technology_label=assignment.label,
+        feed_epoch_definition_id=feed_epoch_definition.definition_id,
+        boundary_id=boundary.boundary_id,
+        boundary_support=boundary.support,
+        uncertainty_start_period=boundary.uncertainty_start_period,
+        uncertainty_end_period=boundary.uncertainty_end_period,
+    )
+
+
 def run_reverse_degradation_benchmark_campaign(
     corpus: ReverseDegradationBenchmarkCorpusV1,
     source_root: str | Path,
     *,
     motif_index: ReferenceMotifIndexV1 | None = None,
     motif_candidate_provisional: bool = True,
+    event_clock_configs: Sequence[EventClockConfigurationV1] = (),
+    marked_hawkes_configs: Sequence[MarkedHawkesConfigV1] = (),
+    regime_hawkes_configs: Sequence[RegimeHawkesConfigV1] = (),
+    neural_tpp_config: NeuralTPPConfigV1 | None = None,
+    add_thin_config: AddThinConfigV1 | None = None,
+    schrodinger_bridge_config: SchrodingerBridgeConfigV1 | None = None,
+    schrodinger_bridge_broker_target: (
+        SchrodingerBridgeBrokerTargetV1 | None
+    ) = None,
+    metric_trace_out: list[BenchmarkWindowMetricTraceV1] | None = None,
+    fit_result_out: list[Any] | None = None,
 ) -> tuple[ReverseDegradationBenchmarkCampaignV1, ReferenceMotifIndexV1]:
-    """Run baselines, one bound motif candidate, and a negative control."""
+    """Run controls and every explicitly configured challenger family."""
     if not isinstance(corpus, ReverseDegradationBenchmarkCorpusV1):
         raise ValueError("benchmark campaign requires a v1 corpus")
+    if metric_trace_out is not None and metric_trace_out:
+        raise ValueError("benchmark metric trace output must start empty")
+    if fit_result_out is not None and fit_result_out:
+        raise ValueError("benchmark fit-result output must start empty")
     started_wall = datetime.now(timezone.utc)
     started = time.monotonic()
     root = Path(source_root).expanduser().resolve()
@@ -1718,10 +2541,95 @@ def run_reverse_degradation_benchmark_campaign(
         max_events_per_interval=512,
         max_transformations_per_interval=64,
     )
+    clock_configs = _validated_event_clock_configs(event_clock_configs)
+    hawkes_configs = _validated_marked_hawkes_configs(marked_hawkes_configs)
+    regime_configs = _validated_regime_hawkes_configs(regime_hawkes_configs)
+    neural_config = _validated_neural_tpp_config(neural_tpp_config)
+    add_thin_selected_config = _validated_add_thin_config(add_thin_config)
+    bridge_config, bridge_target = _validated_schrodinger_bridge_inputs(
+        schrodinger_bridge_config,
+        schrodinger_bridge_broker_target,
+    )
+    regime_contexts: tuple[RegimeHawkesWindowContextV1, ...] = ()
+    neural_contexts: tuple[NeuralTPPWindowContextV1, ...] = ()
+    add_thin_contexts: tuple[AddThinWindowContextV1, ...] = ()
+    bridge_contexts: tuple[SchrodingerBridgeWindowContextV1, ...] = ()
+    feed_epoch_definition: FeedEpochDefinitionV2 | None = None
+    if (
+        regime_configs
+        or neural_config is not None
+        or add_thin_selected_config is not None
+        or bridge_config is not None
+    ):
+        feed_epoch_definition = read_active_time_feed_epoch_definition(
+            corpus.dependency_artifacts["feed_epochs"].path
+        )
+        if (
+            feed_epoch_definition.definition_id
+            != corpus.feed_epoch_definition_id
+        ):
+            raise ValueError("campaign feed epoch definition identity differs")
+        if regime_configs:
+            regime_contexts = tuple(
+                _regime_hawkes_window_context(
+                    partition,
+                    feed_epoch_definition=feed_epoch_definition,
+                )
+                for partition in corpus.windows
+            )
+        if neural_config is not None:
+            neural_contexts = tuple(
+                _neural_tpp_window_context(
+                    partition,
+                    feed_epoch_definition=feed_epoch_definition,
+                )
+                for partition in corpus.windows
+            )
+        if add_thin_selected_config is not None:
+            add_thin_contexts = tuple(
+                _add_thin_window_context(
+                    partition,
+                    feed_epoch_definition=feed_epoch_definition,
+                )
+                for partition in corpus.windows
+            )
+        if bridge_config is not None:
+            bridge_contexts = tuple(
+                _schrodinger_bridge_window_context(
+                    partition,
+                    feed_epoch_definition=feed_epoch_definition,
+                )
+                for partition in corpus.windows
+            )
+    regime_context_by_window = {
+        item.window_id: item for item in regime_contexts
+    }
+    neural_context_by_window = {
+        item.window_id: item for item in neural_contexts
+    }
+    add_thin_context_by_window = {
+        item.window_id: item for item in add_thin_contexts
+    }
+    bridge_context_by_window = {
+        item.window_id: item for item in bridge_contexts
+    }
     reconstruction_run = ReconstructionRunV1(
         symbols=corpus.profile.symbols,
         source_version_ids=tuple(item.partition_id for item in corpus.sources),
-        configuration_ids=(generator_config.config_id,),
+        configuration_ids=(
+            generator_config.config_id,
+            *(item.config_id for item in clock_configs),
+            *(item.config_id for item in hawkes_configs),
+            *(item.config_id for item in regime_configs),
+            *((neural_config.config_id,) if neural_config is not None else ()),
+            *(
+                (add_thin_selected_config.config_id,)
+                if add_thin_selected_config is not None
+                else ()
+            ),
+            *((bridge_config.config_id,) if bridge_config is not None else ()),
+            *((bridge_target.target_id,) if bridge_target is not None else ()),
+        ),
         ensemble_member_ids=corpus.profile.ensemble_member_ids,
         base_seed=463,
         storage_policy=ReconstructionStoragePolicyV1(
@@ -1761,6 +2669,325 @@ def run_reverse_degradation_benchmark_campaign(
         ensemble_member_ids=("control",),
         control_kind=BenchmarkControlKind.LINEAR_INTERPOLATION,
     )
+    calibration_windows = tuple(
+        EventClockCalibrationWindowV1(
+            window_id=partition.window_id,
+            start_ns=partition.start_ns,
+            end_ns=partition.end_ns,
+            events=events_by_window[partition.window_id],
+        )
+        for partition in corpus.windows
+        if partition.split_kind == "calibration"
+    )
+    clock_fits = {
+        config.family: fit_event_clock_challenger(
+            config,
+            calibration_windows,
+            information_mode=InformationMode.EX_POST_RECONSTRUCTION,
+        )
+        for config in clock_configs
+    }
+    clock_candidates = {
+        config.family: build_event_clock_benchmark_candidate(
+            config,
+            clock_fits[config.family],
+            ensemble_member_ids=corpus.profile.ensemble_member_ids,
+        )
+        for config in clock_configs
+    }
+    clock_generators: dict[
+        EventClockFamily, FittedEventClockBenchmarkGeneratorV1
+    ] = {
+        config.family: build_fitted_event_clock_generator(
+            config,
+            clock_fits[config.family],
+            ensemble_member_ids=corpus.profile.ensemble_member_ids,
+        )
+        for config in clock_configs
+        if clock_fits[config.family].status is EventClockFitStatus.FITTED
+    }
+    hawkes_fits = {
+        config.excitation_structure: fit_marked_hawkes_challenger(
+            config,
+            calibration_windows,
+            information_mode=InformationMode.EX_POST_RECONSTRUCTION,
+        )
+        for config in hawkes_configs
+    }
+    hawkes_candidates = {
+        config.excitation_structure: build_marked_hawkes_benchmark_candidate(
+            config,
+            hawkes_fits[config.excitation_structure],
+            ensemble_member_ids=corpus.profile.ensemble_member_ids,
+        )
+        for config in hawkes_configs
+    }
+    hawkes_generators: dict[
+        HawkesExcitationStructure, FittedMarkedHawkesBenchmarkGeneratorV1
+    ] = {
+        config.excitation_structure: build_fitted_marked_hawkes_generator(
+            config,
+            hawkes_fits[config.excitation_structure],
+            ensemble_member_ids=corpus.profile.ensemble_member_ids,
+        )
+        for config in hawkes_configs
+        if hawkes_fits[config.excitation_structure].status
+        is MarkedHawkesFitStatus.FITTED
+    }
+    calibration_contexts = (
+        tuple(
+            regime_context_by_window[item.window_id]
+            for item in corpus.windows
+            if item.split_kind == "calibration"
+        )
+        if regime_configs
+        else ()
+    )
+    regime_generation_contexts = (
+        tuple(
+            replace(
+                regime_context_by_window[partition.window_id],
+                window_id=ReconstructionWindowV1(
+                    run_id=reconstruction_run.run_id,
+                    ensemble_member_id=member_id,
+                    symbols=corpus.profile.symbols,
+                    core_start_ns=partition.start_ns,
+                    core_end_ns=partition.end_ns,
+                ).window_id,
+                context_id="",
+            )
+            for partition in corpus.windows
+            for member_id in corpus.profile.ensemble_member_ids
+        )
+        if regime_configs
+        else ()
+    )
+    regime_fits = {
+        config.modulation: fit_regime_hawkes_challenger(
+            config,
+            calibration_windows,
+            window_contexts=calibration_contexts,
+            information_mode=InformationMode.EX_POST_RECONSTRUCTION,
+        )
+        for config in regime_configs
+    }
+    regime_candidates = {
+        config.modulation: build_regime_hawkes_benchmark_candidate(
+            config,
+            regime_fits[config.modulation],
+            ensemble_member_ids=corpus.profile.ensemble_member_ids,
+        )
+        for config in regime_configs
+    }
+    regime_generators: dict[
+        RegimeHawkesModulation, FittedRegimeHawkesBenchmarkGeneratorV1
+    ] = {
+        config.modulation: build_fitted_regime_hawkes_generator(
+            config,
+            regime_fits[config.modulation],
+            ensemble_member_ids=corpus.profile.ensemble_member_ids,
+            window_contexts=regime_generation_contexts,
+        )
+        for config in regime_configs
+        if regime_fits[config.modulation].status is RegimeHawkesFitStatus.FITTED
+    }
+    neural_fit: NeuralTPPFitResultV1 | None = None
+    neural_candidate: BenchmarkCandidateV1 | None = None
+    neural_generator: FittedNeuralTPPBenchmarkGeneratorV1 | None = None
+    if neural_config is not None:
+        neural_calibration_contexts = tuple(
+            neural_context_by_window[item.window_id]
+            for item in corpus.windows
+            if item.split_kind == "calibration"
+        )
+        neural_protected_windows = tuple(
+            build_neural_tpp_protected_window(
+                EventClockCalibrationWindowV1(
+                    window_id=partition.window_id,
+                    start_ns=partition.start_ns,
+                    end_ns=partition.end_ns,
+                    events=events_by_window[partition.window_id],
+                ),
+                neural_context_by_window[partition.window_id],
+                role=partition.split_kind,
+                symbols=corpus.profile.symbols,
+            )
+            for partition in corpus.windows
+            if partition.split_kind in {"validation", "final_holdout"}
+        )
+        neural_fit = fit_neural_tpp_challenger(
+            neural_config,
+            calibration_windows,
+            window_contexts=neural_calibration_contexts,
+            protected_windows=neural_protected_windows,
+            information_mode=InformationMode.EX_POST_RECONSTRUCTION,
+        )
+        neural_candidate = build_neural_tpp_benchmark_candidate(
+            neural_config,
+            neural_fit,
+            ensemble_member_ids=corpus.profile.ensemble_member_ids,
+        )
+        if neural_fit.status is NeuralTPPFitStatus.FITTED:
+            neural_generation_contexts = tuple(
+                replace(
+                    neural_context_by_window[partition.window_id],
+                    window_id=ReconstructionWindowV1(
+                        run_id=reconstruction_run.run_id,
+                        ensemble_member_id=member_id,
+                        symbols=corpus.profile.symbols,
+                        core_start_ns=partition.start_ns,
+                        core_end_ns=partition.end_ns,
+                    ).window_id,
+                    context_id="",
+                )
+                for partition in corpus.windows
+                for member_id in corpus.profile.ensemble_member_ids
+            )
+            neural_generator = build_fitted_neural_tpp_generator(
+                neural_config,
+                neural_fit,
+                ensemble_member_ids=corpus.profile.ensemble_member_ids,
+                window_contexts={
+                    item.window_id: item for item in neural_generation_contexts
+                },
+            )
+
+    add_thin_fit: AddThinFitResultV1 | None = None
+    add_thin_candidate: BenchmarkCandidateV1 | None = None
+    add_thin_generator: FittedAddThinBenchmarkGeneratorV1 | None = None
+    if add_thin_selected_config is not None:
+        add_thin_calibration_contexts = tuple(
+            add_thin_context_by_window[item.window_id]
+            for item in corpus.windows
+            if item.split_kind == "calibration"
+        )
+        add_thin_protected_windows = tuple(
+            build_add_thin_protected_window(
+                EventClockCalibrationWindowV1(
+                    window_id=partition.window_id,
+                    start_ns=partition.start_ns,
+                    end_ns=partition.end_ns,
+                    events=events_by_window[partition.window_id],
+                ),
+                add_thin_context_by_window[partition.window_id],
+                role=partition.split_kind,
+                symbols=corpus.profile.symbols,
+            )
+            for partition in corpus.windows
+            if partition.split_kind in {"validation", "final_holdout"}
+        )
+        add_thin_fit = fit_add_thin_challenger(
+            add_thin_selected_config,
+            calibration_windows,
+            window_contexts=add_thin_calibration_contexts,
+            protected_windows=add_thin_protected_windows,
+            information_mode=InformationMode.EX_POST_RECONSTRUCTION,
+        )
+        add_thin_candidate = build_add_thin_benchmark_candidate(
+            add_thin_selected_config,
+            add_thin_fit,
+            ensemble_member_ids=corpus.profile.ensemble_member_ids,
+        )
+        if add_thin_fit.status is AddThinFitStatus.FITTED:
+            add_thin_generation_contexts = tuple(
+                replace(
+                    add_thin_context_by_window[partition.window_id],
+                    window_id=ReconstructionWindowV1(
+                        run_id=reconstruction_run.run_id,
+                        ensemble_member_id=member_id,
+                        symbols=corpus.profile.symbols,
+                        core_start_ns=partition.start_ns,
+                        core_end_ns=partition.end_ns,
+                    ).window_id,
+                    context_id="",
+                )
+                for partition in corpus.windows
+                for member_id in corpus.profile.ensemble_member_ids
+            )
+            add_thin_generator = build_fitted_add_thin_generator(
+                add_thin_selected_config,
+                add_thin_fit,
+                ensemble_member_ids=corpus.profile.ensemble_member_ids,
+                window_contexts={
+                    item.window_id: item
+                    for item in add_thin_generation_contexts
+                },
+            )
+
+    bridge_fit: SchrodingerBridgeFitResultV1 | None = None
+    bridge_candidate: BenchmarkCandidateV1 | None = None
+    bridge_generator: FittedSchrodingerBridgeBenchmarkGeneratorV1 | None = None
+    if bridge_config is not None and bridge_target is not None:
+        bridge_calibration_contexts = tuple(
+            bridge_context_by_window[item.window_id]
+            for item in corpus.windows
+            if item.split_kind == "calibration"
+        )
+        bridge_protected_windows = tuple(
+            build_schrodinger_bridge_protected_window(
+                EventClockCalibrationWindowV1(
+                    window_id=partition.window_id,
+                    start_ns=partition.start_ns,
+                    end_ns=partition.end_ns,
+                    events=events_by_window[partition.window_id],
+                ),
+                bridge_context_by_window[partition.window_id],
+                role=partition.split_kind,
+            )
+            for partition in corpus.windows
+            if partition.split_kind in {"validation", "final_holdout"}
+        )
+        bridge_fit = fit_schrodinger_bridge_challenger(
+            bridge_config,
+            bridge_target,
+            calibration_windows,
+            window_contexts=bridge_calibration_contexts,
+            protected_windows=bridge_protected_windows,
+            information_mode=InformationMode.EX_POST_RECONSTRUCTION,
+        )
+        bridge_candidate = build_schrodinger_bridge_benchmark_candidate(
+            bridge_config,
+            bridge_target,
+            bridge_fit,
+            ensemble_member_ids=corpus.profile.ensemble_member_ids,
+        )
+        if bridge_fit.status is SchrodingerBridgeFitStatus.FITTED:
+            bridge_generation_contexts = tuple(
+                replace(
+                    bridge_context_by_window[partition.window_id],
+                    window_id=ReconstructionWindowV1(
+                        run_id=reconstruction_run.run_id,
+                        ensemble_member_id=member_id,
+                        symbols=corpus.profile.symbols,
+                        core_start_ns=partition.start_ns,
+                        core_end_ns=partition.end_ns,
+                    ).window_id,
+                    context_id="",
+                )
+                for partition in corpus.windows
+                for member_id in corpus.profile.ensemble_member_ids
+            )
+            bridge_generator = build_fitted_schrodinger_bridge_generator(
+                bridge_config,
+                bridge_target,
+                bridge_fit,
+                ensemble_member_ids=corpus.profile.ensemble_member_ids,
+                window_contexts={
+                    item.window_id: item for item in bridge_generation_contexts
+                },
+            )
+
+    if fit_result_out is not None:
+        fit_result_out.extend(
+            (
+                *clock_fits.values(),
+                *hawkes_fits.values(),
+                *regime_fits.values(),
+                *((neural_fit,) if neural_fit is not None else ()),
+                *((add_thin_fit,) if add_thin_fit is not None else ()),
+                *((bridge_fit,) if bridge_fit is not None else ()),
+            )
+        )
 
     degradation_coverage = dict.fromkeys(_degradation_config_names(), 0)
     degradation_effect_coverage = dict.fromkeys(_degradation_config_names(), 0)
@@ -1830,12 +3057,56 @@ def run_reverse_degradation_benchmark_campaign(
             + ", ".join(sorted(ineffective))
         )
 
+    clock_keys = {
+        family: f"event_clock_{family.value}" for family in clock_candidates
+    }
+    hawkes_keys = {
+        structure: f"marked_hawkes_{structure.value}"
+        for structure in hawkes_candidates
+    }
+    regime_keys = {
+        modulation: f"regime_hawkes_{modulation.value}"
+        for modulation in regime_candidates
+    }
+    neural_key = (
+        "neural_tpp_rmtpp_cpu_v1" if neural_candidate is not None else None
+    )
+    add_thin_key = (
+        "add_thin_histogram_marked_cpu_v1"
+        if add_thin_candidate is not None
+        else None
+    )
+    bridge_key = (
+        "schrodinger_bridge_markov_sinkhorn_cpu_v1"
+        if bridge_candidate is not None
+        else None
+    )
+    add_thin_generation_totals: dict[str, float] = defaultdict(float)
+    bridge_generation_totals: dict[str, float] = defaultdict(float)
     accumulators = {
         "dense_identity": _CandidateAccumulator(),
         "degraded_identity": _CandidateAccumulator(),
         "linear_interpolation": _CandidateAccumulator(),
         "empirical_motif": _CandidateAccumulator(),
         "negative_anchor_drop": _CandidateAccumulator(),
+        **{key: _CandidateAccumulator() for key in clock_keys.values()},
+        **{key: _CandidateAccumulator() for key in hawkes_keys.values()},
+        **{key: _CandidateAccumulator() for key in regime_keys.values()},
+        **(
+            {neural_key: _CandidateAccumulator()}
+            if neural_key is not None
+            else {}
+        ),
+        **(
+            {add_thin_key: _CandidateAccumulator()}
+            if add_thin_key is not None
+            else {}
+        ),
+        **(
+            {bridge_key: _CandidateAccumulator()}
+            if bridge_key is not None
+            else {}
+        ),
     }
     evaluated = tuple(
         item
@@ -1845,11 +3116,17 @@ def run_reverse_degradation_benchmark_campaign(
     for partition in evaluated:
         reference = events_by_window[partition.window_id]
         degraded = primary_degraded[partition.window_id]
-        accumulators["dense_identity"].consume(
-            _compare_streams(reference, reference, partition)
+        accumulators["dense_identity"].consume_streams(
+            reference,
+            reference,
+            partition,
+            ensemble_member_id="control",
         )
-        accumulators["degraded_identity"].consume(
-            _compare_streams(reference, degraded, partition)
+        accumulators["degraded_identity"].consume_streams(
+            reference,
+            degraded,
+            partition,
+            ensemble_member_id="control",
         )
         interpolated: list[BenchmarkEventV1] = []
         for symbol in corpus.profile.symbols:
@@ -1862,16 +3139,18 @@ def run_reverse_degradation_benchmark_campaign(
                     max_events=(corpus.profile.max_events_per_symbol * 8),
                 )
             )
-        accumulators["linear_interpolation"].consume(
-            _compare_streams(
-                reference,
-                tuple(_ordered_events(interpolated)),
-                partition,
-            )
+        accumulators["linear_interpolation"].consume_streams(
+            reference,
+            tuple(_ordered_events(interpolated)),
+            partition,
+            ensemble_member_id="control",
         )
         negative = _drop_first_anchor(degraded)
-        accumulators["negative_anchor_drop"].consume(
-            _compare_streams(reference, negative, partition)
+        accumulators["negative_anchor_drop"].consume_streams(
+            reference,
+            negative,
+            partition,
+            ensemble_member_id="control",
         )
 
         scenario = BenchmarkScenarioV1(
@@ -1932,16 +3211,274 @@ def run_reverse_degradation_benchmark_campaign(
                     member_refused = True
             if member_failed:
                 accumulators["empirical_motif"].failures += 1
-                continue
-            if member_refused:
-                accumulators["empirical_motif"].refusals += 1
-            accumulators["empirical_motif"].consume(
-                _compare_streams(
+            else:
+                if member_refused:
+                    accumulators["empirical_motif"].refusals += 1
+                accumulators["empirical_motif"].consume_streams(
                     reference,
                     tuple(_ordered_events(generated)),
                     partition,
+                    ensemble_member_id=member_id,
                 )
-            )
+            for family, candidate in clock_candidates.items():
+                accumulator = accumulators[clock_keys[family]]
+                clock_generator = clock_generators.get(family)
+                if clock_generator is None:
+                    accumulator.failures += 1
+                    continue
+                try:
+                    candidate_window = generate_benchmark_candidate_window(
+                        clock_generator,
+                        candidate,
+                        degraded,
+                        scenario=scenario,
+                        window=reconstruction_window,
+                        ensemble_member_id=member_id,
+                        execution=BenchmarkExecutionEvidenceV1(
+                            attempted=True,
+                            converged=True,
+                            peak_memory_bytes=_peak_memory_bytes(),
+                        ),
+                    )
+                except (RuntimeError, ValueError):
+                    accumulator.failures += 1
+                    continue
+                if not any(
+                    item.sparsity.startswith("event-clock-")
+                    for item in candidate_window.events
+                ):
+                    accumulator.refusals += 1
+                accumulator.consume_streams(
+                    reference,
+                    candidate_window.events,
+                    partition,
+                    ensemble_member_id=member_id,
+                )
+            for structure, candidate in hawkes_candidates.items():
+                accumulator = accumulators[hawkes_keys[structure]]
+                hawkes_generator = hawkes_generators.get(structure)
+                if hawkes_generator is None:
+                    accumulator.failures += 1
+                    continue
+                try:
+                    candidate_window = generate_benchmark_candidate_window(
+                        hawkes_generator,
+                        candidate,
+                        degraded,
+                        scenario=scenario,
+                        window=reconstruction_window,
+                        ensemble_member_id=member_id,
+                        execution=BenchmarkExecutionEvidenceV1(
+                            attempted=True,
+                            converged=True,
+                            peak_memory_bytes=_peak_memory_bytes(),
+                        ),
+                    )
+                except (RuntimeError, ValueError):
+                    accumulator.failures += 1
+                    continue
+                if not any(
+                    item.sparsity.startswith("marked-hawkes-")
+                    for item in candidate_window.events
+                ):
+                    accumulator.refusals += 1
+                accumulator.consume_streams(
+                    reference,
+                    candidate_window.events,
+                    partition,
+                    ensemble_member_id=member_id,
+                )
+            for modulation, candidate in regime_candidates.items():
+                accumulator = accumulators[regime_keys[modulation]]
+                regime_generator = regime_generators.get(modulation)
+                if regime_generator is None:
+                    accumulator.failures += 1
+                    continue
+                try:
+                    candidate_window = generate_benchmark_candidate_window(
+                        regime_generator,
+                        candidate,
+                        degraded,
+                        scenario=scenario,
+                        window=reconstruction_window,
+                        ensemble_member_id=member_id,
+                        execution=BenchmarkExecutionEvidenceV1(
+                            attempted=True,
+                            converged=True,
+                            peak_memory_bytes=_peak_memory_bytes(),
+                        ),
+                    )
+                except (RuntimeError, ValueError):
+                    accumulator.failures += 1
+                    continue
+                if not any(
+                    item.sparsity.startswith("regime-hawkes-")
+                    for item in candidate_window.events
+                ):
+                    accumulator.refusals += 1
+                accumulator.consume_streams(
+                    reference,
+                    candidate_window.events,
+                    partition,
+                    ensemble_member_id=member_id,
+                )
+            if neural_key is not None and neural_candidate is not None:
+                accumulator = accumulators[neural_key]
+                if neural_generator is None:
+                    accumulator.failures += 1
+                else:
+                    try:
+                        candidate_window = generate_benchmark_candidate_window(
+                            neural_generator,
+                            neural_candidate,
+                            degraded,
+                            scenario=scenario,
+                            window=reconstruction_window,
+                            ensemble_member_id=member_id,
+                            execution=BenchmarkExecutionEvidenceV1(
+                                attempted=True,
+                                converged=True,
+                                peak_memory_bytes=_peak_memory_bytes(),
+                            ),
+                        )
+                    except (RuntimeError, ValueError):
+                        accumulator.failures += 1
+                    else:
+                        if not any(
+                            item.sparsity.startswith("neural-tpp-")
+                            for item in candidate_window.events
+                        ):
+                            accumulator.refusals += 1
+                        accumulator.consume_streams(
+                            reference,
+                            candidate_window.events,
+                            partition,
+                            ensemble_member_id=member_id,
+                        )
+            if add_thin_key is not None and add_thin_candidate is not None:
+                accumulator = accumulators[add_thin_key]
+                if add_thin_generator is None:
+                    accumulator.failures += 1
+                else:
+                    result = add_thin_generator.generate_with_evidence(
+                        degraded,
+                        scenario=scenario,
+                        window=reconstruction_window,
+                        ensemble_member_id=member_id,
+                    )
+                    evidence = result.evidence
+                    add_thin_generation_totals["attempt_count"] += 1
+                    add_thin_generation_totals[
+                        "initial_noise_count"
+                    ] += evidence.initial_noise_count
+                    add_thin_generation_totals[
+                        "final_point_count"
+                    ] += evidence.final_point_count
+                    add_thin_generation_totals[
+                        "generated_event_count"
+                    ] += evidence.generated_event_count
+                    add_thin_generation_totals[
+                        "skipped_unsupported_count"
+                    ] += evidence.skipped_unsupported_count
+                    add_thin_generation_totals[
+                        "collision_count"
+                    ] += evidence.collision_count
+                    add_thin_generation_totals[
+                        "poisson_draw_work"
+                    ] += evidence.poisson_draw_work
+                    add_thin_generation_totals[
+                        "wall_time_ms"
+                    ] += evidence.wall_time_ms
+                    add_thin_generation_totals["peak_memory_bytes"] = max(
+                        add_thin_generation_totals["peak_memory_bytes"],
+                        evidence.peak_memory_bytes,
+                    )
+                    for step in evidence.step_evidence:
+                        for name in (
+                            "b_count",
+                            "c_count",
+                            "d_count",
+                            "e_count",
+                            "thinned_count",
+                            "collision_count",
+                        ):
+                            add_thin_generation_totals[
+                                f"step_{name}"
+                            ] += getattr(step, name)
+                    if evidence.status is AddThinGenerationStatus.FAILED:
+                        accumulator.failures += 1
+                    elif evidence.status is AddThinGenerationStatus.REFUSED:
+                        accumulator.refusals += 1
+                    else:
+                        if evidence.status is AddThinGenerationStatus.EMPTY:
+                            accumulator.refusals += 1
+                        accumulator.consume_streams(
+                            reference,
+                            result.events,
+                            partition,
+                            ensemble_member_id=member_id,
+                        )
+            if bridge_key is not None and bridge_candidate is not None:
+                accumulator = accumulators[bridge_key]
+                if bridge_generator is None:
+                    accumulator.failures += 1
+                else:
+                    bridge_result = bridge_generator.generate_with_evidence(
+                        degraded,
+                        scenario=scenario,
+                        window=reconstruction_window,
+                        ensemble_member_id=member_id,
+                    )
+                    bridge_evidence = bridge_result.evidence
+                    bridge_generation_totals["attempt_count"] += 1
+                    for name in (
+                        "input_event_count",
+                        "history_event_count",
+                        "expected_total_event_count",
+                        "requested_generated_event_count",
+                        "generated_event_count",
+                        "skipped_outside_anchor_count",
+                        "skipped_quarantine_count",
+                        "collision_count",
+                        "boundary_conditioning_l1",
+                        "mean_triangle_residual_before",
+                        "mean_triangle_residual_after",
+                        "generation_work",
+                        "wall_time_ms",
+                    ):
+                        bridge_generation_totals[name] += getattr(
+                            bridge_evidence, name
+                        )
+                    bridge_generation_totals["peak_memory_bytes"] = max(
+                        bridge_generation_totals["peak_memory_bytes"],
+                        bridge_evidence.peak_memory_bytes,
+                    )
+                    if bridge_evidence.failure_reason is not None:
+                        bridge_generation_totals[
+                            f"reason_count.{bridge_evidence.failure_reason}"
+                        ] += 1
+                    if (
+                        bridge_evidence.status
+                        is SchrodingerBridgeGenerationStatus.FAILED
+                    ):
+                        accumulator.failures += 1
+                    elif (
+                        bridge_evidence.status
+                        is SchrodingerBridgeGenerationStatus.REFUSED
+                    ):
+                        accumulator.refusals += 1
+                    else:
+                        if (
+                            bridge_evidence.status
+                            is SchrodingerBridgeGenerationStatus.EMPTY
+                        ):
+                            accumulator.refusals += 1
+                        accumulator.consume_streams(
+                            reference,
+                            bridge_result.events,
+                            partition,
+                            ensemble_member_id=member_id,
+                        )
         _enforce_runtime(started, corpus.profile.max_runtime_seconds)
 
     subject_ids = {
@@ -1951,29 +3488,121 @@ def run_reverse_degradation_benchmark_campaign(
         for name in accumulators
     }
     subject_ids["empirical_motif"] = motif_candidate.candidate_id
+    for family, key in clock_keys.items():
+        subject_ids[key] = clock_candidates[family].candidate_id
+    for structure, key in hawkes_keys.items():
+        subject_ids[key] = hawkes_candidates[structure].candidate_id
+    for modulation, key in regime_keys.items():
+        subject_ids[key] = regime_candidates[modulation].candidate_id
+    if neural_key is not None and neural_candidate is not None:
+        subject_ids[neural_key] = neural_candidate.candidate_id
+    if add_thin_key is not None and add_thin_candidate is not None:
+        subject_ids[add_thin_key] = add_thin_candidate.candidate_id
+    if bridge_key is not None and bridge_candidate is not None:
+        subject_ids[bridge_key] = bridge_candidate.candidate_id
     roles = {
         "dense_identity": "baseline",
         "degraded_identity": "baseline",
         "linear_interpolation": "baseline",
         "empirical_motif": "candidate",
         "negative_anchor_drop": "negative_control",
+        **{key: "candidate" for key in clock_keys.values()},
+        **{key: "candidate" for key in hawkes_keys.values()},
+        **{key: "candidate" for key in regime_keys.values()},
+        **({neural_key: "candidate"} if neural_key is not None else {}),
+        **({add_thin_key: "candidate"} if add_thin_key is not None else {}),
+        **({bridge_key: "candidate"} if bridge_key is not None else {}),
+    }
+    method_names = dict.fromkeys(accumulators, "")
+    for name in method_names:
+        method_names[name] = name
+    for family, key in clock_keys.items():
+        method_names[key] = family.value
+    for structure, key in hawkes_keys.items():
+        method_names[key] = f"marked_hawkes_{structure.value}"
+    for modulation, key in regime_keys.items():
+        method_names[key] = f"regime_hawkes_{modulation.value}"
+    if neural_key is not None:
+        method_names[neural_key] = "neural_tpp_rmtpp_cpu_v1"
+    if add_thin_key is not None:
+        method_names[add_thin_key] = "add_thin_histogram_marked_cpu_v1"
+    if bridge_key is not None:
+        method_names[bridge_key] = "schrodinger_bridge_markov_sinkhorn_cpu_v1"
+    fit_by_key = {clock_keys[family]: fit for family, fit in clock_fits.items()}
+    hawkes_fit_by_key = {
+        hawkes_keys[structure]: fit for structure, fit in hawkes_fits.items()
+    }
+    regime_fit_by_key = {
+        regime_keys[modulation]: fit for modulation, fit in regime_fits.items()
+    }
+    neural_fit_by_key = (
+        {neural_key: neural_fit}
+        if neural_key is not None and neural_fit is not None
+        else {}
+    )
+    add_thin_fit_by_key = (
+        {add_thin_key: add_thin_fit}
+        if add_thin_key is not None and add_thin_fit is not None
+        else {}
+    )
+    bridge_fit_by_key = (
+        {bridge_key: bridge_fit}
+        if bridge_key is not None and bridge_fit is not None
+        else {}
+    )
+    extra_metrics_by_key: dict[str, Mapping[str, JSONScalar]] = {
+        **{
+            key: _event_clock_fit_metrics(fit)
+            for key, fit in fit_by_key.items()
+        },
+        **{
+            key: _marked_hawkes_fit_metrics(fit)
+            for key, fit in hawkes_fit_by_key.items()
+        },
+        **{
+            key: _regime_hawkes_fit_metrics(fit)
+            for key, fit in regime_fit_by_key.items()
+        },
+        **{
+            key: _neural_tpp_fit_metrics(fit)
+            for key, fit in neural_fit_by_key.items()
+        },
+        **{
+            key: _add_thin_fit_metrics(fit, add_thin_generation_totals)
+            for key, fit in add_thin_fit_by_key.items()
+        },
+        **{
+            key: _schrodinger_bridge_fit_metrics(
+                fit,
+                bridge_generation_totals,
+            )
+            for key, fit in bridge_fit_by_key.items()
+        },
     }
     reports = tuple(
         _candidate_report(
             subject_id=subject_ids[name],
-            method_name=name,
+            method_name=method_names[name],
             role=roles[name],
             accumulator=accumulator,
             policy=policy,
             ensemble_member_count=(
                 len(corpus.profile.ensemble_member_ids)
                 if name == "empirical_motif"
+                or name in fit_by_key
+                or name in hawkes_fit_by_key
+                or name in regime_fit_by_key
+                or name in neural_fit_by_key
+                or name in add_thin_fit_by_key
+                or name in bridge_fit_by_key
                 else 1
             ),
             evaluated_window_count=len(evaluated),
             provisional=(
-                name == "empirical_motif" and motif_candidate_provisional
+                (name == "empirical_motif" and motif_candidate_provisional)
+                or name in bridge_fit_by_key
             ),
+            extra_metrics=extra_metrics_by_key.get(name),
         )
         for name, accumulator in accumulators.items()
     )
@@ -2036,6 +3665,30 @@ def run_reverse_degradation_benchmark_campaign(
         "ineffective_degradation_family_count": len(ineffective),
         "point_process_diagnostic_status": "not_applicable-no-conditional-intensity",
     }
+    if clock_configs:
+        base_campaign_metrics["point_process_diagnostic_status"] = (
+            "available-four-classical-event-clock-families"
+        )
+    if hawkes_configs:
+        base_campaign_metrics["point_process_diagnostic_status"] = (
+            "available-marked-hawkes-zero-diagonal-full-ablations"
+        )
+    if regime_configs:
+        base_campaign_metrics["point_process_diagnostic_status"] = (
+            "available-two-state-mmhp-delta-regime-ablations"
+        )
+    if neural_config is not None:
+        base_campaign_metrics["point_process_diagnostic_status"] = (
+            "available-bounded-rmtpp-cpu-challenger"
+        )
+    if add_thin_selected_config is not None:
+        base_campaign_metrics["point_process_diagnostic_status"] = (
+            "available-bounded-marked-add-thin-cpu-challenger"
+        )
+    if bridge_config is not None:
+        base_campaign_metrics["point_process_diagnostic_status"] = (
+            "available-bounded-markov-schrodinger-bridge-cpu-challenger"
+        )
     base_campaign_metrics.update(
         {
             f"degradation_effect_window_count:{name}": count
@@ -2090,10 +3743,31 @@ def run_reverse_degradation_benchmark_campaign(
             ).values()
         )
         if measured == artifact_bytes:
+            if metric_trace_out is not None:
+                metric_trace_out.append(
+                    _build_window_metric_trace(
+                        corpus=corpus,
+                        campaign=campaign,
+                        accumulators=accumulators,
+                        subject_ids=subject_ids,
+                        method_names=method_names,
+                        roles=roles,
+                    )
+                )
             return campaign, motif_index
         artifact_bytes = measured
         campaign = campaign_for_size(artifact_bytes)
     raise RuntimeError("benchmark artifact byte measurement did not converge")
+
+
+@dataclass(frozen=True, slots=True)
+class _WindowMetricCell:
+    split_kind: str
+    window_id: str
+    ensemble_member_id: str
+    reference_metrics: Mapping[str, float]
+    candidate_metrics: Mapping[str, float]
+    comparison_metrics: Mapping[str, float]
 
 
 @dataclass(slots=True)
@@ -2101,12 +3775,75 @@ class _CandidateAccumulator:
     values: dict[str, list[float]] = field(
         default_factory=lambda: defaultdict(list)
     )
+    cells: list[_WindowMetricCell] = field(default_factory=list)
     failures: int = 0
     refusals: int = 0
 
     def consume(self, values: Mapping[str, float]) -> None:
+        """Retain aggregate-only compatibility for focused metric tests."""
         for name, value in values.items():
             self.values[name].append(_finite_float(value, name))
+
+    def consume_streams(
+        self,
+        reference: Sequence[BenchmarkEventV1],
+        candidate: Sequence[BenchmarkEventV1],
+        partition: BenchmarkWindowPartitionV1,
+        *,
+        ensemble_member_id: str,
+    ) -> None:
+        values = _compare_streams(reference, candidate, partition)
+        self.consume(values)
+        self.cells.append(
+            _WindowMetricCell(
+                split_kind=partition.split_kind,
+                window_id=partition.window_id,
+                ensemble_member_id=_required_text(ensemble_member_id),
+                reference_metrics=_predictive_feature_vector(
+                    reference, partition
+                ),
+                candidate_metrics=_predictive_feature_vector(
+                    candidate, partition
+                ),
+                comparison_metrics=dict(values),
+            )
+        )
+
+
+def _build_window_metric_trace(
+    *,
+    corpus: ReverseDegradationBenchmarkCorpusV1,
+    campaign: ReverseDegradationBenchmarkCampaignV1,
+    accumulators: Mapping[str, _CandidateAccumulator],
+    subject_ids: Mapping[str, str],
+    method_names: Mapping[str, str],
+    roles: Mapping[str, str],
+) -> BenchmarkWindowMetricTraceV1:
+    window_by_id = {item.window_id: item for item in corpus.windows}
+    observations = tuple(
+        BenchmarkWindowMetricObservationV1(
+            candidate_id=subject_ids[name],
+            method_name=method_names[name],
+            role=roles[name],
+            split_kind=cell.split_kind,
+            window_id=cell.window_id,
+            ensemble_member_id=cell.ensemble_member_id,
+            reference_metrics=cell.reference_metrics,
+            candidate_metrics=cell.candidate_metrics,
+            comparison_metrics=cell.comparison_metrics,
+            session=window_by_id[cell.window_id].session,
+            epoch_label=window_by_id[cell.window_id].epoch_label,
+            context_state=window_by_id[cell.window_id].context_state,
+            positioning_state=window_by_id[cell.window_id].positioning_state,
+        )
+        for name, accumulator in sorted(accumulators.items())
+        for cell in accumulator.cells
+    )
+    return BenchmarkWindowMetricTraceV1(
+        corpus_id=corpus.corpus_id,
+        campaign_id=campaign.campaign_id,
+        observations=observations,
+    )
 
 
 def _candidate_report(
@@ -2119,6 +3856,7 @@ def _candidate_report(
     ensemble_member_count: int,
     evaluated_window_count: int,
     provisional: bool,
+    extra_metrics: Mapping[str, JSONScalar] | None = None,
 ) -> BenchmarkCandidateReportV1:
     defaults = {
         "event_count_relative_error": 1.0,
@@ -2178,6 +3916,8 @@ def _candidate_report(
             if values
         }
     )
+    if extra_metrics:
+        metrics.update(extra_metrics)
     observations = _gate_observations(
         scope=BenchmarkGateScope.CANDIDATE,
         subject_id=subject_id,
@@ -2216,6 +3956,493 @@ def _candidate_report(
     )
 
 
+def _event_clock_fit_metrics(
+    fit: EventClockFitResultV1,
+) -> dict[str, JSONScalar]:
+    diagnostic_status = {
+        EventClockFamily.NHPP: "available-conditional-intensity",
+        EventClockFamily.COX: "available-random-conditional-intensity",
+        EventClockFamily.ACD: "available-conditional-duration",
+        EventClockFamily.HIDDEN_MARKOV: "available-hidden-duration-mark",
+    }[fit.family]
+    return {
+        "event_clock_family": fit.family.value,
+        "event_clock_config_id": fit.config_id,
+        "event_clock_fit_id": fit.fit_id,
+        "event_clock_fit_status": fit.status.value,
+        "event_clock_fit_converged": fit.converged,
+        "event_clock_fit_iteration_count": fit.iteration_count,
+        "event_clock_fitted_event_count": fit.fitted_event_count,
+        "event_clock_fitted_window_count": fit.fitted_window_count,
+        "event_clock_fit_log_likelihood": fit.log_likelihood,
+        "event_clock_fit_failure_reason": fit.failure_reason,
+        "event_clock_fit_estimated_peak_memory_bytes": (
+            fit.estimated_peak_memory_bytes
+        ),
+        "event_clock_calibration_content_sha256": (
+            fit.calibration_content_sha256
+        ),
+        "point_process_diagnostic_status": diagnostic_status,
+        "automatic_winner": False,
+    }
+
+
+def _marked_hawkes_fit_metrics(
+    fit: MarkedHawkesFitResultV1,
+) -> dict[str, JSONScalar]:
+    """Expose bounded stability/convergence evidence beside stream metrics."""
+    return {
+        "marked_hawkes_excitation_structure": fit.excitation_structure.value,
+        "marked_hawkes_config_id": fit.config_id,
+        "marked_hawkes_fit_id": fit.fit_id,
+        "marked_hawkes_fit_status": fit.status.value,
+        "marked_hawkes_fit_converged": fit.converged,
+        "marked_hawkes_fit_iteration_count": fit.iteration_count,
+        "marked_hawkes_fitted_event_count": fit.fitted_event_count,
+        "marked_hawkes_fitted_window_count": fit.fitted_window_count,
+        "marked_hawkes_fit_log_likelihood": fit.log_likelihood,
+        "marked_hawkes_fit_failure_reason": fit.failure_reason,
+        "marked_hawkes_fit_estimated_peak_memory_bytes": (
+            fit.estimated_peak_memory_bytes
+        ),
+        "marked_hawkes_calibration_content_sha256": (
+            fit.calibration_content_sha256
+        ),
+        "marked_hawkes_maximum_spectral_radius": fit.diagnostics.get(
+            "maximum_spectral_radius"
+        ),
+        "marked_hawkes_stability_margin": fit.diagnostics.get(
+            "stability_margin"
+        ),
+        "marked_hawkes_conditioning_cell_count": fit.diagnostics.get(
+            "conditioning_cell_count"
+        ),
+        "point_process_diagnostic_status": (
+            "available-marked-multivariate-conditional-intensity"
+        ),
+        "automatic_winner": False,
+    }
+
+
+def _regime_hawkes_fit_metrics(
+    fit: RegimeHawkesFitResultV1,
+) -> dict[str, JSONScalar]:
+    """Expose fit, stability, state, and technology-stratum evidence."""
+    return {
+        "regime_hawkes_modulation": fit.modulation.value,
+        "regime_hawkes_config_id": fit.config_id,
+        "regime_hawkes_fit_id": fit.fit_id,
+        "regime_hawkes_fit_status": fit.status.value,
+        "regime_hawkes_fit_converged": fit.converged,
+        "regime_hawkes_fit_iteration_count": fit.iteration_count,
+        "regime_hawkes_fitted_event_count": fit.fitted_event_count,
+        "regime_hawkes_fitted_window_count": fit.fitted_window_count,
+        "regime_hawkes_fitted_bin_count": fit.fitted_bin_count,
+        "regime_hawkes_fit_log_likelihood": fit.log_likelihood,
+        "regime_hawkes_fit_failure_reason": fit.failure_reason,
+        "regime_hawkes_fit_estimated_peak_memory_bytes": (
+            fit.estimated_peak_memory_bytes
+        ),
+        "regime_hawkes_fit_diagnostic_bytes": fit.diagnostics.get(
+            "diagnostic_bytes"
+        ),
+        "regime_hawkes_calibration_content_sha256": (
+            fit.calibration_content_sha256
+        ),
+        "regime_hawkes_calibration_context_sha256": (
+            fit.calibration_context_sha256
+        ),
+        "regime_hawkes_maximum_spectral_radius": fit.diagnostics.get(
+            "maximum_spectral_radius"
+        ),
+        "regime_hawkes_stability_margin": fit.diagnostics.get(
+            "stability_margin"
+        ),
+        "regime_hawkes_minimum_state_occupancy": fit.diagnostics.get(
+            "minimum_state_occupancy"
+        ),
+        "regime_hawkes_minimum_calm_state_occupancy": fit.diagnostics.get(
+            "minimum_calm_state_occupancy"
+        ),
+        "regime_hawkes_minimum_active_state_occupancy": fit.diagnostics.get(
+            "minimum_active_state_occupancy"
+        ),
+        "regime_hawkes_minimum_activity_contrast": fit.diagnostics.get(
+            "minimum_activity_contrast"
+        ),
+        "regime_hawkes_minimum_expected_transition_count": (
+            fit.diagnostics.get("minimum_expected_transition_count")
+        ),
+        "regime_hawkes_technology_transition_cell_count": (
+            fit.diagnostics.get("technology_transition_cell_count")
+        ),
+        "regime_hawkes_minimum_mean_dwell_bins": fit.diagnostics.get(
+            "minimum_mean_dwell_bins"
+        ),
+        "regime_hawkes_maximum_mean_dwell_bins": fit.diagnostics.get(
+            "maximum_mean_dwell_bins"
+        ),
+        "regime_hawkes_mean_posterior_entropy": fit.diagnostics.get(
+            "mean_posterior_entropy"
+        ),
+        "point_process_diagnostic_status": (
+            "available-two-state-mmhp-delta-filtered-and-smoothed"
+        ),
+        "automatic_winner": False,
+    }
+
+
+def _neural_tpp_fit_metrics(
+    fit: NeuralTPPFitResultV1,
+) -> dict[str, JSONScalar]:
+    """Expose split, leakage, likelihood, checkpoint, and resource evidence."""
+    dataset = fit.dataset_manifest
+    training = fit.training_manifest
+    checkpoint = fit.checkpoint
+    return {
+        "neural_tpp_architecture": "rmtpp_cpu_v1",
+        "neural_tpp_config_id": fit.config_id,
+        "neural_tpp_fit_id": fit.fit_id,
+        "neural_tpp_fit_status": fit.status.value,
+        "neural_tpp_fit_converged": fit.converged,
+        "neural_tpp_training_event_count": fit.training_event_count,
+        "neural_tpp_tuning_event_count": fit.tuning_event_count,
+        "neural_tpp_training_window_count": fit.training_window_count,
+        "neural_tpp_tuning_window_count": fit.tuning_window_count,
+        "neural_tpp_selected_epoch": fit.selected_epoch,
+        "neural_tpp_train_negative_log_likelihood": (
+            fit.train_negative_log_likelihood
+        ),
+        "neural_tpp_tune_negative_log_likelihood": (
+            fit.tune_negative_log_likelihood
+        ),
+        "neural_tpp_train_time_negative_log_likelihood": (
+            checkpoint.train_time_negative_log_likelihood
+            if checkpoint is not None
+            else None
+        ),
+        "neural_tpp_train_mark_negative_log_likelihood": (
+            checkpoint.train_mark_negative_log_likelihood
+            if checkpoint is not None
+            else None
+        ),
+        "neural_tpp_tune_time_negative_log_likelihood": (
+            checkpoint.tune_time_negative_log_likelihood
+            if checkpoint is not None
+            else None
+        ),
+        "neural_tpp_tune_mark_negative_log_likelihood": (
+            checkpoint.tune_mark_negative_log_likelihood
+            if checkpoint is not None
+            else None
+        ),
+        "neural_tpp_fit_failure_reason": fit.failure_reason,
+        "neural_tpp_fit_estimated_peak_memory_bytes": (
+            fit.estimated_peak_memory_bytes
+        ),
+        "neural_tpp_dataset_content_sha256": fit.dataset_content_sha256,
+        "neural_tpp_context_content_sha256": fit.context_content_sha256,
+        "neural_tpp_dataset_id": (
+            dataset.dataset_id if dataset is not None else None
+        ),
+        "neural_tpp_exact_duplicate_count": (
+            dataset.exact_duplicate_count if dataset is not None else None
+        ),
+        "neural_tpp_near_duplicate_collision_count": (
+            dataset.near_duplicate_collision_count
+            if dataset is not None
+            else None
+        ),
+        "neural_tpp_overlap_count": (
+            dataset.overlap_count if dataset is not None else None
+        ),
+        "neural_tpp_training_id": (
+            training.training_id if training is not None else None
+        ),
+        "neural_tpp_completed_epoch_count": (
+            training.completed_epoch_count if training is not None else None
+        ),
+        "neural_tpp_maximum_gradient_norm": (
+            training.maximum_gradient_norm if training is not None else None
+        ),
+        "neural_tpp_gradient_work": (
+            training.gradient_work if training is not None else None
+        ),
+        "neural_tpp_checkpoint_id": (
+            checkpoint.checkpoint_id if checkpoint is not None else None
+        ),
+        "neural_tpp_parameter_count": (
+            checkpoint.parameter_count if checkpoint is not None else None
+        ),
+        "neural_tpp_parameter_bytes": (
+            checkpoint.parameter_bytes if checkpoint is not None else None
+        ),
+        "neural_tpp_tune_mark_accuracy": (
+            checkpoint.tune_mark_accuracy if checkpoint is not None else None
+        ),
+        "neural_tpp_tune_log_duration_rmse": (
+            checkpoint.tune_log_duration_rmse
+            if checkpoint is not None
+            else None
+        ),
+        "neural_tpp_tune_mean_pit": (
+            checkpoint.tune_mean_pit if checkpoint is not None else None
+        ),
+        "point_process_diagnostic_status": (
+            "available-exact-rmtpp-intensity-compensator-and-inverse-cdf"
+        ),
+        "automatic_winner": False,
+    }
+
+
+def _add_thin_fit_metrics(
+    fit: AddThinFitResultV1,
+    generation_totals: Mapping[str, float],
+) -> dict[str, JSONScalar]:
+    """Expose Add-Thin split, denoising, resource, and B/C/D/E evidence."""
+    dataset = fit.dataset_manifest
+    checkpoint = fit.checkpoint
+    runtime = fit.runtime_metadata
+    metrics: dict[str, JSONScalar] = {
+        "add_thin_architecture": "histogram_marked_add_thin_cpu_v1",
+        "add_thin_config_id": fit.config_id,
+        "add_thin_fit_id": fit.fit_id,
+        "add_thin_fit_status": fit.status.value,
+        "add_thin_fit_converged": fit.converged,
+        "add_thin_fit_failure_reason": fit.failure_reason,
+        "add_thin_training_window_count": fit.training_window_count,
+        "add_thin_tuning_window_count": fit.tuning_window_count,
+        "add_thin_training_event_count": fit.training_event_count,
+        "add_thin_tuning_event_count": fit.tuning_event_count,
+        "add_thin_fit_wall_time_ms": fit.fit_wall_time_ms,
+        "add_thin_fit_peak_memory_bytes": fit.fit_peak_memory_bytes,
+        "add_thin_runtime_os": cast(
+            JSONScalar, runtime.get("operating_system")
+        ),
+        "add_thin_runtime_machine": cast(JSONScalar, runtime.get("machine")),
+        "add_thin_python_implementation": cast(
+            JSONScalar, runtime.get("python_implementation")
+        ),
+        "add_thin_python_version": cast(
+            JSONScalar, runtime.get("python_version")
+        ),
+        "add_thin_accelerator_policy": cast(
+            JSONScalar, runtime.get("accelerator_policy")
+        ),
+        "add_thin_dataset_id": (
+            dataset.dataset_id if dataset is not None else None
+        ),
+        "add_thin_protected_window_count": (
+            dataset.protected_window_count if dataset is not None else None
+        ),
+        "add_thin_exact_duplicate_count": (
+            dataset.exact_duplicate_count if dataset is not None else None
+        ),
+        "add_thin_near_duplicate_collision_count": (
+            dataset.near_duplicate_collision_count
+            if dataset is not None
+            else None
+        ),
+        "add_thin_interval_overlap_count": (
+            dataset.interval_overlap_count if dataset is not None else None
+        ),
+        "add_thin_checkpoint_id": (
+            checkpoint.checkpoint_id if checkpoint is not None else None
+        ),
+        "add_thin_selected_smoothing": (
+            checkpoint.selected_smoothing if checkpoint is not None else None
+        ),
+        "add_thin_train_classifier_bce": (
+            checkpoint.train_classifier_bce if checkpoint is not None else None
+        ),
+        "add_thin_train_missing_poisson_nll": (
+            checkpoint.train_missing_poisson_nll
+            if checkpoint is not None
+            else None
+        ),
+        "add_thin_train_objective": (
+            checkpoint.train_objective if checkpoint is not None else None
+        ),
+        "add_thin_tune_classifier_bce": (
+            checkpoint.tune_classifier_bce if checkpoint is not None else None
+        ),
+        "add_thin_tune_missing_poisson_nll": (
+            checkpoint.tune_missing_poisson_nll
+            if checkpoint is not None
+            else None
+        ),
+        "add_thin_tune_objective": (
+            checkpoint.tune_objective if checkpoint is not None else None
+        ),
+        "add_thin_baseline_tune_objective": (
+            checkpoint.baseline_tune_objective
+            if checkpoint is not None
+            else None
+        ),
+        "add_thin_tune_count_relative_error": (
+            checkpoint.tune_count_relative_error
+            if checkpoint is not None
+            else None
+        ),
+        "add_thin_tune_mark_l1": (
+            checkpoint.tune_mark_l1 if checkpoint is not None else None
+        ),
+        "add_thin_parameter_count": (
+            checkpoint.parameter_count if checkpoint is not None else None
+        ),
+        "add_thin_parameter_bytes": (
+            checkpoint.parameter_bytes if checkpoint is not None else None
+        ),
+        "add_thin_smoothing_candidate_count": (
+            len(checkpoint.candidate_objectives)
+            if checkpoint is not None
+            else None
+        ),
+        "point_process_diagnostic_status": (
+            "available-add-thin-forward-and-b-c-d-e-reverse-accounting"
+        ),
+        "automatic_winner": False,
+    }
+    metrics.update(
+        {
+            f"add_thin_generation_{name}": int(value)
+            for name, value in generation_totals.items()
+        }
+    )
+    return metrics
+
+
+def _schrodinger_bridge_fit_metrics(
+    fit: SchrodingerBridgeFitResultV1,
+    generation_totals: Mapping[str, float],
+) -> dict[str, JSONScalar]:
+    """Expose bridge split, IPF, path, boundary, and resource evidence."""
+    dataset = fit.dataset_manifest
+    checkpoint = fit.checkpoint
+    solver = fit.solver_evidence
+    runtime = fit.runtime_metadata
+    metrics: dict[str, JSONScalar] = {
+        "schrodinger_bridge_architecture": "finite_state_markov_sinkhorn_cpu_v1",
+        "schrodinger_bridge_config_id": fit.config_id,
+        "schrodinger_bridge_broker_target_id": fit.broker_target_id,
+        "schrodinger_bridge_fit_id": fit.fit_id,
+        "schrodinger_bridge_fit_status": fit.status.value,
+        "schrodinger_bridge_fit_converged": fit.converged,
+        "schrodinger_bridge_fit_failure_reason": fit.failure_reason,
+        "schrodinger_bridge_training_window_count": fit.training_window_count,
+        "schrodinger_bridge_tuning_window_count": fit.tuning_window_count,
+        "schrodinger_bridge_training_event_count": fit.training_event_count,
+        "schrodinger_bridge_tuning_event_count": fit.tuning_event_count,
+        "schrodinger_bridge_fit_wall_time_ms": fit.fit_wall_time_ms,
+        "schrodinger_bridge_fit_peak_memory_bytes": fit.fit_peak_memory_bytes,
+        "schrodinger_bridge_runtime_os": cast(
+            JSONScalar, runtime.get("operating_system")
+        ),
+        "schrodinger_bridge_runtime_machine": cast(
+            JSONScalar, runtime.get("machine")
+        ),
+        "schrodinger_bridge_accelerator_policy": cast(
+            JSONScalar, runtime.get("accelerator_policy")
+        ),
+        "schrodinger_bridge_dataset_id": (
+            dataset.dataset_id if dataset is not None else None
+        ),
+        "schrodinger_bridge_protected_window_count": (
+            dataset.protected_window_count if dataset is not None else None
+        ),
+        "schrodinger_bridge_exact_duplicate_count": (
+            dataset.exact_duplicate_count if dataset is not None else None
+        ),
+        "schrodinger_bridge_near_duplicate_collision_count": (
+            dataset.near_duplicate_collision_count
+            if dataset is not None
+            else None
+        ),
+        "schrodinger_bridge_interval_overlap_count": (
+            dataset.interval_overlap_count if dataset is not None else None
+        ),
+        "schrodinger_bridge_checkpoint_id": (
+            checkpoint.checkpoint_id if checkpoint is not None else None
+        ),
+        "schrodinger_bridge_parameter_count": (
+            checkpoint.parameter_count if checkpoint is not None else None
+        ),
+        "schrodinger_bridge_parameter_bytes": (
+            checkpoint.parameter_bytes if checkpoint is not None else None
+        ),
+        "schrodinger_bridge_target_mean_event_count": (
+            checkpoint.target_mean_event_count
+            if checkpoint is not None
+            else None
+        ),
+        "schrodinger_bridge_tune_joint_nll": (
+            checkpoint.tune_joint_nll if checkpoint is not None else None
+        ),
+        "schrodinger_bridge_source_iid_tune_nll": (
+            checkpoint.source_iid_tune_nll if checkpoint is not None else None
+        ),
+        "schrodinger_bridge_uniform_tune_nll": (
+            checkpoint.uniform_tune_nll if checkpoint is not None else None
+        ),
+        "schrodinger_bridge_solver_converged": (
+            solver.converged if solver is not None else False
+        ),
+        "schrodinger_bridge_solver_iterations": (
+            solver.iterations if solver is not None else 0
+        ),
+        "schrodinger_bridge_source_marginal_residual": (
+            solver.source_marginal_residual if solver is not None else None
+        ),
+        "schrodinger_bridge_target_marginal_residual": (
+            solver.target_marginal_residual if solver is not None else None
+        ),
+        "schrodinger_bridge_maximum_marginal_residual": (
+            solver.maximum_marginal_residual if solver is not None else None
+        ),
+        "schrodinger_bridge_support_missing_count": (
+            solver.support_missing_count if solver is not None else None
+        ),
+        "schrodinger_bridge_numerical_repair_count": (
+            solver.numerical_repair_count if solver is not None else None
+        ),
+        "schrodinger_bridge_minimum_positive_kernel": (
+            solver.minimum_positive_kernel if solver is not None else None
+        ),
+        "schrodinger_bridge_maximum_scaling": (
+            solver.maximum_scaling if solver is not None else None
+        ),
+        "schrodinger_bridge_expected_transport_cost": (
+            solver.expected_transport_cost if solver is not None else None
+        ),
+        "schrodinger_bridge_relative_entropy": (
+            solver.relative_entropy if solver is not None else None
+        ),
+        "schrodinger_bridge_regularized_objective": (
+            solver.regularized_objective if solver is not None else None
+        ),
+        "schrodinger_bridge_quantization_mean_abs_error": (
+            solver.quantization_mean_abs_error if solver is not None else None
+        ),
+        "schrodinger_bridge_window_boundary_transition_l1": (
+            solver.window_boundary_transition_l1 if solver is not None else None
+        ),
+        "schrodinger_bridge_solver_work": (
+            solver.solver_work if solver is not None else None
+        ),
+        "point_process_diagnostic_status": (
+            "available-finite-state-markov-sinkhorn-and-conditional-paths"
+        ),
+        "automatic_winner": False,
+    }
+    metrics.update(
+        {
+            f"schrodinger_bridge_generation_{name}": value
+            for name, value in generation_totals.items()
+        }
+    )
+    return metrics
+
+
 def _gate_observations(
     *,
     scope: BenchmarkGateScope,
@@ -2235,8 +4462,10 @@ def _gate_observations(
         if name
         in {
             requirement.metric_name
-            for requirement in load_default_benchmark_promotion_gate_policy().requirements_for(
-                scope
+            for requirement in (
+                load_default_benchmark_promotion_gate_policy().requirements_for(
+                    scope
+                )
             )
         }
     )
@@ -2396,13 +4625,28 @@ def _build_real_reference_motif_index(
                         available_at_ns=chunk[-1].event_time_ns,
                     )
                 )
+    chunks_per_symbol = math.ceil(corpus.profile.max_events_per_symbol / 16)
+    maximum_source_windows = (
+        len(corpus.windows) * len(corpus.profile.symbols) * chunks_per_symbol
+    )
+    maximum_training_fragments = (
+        sum(item.split_kind == "calibration" for item in corpus.windows)
+        * len(corpus.profile.symbols)
+        * chunks_per_symbol
+    )
+    if maximum_source_windows > MAX_REFERENCE_MOTIF_SOURCE_WINDOWS:
+        raise ValueError(
+            "benchmark motif source-window preflight exceeds bound"
+        )
+    if maximum_training_fragments > MAX_REFERENCE_MOTIF_FRAGMENTS:
+        raise ValueError("benchmark motif fragment preflight exceeds bound")
     return build_reference_motif_index(
         windows,
         splits=splits,
         config=ReferenceMotifIndexConfigV1(
             min_cell_support=1,
-            max_source_windows=2048,
-            max_fragments=512,
+            max_source_windows=maximum_source_windows,
+            max_fragments=maximum_training_fragments,
             max_matches=16,
             source_overlap_guard_ns=(
                 corpus.profile.neighbor_guard_seconds * NANOSECONDS_PER_SECOND
@@ -2540,7 +4784,33 @@ def _apply_degradation(
                 counts[key] += 1
     elif name == "missing_window":
         modulus = int(cast(int, config["window_modulus"]))
-        missing = int(partition.window_id[-8:], 16) % modulus == 0
+        peers = tuple(
+            item
+            for item in corpus.windows
+            if item.split_kind == partition.split_kind
+        )
+        selected_windows = tuple(
+            item
+            for item in peers
+            if int(item.window_id[-8:], 16) % modulus == 0
+        )
+        # A hash bucket is a reproducible assignment, but a finite corpus can
+        # legitimately leave that bucket empty.  Keep the predeclared bucket
+        # whenever it has support and deterministically select the lowest hash
+        # otherwise so every protected split exercises this negative control.
+        if not selected_windows:
+            selected_windows = (
+                min(
+                    peers,
+                    key=lambda item: (
+                        int(item.window_id[-8:], 16),
+                        item.window_id,
+                    ),
+                ),
+            )
+        missing = partition.window_id in {
+            item.window_id for item in selected_windows
+        }
         selected = [
             _degraded_event(item, name)
             for item in reference
@@ -2631,6 +4901,79 @@ def _anchor_violation_count(
     )
 
 
+def _predictive_feature_vector(
+    events: Sequence[BenchmarkEventV1],
+    partition: BenchmarkWindowPartitionV1,
+) -> dict[str, float]:
+    """Project a bounded synchronized stream into comparable observables."""
+    ordered = tuple(_ordered_events(events))
+    duration_seconds = max(
+        1e-9,
+        (partition.end_ns - partition.start_ns) / NANOSECONDS_PER_SECOND,
+    )
+    intervals = _interarrivals(ordered)
+    spreads_pips = [item.spread / PIP for item in ordered]
+    mids = _mids_by_symbol(ordered)
+    increments = _absolute_log_increments(mids)
+    update_shares = _update_proportions(ordered)
+    burst_count = sum(value <= 100_000_000 for value in intervals)
+    quiet_count = sum(value >= 5_000_000_000 for value in intervals)
+    interval_count = max(1, len(intervals))
+    features: dict[str, float] = {
+        "event_count": float(len(ordered)),
+        "window_duration_seconds": duration_seconds,
+        "event_rate_hz": len(ordered) / duration_seconds,
+        "interarrival_mean_seconds": _mean(intervals) / NANOSECONDS_PER_SECOND,
+        "interarrival_q10_seconds": _quantile(intervals, 0.10)
+        / NANOSECONDS_PER_SECOND,
+        "interarrival_q50_seconds": _quantile(intervals, 0.50)
+        / NANOSECONDS_PER_SECOND,
+        "interarrival_q90_seconds": _quantile(intervals, 0.90)
+        / NANOSECONDS_PER_SECOND,
+        "interarrival_lag1": _lag_one_correlation(intervals),
+        "count_dispersion": _dispersion(
+            _multiscale_counts(ordered, partition.start_ns, partition.end_ns)
+        ),
+        "burst_rate": burst_count / interval_count,
+        "quiet_rate": quiet_count / interval_count,
+        "spread_mean_pips": _mean(spreads_pips),
+        "spread_q50_pips": _quantile(spreads_pips, 0.50),
+        "spread_q95_pips": _quantile(spreads_pips, 0.95),
+        "spread_q99_pips": _quantile(spreads_pips, 0.99),
+        "spread_jump_mean_pips": _mean_absolute_difference(spreads_pips),
+        "stale_run_fraction": _longest_stale_run(ordered)
+        / max(1, len(ordered)),
+        "timestamp_quantum_ms": _timestamp_quantum(ordered)
+        / NANOSECONDS_PER_MILLISECOND,
+        "absolute_log_increment_mean": _mean(increments),
+        "absolute_log_increment_q95": _quantile(increments, 0.95),
+        "absolute_log_increment_q99": _quantile(increments, 0.99),
+        "path_realized_variation": sum(
+            _realized_variation(values) for values in mids.values()
+        ),
+        "path_excursion_pips": _path_excursion(mids) / PIP,
+        "triangle_residual_p99_pips": _triangle_residual_p99_pips(ordered),
+        "triangle_synchronization_rate": _triangle_sync_rate(ordered),
+    }
+    for symbol in DEFAULT_BENCHMARK_SYMBOLS:
+        selected = mids.get(symbol, ())
+        features[f"event_rate_hz.{symbol}"] = (
+            sum(item.symbol == symbol for item in ordered) / duration_seconds
+        )
+        features[f"path_realized_variation.{symbol}"] = _realized_variation(
+            selected
+        )
+        features[f"path_excursion_pips.{symbol}"] = (
+            (max(selected) - min(selected)) / PIP if selected else 0.0
+        )
+    for state in BENCHMARK_MARK_STATES:
+        features[f"mark_share.{state}"] = update_shares.get(state, 0.0)
+    return {
+        name: _finite_float(value, name)
+        for name, value in sorted(features.items())
+    }
+
+
 def _compare_streams(
     reference: Sequence[BenchmarkEventV1],
     candidate: Sequence[BenchmarkEventV1],
@@ -2678,6 +5021,14 @@ def _compare_streams(
     )
     left_increment = _absolute_log_increments(left_mids)
     right_increment = _absolute_log_increments(right_mids)
+    time_pits = _empirical_pit_values(
+        left_intervals,
+        right_intervals,
+        keys=tuple(item.source_event_id for item in left[1:]),
+    )
+    mark_pits = _categorical_pit_values(left, right_updates)
+    time_ks = _uniform_ks_statistic(time_pits)
+    mark_ks = _uniform_ks_statistic(mark_pits)
     return {
         "event_count_relative_error": _relative_error(
             float(len(left)), float(len(right))
@@ -2696,6 +5047,10 @@ def _compare_streams(
             _lag_one_correlation(left_intervals)
             - _lag_one_correlation(right_intervals)
         ),
+        "simulation_time_pit_ks": time_ks,
+        "simulation_time_pit_lag1_abs": abs(_lag_one_correlation(time_pits)),
+        "simulation_mark_pit_ks": mark_ks,
+        "joint_time_mark_max_ks": max(time_ks, mark_ks),
         "burst_quiet_rate_error": _burst_quiet_error(
             left_intervals, right_intervals
         ),
@@ -2737,6 +5092,81 @@ def _compare_streams(
         "inverse_consistency_error": 0.0,
         "unsupported_context_emission_count": float(unsupported),
     }
+
+
+def _empirical_pit_values(
+    observed: Sequence[float],
+    predictive: Sequence[float],
+    *,
+    keys: Sequence[str],
+) -> tuple[float, ...]:
+    """Return deterministic randomized ranks against one predictive sample."""
+    if not observed or not predictive:
+        return ()
+    ordered = tuple(
+        sorted(
+            _finite_float(item, "predictive interval") for item in predictive
+        )
+    )
+    result: list[float] = []
+    for index, value in enumerate(observed):
+        selected = _finite_float(value, "observed interval")
+        less = bisect_left(ordered, selected)
+        upper = less
+        while upper < len(ordered) and ordered[upper] == selected:
+            upper += 1
+        key = keys[index] if index < len(keys) else f"pit-{index}"
+        randomized = _hash_unit_interval(key)
+        rank = less + randomized * (upper - less) + 0.5
+        result.append(min(1.0 - 1e-12, max(1e-12, rank / len(ordered))))
+    return tuple(result)
+
+
+def _categorical_pit_values(
+    observed: Sequence[BenchmarkEventV1],
+    predictive_probabilities: Mapping[str, float],
+) -> tuple[float, ...]:
+    states = BENCHMARK_MARK_STATES
+    probabilities = [
+        max(0.0, _finite_float(predictive_probabilities.get(state, 0.0), state))
+        for state in states
+    ]
+    total = sum(probabilities)
+    if not observed or total <= 0.0:
+        return ()
+    probabilities = [value / total for value in probabilities]
+    cumulative = 0.0
+    intervals: dict[str, tuple[float, float]] = {}
+    for state, probability in zip(states, probabilities):
+        intervals[state] = (cumulative, cumulative + probability)
+        cumulative += probability
+    result: list[float] = []
+    for event in observed:
+        lower, upper = intervals[_canonical_update_state(event.event_state)]
+        if upper <= lower:
+            result.append(1e-12)
+            continue
+        value = lower + (upper - lower) * _hash_unit_interval(
+            event.source_event_id
+        )
+        result.append(min(1.0 - 1e-12, max(1e-12, value)))
+    return tuple(result)
+
+
+def _uniform_ks_statistic(values: Sequence[float]) -> float:
+    if not values:
+        return 1.0
+    ordered = sorted(_finite_float(item, "PIT value") for item in values)
+    count = len(ordered)
+    return max(
+        max((index + 1) / count - value, value - index / count)
+        for index, value in enumerate(ordered)
+    )
+
+
+def _hash_unit_interval(value: str) -> float:
+    digest = hashlib.sha256(_required_text(value).encode("utf-8")).digest()
+    return (int.from_bytes(digest[:8], "big") + 0.5) / 2**64
 
 
 def write_reverse_degradation_benchmark_artifacts(
@@ -2784,6 +5214,34 @@ def write_reverse_degradation_benchmark_artifacts(
     return artifacts
 
 
+def write_benchmark_window_metric_trace(
+    trace: BenchmarkWindowMetricTraceV1,
+    artifact_directory: str | Path,
+) -> ArtifactRef:
+    """Write one bounded row-free trace as a content-addressed artifact."""
+    if not isinstance(trace, BenchmarkWindowMetricTraceV1):
+        raise TypeError("metric trace must use the v1 contract")
+    root = Path(artifact_directory).expanduser().resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    encoded = trace.to_json().encode("utf-8") + b"\n"
+    if len(encoded) > DEFAULT_MAX_ARTIFACT_BYTES:
+        raise ValueError("benchmark window metric trace exceeds bound")
+    digest = hashlib.sha256(encoded).hexdigest()
+    target = root / f"reverse-degradation-window-metric-trace-{digest}.json"
+    _write_once(target, encoded)
+    return ArtifactRef(
+        kind="reverse_degradation_window_metric_trace_v1",
+        path=str(target),
+        size_bytes=len(encoded),
+        sha256=digest,
+        metadata={
+            "corpus_id": trace.corpus_id,
+            "campaign_id": trace.campaign_id,
+            "trace_id": trace.trace_id,
+        },
+    )
+
+
 def _benchmark_artifact_payloads(
     corpus: ReverseDegradationBenchmarkCorpusV1,
     campaign: ReverseDegradationBenchmarkCampaignV1,
@@ -2815,7 +5273,9 @@ def _benchmark_artifact_payloads(
                 "split_hashes": dict(corpus.split_hashes),
                 "neighbor_guard_seconds": corpus.profile.neighbor_guard_seconds,
                 "holdout_neighbor_leakage_count": corpus.neighbor_leakage_count,
-                "motif_cross_split_comparison_count": motif_index.leakage_comparison_count,
+                "motif_cross_split_comparison_count": (
+                    motif_index.leakage_comparison_count
+                ),
                 "motif_indexed_splits": [ReferenceMotifSplitKind.TRAIN.value],
                 "information_audit_violation_count": campaign.campaign_metrics[
                     "information_audit_violation_count"
@@ -2883,6 +5343,18 @@ def read_reverse_degradation_benchmark_campaign(
         maximum=DEFAULT_MAX_ARTIFACT_BYTES,
     )
     return ReverseDegradationBenchmarkCampaignV1.from_dict(payload)
+
+
+def read_benchmark_window_metric_trace(
+    path: str | Path,
+) -> BenchmarkWindowMetricTraceV1:
+    """Read and hash-verify one content-addressed row-free metric trace."""
+    payload = _read_content_addressed_json(
+        path,
+        prefix="reverse-degradation-window-metric-trace",
+        maximum=DEFAULT_MAX_ARTIFACT_BYTES,
+    )
+    return BenchmarkWindowMetricTraceV1.from_dict(payload)
 
 
 def _ordered_events(
@@ -3044,7 +5516,9 @@ def _burst_quiet_error(left: Sequence[float], right: Sequence[float]) -> float:
 
 
 def _update_proportions(events: Sequence[BenchmarkEventV1]) -> dict[str, float]:
-    counts = Counter(item.event_state for item in events)
+    counts = Counter(
+        _canonical_update_state(item.event_state) for item in events
+    )
     total = max(1, len(events))
     return {name: count / total for name, count in counts.items()}
 
@@ -3054,9 +5528,20 @@ def _update_transitions(events: Sequence[BenchmarkEventV1]) -> dict[str, float]:
     total = 0
     for selected in _events_by_symbol(events).values():
         for left, right in zip(selected, selected[1:]):
-            counts[f"{left.event_state}->{right.event_state}"] += 1
+            left_state = _canonical_update_state(left.event_state)
+            right_state = _canonical_update_state(right.event_state)
+            counts[f"{left_state}->{right_state}"] += 1
             total += 1
     return {name: count / max(1, total) for name, count in counts.items()}
+
+
+def _canonical_update_state(value: str) -> str:
+    try:
+        return _CANONICAL_UPDATE_STATE[value]
+    except KeyError as error:
+        raise ValueError(
+            f"unsupported benchmark update state: {value!r}"
+        ) from error
 
 
 def _mapping_l1(left: Mapping[str, float], right: Mapping[str, float]) -> float:
@@ -3335,7 +5820,7 @@ def _read_content_addressed_json(
 
 
 def _peak_memory_bytes() -> int:
-    return peak_rss_bytes()
+    return int(peak_rss_bytes())
 
 
 def _enforce_runtime(started: float, maximum: float) -> None:
@@ -3436,6 +5921,18 @@ def _json_scalar(value: Any, name: str) -> JSONScalar:
     raise ValueError(f"{name} must be a finite JSON scalar")
 
 
+def _trace_metric_mapping(
+    value: Mapping[str, float], name: str
+) -> dict[str, float]:
+    selected = {
+        _required_text(key): _finite_float(metric, f"{name} {key}")
+        for key, metric in value.items()
+    }
+    if not selected or len(selected) > MAX_BENCHMARK_TRACE_METRICS:
+        raise ValueError(f"{name} mapping is empty or exceeds its bound")
+    return dict(sorted(selected.items()))
+
+
 def _mapping(value: Any) -> Mapping[str, Any]:
     if not isinstance(value, Mapping):
         raise ValueError("expected a mapping")
@@ -3480,21 +5977,27 @@ __all__ = [
     "BENCHMARK_CANDIDATE_REPORT_SCHEMA_VERSION",
     "BENCHMARK_CORPUS_PROFILE_SCHEMA_VERSION",
     "BENCHMARK_SOURCE_PARTITION_SCHEMA_VERSION",
+    "BENCHMARK_WINDOW_METRIC_OBSERVATION_SCHEMA_VERSION",
+    "BENCHMARK_WINDOW_METRIC_TRACE_SCHEMA_VERSION",
     "BENCHMARK_WINDOW_PARTITION_SCHEMA_VERSION",
     "PREDECLARED_GATE_COMMIT",
     "REVERSE_DEGRADATION_CAMPAIGN_SCHEMA_VERSION",
     "REVERSE_DEGRADATION_CORPUS_SCHEMA_VERSION",
     "BenchmarkCandidateReportV1",
     "BenchmarkSourcePartitionV1",
+    "BenchmarkWindowMetricObservationV1",
+    "BenchmarkWindowMetricTraceV1",
     "BenchmarkWindowPartitionV1",
     "ReverseDegradationBenchmarkCampaignV1",
     "ReverseDegradationBenchmarkCorpusV1",
     "ReverseDegradationCorpusProfileV1",
     "audit_holdout_neighbor_leakage",
     "build_reverse_degradation_benchmark_corpus",
+    "read_benchmark_window_metric_trace",
     "read_reverse_degradation_benchmark_campaign",
     "read_reverse_degradation_benchmark_corpus",
     "replay_reverse_degradation_benchmark_corpus",
     "run_reverse_degradation_benchmark_campaign",
+    "write_benchmark_window_metric_trace",
     "write_reverse_degradation_benchmark_artifacts",
 ]

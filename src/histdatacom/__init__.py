@@ -30,9 +30,17 @@ __all__ = [
     "DatasetVersionManifestV1",
     "FixtureProviderAdapter",
     "HistDataProviderAdapter",
+    "CrossSeriesConstraintBundleV1",
+    "CrossSeriesConstraintPolicyV1",
+    "CrossSeriesConstraintUseV1",
+    "CrossSeriesConstraintWindowV1",
     "ReconstructionClient",
     "ReconstructionExecutionRequestV1",
     "ReconstructionExitCode",
+    "ReconstructionExperimentManifestV1",
+    "ReconstructionExperimentRole",
+    "ReconstructionExperimentSelectionV1",
+    "ReconstructionExperimentVerificationV1",
     "ReconstructionOperationReceiptV1",
     "ReconstructionPlanSetPreflightV1",
     "ReconstructionPlanSetV1",
@@ -42,7 +50,7 @@ __all__ = [
 ]
 
 
-__version__ = "2.3.0"
+__version__ = "2.4.0"
 __author__ = "David Midlo"
 
 _RECONSTRUCTION_EXPORTS = frozenset(
@@ -59,6 +67,15 @@ _RECONSTRUCTION_EXPORTS = frozenset(
     }
 )
 
+_EXPERIMENT_EXPORTS = frozenset(
+    {
+        "ReconstructionExperimentManifestV1",
+        "ReconstructionExperimentRole",
+        "ReconstructionExperimentSelectionV1",
+        "ReconstructionExperimentVerificationV1",
+    }
+)
+
 _DATASET_EXPORTS = frozenset(
     {
         "DatasetCatalog",
@@ -70,18 +87,35 @@ _DATASET_EXPORTS = frozenset(
     }
 )
 
+_CROSS_SERIES_EXPORTS = frozenset(
+    {
+        "CrossSeriesConstraintBundleV1",
+        "CrossSeriesConstraintPolicyV1",
+        "CrossSeriesConstraintUseV1",
+        "CrossSeriesConstraintWindowV1",
+    }
+)
+
 
 def __getattr__(name: str) -> Any:
     """Lazily expose the typed reconstruction facade without import cycles."""
-    if name not in _RECONSTRUCTION_EXPORTS | _DATASET_EXPORTS:
+    if name not in (
+        _RECONSTRUCTION_EXPORTS
+        | _EXPERIMENT_EXPORTS
+        | _DATASET_EXPORTS
+        | _CROSS_SERIES_EXPORTS
+    ):
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
     from importlib import import_module
 
-    module_name = (
-        "histdatacom.reconstruction"
-        if name in _RECONSTRUCTION_EXPORTS
-        else "histdatacom.datasets"
-    )
+    if name in _RECONSTRUCTION_EXPORTS:
+        module_name = "histdatacom.reconstruction"
+    elif name in _EXPERIMENT_EXPORTS:
+        module_name = "histdatacom.reconstruction_experiment"
+    elif name in _DATASET_EXPORTS:
+        module_name = "histdatacom.datasets"
+    else:
+        module_name = "histdatacom.cross_series_constraints"
     value = getattr(import_module(module_name), name)
     globals()[name] = value
     return value

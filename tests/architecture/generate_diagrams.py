@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -36,6 +37,7 @@ def generate_pyreverse_svgs() -> None:
         "--output-directory",
         base_dir.resolve(),
         package_dir.resolve(),
+        _env={**os.environ, "PYTHONHASHSEED": "0"},
     )
 
 

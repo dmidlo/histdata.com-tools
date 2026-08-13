@@ -10,25 +10,34 @@ workflow payloads.
 
 from __future__ import annotations
 
+import hashlib
+import json
+import math
+import os
+import re
+from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
 from functools import lru_cache
-import hashlib
-import json
-import math
-import os
 from pathlib import Path
-import re
 from typing import Any, cast
 
+from histdatacom.cross_series_constraints import (
+    CROSS_SERIES_CONSTRAINT_POLICY_ARTIFACT_KIND,
+    CrossSeriesConstraintPolicyV1,
+)
 from histdatacom.data_analytics.feed_epochs_v2 import (
     read_active_time_feed_epoch_definition,
 )
 from histdatacom.datasets import (
+    DatasetCatalog,
     DatasetContractError,
     DatasetFailureCode,
+    DatasetOrigin,
+    DatasetQueryScopeV1,
+    DatasetResolutionV1,
     HistDataProviderAdapter,
 )
 from histdatacom.market_context import (
@@ -51,6 +60,23 @@ from histdatacom.orchestration.reconstruction import (
     ReconstructionWorkflowRequestV1,
     artifact_ref_for_file,
     verify_artifact_ref,
+)
+from histdatacom.reconstruction_evidence import (
+    CURRENT_EVIDENCE_SOURCE_PROVIDER_ID,
+    RECONSTRUCTION_EVIDENCE_POLICY_ARTIFACT_KIND,
+    ReconstructionEvidencePolicyV1,
+)
+from histdatacom.reconstruction_experiment import (
+    CURRENT_EXPERIMENT_ALIAS,
+    RECONSTRUCTION_EXPERIMENT_ARTIFACT_KIND,
+    RECONSTRUCTION_EXPERIMENT_CATALOG_ARTIFACT_KIND,
+    RECONSTRUCTION_EXPERIMENT_RESOLUTION_ARTIFACT_KIND,
+    ReconstructionExperimentArtifactBindingV1,
+    ReconstructionExperimentRole,
+    build_legacy_histdata_catalog,
+    freeze_histdata_reconstruction_experiment,
+    read_reconstruction_experiment,
+    verify_reconstruction_experiment,
 )
 from histdatacom.runtime_contracts import ArtifactRef, JSONValue
 from histdatacom.synthetic.benchmark_corpus import (
@@ -75,7 +101,10 @@ from histdatacom.synthetic.ensembles import (
     EnsembleCalibrationConfigV1,
     plan_reconstruction_ensemble,
 )
-from histdatacom.synthetic.generation import EmpiricalMotifGeneratorConfigV1
+from histdatacom.synthetic.generation import (
+    EMPIRICAL_MOTIF_GENERATOR_ID,
+    EmpiricalMotifGeneratorConfigV1,
+)
 from histdatacom.synthetic.information import (
     InformationAuditReportV1,
     InformationInputKind,
@@ -100,6 +129,25 @@ from histdatacom.synthetic.observation import (
     read_observation_operator_artifact,
 )
 from histdatacom.synthetic.persistence import estimate_reconstruction_retention
+from histdatacom.synthetic.proposal_engines import (
+    PROPOSAL_ENGINE_PORTFOLIO_SCHEMA_VERSION,
+    ProposalEngineBindingV1,
+    ProposalEnginePortfolioV1,
+    ProposalEngineRegistryV1,
+    build_histdata_proposal_portfolio,
+    proposal_engine_default_configs,
+    proposal_engine_registry,
+    proposal_evaluation_engine_artifacts,
+    proposal_evidence_from_campaigns,
+    read_proposal_engine_fit_artifact,
+    read_proposal_evidence_campaigns,
+    read_proposal_portfolio_evaluation,
+)
+from histdatacom.synthetic.qualification import (
+    PoweredQualificationDossierV1,
+    read_powered_qualification_dossier,
+    verify_powered_qualification_dossier,
+)
 from histdatacom.synthetic.streaming import (
     ReconstructionResourceEstimateV1,
     ReconstructionRunV1,
@@ -116,6 +164,9 @@ RECONSTRUCTION_SOURCE_INVENTORY_SCHEMA_VERSION = (
 RECONSTRUCTION_PLAN_CONFIGURATION_SCHEMA_VERSION = (
     "histdatacom.reconstruction-plan-configuration.v1"
 )
+RECONSTRUCTION_PLAN_CONFIGURATION_V2_SCHEMA_VERSION = (
+    "histdatacom.reconstruction-plan-configuration.v2"
+)
 RECONSTRUCTION_PLAN_EXECUTION_MANIFEST_SCHEMA_VERSION = (
     "histdatacom.reconstruction-plan-execution-manifest.v1"
 )
@@ -130,6 +181,14 @@ SYNTHETIC_INFILL_PLAN_SCHEMA_VERSION = "histdatacom.synthetic-infill-plan.v1"
 ASCII_TICK_SOURCE_KIND = "histdata_ascii_tick_arrow"
 SOURCE_INVENTORY_ARTIFACT_KIND = "reconstruction_source_inventory_v1"
 PLAN_CONFIGURATION_ARTIFACT_KIND = "reconstruction_plan_configuration_v1"
+PLAN_CONFIGURATION_V2_ARTIFACT_KIND = "reconstruction_plan_configuration_v2"
+PROPOSAL_ENGINE_REGISTRY_ARTIFACT_KIND = "proposal_engine_registry_v1"
+PROPOSAL_ENGINE_PORTFOLIO_ARTIFACT_KIND = "proposal_engine_portfolio_v1"
+PROPOSAL_ENGINE_CONFIG_ARTIFACT_KIND = "proposal_engine_config_v1"
+PROPOSAL_ENGINE_EVALUATION_ARTIFACT_KIND = (
+    "proposal_engine_evaluation_scorecard_v1"
+)
+POWERED_QUALIFICATION_DOSSIER_ARTIFACT_KIND = "powered_qualification_dossier_v1"
 PLAN_EXECUTION_MANIFEST_ARTIFACT_KIND = (
     "reconstruction_plan_execution_manifest_v1"
 )
@@ -163,18 +222,18 @@ TICK_ONLY_INPUT_POLICY = (
 
 FIRST_PARTY_RECONSTRUCTION_HANDLERS: Mapping[ReconstructionStage, str] = {
     ReconstructionStage.SOURCE_ENRICHMENT: (
-        "histdatacom.reconstruction.source-enrichment.v2"
+        "histdatacom.reconstruction.source-enrichment.v3"
     ),
-    ReconstructionStage.PROPOSAL: "histdatacom.reconstruction.proposal.v6",
-    ReconstructionStage.CARVING: "histdatacom.reconstruction.carving.v3",
+    ReconstructionStage.PROPOSAL: "histdatacom.reconstruction.proposal.v7",
+    ReconstructionStage.CARVING: "histdatacom.reconstruction.carving.v4",
     ReconstructionStage.CROSS_SERIES_RECONCILIATION: (
-        "histdatacom.reconstruction.cross-series-reconciliation.v4"
+        "histdatacom.reconstruction.cross-series-reconciliation.v5"
     ),
     ReconstructionStage.BROKER_TRANSFER: (
-        "histdatacom.reconstruction.delivery-projection.v1"
+        "histdatacom.reconstruction.delivery-projection.v2"
     ),
     ReconstructionStage.VALIDATION: (
-        "histdatacom.reconstruction.validation.v1"
+        "histdatacom.reconstruction.validation.v2"
     ),
     ReconstructionStage.ATOMIC_PARTITION_COMMIT: (
         "histdatacom.reconstruction.atomic-partition-commit.v1"
@@ -306,7 +365,7 @@ class ReconstructionSourcePartitionV1:
     @classmethod
     def from_dict(
         cls, data: Mapping[str, Any]
-    ) -> "ReconstructionSourcePartitionV1":
+    ) -> ReconstructionSourcePartitionV1:
         _require_schema(data, RECONSTRUCTION_SOURCE_PARTITION_SCHEMA_VERSION)
         _require_derived(
             data, "row_identity_basis", "zero-based-arrow-row-ordinal-v1"
@@ -448,7 +507,7 @@ class ReconstructionSourceInventoryV1:
     @classmethod
     def from_dict(
         cls, data: Mapping[str, Any]
-    ) -> "ReconstructionSourceInventoryV1":
+    ) -> ReconstructionSourceInventoryV1:
         _require_schema(data, RECONSTRUCTION_SOURCE_INVENTORY_SCHEMA_VERSION)
         _require_derived(data, "input_contract", "ascii/T-tick-bid-ask-only")
         _require_derived(data, "observed_values_immutable", True)
@@ -477,7 +536,7 @@ class ReconstructionSourceInventoryV1:
         )
 
     @classmethod
-    def from_json(cls, text: str) -> "ReconstructionSourceInventoryV1":
+    def from_json(cls, text: str) -> ReconstructionSourceInventoryV1:
         return cls.from_dict(_json_mapping(text))
 
 
@@ -596,7 +655,7 @@ class ReconstructionPlanConfigurationV1:
     @classmethod
     def from_dict(
         cls, data: Mapping[str, Any]
-    ) -> "ReconstructionPlanConfigurationV1":
+    ) -> ReconstructionPlanConfigurationV1:
         _require_schema(data, RECONSTRUCTION_PLAN_CONFIGURATION_SCHEMA_VERSION)
         _require_derived(data, "scientific_nonclaim", SCIENTIFIC_NONCLAIM)
         _require_derived(
@@ -648,8 +707,156 @@ class ReconstructionPlanConfigurationV1:
         )
 
     @classmethod
-    def from_json(cls, text: str) -> "ReconstructionPlanConfigurationV1":
+    def from_json(cls, text: str) -> ReconstructionPlanConfigurationV1:
         return cls.from_dict(_json_mapping(text))
+
+
+@dataclass(frozen=True, slots=True)
+class ReconstructionPlanConfigurationV2:
+    """Portfolio-bound configuration with an explicit v2.3 translation base."""
+
+    base_configuration: ReconstructionPlanConfigurationV1
+    proposal_portfolio: ProposalEnginePortfolioV1
+    configuration_id: str = ""
+    schema_version: str = RECONSTRUCTION_PLAN_CONFIGURATION_V2_SCHEMA_VERSION
+
+    def __post_init__(self) -> None:
+        if (
+            self.schema_version
+            != RECONSTRUCTION_PLAN_CONFIGURATION_V2_SCHEMA_VERSION
+        ):
+            raise ValueError(
+                "unsupported reconstruction plan configuration v2 schema"
+            )
+        if not isinstance(
+            self.base_configuration, ReconstructionPlanConfigurationV1
+        ):
+            raise TypeError("configuration v2 requires a v1 translation base")
+        if not isinstance(self.proposal_portfolio, ProposalEnginePortfolioV1):
+            raise TypeError("configuration v2 requires a proposal portfolio")
+        if (
+            EMPIRICAL_MOTIF_GENERATOR_ID
+            in self.proposal_portfolio.selected_engine_ids
+            and self.proposal_portfolio.binding(
+                EMPIRICAL_MOTIF_GENERATOR_ID
+            ).config_id
+            != self.base_configuration.generator_config.config_id
+        ):
+            raise ValueError("v1 motif adapter differs from selected portfolio")
+        expected = _stable_id(
+            "reconstruction-plan-configuration", self.identity_payload()
+        )
+        if self.configuration_id and self.configuration_id != expected:
+            raise ValueError("plan configuration v2 identity differs")
+        object.__setattr__(self, "configuration_id", expected)
+
+    @property
+    def delivery_mode(self) -> ReconstructionDeliveryMode:
+        return self.base_configuration.delivery_mode
+
+    @property
+    def information_policy(self) -> ReconstructionInformationPolicyV1:
+        return self.base_configuration.information_policy
+
+    @property
+    def generator_config(self) -> EmpiricalMotifGeneratorConfigV1:
+        """Return the explicit v2.3 motif adapter selected by the portfolio."""
+        return self.base_configuration.generator_config
+
+    @property
+    def carving_constraints(self) -> HistoricalCarvingConstraintSetV1:
+        return self.base_configuration.carving_constraints
+
+    @property
+    def cross_currency_config(self) -> CrossCurrencyReconciliationConfigV1:
+        return self.base_configuration.cross_currency_config
+
+    @property
+    def ensemble_config(self) -> EnsembleCalibrationConfigV1:
+        return self.base_configuration.ensemble_config
+
+    @property
+    def storage_policy(self) -> ReconstructionStoragePolicyV1:
+        return self.base_configuration.storage_policy
+
+    @property
+    def window_size_ns(self) -> int:
+        return self.base_configuration.window_size_ns
+
+    @property
+    def left_halo_ns(self) -> int:
+        return self.base_configuration.left_halo_ns
+
+    @property
+    def right_lookahead_ns(self) -> int:
+        return self.base_configuration.right_lookahead_ns
+
+    @property
+    def max_parallel_windows(self) -> int:
+        return self.base_configuration.max_parallel_windows
+
+    def identity_payload(self) -> dict[str, JSONValue]:
+        return {
+            "schema_version": self.schema_version,
+            "base_configuration": self.base_configuration.to_dict(),
+            "proposal_portfolio": self.proposal_portfolio.to_dict(),
+            "portfolio_schema_version": PROPOSAL_ENGINE_PORTFOLIO_SCHEMA_VERSION,
+            "fallback_policy": "refuse-no-silent-fallback-v1",
+            "v2_3_translation": "retained-empirical-motif-adapter",
+            "current_provider_scope": "histdata.com-ascii-T-only",
+            "scientific_nonclaim": SCIENTIFIC_NONCLAIM,
+        }
+
+    def to_dict(self) -> dict[str, JSONValue]:
+        return {
+            **self.identity_payload(),
+            "configuration_id": self.configuration_id,
+        }
+
+    def to_json(self) -> str:
+        return str(canonical_contract_json(self.to_dict()))
+
+    @classmethod
+    def from_dict(
+        cls, data: Mapping[str, Any]
+    ) -> ReconstructionPlanConfigurationV2:
+        _require_schema(
+            data, RECONSTRUCTION_PLAN_CONFIGURATION_V2_SCHEMA_VERSION
+        )
+        _require_derived(
+            data,
+            "portfolio_schema_version",
+            PROPOSAL_ENGINE_PORTFOLIO_SCHEMA_VERSION,
+        )
+        _require_derived(
+            data, "fallback_policy", "refuse-no-silent-fallback-v1"
+        )
+        _require_derived(
+            data, "v2_3_translation", "retained-empirical-motif-adapter"
+        )
+        _require_derived(
+            data, "current_provider_scope", "histdata.com-ascii-T-only"
+        )
+        _require_derived(data, "scientific_nonclaim", SCIENTIFIC_NONCLAIM)
+        return cls(
+            base_configuration=ReconstructionPlanConfigurationV1.from_dict(
+                _mapping(data.get("base_configuration"))
+            ),
+            proposal_portfolio=ProposalEnginePortfolioV1.from_dict(
+                _mapping(data.get("proposal_portfolio"))
+            ),
+            configuration_id=str(data.get("configuration_id", "")),
+            schema_version=str(data.get("schema_version", "")),
+        )
+
+    @classmethod
+    def from_json(cls, text: str) -> ReconstructionPlanConfigurationV2:
+        return cls.from_dict(_json_mapping(text))
+
+
+ReconstructionPlanConfiguration = (
+    ReconstructionPlanConfigurationV1 | ReconstructionPlanConfigurationV2
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -699,9 +906,7 @@ class ReconstructionPlanRefusalV1:
         return {**self.identity_payload(), "refusal_id": self.refusal_id}
 
     @classmethod
-    def from_dict(
-        cls, data: Mapping[str, Any]
-    ) -> "ReconstructionPlanRefusalV1":
+    def from_dict(cls, data: Mapping[str, Any]) -> ReconstructionPlanRefusalV1:
         _require_schema(data, RECONSTRUCTION_PLAN_REFUSAL_SCHEMA_VERSION)
         return cls(
             start_ns=_strict_int(data.get("start_ns"), "start_ns"),
@@ -843,7 +1048,7 @@ class ReconstructionPlanResourceSummaryV1:
     @classmethod
     def from_dict(
         cls, data: Mapping[str, Any]
-    ) -> "ReconstructionPlanResourceSummaryV1":
+    ) -> ReconstructionPlanResourceSummaryV1:
         _require_schema(
             data, RECONSTRUCTION_PLAN_RESOURCE_SUMMARY_SCHEMA_VERSION
         )
@@ -961,6 +1166,9 @@ class ReconstructionPlanExecutionManifestV1:
         artifacts = _artifact_mapping(self.artifacts)
         required = {
             "configuration",
+            "dataset_catalog",
+            "dataset_resolution",
+            "experiment_manifest",
             "source_inventory",
             "feed_epochs",
             "observation_operator",
@@ -978,7 +1186,31 @@ class ReconstructionPlanExecutionManifestV1:
         }
         if self.delivery_mode is ReconstructionDeliveryMode.BROKER_CONDITIONED:
             required.add("broker_delivery")
-        if set(artifacts) != required:
+        allowed = required | {
+            "evidence_policy",
+            "cross_series_constraint_policy",
+            "proposal_engine_registry",
+            "proposal_engine_portfolio",
+            "proposal_dataset_resolution",
+            "proposal_portfolio_evaluation",
+            "powered_qualification_dossier",
+        }
+        allowed.update(
+            name
+            for name in artifacts
+            if name.startswith(
+                (
+                    "proposal_engine_config_",
+                    "proposal_engine_evidence_",
+                    "proposal_engine_fit_",
+                    "proposal_engine_checkpoint_",
+                    "proposal_engine_training_dataset_",
+                )
+            )
+        )
+        if not required.issubset(artifacts) or not set(artifacts).issubset(
+            allowed
+        ):
             raise ValueError(
                 "execution artifact graph is incomplete or contains extras"
             )
@@ -1062,7 +1294,7 @@ class ReconstructionPlanExecutionManifestV1:
     @classmethod
     def from_dict(
         cls, data: Mapping[str, Any]
-    ) -> "ReconstructionPlanExecutionManifestV1":
+    ) -> ReconstructionPlanExecutionManifestV1:
         _require_schema(
             data, RECONSTRUCTION_PLAN_EXECUTION_MANIFEST_SCHEMA_VERSION
         )
@@ -1099,7 +1331,7 @@ class ReconstructionPlanExecutionManifestV1:
         )
 
     @classmethod
-    def from_json(cls, text: str) -> "ReconstructionPlanExecutionManifestV1":
+    def from_json(cls, text: str) -> ReconstructionPlanExecutionManifestV1:
         return cls.from_dict(_json_mapping(text))
 
 
@@ -1110,7 +1342,7 @@ class ReconstructionStagePlanV1:
     command: ReconstructionStageCommandV1
     execution_manifest_ref: ArtifactRef
     execution_manifest: ReconstructionPlanExecutionManifestV1
-    configuration: ReconstructionPlanConfigurationV1
+    configuration: ReconstructionPlanConfiguration
     source_inventory: ReconstructionSourceInventoryV1
 
     def __post_init__(self) -> None:
@@ -1157,12 +1389,27 @@ class ReconstructionStagePlanV1:
                 "execution delivery mode differs from configuration"
             )
         _validate_stage_inputs(
-            self.command, self.execution_manifest.delivery_mode
+            self.command,
+            self.execution_manifest.delivery_mode,
+            portfolio_bound=isinstance(
+                self.configuration, ReconstructionPlanConfigurationV2
+            ),
         )
         graph_refs = {
             canonical_contract_json(ref.to_dict())
             for ref in self.execution_manifest.artifacts.values()
         }
+        if isinstance(
+            self.configuration, ReconstructionPlanConfigurationV2
+        ) and not {
+            "proposal_engine_registry",
+            "proposal_engine_portfolio",
+        }.issubset(
+            self.execution_manifest.artifacts
+        ):
+            raise ReconstructionPlanCompatibilityError(
+                "portfolio configuration lacks registry or portfolio artifact"
+            )
         source_refs = {
             canonical_contract_json(item.artifact.to_dict())
             for item in self.source_inventory.partitions
@@ -1178,6 +1425,32 @@ class ReconstructionStagePlanV1:
                 raise ReconstructionPlanCompatibilityError(
                     "stage input reference is absent from execution artifact graph"
                 )
+
+
+def _legacy_all_member_task_layout_is_valid(
+    *,
+    task_counts_by_member: Mapping[str, int],
+    executable_window_count: int,
+    retained_member_count: int,
+    ensemble_member_count: int,
+    run_ensemble_member_ids: Sequence[str],
+    artifact_names: Iterable[str],
+) -> bool:
+    """Recognize the bounded pre-portfolio v1 all-member task rectangle."""
+    artifact_name_set = set(artifact_names)
+    return (
+        "proposal_engine_registry" not in artifact_name_set
+        and "proposal_portfolio_evaluation" not in artifact_name_set
+        and "powered_qualification_dossier" not in artifact_name_set
+        and retained_member_count < ensemble_member_count
+        and sum(task_counts_by_member.values())
+        == executable_window_count * ensemble_member_count
+        and set(task_counts_by_member) == set(run_ensemble_member_ids)
+        and all(
+            count == executable_window_count
+            for count in task_counts_by_member.values()
+        )
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -1202,7 +1475,7 @@ class SyntheticInfillPlanV1:
         if self.schema_version != SYNTHETIC_INFILL_PLAN_SCHEMA_VERSION:
             raise ValueError("unsupported synthetic infill plan schema")
         if not isinstance(self.run, ReconstructionRunV1):
-            raise ValueError(
+            raise TypeError(
                 "synthetic infill plan requires a reconstruction run"
             )
         object.__setattr__(
@@ -1257,18 +1530,30 @@ class SyntheticInfillPlanV1:
             )
         object.__setattr__(self, "artifact_graph", graph)
         if not isinstance(self.resources, ReconstructionPlanResourceSummaryV1):
-            raise ValueError(
-                "synthetic infill plan requires a resource summary"
-            )
+            raise TypeError("synthetic infill plan requires a resource summary")
         if self.resources.workflow_request_count != len(requests):
             raise ValueError("resource workflow request count differs")
-        if (
+        expected_retained_tasks = (
             self.resources.executable_window_count
-            * self.resources.ensemble_member_count
-            != len(tasks)
+            * self.resources.retained_member_count
+        )
+        task_counts_by_member = Counter(
+            item.window.ensemble_member_id for item in tasks
+        )
+        legacy_all_member_layout = _legacy_all_member_task_layout_is_valid(
+            task_counts_by_member=task_counts_by_member,
+            executable_window_count=self.resources.executable_window_count,
+            retained_member_count=self.resources.retained_member_count,
+            ensemble_member_count=self.resources.ensemble_member_count,
+            run_ensemble_member_ids=self.run.ensemble_member_ids,
+            artifact_names=graph,
+        )
+        if (
+            len(tasks) != expected_retained_tasks
+            and not legacy_all_member_layout
         ):
             raise ValueError(
-                "resource executable window count differs from tasks"
+                "retained-member executable window count differs from tasks"
             )
         refusals = tuple(
             sorted(
@@ -1377,7 +1662,7 @@ class SyntheticInfillPlanV1:
         return str(canonical_contract_json(self.dry_run_payload()))
 
     @classmethod
-    def from_dict(cls, data: Mapping[str, Any]) -> "SyntheticInfillPlanV1":
+    def from_dict(cls, data: Mapping[str, Any]) -> SyntheticInfillPlanV1:
         _require_schema(data, SYNTHETIC_INFILL_PLAN_SCHEMA_VERSION)
         _require_derived(data, "scientific_nonclaim", SCIENTIFIC_NONCLAIM)
         _require_derived(
@@ -1420,7 +1705,7 @@ class SyntheticInfillPlanV1:
         )
 
     @classmethod
-    def from_json(cls, text: str) -> "SyntheticInfillPlanV1":
+    def from_json(cls, text: str) -> SyntheticInfillPlanV1:
         return cls.from_dict(_json_mapping(text))
 
 
@@ -1440,7 +1725,7 @@ class _ResolvedPlanInputs:
 
 
 def build_synthetic_infill_plan(
-    source_root: str | Path,
+    source_root: str | Path | None,
     *,
     feed_epoch_definition_path: str | Path,
     observation_operator_path: str | Path,
@@ -1476,24 +1761,54 @@ def build_synthetic_infill_plan(
     generator_config: EmpiricalMotifGeneratorConfigV1 | None = None,
     carving_constraints: HistoricalCarvingConstraintSetV1 | None = None,
     cross_currency_config: CrossCurrencyReconciliationConfigV1 | None = None,
+    evidence_policy: ReconstructionEvidencePolicyV1 | None = None,
+    cross_series_constraint_policy: CrossSeriesConstraintPolicyV1 | None = None,
+    dataset_catalog_path: str | Path | None = None,
+    dataset_reference: str = CURRENT_EXPERIMENT_ALIAS,
+    dataset_resolution: DatasetResolutionV1 | None = None,
+    proposal_engine_ids: Iterable[str] = (),
+    selected_proposal_engine_ids: Iterable[str] = (),
+    proposal_evaluation_paths: Iterable[str | Path] = (),
+    qualification_dossier_path: str | Path | None = None,
 ) -> SyntheticInfillPlanV1:
     """Resolve real artifacts and build one executable first-party plan."""
     selected_symbols = _symbols(tuple(symbols))
+    requested_selected_engine_ids = tuple(selected_proposal_engine_ids)
+    require_motif_promotion = (
+        not requested_selected_engine_ids
+        or EMPIRICAL_MOTIF_GENERATOR_ID in requested_selected_engine_ids
+    )
     if selected_symbols != tuple(EURUSD_TRIANGLE_SYMBOLS):
         raise ReconstructionPlanCompatibilityError(
             "v2.1 requires the complete EURUSD/GBPUSD/EURGBP tick triangle"
         )
-    source = Path(source_root).expanduser().resolve()
-    if source.name.upper() != "T" or source.parent.name.upper() != "ASCII":
+    legacy_source = (
+        None
+        if source_root is None or not str(source_root).strip()
+        else Path(source_root).expanduser().resolve()
+    )
+    if legacy_source is not None and (
+        legacy_source.name.upper() != "T"
+        or legacy_source.parent.name.upper() != "ASCII"
+    ):
         raise ReconstructionPlanCompatibilityError(
             "reconstruction source_root must be the ASCII/T tick directory"
         )
-    roots = _validated_plan_roots(
-        source_root=source,
-        artifact_root=artifact_root,
-        output_root=output_root,
-        checkpoint_root=checkpoint_root,
-        scratch_root=scratch_root,
+    if dataset_catalog_path is None and legacy_source is None:
+        raise ReconstructionPlanCompatibilityError(
+            "reconstruction requires a HistData catalog selection or the "
+            "documented v2.3 ASCII/T path translation"
+        )
+    roots = (
+        _validated_plan_roots(
+            source_root=legacy_source,
+            artifact_root=artifact_root,
+            output_root=output_root,
+            checkpoint_root=checkpoint_root,
+            scratch_root=scratch_root,
+        )
+        if legacy_source is not None
+        else None
     )
     mode = InformationMode.from_value(information_mode)
     delivery = ReconstructionDeliveryMode.from_value(delivery_mode)
@@ -1526,6 +1841,7 @@ def build_synthetic_infill_plan(
         motif_qualification_path=motif_qualification_path,
         motif_leakage_audit_path=motif_leakage_audit_path,
         symbols=selected_symbols,
+        require_motif_promotion=require_motif_promotion,
     )
     all_common_periods = _common_source_periods(
         resolved.feed_epoch_definition, selected_symbols
@@ -1576,14 +1892,68 @@ def build_synthetic_infill_plan(
         definition=resolved.feed_epoch_definition,
         motif_profile=resolved.motif_profile,
     )
-    inventory = _build_source_inventory(
-        source,
-        definition=resolved.feed_epoch_definition,
+    provisional_artifact_root = Path(artifact_root).expanduser().resolve()
+    provisional_artifact_root.mkdir(parents=True, exist_ok=True)
+    query_scope = DatasetQueryScopeV1(
         symbols=selected_symbols,
         periods=selected_periods,
-        requested_start_ns=requested_start,
-        requested_end_ns=requested_end,
+        origin=DatasetOrigin.OBSERVED,
     )
+    inventory: ReconstructionSourceInventoryV1 | None = None
+    if dataset_catalog_path is None:
+        assert legacy_source is not None
+        inventory = _build_source_inventory(
+            legacy_source,
+            definition=resolved.feed_epoch_definition,
+            symbols=selected_symbols,
+            periods=selected_periods,
+            requested_start_ns=requested_start,
+            requested_end_ns=requested_end,
+        )
+        catalog, catalog_path, _ = build_legacy_histdata_catalog(
+            legacy_source,
+            symbols=selected_symbols,
+            periods=selected_periods,
+            qualification_evidence=(resolved.artifacts["feed_epochs"],),
+            path=provisional_artifact_root / "histdata-dataset-catalog.json",
+        )
+        exact_resolution = catalog.resolve(
+            CURRENT_EXPERIMENT_ALIAS,
+            query_scope=query_scope,
+        )
+        selected_reference = CURRENT_EXPERIMENT_ALIAS
+    else:
+        catalog_path = Path(dataset_catalog_path).expanduser().resolve()
+        catalog = DatasetCatalog.read(catalog_path)
+        exact_resolution = dataset_resolution or catalog.resolve(
+            dataset_reference,
+            query_scope=query_scope,
+        )
+        exact_resolution = catalog.replay(exact_resolution)
+        catalog.verify(exact_resolution)
+        selected_reference = dataset_reference
+    source = _catalog_source_root(catalog, exact_resolution)
+    if legacy_source is not None and source != legacy_source:
+        raise ReconstructionPlanCompatibilityError(
+            "source_root differs from the resolved HistData catalog materialization"
+        )
+    roots = roots or _validated_plan_roots(
+        source_root=source,
+        artifact_root=artifact_root,
+        output_root=output_root,
+        checkpoint_root=checkpoint_root,
+        scratch_root=scratch_root,
+    )
+    if inventory is None:
+        inventory = _build_source_inventory(
+            source,
+            definition=resolved.feed_epoch_definition,
+            symbols=selected_symbols,
+            periods=selected_periods,
+            requested_start_ns=requested_start,
+            requested_end_ns=requested_end,
+        )
+    _reconcile_catalog_inventory(catalog, exact_resolution, inventory)
     artifacts_dir = roots["artifact"]
     inventory_ref = _write_contract_artifact(
         inventory,
@@ -1591,6 +1961,42 @@ def build_synthetic_infill_plan(
         prefix="reconstruction-source-inventory",
         kind=SOURCE_INVENTORY_ARTIFACT_KIND,
         metadata={"inventory_id": inventory.inventory_id},
+    )
+    selected_evidence_policy = (
+        evidence_policy or ReconstructionEvidencePolicyV1()
+    )
+    if selected_evidence_policy.supported_provider_ids != (
+        CURRENT_EVIDENCE_SOURCE_PROVIDER_ID,
+    ):
+        raise ReconstructionPlanCompatibilityError(
+            "the current reconstruction evidence policy supports only HistData.com"
+        )
+    evidence_policy_ref = _write_contract_artifact(
+        selected_evidence_policy,
+        artifacts_dir,
+        prefix="reconstruction-evidence-policy",
+        kind=RECONSTRUCTION_EVIDENCE_POLICY_ARTIFACT_KIND,
+        metadata={"policy_id": selected_evidence_policy.policy_id},
+    )
+    selected_cross_series_policy = (
+        cross_series_constraint_policy or CrossSeriesConstraintPolicyV1()
+    )
+    if selected_cross_series_policy.supported_provider_ids != (
+        CURRENT_EVIDENCE_SOURCE_PROVIDER_ID,
+    ):
+        raise ReconstructionPlanCompatibilityError(
+            "the current cross-series evidence adapter supports only HistData.com"
+        )
+    if selected_cross_series_policy.required_symbols != selected_symbols:
+        raise ReconstructionPlanCompatibilityError(
+            "cross-series evidence policy does not cover the complete triangle"
+        )
+    cross_series_policy_ref = _write_contract_artifact(
+        selected_cross_series_policy,
+        artifacts_dir,
+        prefix="cross-series-constraint-policy",
+        kind=CROSS_SERIES_CONSTRAINT_POLICY_ARTIFACT_KIND,
+        metadata={"policy_id": selected_cross_series_policy.policy_id},
     )
 
     selected_storage = storage_policy or ReconstructionStoragePolicyV1()
@@ -1624,7 +2030,7 @@ def build_synthetic_infill_plan(
         information_mode=mode,
         max_allowed_lookahead_ns=selected_right,
     )
-    configuration = ReconstructionPlanConfigurationV1(
+    base_configuration = ReconstructionPlanConfigurationV1(
         delivery_mode=delivery,
         information_policy=information_policy,
         generator_config=selected_generator,
@@ -1637,20 +2043,365 @@ def build_synthetic_infill_plan(
         right_lookahead_ns=selected_right,
         max_parallel_windows=max_parallel_windows,
     )
+    proposal_registry = proposal_engine_registry()
+    ordered_proposal_engine_ids = tuple(proposal_engine_ids) or (
+        EMPIRICAL_MOTIF_GENERATOR_ID,
+    )
+    selected_engine_ids = requested_selected_engine_ids or (
+        EMPIRICAL_MOTIF_GENERATOR_ID,
+    )
+    if len(set(ordered_proposal_engine_ids)) != len(
+        ordered_proposal_engine_ids
+    ):
+        raise ReconstructionPlanCompatibilityError(
+            "proposal engine ordering contains duplicates"
+        )
+    for engine_id in ordered_proposal_engine_ids:
+        proposal_registry.descriptor(engine_id)
+    if not set(selected_engine_ids).issubset(ordered_proposal_engine_ids):
+        raise ReconstructionPlanCompatibilityError(
+            "selected proposal engine is absent from portfolio"
+        )
+    proposal_registry_ref = _write_contract_artifact(
+        proposal_registry,
+        artifacts_dir,
+        prefix="proposal-engine-registry",
+        kind=PROPOSAL_ENGINE_REGISTRY_ARTIFACT_KIND,
+        metadata={"registry_id": proposal_registry.registry_id},
+    )
+    proposal_dataset_ref = _write_contract_artifact(
+        exact_resolution,
+        artifacts_dir,
+        prefix="proposal-dataset-resolution",
+        kind="proposal_dataset_resolution_v1",
+        metadata={
+            "resolution_id": exact_resolution.resolution_id,
+            "dataset_version_id": exact_resolution.dataset_version_id,
+            "schema_version": exact_resolution.schema_version,
+        },
+    )
+    installed_proposal_configs = dict(proposal_engine_default_configs())
+    installed_proposal_configs[EMPIRICAL_MOTIF_GENERATOR_ID] = (
+        selected_generator
+    )
+    proposal_configs = {
+        engine_id: installed_proposal_configs[engine_id]
+        for engine_id in ordered_proposal_engine_ids
+    }
+    proposal_config_refs = {
+        engine_id: _write_contract_artifact(
+            config,
+            artifacts_dir,
+            prefix="proposal-engine-config",
+            kind=PROPOSAL_ENGINE_CONFIG_ARTIFACT_KIND,
+            metadata={
+                "engine_id": engine_id,
+                "config_id": config.config_id,
+                "schema_version": config.schema_version,
+            },
+        )
+        for engine_id, config in proposal_configs.items()
+    }
+    evaluation_paths = tuple(proposal_evaluation_paths)
+    proposal_campaigns = read_proposal_evidence_campaigns(evaluation_paths)
+    proposal_evidence = proposal_evidence_from_campaigns(proposal_campaigns)
+    proposal_evaluation_refs = tuple(
+        artifact_ref_for_file(
+            path, kind=PROPOSAL_ENGINE_EVALUATION_ARTIFACT_KIND
+        )
+        for path in evaluation_paths
+    )
+    qualification_dossier: PoweredQualificationDossierV1 | None = None
+    qualification_ref: ArtifactRef | None = None
+    qualification_evaluation_ref: ArtifactRef | None = None
+    proposal_model_refs: dict[str, Mapping[str, ArtifactRef]] = {}
+    if qualification_dossier_path is not None:
+        qualification_dossier = read_powered_qualification_dossier(
+            qualification_dossier_path
+        )
+        verify_powered_qualification_dossier(qualification_dossier)
+        if not proposal_campaigns:
+            raise ReconstructionPlanCompatibilityError(
+                "qualification dossier requires retained proposal evidence"
+            )
+        if any(
+            item.corpus_id != qualification_dossier.corpus_id
+            for item in proposal_campaigns
+        ):
+            raise ReconstructionPlanCompatibilityError(
+                "proposal evaluation corpus differs from qualification dossier"
+            )
+        if qualification_dossier.campaign_id not in {
+            item.campaign_id for item in proposal_campaigns
+        }:
+            raise ReconstructionPlanCompatibilityError(
+                "qualification campaign differs from retained proposal evidence"
+            )
+        qualification_ref = artifact_ref_for_file(
+            qualification_dossier_path,
+            kind=POWERED_QUALIFICATION_DOSSIER_ARTIFACT_KIND,
+        )
+        qualification_evaluation_ref = qualification_dossier.input_artifacts[
+            "evaluation"
+        ]
+        evaluation = read_proposal_portfolio_evaluation(
+            qualification_evaluation_ref.path
+        )
+        if (
+            evaluation.evaluation_id != qualification_dossier.evaluation_id
+            or evaluation.registry_id != proposal_registry.registry_id
+            or evaluation.corpus_id != qualification_dossier.corpus_id
+            or evaluation.campaign_id != qualification_dossier.campaign_id
+        ):
+            raise ReconstructionPlanCompatibilityError(
+                "proposal evaluation differs from powered qualification"
+            )
+        evidence_by_engine = {
+            item.engine_id: item for item in evaluation.engine_evidence
+        }
+        for engine_id in selected_engine_ids:
+            descriptor = proposal_registry.descriptor(engine_id)
+            model_refs = proposal_evaluation_engine_artifacts(
+                evaluation, engine_id
+            )
+            fit_ref = model_refs.get("fit")
+            if descriptor.fit_schema_versions:
+                if fit_ref is None:
+                    raise ReconstructionPlanCompatibilityError(
+                        f"selected engine lacks retained fit: {engine_id}"
+                    )
+                fit = read_proposal_engine_fit_artifact(fit_ref)
+                evidence_item = evidence_by_engine.get(engine_id)
+                if (
+                    fit.config_id != proposal_configs[engine_id].config_id
+                    or fit.schema_version not in descriptor.fit_schema_versions
+                    or fit_ref.metadata.get("status") != "fitted"
+                    or evidence_item is None
+                    or fit.fit_id not in evidence_item.fit_ids
+                ):
+                    raise ReconstructionPlanCompatibilityError(
+                        f"selected engine fit is not exact promoted evidence: "
+                        f"{engine_id}"
+                    )
+            checkpoint_ref = model_refs.get("checkpoint")
+            if descriptor.checkpoint_schema_versions:
+                if checkpoint_ref is None:
+                    raise ReconstructionPlanCompatibilityError(
+                        f"selected engine lacks retained checkpoint: {engine_id}"
+                    )
+                verify_artifact_ref(checkpoint_ref)
+                evidence_item = evidence_by_engine.get(engine_id)
+                if (
+                    checkpoint_ref.metadata.get("config_id")
+                    != proposal_configs[engine_id].config_id
+                    or checkpoint_ref.metadata.get("schema_version")
+                    not in descriptor.checkpoint_schema_versions
+                    or evidence_item is None
+                    or checkpoint_ref.metadata.get("checkpoint_id")
+                    not in evidence_item.checkpoint_ids
+                ):
+                    raise ReconstructionPlanCompatibilityError(
+                        "selected engine checkpoint differs from promoted "
+                        f"evidence: {engine_id}"
+                    )
+            for ref in model_refs.values():
+                verify_artifact_ref(ref)
+            proposal_model_refs[engine_id] = model_refs
+    elif any(
+        campaign.corpus_id != resolved.benchmark_corpus.corpus_id
+        for campaign in proposal_campaigns
+    ):
+        raise ReconstructionPlanCompatibilityError(
+            "legacy proposal evaluation corpus differs from planned benchmark"
+        )
+    common_context_refs = (
+        resolved.artifacts["benchmark_manifest"],
+        resolved.artifacts["feed_epochs"],
+        resolved.artifacts["market_context"],
+        resolved.artifacts["cftc_positioning"],
+        resolved.artifacts["observation_operator"],
+    )
+    proposal_bindings = tuple(
+        ProposalEngineBindingV1(
+            engine_id=descriptor.engine_id,
+            descriptor_id=descriptor.descriptor_id,
+            config_id=proposal_configs[descriptor.engine_id].config_id,
+            config_ref=proposal_config_refs[descriptor.engine_id],
+            dataset_ref=proposal_dataset_ref,
+            context_refs=common_context_refs,
+            evidence_refs=(
+                *proposal_evaluation_refs,
+                *(
+                    (qualification_evaluation_ref,)
+                    if qualification_evaluation_ref is not None
+                    else ()
+                ),
+                *(
+                    (qualification_ref,)
+                    if qualification_ref is not None
+                    else ()
+                ),
+                *(
+                    (
+                        resolved.artifacts["motif_manifest"],
+                        resolved.artifacts["motif_index"],
+                        resolved.artifacts["motif_qualification"],
+                        resolved.artifacts["motif_leakage_audit"],
+                    )
+                    if descriptor.engine_id == EMPIRICAL_MOTIF_GENERATOR_ID
+                    else ()
+                ),
+                *(
+                    tuple(
+                        ref
+                        for role, ref in proposal_model_refs.get(
+                            descriptor.engine_id, {}
+                        ).items()
+                        if role == "training_dataset"
+                    )
+                ),
+            ),
+            fit_ref=proposal_model_refs.get(descriptor.engine_id, {}).get(
+                "fit"
+            ),
+            checkpoint_ref=proposal_model_refs.get(
+                descriptor.engine_id, {}
+            ).get("checkpoint"),
+        )
+        for descriptor in (
+            proposal_registry.descriptor(engine_id)
+            for engine_id in ordered_proposal_engine_ids
+        )
+    )
+    proposal_portfolio = build_histdata_proposal_portfolio(
+        registry=proposal_registry,
+        dataset_version_id=exact_resolution.dataset_version_id,
+        bindings=proposal_bindings,
+        evidence=proposal_evidence,
+        motif_qualification=resolved.motif_qualification,
+        engine_ids=ordered_proposal_engine_ids,
+        selected_engine_ids=selected_engine_ids,
+        allow_legacy_motif_qualification=not evaluation_paths,
+        qualification_dossier=qualification_dossier,
+    )
+    proposal_portfolio_ref = _write_contract_artifact(
+        proposal_portfolio,
+        artifacts_dir,
+        prefix="proposal-engine-portfolio",
+        kind=PROPOSAL_ENGINE_PORTFOLIO_ARTIFACT_KIND,
+        metadata={
+            "portfolio_id": proposal_portfolio.portfolio_id,
+            "registry_id": proposal_portfolio.registry_id,
+        },
+    )
+    configuration = ReconstructionPlanConfigurationV2(
+        base_configuration=base_configuration,
+        proposal_portfolio=proposal_portfolio,
+    )
     configuration_ref = _write_contract_artifact(
         configuration,
         artifacts_dir,
         prefix="reconstruction-plan-configuration",
-        kind=PLAN_CONFIGURATION_ARTIFACT_KIND,
+        kind=PLAN_CONFIGURATION_V2_ARTIFACT_KIND,
         metadata={"configuration_id": configuration.configuration_id},
+    )
+
+    experiment, experiment_ref = freeze_histdata_reconstruction_experiment(
+        catalog_path=catalog_path,
+        dataset_reference=selected_reference,
+        query_scope=query_scope,
+        resolution=exact_resolution,
+        roles=(
+            ReconstructionExperimentRole.HISTORICAL_ANCHOR,
+            ReconstructionExperimentRole.PRODUCT_INPUT,
+        ),
+        output_directory=artifacts_dir,
+        artifact_bindings=_experiment_artifact_bindings(
+            resolved=resolved,
+            evidence_policy=selected_evidence_policy,
+            evidence_policy_ref=evidence_policy_ref,
+            cross_series_policy=selected_cross_series_policy,
+            cross_series_policy_ref=cross_series_policy_ref,
+            configuration=configuration,
+            configuration_ref=configuration_ref,
+            proposal_registry_ref=proposal_registry_ref,
+            proposal_portfolio_ref=proposal_portfolio_ref,
+        ),
+        evidence_policy_ids=(
+            selected_evidence_policy.policy_id,
+            selected_cross_series_policy.policy_id,
+        ),
+        preprocessing_ids=(
+            resolved.observation_operator.operator_id,
+            configuration.configuration_id,
+        ),
+        feature_schema_versions=(
+            RECONSTRUCTION_SOURCE_PARTITION_SCHEMA_VERSION,
+            RECONSTRUCTION_SOURCE_INVENTORY_SCHEMA_VERSION,
+            str(
+                getattr(
+                    resolved.observation_operator,
+                    "schema_version",
+                    "histdatacom.observation-operator.v1",
+                )
+            ),
+        ),
+        benchmark_gate_ids=(
+            PREDECLARED_GATE_COMMIT,
+            str(resolved.motif_manifest["library_id"]),
+        ),
+        limitations=(
+            "v2.4 executes only local HistData.com ASCII/T observed partitions.",
+            (
+                "Provider-neutral fields are identity seams; alternate providers, "
+                "brokers, and OANDA are deferred milestones."
+            ),
+            "Existing specialized manifests remain authoritative for their domains.",
+        ),
+    )
+    experiment_verification = verify_reconstruction_experiment(experiment)
+    if not experiment_verification.verified:
+        raise ReconstructionPlanCompatibilityError(
+            "frozen HistData experiment failed deterministic verification: "
+            + ", ".join(experiment_verification.finding_codes)
+        )
+    experiment_selection = experiment.selection_for_role(
+        ReconstructionExperimentRole.PRODUCT_INPUT
     )
 
     configuration_hashes = {
         configuration.configuration_id: configuration_ref.sha256,
+        base_configuration.configuration_id: _contract_sha256(
+            base_configuration
+        ),
+        proposal_registry.registry_id: proposal_registry_ref.sha256,
+        proposal_portfolio.portfolio_id: proposal_portfolio_ref.sha256,
+        **{
+            config.config_id: proposal_config_refs[engine_id].sha256
+            for engine_id, config in proposal_configs.items()
+        },
+        **{
+            str(
+                ref.metadata.get(
+                    {
+                        "fit": "fit_id",
+                        "checkpoint": "checkpoint_id",
+                        "training_dataset": "dataset_id",
+                    }[role],
+                    ref.sha256,
+                )
+            ): ref.sha256
+            for refs in proposal_model_refs.values()
+            for role, ref in refs.items()
+        },
         information_policy.policy_id: _contract_sha256(information_policy),
         selected_generator.config_id: _contract_sha256(selected_generator),
         selected_carving.constraint_set_id: _contract_sha256(selected_carving),
         selected_cross.config_id: _contract_sha256(selected_cross),
+        selected_evidence_policy.policy_id: evidence_policy_ref.sha256,
+        selected_cross_series_policy.policy_id: (
+            cross_series_policy_ref.sha256
+        ),
         resolved.feed_epoch_definition.definition_id: resolved.artifacts[
             "feed_epochs"
         ].sha256,
@@ -1670,6 +2421,7 @@ def build_synthetic_infill_plan(
             "motif_manifest"
         ].sha256,
         resolved.motif_index.index_id: resolved.artifacts["motif_index"].sha256,
+        experiment.experiment_id: experiment_ref.sha256,
     }
     ensemble_plan = plan_reconstruction_ensemble(
         symbols=selected_symbols,
@@ -1734,6 +2486,11 @@ def build_synthetic_infill_plan(
             **resolved.artifacts,
             "source_inventory": inventory_ref,
             "configuration": configuration_ref,
+            "evidence_policy": evidence_policy_ref,
+            "cross_series_constraint_policy": cross_series_policy_ref,
+            "dataset_catalog": experiment_selection.catalog_ref,
+            "dataset_resolution": experiment_selection.resolution_ref,
+            "experiment_manifest": experiment_ref,
         },
         motif_profile=resolved.motif_profile,
         requested_start_ns=requested_start,
@@ -1799,13 +2556,42 @@ def build_synthetic_infill_plan(
 
     graph: dict[str, ArtifactRef] = {
         **resolved.artifacts,
+        "dataset_catalog": experiment_selection.catalog_ref,
+        "dataset_resolution": experiment_selection.resolution_ref,
+        "experiment_manifest": experiment_ref,
         "source_inventory": inventory_ref,
         "configuration": configuration_ref,
+        "evidence_policy": evidence_policy_ref,
+        "cross_series_constraint_policy": cross_series_policy_ref,
         "information_manifest": information_manifest_ref,
         "information_audit": information_audit_ref,
         "ensemble_plan": ensemble_ref,
         "retention_plan": retention_ref,
+        "proposal_engine_registry": proposal_registry_ref,
+        "proposal_engine_portfolio": proposal_portfolio_ref,
+        "proposal_dataset_resolution": proposal_dataset_ref,
+        **{
+            f"proposal_engine_config_{index:02d}": ref
+            for index, (_, ref) in enumerate(
+                sorted(proposal_config_refs.items())
+            )
+        },
+        **{
+            f"proposal_engine_evidence_{index:02d}": ref
+            for index, ref in enumerate(proposal_evaluation_refs)
+        },
+        **{
+            f"proposal_engine_{role}_{index:02d}": ref
+            for index, (engine_id, refs) in enumerate(
+                sorted(proposal_model_refs.items())
+            )
+            for role, ref in sorted(refs.items())
+        },
     }
+    if qualification_ref is not None:
+        graph["powered_qualification_dossier"] = qualification_ref
+    if qualification_evaluation_ref is not None:
+        graph["proposal_portfolio_evaluation"] = qualification_evaluation_ref
     if broker_ref is not None:
         graph["broker_delivery"] = broker_ref
     execution_manifest = ReconstructionPlanExecutionManifestV1(
@@ -1836,7 +2622,11 @@ def build_synthetic_infill_plan(
 
     workflows = _build_workflow_requests(
         run=ensemble_plan.run,
-        member_window_plans=member_window_plans,
+        member_window_plans=tuple(
+            item
+            for item in member_window_plans
+            if item.ensemble_member_id in retained_ids
+        ),
         executable_keys=executable_keys,
         estimates_by_boundary=estimates_by_boundary,
         inventory=inventory,
@@ -1849,9 +2639,7 @@ def build_synthetic_infill_plan(
         key=lambda item: item.estimated_memory_bytes,
         default=None,
     )
-    total_candidate_events = candidate_events_per_member * len(
-        ensemble_plan.members
-    )
+    total_candidate_events = candidate_events_per_member * len(retained_ids)
     resources = ReconstructionPlanResourceSummaryV1(
         source_event_count=inventory.total_row_count,
         source_size_bytes=inventory.total_size_bytes,
@@ -1862,7 +2650,7 @@ def build_synthetic_infill_plan(
         retained_member_count=len(retained_ids),
         workflow_request_count=len(workflows),
         estimated_input_event_count=(
-            input_events_per_member * len(ensemble_plan.members)
+            input_events_per_member * len(retained_ids)
         ),
         estimated_candidate_event_count=total_candidate_events,
         estimated_candidate_bytes=(
@@ -1928,6 +2716,23 @@ def validate_synthetic_infill_plan_for_execution(
         configuration_ref.path
     )
     inventory = read_reconstruction_source_inventory(inventory_ref.path)
+    experiment_ref = plan.artifact_graph["experiment_manifest"]
+    experiment = read_reconstruction_experiment(experiment_ref.path)
+    if experiment_ref.metadata.get("experiment_id") != experiment.experiment_id:
+        raise ReconstructionPlanCompatibilityError(
+            "plan experiment artifact metadata identity differs"
+        )
+    experiment_verification = verify_reconstruction_experiment(experiment)
+    if not experiment_verification.verified:
+        raise ReconstructionPlanCompatibilityError(
+            "plan experiment manifest failed deterministic verification: "
+            + ", ".join(experiment_verification.finding_codes)
+        )
+    catalog = DatasetCatalog.read(plan.artifact_graph["dataset_catalog"].path)
+    selection = experiment.selection_for_role(
+        ReconstructionExperimentRole.PRODUCT_INPUT
+    )
+    _reconcile_catalog_inventory(catalog, selection.resolution, inventory)
     if execution.manifest_id != plan.execution_manifest_id:
         raise ReconstructionPlanCompatibilityError(
             "plan execution manifest identity differs"
@@ -1936,6 +2741,216 @@ def validate_synthetic_infill_plan_for_execution(
         raise ReconstructionPlanCompatibilityError(
             "plan configuration identity differs"
         )
+    if isinstance(configuration, ReconstructionPlanConfigurationV2):
+        registry_ref = plan.artifact_graph["proposal_engine_registry"]
+        portfolio_ref = plan.artifact_graph["proposal_engine_portfolio"]
+        registry = ProposalEngineRegistryV1.from_dict(
+            _mapping(
+                json.loads(Path(registry_ref.path).read_text(encoding="utf-8"))
+            )
+        )
+        portfolio = ProposalEnginePortfolioV1.from_dict(
+            _mapping(
+                json.loads(Path(portfolio_ref.path).read_text(encoding="utf-8"))
+            )
+        )
+        if registry.registry_id != portfolio.registry_id:
+            raise ReconstructionPlanCompatibilityError(
+                "proposal portfolio registry identity differs"
+            )
+        if registry != proposal_engine_registry():
+            raise ReconstructionPlanCompatibilityError(
+                "proposal engine registry differs from installed code"
+            )
+        if portfolio != configuration.proposal_portfolio:
+            raise ReconstructionPlanCompatibilityError(
+                "proposal portfolio artifact differs from configuration"
+            )
+        if portfolio.qualification_dossier_id is not None:
+            qualification_ref = plan.artifact_graph.get(
+                "powered_qualification_dossier"
+            )
+            if qualification_ref is None:
+                raise ReconstructionPlanCompatibilityError(
+                    "qualified proposal portfolio lacks its dossier artifact"
+                )
+            if (
+                qualification_ref.kind
+                != POWERED_QUALIFICATION_DOSSIER_ARTIFACT_KIND
+            ):
+                raise ReconstructionPlanCompatibilityError(
+                    "proposal qualification artifact kind differs"
+                )
+            qualification = read_powered_qualification_dossier(
+                qualification_ref.path
+            )
+            verify_powered_qualification_dossier(qualification)
+            if (
+                portfolio.qualification_dossier_id != qualification.dossier_id
+                or portfolio.qualification_policy_id
+                != qualification.policy.policy_id
+                or portfolio.qualification_power_study_id
+                != qualification.power_study.study_id
+                or portfolio.qualification_portfolio_calibration_id
+                != qualification.portfolio_calibration.calibration_id
+                or portfolio.qualification_decision_ids
+                != {
+                    item.engine_id: item.decision_id
+                    for item in qualification.engine_decisions
+                    if item.engine_id
+                    in {entry.engine_id for entry in portfolio.entries}
+                }
+                or portfolio.portfolio_weights
+                != qualification.portfolio_calibration.weights
+            ):
+                raise ReconstructionPlanCompatibilityError(
+                    "proposal portfolio qualification binding differs"
+                )
+            if not set(portfolio.selected_engine_ids).issubset(
+                qualification.reconstruction_eligible_engine_ids
+            ):
+                raise ReconstructionPlanCompatibilityError(
+                    "proposal selection exceeds powered qualification"
+                )
+        elif "powered_qualification_dossier" in plan.artifact_graph:
+            raise ReconstructionPlanCompatibilityError(
+                "unbound proposal qualification artifact is present"
+            )
+        graph_values = {
+            canonical_contract_json(ref.to_dict())
+            for ref in plan.artifact_graph.values()
+        }
+        if (
+            portfolio.dataset_version_id
+            != selection.resolution.dataset_version_id
+        ):
+            raise ReconstructionPlanCompatibilityError(
+                "proposal portfolio dataset differs from experiment selection"
+            )
+        experiment_benchmark_id = next(
+            item.artifact_id
+            for item in experiment.artifact_bindings
+            if item.name == "benchmark-corpus"
+        )
+        if any(
+            item.corpus_id != experiment_benchmark_id
+            for item in portfolio.evidence
+        ):
+            raise ReconstructionPlanCompatibilityError(
+                "proposal evidence corpus differs from experiment benchmark"
+            )
+        for binding in portfolio.bindings:
+            descriptor = registry.descriptor(binding.engine_id)
+            entry = next(
+                item
+                for item in portfolio.entries
+                if item.engine_id == binding.engine_id
+            )
+            if entry.descriptor_id != descriptor.descriptor_id:
+                raise ReconstructionPlanCompatibilityError(
+                    "proposal entry descriptor differs from installed registry"
+                )
+            config_payload = _read_content_addressed_json(
+                binding.config_ref.path, "proposal-engine-config"
+            )
+            if (
+                config_payload.get("config_id") != binding.config_id
+                or config_payload.get("schema_version")
+                not in descriptor.config_schema_versions
+                or binding.config_ref.metadata.get("engine_id")
+                != binding.engine_id
+            ):
+                raise ReconstructionPlanCompatibilityError(
+                    "proposal engine configuration binding differs"
+                )
+            if (
+                binding.dataset_ref.metadata.get("dataset_version_id")
+                != portfolio.dataset_version_id
+                or binding.dataset_ref.metadata.get("schema_version")
+                not in descriptor.dataset_schema_versions
+            ):
+                raise ReconstructionPlanCompatibilityError(
+                    "proposal engine dataset binding differs"
+                )
+            evidence_items = tuple(
+                item
+                for item in portfolio.evidence
+                if item.engine_id == binding.engine_id
+                and binding.config_id in item.config_ids
+                and item.promotion_eligible
+                and not item.provisional
+            )
+            promoted_fit_ids = {
+                fit_id for item in evidence_items for fit_id in item.fit_ids
+            }
+            if (
+                binding.engine_id in portfolio.selected_engine_ids
+                and descriptor.fit_schema_versions
+            ):
+                if binding.fit_ref is None:
+                    raise ReconstructionPlanCompatibilityError(
+                        "selected proposal engine lacks its exact fit"
+                    )
+                fit = read_proposal_engine_fit_artifact(binding.fit_ref)
+                if (
+                    fit.config_id != binding.config_id
+                    or fit.schema_version not in descriptor.fit_schema_versions
+                    or fit.fit_id not in promoted_fit_ids
+                    or binding.fit_ref.metadata.get("engine_id")
+                    != binding.engine_id
+                    or binding.fit_ref.metadata.get("status") != "fitted"
+                ):
+                    raise ReconstructionPlanCompatibilityError(
+                        "proposal engine fit differs from promoted evidence"
+                    )
+            promoted_checkpoint_ids = {
+                checkpoint_id
+                for item in evidence_items
+                for checkpoint_id in item.checkpoint_ids
+            }
+            if (
+                binding.engine_id in portfolio.selected_engine_ids
+                and descriptor.checkpoint_schema_versions
+            ):
+                if binding.checkpoint_ref is None:
+                    raise ReconstructionPlanCompatibilityError(
+                        "selected proposal engine lacks its exact checkpoint"
+                    )
+                verify_artifact_ref(binding.checkpoint_ref)
+                checkpoint_payload = _read_content_addressed_json(
+                    binding.checkpoint_ref.path,
+                    "proposal-engine-checkpoint",
+                )
+                if (
+                    checkpoint_payload.get("schema_version")
+                    not in descriptor.checkpoint_schema_versions
+                    or checkpoint_payload.get("config_id") != binding.config_id
+                    or checkpoint_payload.get("checkpoint_id")
+                    not in promoted_checkpoint_ids
+                    or binding.checkpoint_ref.metadata.get("engine_id")
+                    != binding.engine_id
+                ):
+                    raise ReconstructionPlanCompatibilityError(
+                        "proposal checkpoint differs from promoted evidence"
+                    )
+            required_refs = (
+                binding.config_ref,
+                binding.dataset_ref,
+                *binding.context_refs,
+                *binding.evidence_refs,
+                *(() if binding.fit_ref is None else (binding.fit_ref,)),
+                *(
+                    ()
+                    if binding.checkpoint_ref is None
+                    else (binding.checkpoint_ref,)
+                ),
+            )
+            if not {
+                canonical_contract_json(ref.to_dict()) for ref in required_refs
+            }.issubset(graph_values):
+                raise ReconstructionPlanCompatibilityError(
+                    "proposal engine binding reference is absent from plan graph"
+                )
     if inventory.inventory_id != plan.run.source_version_ids[0]:
         raise ReconstructionPlanCompatibilityError(
             "plan source inventory is not run-bound"
@@ -2000,10 +3015,15 @@ def read_reconstruction_source_inventory(
 
 def read_reconstruction_plan_configuration(
     path: str | Path,
-) -> ReconstructionPlanConfigurationV1:
+) -> ReconstructionPlanConfiguration:
     payload = _read_content_addressed_json(
         path, "reconstruction-plan-configuration"
     )
+    if (
+        payload.get("schema_version")
+        == RECONSTRUCTION_PLAN_CONFIGURATION_V2_SCHEMA_VERSION
+    ):
+        return ReconstructionPlanConfigurationV2.from_dict(payload)
     return ReconstructionPlanConfigurationV1.from_dict(payload)
 
 
@@ -2039,6 +3059,27 @@ def load_reconstruction_stage_plan(
             verify_artifact_ref(ref)
         for ref in command.input_manifest_refs:
             verify_artifact_ref(ref)
+    experiment_ref = execution.artifacts["experiment_manifest"]
+    experiment = read_reconstruction_experiment(experiment_ref.path)
+    if experiment_ref.metadata.get("experiment_id") != experiment.experiment_id:
+        raise ReconstructionPlanCompatibilityError(
+            "stage experiment artifact metadata identity differs"
+        )
+    experiment_verification = verify_reconstruction_experiment(experiment)
+    if not experiment_verification.verified:
+        raise ReconstructionPlanCompatibilityError(
+            "stage experiment manifest failed deterministic verification: "
+            + ", ".join(experiment_verification.finding_codes)
+        )
+    inventory = read_reconstruction_source_inventory(inventory_ref.path)
+    catalog = DatasetCatalog.read(execution.artifacts["dataset_catalog"].path)
+    _reconcile_catalog_inventory(
+        catalog,
+        experiment.selection_for_role(
+            ReconstructionExperimentRole.PRODUCT_INPUT
+        ).resolution,
+        inventory,
+    )
     return ReconstructionStagePlanV1(
         command=command,
         execution_manifest_ref=execution_ref,
@@ -2046,9 +3087,7 @@ def load_reconstruction_stage_plan(
         configuration=read_reconstruction_plan_configuration(
             configuration_ref.path
         ),
-        source_inventory=read_reconstruction_source_inventory(
-            inventory_ref.path
-        ),
+        source_inventory=inventory,
     )
 
 
@@ -2064,6 +3103,7 @@ def _resolve_plan_inputs(
     motif_qualification_path: str | Path,
     motif_leakage_audit_path: str | Path,
     symbols: tuple[str, ...],
+    require_motif_promotion: bool,
 ) -> _ResolvedPlanInputs:
     """Resolve qualified inputs once per unchanged stat-identity set."""
     identities = tuple(
@@ -2080,13 +3120,16 @@ def _resolve_plan_inputs(
             motif_leakage_audit_path,
         )
     )
-    return _resolve_plan_inputs_for_identity(identities, symbols)
+    return _resolve_plan_inputs_for_identity(
+        identities, symbols, require_motif_promotion
+    )
 
 
 @lru_cache(maxsize=4)
 def _resolve_plan_inputs_for_identity(
     identities: tuple[tuple[str, int, int, int, int, int], ...],
     symbols: tuple[str, ...],
+    require_motif_promotion: bool,
 ) -> _ResolvedPlanInputs:
     paths = tuple(item[0] for item in identities)
     return _resolve_plan_inputs_uncached(
@@ -2100,6 +3143,7 @@ def _resolve_plan_inputs_for_identity(
         motif_qualification_path=paths[7],
         motif_leakage_audit_path=paths[8],
         symbols=symbols,
+        require_motif_promotion=require_motif_promotion,
     )
 
 
@@ -2115,6 +3159,7 @@ def _resolve_plan_inputs_uncached(
     motif_qualification_path: str | Path,
     motif_leakage_audit_path: str | Path,
     symbols: tuple[str, ...],
+    require_motif_promotion: bool,
 ) -> _ResolvedPlanInputs:
     feed_ref = artifact_ref_for_file(
         feed_epoch_definition_path, kind="feed_epoch_definition_v2"
@@ -2245,15 +3290,21 @@ def _resolve_plan_inputs_uncached(
     )
     campaign = _mapping(qualification.get("campaign"))
     campaign_gate = _mapping(campaign.get("campaign_gate_decision"))
+    real_window_contracts = _mapping(qualification.get("real_window_contracts"))
     if (
         qualification.get("library_id") != motif_manifest.get("library_id")
-        or qualification.get("candidate_promotion_eligible") is not True
+        or (
+            require_motif_promotion
+            and qualification.get("candidate_promotion_eligible") is not True
+        )
         or qualification.get("candidate_provisional") is not False
         or qualification.get("frozen_gate_policy_commit")
         != PREDECLARED_GATE_COMMIT
         or campaign.get("corpus_id") != benchmark.corpus_id
         or campaign.get("source_replay_verified") is not True
         or campaign_gate.get("promotion_eligible") is not True
+        or not real_window_contracts
+        or not all(value is True for value in real_window_contracts.values())
     ):
         raise ReconstructionPlanCompatibilityError(
             "modern reference motif qualification is missing or stale"
@@ -2312,6 +3363,279 @@ def _file_stat_identity(
         stat.st_size,
         stat.st_mtime_ns,
         stat.st_ctime_ns,
+    )
+
+
+def _catalog_source_root(
+    catalog: DatasetCatalog,
+    resolution: DatasetResolutionV1,
+) -> Path:
+    """Resolve one local HistData ASCII/T materialization without widening scope."""
+    exact = catalog.replay(resolution)
+    catalog.verify(exact)
+    version = next(
+        (
+            item
+            for item in catalog.versions
+            if item.dataset_version_id == exact.dataset_version_id
+        ),
+        None,
+    )
+    if version is None:
+        raise ReconstructionPlanCompatibilityError(
+            "resolved dataset version is absent from the catalog"
+        )
+    if (
+        version.origin is not DatasetOrigin.OBSERVED
+        or version.source_provider_ids != (CURRENT_EVIDENCE_SOURCE_PROVIDER_ID,)
+    ):
+        raise ReconstructionPlanCompatibilityError(
+            "v2.4 plans accept only observed HistData.com catalog selections"
+        )
+    scope = exact.query_scope
+    selected = tuple(
+        item
+        for item in version.partitions
+        if (not scope.symbols or item.symbol in scope.symbols)
+        and (not scope.periods or item.period in scope.periods)
+    )
+    expected = {
+        (symbol, period) for symbol in scope.symbols for period in scope.periods
+    }
+    if (
+        not selected
+        or {(item.symbol, item.period) for item in selected} != expected
+    ):
+        raise ReconstructionPlanCompatibilityError(
+            "catalog selection is not a complete HistData triangle/period matrix"
+        )
+    roots: set[Path] = set()
+    for partition in selected:
+        if partition.format != "ascii" or partition.granularity != "T":
+            raise ReconstructionPlanCompatibilityError(
+                "v2.4 plans reject M1 and non-ASCII/T catalog selections"
+            )
+        path = Path(partition.artifact.path).expanduser().resolve()
+        try:
+            root = path.parents[3]
+        except IndexError as err:
+            raise ReconstructionPlanCompatibilityError(
+                "catalog partition is outside the HistData ASCII/T layout"
+            ) from err
+        if (
+            path.name != ".data"
+            or root.name.upper() != "T"
+            or root.parent.name.upper() != "ASCII"
+        ):
+            raise ReconstructionPlanCompatibilityError(
+                "catalog partition is outside the HistData ASCII/T layout"
+            )
+        roots.add(root)
+    if len(roots) != 1:
+        raise ReconstructionPlanCompatibilityError(
+            "catalog selection spans multiple materialization roots"
+        )
+    return next(iter(roots))
+
+
+def _reconcile_catalog_inventory(
+    catalog: DatasetCatalog,
+    resolution: DatasetResolutionV1,
+    inventory: ReconstructionSourceInventoryV1,
+) -> None:
+    """Require the execution inventory to equal the frozen catalog selection."""
+    exact = catalog.replay(resolution)
+    catalog.verify(exact)
+    version = next(
+        item
+        for item in catalog.versions
+        if item.dataset_version_id == exact.dataset_version_id
+    )
+    scope = exact.query_scope
+    selected = {
+        (_symbol(item.symbol), item.period): item
+        for item in version.partitions
+        if (not scope.symbols or item.symbol in scope.symbols)
+        and (not scope.periods or item.period in scope.periods)
+    }
+    planned = {
+        (_symbol(item.symbol), item.period): item
+        for item in inventory.partitions
+    }
+    if set(selected) != set(planned):
+        raise ReconstructionPlanCompatibilityError(
+            "source inventory scope differs from the resolved catalog selection"
+        )
+    for key, partition in selected.items():
+        inventory_partition = planned[key]
+        if (
+            inventory_partition.artifact.sha256 != partition.artifact.sha256
+            or inventory_partition.artifact.size_bytes
+            != partition.artifact.size_bytes
+            or inventory_partition.row_count != partition.row_count
+        ):
+            raise ReconstructionPlanCompatibilityError(
+                "source inventory content differs from the resolved catalog selection"
+            )
+
+
+def _experiment_artifact_bindings(
+    *,
+    resolved: _ResolvedPlanInputs,
+    evidence_policy: ReconstructionEvidencePolicyV1,
+    evidence_policy_ref: ArtifactRef,
+    cross_series_policy: CrossSeriesConstraintPolicyV1,
+    cross_series_policy_ref: ArtifactRef,
+    configuration: ReconstructionPlanConfiguration,
+    configuration_ref: ArtifactRef,
+    proposal_registry_ref: ArtifactRef,
+    proposal_portfolio_ref: ArtifactRef,
+) -> tuple[ReconstructionExperimentArtifactBindingV1, ...]:
+    """Bind verified authoritative artifacts without duplicating their payloads."""
+    roles = (
+        ReconstructionExperimentRole.HISTORICAL_ANCHOR,
+        ReconstructionExperimentRole.PRODUCT_INPUT,
+    )
+    specifications = (
+        (
+            "feed-epochs",
+            "evidence",
+            resolved.artifacts["feed_epochs"],
+            resolved.feed_epoch_definition.definition_id,
+            "definition_id",
+            getattr(resolved.feed_epoch_definition, "schema_version", ""),
+        ),
+        (
+            "observation-operator",
+            "preprocessing",
+            resolved.artifacts["observation_operator"],
+            resolved.observation_operator.operator_id,
+            "operator_id",
+            getattr(resolved.observation_operator, "schema_version", ""),
+        ),
+        (
+            "market-context",
+            "evidence",
+            resolved.artifacts["market_context"],
+            resolved.market_context.corpus_id,
+            "corpus_id",
+            getattr(resolved.market_context, "schema_version", ""),
+        ),
+        (
+            "cftc-positioning",
+            "evidence",
+            resolved.artifacts["cftc_positioning"],
+            resolved.cftc_positioning.corpus_id,
+            "corpus_id",
+            getattr(resolved.cftc_positioning, "schema_version", ""),
+        ),
+        (
+            "benchmark-corpus",
+            "benchmark",
+            resolved.artifacts["benchmark_manifest"],
+            resolved.benchmark_corpus.corpus_id,
+            "corpus.corpus_id",
+            "histdatacom.reverse-degradation-manifest.v1",
+        ),
+        (
+            "motif-library",
+            "model",
+            resolved.artifacts["motif_manifest"],
+            str(resolved.motif_manifest["library_id"]),
+            "library_id",
+            str(resolved.motif_manifest.get("schema_version", "")),
+        ),
+        (
+            "motif-index",
+            "model",
+            resolved.artifacts["motif_index"],
+            resolved.motif_index.index_id,
+            "index_id",
+            getattr(resolved.motif_index, "schema_version", ""),
+        ),
+        (
+            "motif-qualification",
+            "gate",
+            resolved.artifacts["motif_qualification"],
+            str(
+                resolved.motif_qualification.get(
+                    "library_id", resolved.motif_manifest["library_id"]
+                )
+            ),
+            "library_id",
+            str(resolved.motif_qualification.get("schema_version", "")),
+        ),
+        (
+            "motif-leakage-audit",
+            "gate",
+            resolved.artifacts["motif_leakage_audit"],
+            str(
+                resolved.motif_leakage_audit.get(
+                    "library_id", resolved.motif_manifest["library_id"]
+                )
+            ),
+            "library_id",
+            str(resolved.motif_leakage_audit.get("schema_version", "")),
+        ),
+        (
+            "evidence-policy",
+            "evidence",
+            evidence_policy_ref,
+            evidence_policy.policy_id,
+            "policy_id",
+            evidence_policy.schema_version,
+        ),
+        (
+            "cross-series-policy",
+            "constraint",
+            cross_series_policy_ref,
+            cross_series_policy.policy_id,
+            "policy_id",
+            cross_series_policy.schema_version,
+        ),
+        (
+            "plan-configuration",
+            "configuration",
+            configuration_ref,
+            configuration.configuration_id,
+            "configuration_id",
+            configuration.schema_version,
+        ),
+        (
+            "proposal-engine-registry",
+            "model",
+            proposal_registry_ref,
+            str(proposal_registry_ref.metadata["registry_id"]),
+            "registry_id",
+            "histdatacom.proposal-engine-registry.v1",
+        ),
+        (
+            "proposal-engine-portfolio",
+            "model",
+            proposal_portfolio_ref,
+            str(proposal_portfolio_ref.metadata["portfolio_id"]),
+            "portfolio_id",
+            PROPOSAL_ENGINE_PORTFOLIO_SCHEMA_VERSION,
+        ),
+    )
+    return tuple(
+        ReconstructionExperimentArtifactBindingV1(
+            name=name,
+            domain=domain,
+            artifact=artifact,
+            artifact_id=artifact_id,
+            artifact_identity_field=identity_field,
+            dataset_roles=roles,
+            schema_versions=(str(schema_version),) if schema_version else (),
+        )
+        for (
+            name,
+            domain,
+            artifact,
+            artifact_id,
+            identity_field,
+            schema_version,
+        ) in specifications
     )
 
 
@@ -2522,6 +3846,20 @@ def _build_information_evidence(
             None,
         ),
         (
+            "evidence_policy",
+            InformationStage.FEATURE,
+            InformationScope.POINT_IN_TIME,
+            requested_start_ns,
+            None,
+        ),
+        (
+            "cross_series_constraint_policy",
+            InformationStage.FEATURE,
+            InformationScope.POINT_IN_TIME,
+            requested_start_ns,
+            None,
+        ),
+        (
             "feed_epochs",
             InformationStage.FEATURE,
             (
@@ -2611,7 +3949,7 @@ def _window_resource_estimate(
     window: ReconstructionWindowV1,
     *,
     inventory: ReconstructionSourceInventoryV1,
-    configuration: ReconstructionPlanConfigurationV1,
+    configuration: ReconstructionPlanConfiguration,
 ) -> ReconstructionResourceEstimateV1:
     partitions = inventory.partitions_for_window(window)
     input_count = sum(
@@ -2773,6 +4111,9 @@ def _stage_commands(
     source_inputs = tuple(
         item.artifact for item in inventory.partitions_for_window(window)
     ) + (
+        graph["dataset_catalog"],
+        graph["dataset_resolution"],
+        graph["experiment_manifest"],
         graph["feed_epochs"],
         graph["observation_operator"],
         graph["market_context"],
@@ -2783,6 +4124,27 @@ def _stage_commands(
         ReconstructionStage.PROPOSAL: (
             graph["motif_manifest"],
             graph["motif_index"],
+            *(
+                ref
+                for name, ref in sorted(graph.items())
+                if name
+                in {
+                    "proposal_engine_registry",
+                    "proposal_engine_portfolio",
+                    "proposal_dataset_resolution",
+                    "proposal_portfolio_evaluation",
+                    "powered_qualification_dossier",
+                }
+                or name.startswith(
+                    (
+                        "proposal_engine_config_",
+                        "proposal_engine_evidence_",
+                        "proposal_engine_fit_",
+                        "proposal_engine_checkpoint_",
+                        "proposal_engine_training_dataset_",
+                    )
+                )
+            ),
         ),
         ReconstructionStage.CARVING: (
             graph["market_context"],
@@ -2802,6 +4164,7 @@ def _stage_commands(
             graph["information_audit"],
         ),
         ReconstructionStage.ATOMIC_PARTITION_COMMIT: (
+            graph["experiment_manifest"],
             graph["source_inventory"],
             graph["retention_plan"],
         ),
@@ -2828,11 +4191,16 @@ def _stage_commands(
 def _validate_stage_inputs(
     command: ReconstructionStageCommandV1,
     delivery_mode: ReconstructionDeliveryMode,
+    *,
+    portfolio_bound: bool,
 ) -> None:
     kinds = {ref.kind for ref in command.input_manifest_refs}
     required: Mapping[ReconstructionStage, set[str]] = {
         ReconstructionStage.SOURCE_ENRICHMENT: {
             ASCII_TICK_SOURCE_KIND,
+            RECONSTRUCTION_EXPERIMENT_CATALOG_ARTIFACT_KIND,
+            RECONSTRUCTION_EXPERIMENT_RESOLUTION_ARTIFACT_KIND,
+            RECONSTRUCTION_EXPERIMENT_ARTIFACT_KIND,
             "feed_epoch_definition_v2",
             "observation-operator",
             "market_context_corpus_v1",
@@ -2859,10 +4227,19 @@ def _validate_stage_inputs(
             "reconstruction_information_audit_v1",
         },
         ReconstructionStage.ATOMIC_PARTITION_COMMIT: {
+            RECONSTRUCTION_EXPERIMENT_ARTIFACT_KIND,
             SOURCE_INVENTORY_ARTIFACT_KIND,
             "reconstruction_retention_plan_v1",
         },
     }
+    if portfolio_bound:
+        required[ReconstructionStage.PROPOSAL].update(
+            {
+                PROPOSAL_ENGINE_REGISTRY_ARTIFACT_KIND,
+                PROPOSAL_ENGINE_PORTFOLIO_ARTIFACT_KIND,
+                PROPOSAL_ENGINE_CONFIG_ARTIFACT_KIND,
+            }
+        )
     if not required[command.stage].issubset(kinds):
         raise ReconstructionPlanCompatibilityError(
             f"{command.stage.value} command lacks required artifact kinds"
@@ -2970,7 +4347,7 @@ def _common_source_periods(
 def _inspect_tick_cache(path: Path) -> tuple[int, int, int]:
     try:
         import pyarrow as pa  # pylint: disable=import-outside-toplevel
-        import pyarrow.ipc as ipc  # pylint: disable=import-outside-toplevel
+        from pyarrow import ipc  # pylint: disable=import-outside-toplevel
     except ImportError as err:
         raise RuntimeError("reconstruction planning requires pyarrow") from err
     if not path.is_file():
@@ -3024,9 +4401,16 @@ def _write_contract_artifact(
     metadata: Mapping[str, JSONValue],
 ) -> ArtifactRef:
     serializer = getattr(contract, "to_json", None)
-    if not callable(serializer):
-        raise TypeError("content-addressed contract must provide to_json()")
-    encoded = str(serializer()).encode("utf-8") + b"\n"
+    if callable(serializer):
+        payload = str(serializer())
+    else:
+        to_dict = getattr(contract, "to_dict", None)
+        if not callable(to_dict):
+            raise TypeError(
+                "content-addressed contract must provide to_json() or to_dict()"
+            )
+        payload = canonical_contract_json(to_dict())
+    encoded = payload.encode("utf-8") + b"\n"
     digest = hashlib.sha256(encoded).hexdigest()
     root.mkdir(parents=True, exist_ok=True)
     path = root / f"{prefix}-{digest}.json"
@@ -3280,7 +4664,7 @@ def _bounded_text(value: Any, maximum: int) -> str:
 
 def _strict_int(value: Any, name: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int):
-        raise ValueError(f"{name} must be an integer")
+        raise TypeError(f"{name} must be an integer")
     return value
 
 
@@ -3307,13 +4691,13 @@ def _int64(value: Any, name: str) -> int:
 
 def _mapping(value: Any) -> Mapping[str, Any]:
     if not isinstance(value, Mapping):
-        raise ValueError("expected a mapping")
+        raise TypeError("expected a mapping")
     return value
 
 
 def _sequence(value: Any) -> Sequence[Any]:
     if isinstance(value, (str, bytes)) or not isinstance(value, Sequence):
-        raise ValueError("expected a sequence")
+        raise TypeError("expected a sequence")
     return value
 
 
@@ -3385,9 +4769,9 @@ __all__ = [
     "ReconstructionPlanRefusalCode",
     "ReconstructionPlanRefusalV1",
     "ReconstructionPlanResourceSummaryV1",
-    "ReconstructionStagePlanV1",
     "ReconstructionSourceInventoryV1",
     "ReconstructionSourcePartitionV1",
+    "ReconstructionStagePlanV1",
     "SyntheticInfillPlanV1",
     "build_synthetic_infill_plan",
     "load_reconstruction_stage_plan",

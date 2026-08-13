@@ -5,51 +5,104 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
+import polars as pl
 import pytest
 
+import histdatacom.data_analytics.cli as corpus_module_cli
+import histdatacom.synthetic.benchmark_corpus as corpus_module
 from histdatacom.runtime_contracts import ArtifactRef
+from histdatacom.synthetic.add_thin import default_add_thin_config
 from histdatacom.synthetic.benchmark import BenchmarkEventV1
 from histdatacom.synthetic.benchmark_corpus import (
+    DEFAULT_BENCHMARK_PERIODS,
     PREDECLARED_GATE_COMMIT,
+    BenchmarkWindowMetricObservationV1,
+    BenchmarkWindowMetricTraceV1,
     BenchmarkWindowPartitionV1,
     ReverseDegradationBenchmarkCorpusV1,
     ReverseDegradationCorpusProfileV1,
     audit_holdout_neighbor_leakage,
+    read_benchmark_window_metric_trace,
     read_reverse_degradation_benchmark_corpus,
+    write_benchmark_window_metric_trace,
 )
 from histdatacom.synthetic.benchmark_gates import (
     load_default_benchmark_promotion_gate_policy,
 )
 from histdatacom.synthetic.contracts import canonical_contract_json
-import histdatacom.synthetic.benchmark_corpus as corpus_module
+from histdatacom.synthetic.event_clock import default_event_clock_configs
+from histdatacom.synthetic.marked_hawkes import default_marked_hawkes_configs
+from histdatacom.synthetic.neural_tpp import default_neural_tpp_config
+from histdatacom.synthetic.regime_hawkes import default_regime_hawkes_configs
+from histdatacom.synthetic.schrodinger_bridge import (
+    SchrodingerBridgeBrokerTargetV1,
+    default_schrodinger_bridge_config,
+)
+
+
+def test_arrow_interval_reader_handles_bounded_source_order_regression(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "regressed.data"
+    start_ms = 1_700_000_000_000
+    frame = pl.DataFrame(
+        {
+            "datetime": [
+                start_ms,
+                start_ms + 3_599_000,
+                start_ms + 1_000,
+                start_ms + 2_000,
+                start_ms + 3_000,
+            ],
+            "bid": [1.0, 1.1, 1.01, 1.02, 1.03],
+            "ask": [1.001, 1.101, 1.011, 1.021, 1.031],
+            "vol": [0, 0, 0, 0, 0],
+        }
+    )
+    frame.write_ipc(path)
+
+    rows = corpus_module._read_arrow_interval(
+        path,
+        start_ns=start_ms * 1_000_000,
+        end_ns=(start_ms + 2_500) * 1_000_000,
+        maximum=8,
+    )
+
+    assert [(item.row_id, item.timestamp_ms) for item in rows] == [
+        (0, start_ms),
+        (2, start_ms + 1_000),
+        (3, start_ms + 2_000),
+    ]
 
 
 def _corpus() -> ReverseDegradationBenchmarkCorpusV1:
     profile = ReverseDegradationCorpusProfileV1()
     sources = []
     by_axis = {}
-    for period in profile.split_periods.values():
-        for symbol in profile.symbols:
-            source = corpus_module.BenchmarkSourcePartitionV1(
-                symbol=symbol,
-                period=period,
-                relative_path=f"{symbol.lower()}/{period}/.data",
-                size_bytes=1024,
-                row_count=1000,
-                sha256=hashlib.sha256(
-                    f"{symbol}:{period}".encode()
-                ).hexdigest(),
-            )
-            sources.append(source)
-            by_axis[(period, symbol)] = source
+    for periods in profile.split_periods.values():
+        for period in periods:
+            for symbol in profile.symbols:
+                source = corpus_module.BenchmarkSourcePartitionV1(
+                    symbol=symbol,
+                    period=period,
+                    relative_path=f"{symbol.lower()}/{period}/.data",
+                    size_bytes=1024,
+                    row_count=1000,
+                    sha256=hashlib.sha256(
+                        f"{symbol}:{period}".encode()
+                    ).hexdigest(),
+                )
+                sources.append(source)
+                by_axis[(period, symbol)] = source
     windows = []
     split_offsets = {
         "calibration": 1_200_000_000_000_000_000,
         "validation": 1_600_000_000_000_000_000,
         "final_holdout": 1_700_000_000_000_000_000,
     }
-    for split, period in profile.split_periods.items():
+    for split, periods in profile.split_periods.items():
         for index in range(profile.synchronized_windows_per_split):
+            period = periods[index % len(periods)]
             start = split_offsets[split] + index * 86_400_000_000_000
             windows.append(
                 BenchmarkWindowPartitionV1(
@@ -118,7 +171,10 @@ def test_profile_and_corpus_round_trip_are_content_addressed() -> None:
         == corpus
     )
     assert corpus.corpus_id.startswith("reverse-degradation-corpus:sha256:")
-    assert len(corpus.windows) == 18
+    assert len(corpus.windows) == (
+        len(corpus.profile.split_periods)
+        * corpus.profile.synchronized_windows_per_split
+    )
     assert set(corpus.split_hashes) == {
         "calibration",
         "validation",
@@ -159,6 +215,44 @@ def test_manifest_reader_rejects_tamper(tmp_path: Path) -> None:
     bad.write_bytes(encoded)
     with pytest.raises(ValueError, match="content hash differs"):
         read_reverse_degradation_benchmark_corpus(bad)
+
+
+def test_window_metric_trace_is_bounded_row_free_and_content_addressed(
+    tmp_path: Path,
+) -> None:
+    observation = BenchmarkWindowMetricObservationV1(
+        candidate_id="candidate:one",
+        method_name="empirical_motif",
+        role="candidate",
+        split_kind="validation",
+        window_id="window:one",
+        ensemble_member_id="member-01",
+        reference_metrics={"event_rate_hz": 2.0, "spread_q95_pips": 1.1},
+        candidate_metrics={"event_rate_hz": 1.8, "spread_q95_pips": 1.2},
+        comparison_metrics={
+            "event_count_relative_error": 0.1,
+            "simulation_time_pit_ks": 0.2,
+        },
+    )
+    trace = BenchmarkWindowMetricTraceV1(
+        corpus_id="corpus:one",
+        campaign_id="campaign:one",
+        observations=(observation,),
+    )
+
+    artifact = write_benchmark_window_metric_trace(trace, tmp_path)
+
+    assert read_benchmark_window_metric_trace(artifact.path) == trace
+    assert artifact.metadata["trace_id"] == trace.trace_id
+    assert trace.to_dict()["event_rows_embedded"] is False
+    assert observation.to_dict()["event_rows_embedded"] is False
+
+    changed = Path(artifact.path).with_name(
+        f"reverse-degradation-window-metric-trace-{'0' * 64}.json"
+    )
+    changed.write_bytes(Path(artifact.path).read_bytes())
+    with pytest.raises(ValueError, match="content hash differs"):
+        read_benchmark_window_metric_trace(changed)
 
 
 def test_neighbor_leakage_detects_cross_split_overlap() -> None:
@@ -312,6 +406,39 @@ def test_time_degradations_preserve_protected_anchor_timestamps(
     )
 
 
+def test_missing_window_degradation_has_support_in_every_split() -> None:
+    corpus = _corpus()
+    affected: dict[str, int] = {
+        "calibration": 0,
+        "validation": 0,
+        "final_holdout": 0,
+    }
+    for partition in corpus.windows:
+        event = BenchmarkEventV1(
+            source_event_id=f"{partition.window_id}:ordinary",
+            symbol="EURUSD",
+            event_time_ns=partition.start_ns + 1,
+            event_sequence=1,
+            bid=1.1,
+            ask=1.1002,
+            epoch_id=partition.epoch_label,
+            session=partition.session,
+            event_state="update_joint",
+            sparsity="dense-reference",
+        )
+        degraded = corpus_module._apply_degradation(
+            (event,),
+            config={"name": "missing_window", "window_modulus": 2**32 + 1},
+            corpus=corpus,
+            partition=partition,
+            operator=None,
+            run_id="run-missing-window-support",
+        )
+        affected[partition.split_kind] += int(not degraded)
+
+    assert all(count == 1 for count in affected.values())
+
+
 def test_cli_exposes_installed_real_corpus_command() -> None:
     from histdatacom.data_analytics.cli import build_parser
 
@@ -335,4 +462,174 @@ def test_cli_exposes_installed_real_corpus_command() -> None:
 
     assert args.analytics_command == "reverse-degradation-benchmark-corpus"
     assert args.gate_policy_commit == PREDECLARED_GATE_COMMIT
-    assert args.windows_per_split == 6
+    assert args.windows_per_split == 32
+    assert args.ensemble_member_count == 8
+    assert args.calibration_period is None
+    assert args.validation_period is None
+    assert args.final_holdout_period is None
+    profile = corpus_module_cli._benchmark_profile(args)
+    assert profile.split_periods == DEFAULT_BENCHMARK_PERIODS
+
+    scaled = build_parser().parse_args(
+        [
+            "reverse-degradation-benchmark-corpus",
+            "--source-root",
+            "ticks",
+            "--definition",
+            "epochs.json",
+            "--observation-campaign",
+            "operator.json",
+            "--market-context-corpus",
+            "context.json",
+            "--cftc-positioning-corpus",
+            "positioning.json",
+            "--artifact-dir",
+            "artifacts",
+            "--ensemble-member-count",
+            "8",
+        ]
+    )
+    assert scaled.ensemble_member_count == 8
+    assert (
+        len(corpus_module_cli._benchmark_profile(scaled).ensemble_member_ids)
+        == 8
+    )
+
+
+def test_benchmark_normalizes_engine_and_reference_update_state_names() -> None:
+    reference_states = (
+        "unchanged",
+        "update_ask_only",
+        "update_bid_only",
+        "update_joint",
+    )
+    engine_states = ("unchanged", "ask_only", "bid_only", "joint")
+
+    def events(
+        states: tuple[str, ...], source: str
+    ) -> tuple[BenchmarkEventV1, ...]:
+        return tuple(
+            BenchmarkEventV1(
+                source_event_id=f"{source}-{index}",
+                symbol="EURUSD",
+                event_time_ns=1_000_000_000 + index,
+                event_sequence=index,
+                bid=1.1 + index / 10_000,
+                ask=1.1002 + index / 10_000,
+                epoch_id="technology_epoch_03",
+                session="london",
+                event_state=state,
+                sparsity=source,
+            )
+            for index, state in enumerate(states)
+        )
+
+    reference = events(reference_states, "dense-reference")
+    candidate = events(engine_states, "engine-candidate")
+    reference_proportions = corpus_module._update_proportions(reference)
+    candidate_proportions = corpus_module._update_proportions(candidate)
+
+    assert reference_proportions == candidate_proportions
+    assert corpus_module._update_transitions(reference) == (
+        corpus_module._update_transitions(candidate)
+    )
+    pits = corpus_module._categorical_pit_values(
+        reference, candidate_proportions
+    )
+    assert len(pits) == len(reference)
+    assert all(0.0 < value < 1.0 for value in pits)
+
+
+def test_event_clock_campaign_accepts_unique_family_subsets() -> None:
+    configs = default_event_clock_configs()
+
+    assert corpus_module._validated_event_clock_configs(configs) == configs
+    assert corpus_module._validated_event_clock_configs(configs[:-1]) == (
+        configs[:-1]
+    )
+    with pytest.raises(ValueError, match="duplicates a family"):
+        corpus_module._validated_event_clock_configs((*configs, configs[0]))
+
+
+def test_marked_hawkes_campaign_accepts_unique_ablation_subsets() -> None:
+    configs = default_marked_hawkes_configs()
+
+    assert corpus_module._validated_marked_hawkes_configs(configs) == configs
+    assert corpus_module._validated_marked_hawkes_configs(configs[:-1]) == (
+        configs[:-1]
+    )
+    with pytest.raises(ValueError, match="duplicates an ablation"):
+        corpus_module._validated_marked_hawkes_configs((*configs, configs[0]))
+
+
+def test_regime_hawkes_campaign_accepts_unique_ablation_subsets() -> None:
+    configs = default_regime_hawkes_configs()
+
+    assert corpus_module._validated_regime_hawkes_configs(configs) == configs
+    assert corpus_module._validated_regime_hawkes_configs(configs[:-1]) == (
+        configs[:-1]
+    )
+    with pytest.raises(ValueError, match="duplicates an ablation"):
+        corpus_module._validated_regime_hawkes_configs((*configs, configs[0]))
+
+
+def test_neural_tpp_campaign_accepts_none_or_the_fixed_config() -> None:
+    config = default_neural_tpp_config()
+
+    assert corpus_module._validated_neural_tpp_config(None) is None
+    assert corpus_module._validated_neural_tpp_config(config) == config
+    with pytest.raises(TypeError, match="invalid config"):
+        corpus_module._validated_neural_tpp_config(object())
+
+
+def test_add_thin_campaign_accepts_none_or_the_fixed_config() -> None:
+    config = default_add_thin_config()
+
+    assert corpus_module._validated_add_thin_config(None) is None
+    assert corpus_module._validated_add_thin_config(config) == config
+    with pytest.raises(TypeError, match="invalid config"):
+        corpus_module._validated_add_thin_config(object())
+
+
+def test_schrodinger_bridge_campaign_requires_config_and_target_together() -> (
+    None
+):
+    config = default_schrodinger_bridge_config()
+    target = SchrodingerBridgeBrokerTargetV1(
+        broker_profile_selection_id="broker-profile-selection:test",
+        fingerprint_id="broker-fingerprint:test",
+        broker_support_status="supported",
+        selected_at_utc_ns=2,
+        profile_effective_start_utc_ns=1,
+        profile_effective_end_utc_ns=None,
+        transfer_config_id="broker-transfer-config:test",
+        transfer_strength=0.25,
+        target_mean_event_count=100.0,
+        target_cadence_ns=100_000_000.0,
+        symbol_weights={
+            symbol: 1.0 for symbol in ("EURGBP", "EURUSD", "GBPUSD")
+        },
+        mark_weights={
+            "ask_only": 1.0,
+            "bid_only": 1.0,
+            "joint": 1.0,
+            "unchanged": 1.0,
+        },
+        time_bin_weights=tuple(1.0 for _ in range(config.time_bin_count)),
+        spread_target=0.0002,
+    )
+
+    assert corpus_module._validated_schrodinger_bridge_inputs(None, None) == (
+        None,
+        None,
+    )
+    assert corpus_module._validated_schrodinger_bridge_inputs(
+        config, target
+    ) == (
+        config,
+        target,
+    )
+    with pytest.raises(ValueError, match="config and broker target together"):
+        corpus_module._validated_schrodinger_bridge_inputs(config, None)
+    with pytest.raises(TypeError, match="invalid config"):
+        corpus_module._validated_schrodinger_bridge_inputs(object(), target)

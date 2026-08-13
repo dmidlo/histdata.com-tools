@@ -9,16 +9,19 @@ large analytical frames in flags or workflow control metadata.
 
 ## Supported input and scientific acknowledgement
 
-Version 2.1 accepts only:
+The current v2.4 compatibility boundary accepts only:
 
 - HistData ASCII tick caches below an `ASCII/T` source root;
 - the complete `EURGBP`, `EURUSD`, `GBPUSD` synchronized triangle;
 - `ex_post_reconstruction` or `ex_ante_simulation`, selected explicitly; and
-- modern-reference delivery by default, or broker-conditioned delivery only
-  when a strong `broker_delivery_artifact_v1` reference is supplied.
+- modern-reference delivery.
 
-M1, OHLC, bar, partial-triangle, and broker-only requests are unsupported and
-exit as invalid plans. Every execution request must also carry the exact
+Provider-neutral domain contracts remain the architectural foundation, but
+alternate providers, OANDA, live broker inputs, and broker-conditioned
+delivery are later-milestone work and are non-executable here. Existing broker
+research contracts are not current dataset qualification. M1, OHLC, bar, and
+partial-triangle requests are unsupported and exit as invalid plans. Every
+execution request must also carry the exact
 machine-readable scientific nonclaim and a true acknowledgement:
 
 > Output is a plausible counterfactual ensemble conditioned on declared
@@ -29,13 +32,33 @@ audits, validation, immutable-anchor checks, or certification gates.
 
 ## Construct a plan and request
 
-Planning starts from a JSON `ReconstructionPlanSpecV1`. Paths point to strong,
-qualified artifacts; data rows remain in their source artifacts.
+Discover the installed substrate and audit a JSON plan before constructing it:
+
+```sh
+histdatacom reconstruction schemas --json
+histdatacom reconstruction engines --json
+histdatacom reconstruction compatibility --plan plan-spec.json --json
+```
+
+Both commands use the same registry and compatibility engine consumed by
+`ReconstructionClient.construct_plan()`. See
+[`reconstruction-schema-compatibility.md`](reconstruction-schema-compatibility.md)
+for field metadata, cache translations, and compatibility states.
+
+New planning starts from a JSON `ReconstructionPlanSpecV2`. It explicitly
+orders the proposal engines, selects the reconstruction-eligible product
+engine, and binds retained evaluation evidence. The v1 input remains a
+deprecated deterministic translation to a motif-only portfolio. A catalog
+selector is preferred; the legacy `source_root` field invokes the documented
+v2.3-to-v2.4 catalog translation. Paths point to strong, qualified artifacts;
+data rows remain in their source artifacts.
 
 ```json
 {
-  "schema_version": "histdatacom.reconstruction-plan-spec.v1",
-  "source_root": "data/ASCII/T",
+  "schema_version": "histdatacom.reconstruction-plan-spec.v2",
+  "source_root": null,
+  "dataset_catalog_path": "artifacts/histdata-dataset-catalog.json",
+  "dataset_reference": "reconstruction-selected",
   "feed_epoch_definition_path": "artifacts/feed-epochs-v2-definition.json",
   "observation_operator_path": "artifacts/observation-operator.json",
   "market_context_corpus_path": "artifacts/market-context-corpus.json",
@@ -55,8 +78,110 @@ qualified artifacts; data rows remain in their source artifacts.
   "end_period": "201101",
   "requested_start_ns": null,
   "requested_end_ns": null,
-  "window_size_ns": 86400000000000
+  "window_size_ns": 86400000000000,
+  "proposal_engine_ids": [
+    "histdatacom.empirical-motif-resampling",
+    "histdatacom.event-clock.nhpp"
+  ],
+  "selected_proposal_engine_ids": [
+    "histdatacom.empirical-motif-resampling"
+  ],
+  "proposal_evaluation_paths": [
+    "artifacts/reverse-degradation-scorecard-<sha256>.json"
+  ],
+  "qualification_dossier_path": "artifacts/powered-qualification-dossier-<sha256>.json"
 }
+```
+
+Portfolio order is not scientific rank. A powered dossier can only reduce the
+eligibility granted by retained campaign evidence. The current real dossier
+finds every executable HistData engine underpowered, so its honest product
+result is no decision: a specification that requests motif is refused during
+planning. The selection above illustrates the shape of a plan only and is
+executable only with a dossier that independently grants motif reconstruction
+eligibility. Inspect resolved audits and evidence with:
+
+```sh
+histdatacom reconstruction --json portfolio \
+  --plan work/plan-artifacts/synthetic-infill-plan-<sha256>.json
+```
+
+See
+[`proposal-engine-portfolios.md`](proposal-engine-portfolios.md) for discovery,
+single-engine evaluation, refusal, lineage, and no-fallback semantics.
+
+Produce the exact powered dossier through either installed surface:
+
+```sh
+histdatacom reconstruction --json qualify \
+  --evaluation work/proposal-evaluation/proposal-portfolio-evaluation-<sha256>.json \
+  --experiment work/experiment/reconstruction-experiment-<sha256>.json \
+  --output-directory work/qualification
+```
+
+```python
+dossier = ReconstructionClient().qualify_proposal_portfolio(
+    "work/proposal-evaluation/proposal-portfolio-evaluation-<sha256>.json",
+    "work/experiment/reconstruction-experiment-<sha256>.json",
+    output_directory="work/qualification",
+)
+```
+
+The CLI and API call the same verifier and writer and therefore reproduce the
+same content identity. See
+[`powered-reconstruction-qualification.md`](powered-reconstruction-qualification.md)
+for residual, score, power, holdout, and no-decision semantics.
+
+Retained evidence diagnostics use the same public boundary:
+
+```sh
+histdatacom reconstruction --json diagnostic-build \
+  --spec work/diagnostic-spec.json \
+  --output-directory work/diagnostics
+histdatacom reconstruction --json diagnostic-list \
+  --manifest work/diagnostics/reconstruction-diagnostic-publication-<sha256>.json
+```
+
+```python
+publication = ReconstructionClient().publish_diagnostics(
+    "work/diagnostic-spec.json",
+    output_directory="work/diagnostics",
+)
+listing = ReconstructionClient().diagnostics(
+    "work/diagnostics/reconstruction-diagnostic-publication-<sha256>.json"
+)
+```
+
+JSON chart data works in the base install. SVG and PNG require the optional
+`histdatacom[viz]` extra. Both surfaces verify the same strong evidence graph,
+preserve explicit unavailable and underpowered states, and never reinterpret a
+figure as an eligibility decision. Family and view counts remain distinct so
+dense evidence is not forced onto one unreadable mixed axis. See
+[`reconstruction-diagnostics.md`](reconstruction-diagnostics.md).
+
+The omitted `evidence_policy` and `cross_series_constraint_policy` fields use
+their versioned HistData-only defaults. Supplying either field serializes the
+complete v1 policy object, changes plan/run identity, and is compatibility
+checked before source scanning. Merely adding `oanda` or another provider to a
+policy is rejected; a future provider requires a separately implemented and
+qualified adapter milestone.
+
+The selected catalog reference is resolved to an exact dataset version,
+revision, query scope, and partition set before plan identity is computed. The
+plan graph retains the catalog, resolution receipt, and experiment manifest;
+the committed product repeats the experiment ID in `source.experiment_id`.
+See
+[`reconstruction-experiment-contracts.md`](reconstruction-experiment-contracts.md).
+
+Frozen experiments are discoverable and independently verifiable without
+publishing local paths:
+
+```sh
+histdatacom reconstruction --json experiment-list --root work/plan-artifacts
+histdatacom reconstruction --json experiment-inspect \
+  --manifest work/plan-artifacts/reconstruction-experiment-<sha256>.json
+histdatacom reconstruction --json experiment-verify \
+  --manifest work/plan-artifacts/reconstruction-experiment-<sha256>.json
 ```
 
 `window_size_ns` is a positive execution bound. Use smaller synchronized

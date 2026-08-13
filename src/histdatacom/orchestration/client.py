@@ -106,6 +106,19 @@ class OrchestrationOverlapError(HistDataOperationError):
     exit_code = OVERLAP_GUARD_EXIT_CODE
 
 
+def _normalized_workflow_run_id(value: Any) -> str:
+    """Return a usable optional Temporal run ID.
+
+    ``Client.start_workflow`` may return a handle whose ``run_id`` is ``None``.
+    Earlier clients serialized that sentinel with ``str()``, producing the
+    truthy text ``"None"`` and causing later lookups to target a nonexistent
+    Temporal run.  Temporal run IDs are UUIDs, so the legacy sentinel is safe
+    to treat as an absent optional identifier.
+    """
+    text = str(value or "")
+    return "" if text == "None" else text
+
+
 @dataclass(frozen=True, slots=True)
 class OrchestrationJobHandle:
     """Serializable metadata returned after submitting an orchestration job."""
@@ -346,7 +359,7 @@ async def submit_run_request(
     job_handle = OrchestrationJobHandle(
         request_id=request.request_id,
         workflow_id=str(getattr(handle, "id", workflow_id)),
-        run_id=str(getattr(handle, "run_id", "")),
+        run_id=_normalized_workflow_run_id(getattr(handle, "run_id", "")),
         task_queue=resolved_config.task_queues.orchestration,
         namespace=resolved_config.namespace,
     )
@@ -427,7 +440,7 @@ async def submit_reconstruction_request(
     job_handle = OrchestrationJobHandle(
         request_id=request.request_id,
         workflow_id=str(getattr(handle, "id", resolved_workflow_id)),
-        run_id=str(getattr(handle, "run_id", "")),
+        run_id=_normalized_workflow_run_id(getattr(handle, "run_id", "")),
         task_queue=resolved_config.task_queues.orchestration,
         namespace=resolved_config.namespace,
     )
@@ -970,7 +983,10 @@ async def inspect_job_status(
         )
         handle = _job_handle_from_workflow_identity(
             workflow_id,
-            run_id=run_id or str(getattr(workflow_handle, "run_id", "") or ""),
+            run_id=_normalized_workflow_run_id(run_id)
+            or _normalized_workflow_run_id(
+                getattr(workflow_handle, "run_id", "")
+            ),
             config=resolved_config,
         )
         orchestration_status = _orchestration_status(supervisor)
@@ -1241,7 +1257,10 @@ async def get_job_result(
         )
         handle = _job_handle_from_workflow_identity(
             workflow_id,
-            run_id=run_id or str(getattr(workflow_handle, "run_id", "") or ""),
+            run_id=_normalized_workflow_run_id(run_id)
+            or _normalized_workflow_run_id(
+                getattr(workflow_handle, "run_id", "")
+            ),
             config=resolved_config,
         )
         orchestration_status = _orchestration_status(supervisor)
@@ -1321,7 +1340,8 @@ async def cancel_job(
     )
     handle = _job_handle_from_workflow_identity(
         workflow_id,
-        run_id=run_id or str(getattr(workflow_handle, "run_id", "") or ""),
+        run_id=_normalized_workflow_run_id(run_id)
+        or _normalized_workflow_run_id(getattr(workflow_handle, "run_id", "")),
         config=resolved_config,
     )
     snapshot = await _inspect_workflow_handle(
@@ -2517,7 +2537,9 @@ def _job_handle_from_workflow_handle(
     return OrchestrationJobHandle(
         request_id=request.request_id,
         workflow_id=str(getattr(workflow_handle, "id", workflow_id)),
-        run_id=str(getattr(workflow_handle, "run_id", "")),
+        run_id=_normalized_workflow_run_id(
+            getattr(workflow_handle, "run_id", "")
+        ),
         task_queue=config.task_queues.orchestration,
         namespace=config.namespace,
     )
@@ -2535,7 +2557,7 @@ def _job_handle_from_workflow_identity(
     return OrchestrationJobHandle(
         request_id=request_id,
         workflow_id=workflow_id,
-        run_id=run_id,
+        run_id=_normalized_workflow_run_id(run_id),
         task_queue=config.task_queues.orchestration,
         namespace=config.namespace,
     )
@@ -2593,8 +2615,9 @@ def _workflow_handle_for_job(
     )
     if get_workflow_handle is None:
         raise TypeError("Temporal client must define get_workflow_handle()")
-    if run_id:
-        return get_workflow_handle(workflow_id, run_id=run_id)
+    normalized_run_id = _normalized_workflow_run_id(run_id)
+    if normalized_run_id:
+        return get_workflow_handle(workflow_id, run_id=normalized_run_id)
     return get_workflow_handle(workflow_id)
 
 

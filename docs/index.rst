@@ -20,6 +20,10 @@ Data and reconstruction foundations
    market-context-contracts
    cftc-positioning-contracts
    provider-neutral-dataset-catalog
+   reconstruction-experiment-contracts
+   reconstruction-schema-compatibility
+   reconstruction-evidence-contracts
+   cross-series-constraint-contracts
 
 Empirical reconstruction pipeline
 ---------------------------------
@@ -30,6 +34,13 @@ Empirical reconstruction pipeline
    reference-motif-index-contracts
    modern-reference-motif-library
    empirical-motif-generation-contracts
+   proposal-engine-portfolios
+   classical-event-clock-challengers
+   marked-hawkes-challenger
+   regime-switching-hawkes-challenger
+   neural-tpp-challenger
+   add-thin-challenger
+   schrodinger-bridge-challenger
    historical-carving-contracts
    cross-currency-reconciliation-contracts
    reconstruction-ensemble-calibration-contracts
@@ -50,6 +61,8 @@ Persistence, projections, and validation
    strategy-sensitivity-contracts
    reverse-degradation-benchmark-contracts
    reverse-degradation-benchmark-corpus
+   powered-reconstruction-qualification
+   reconstruction-diagnostics
    reconstruction-certification-contracts
    reconstruction-temporal-orchestration
    reconstruction-public-interfaces

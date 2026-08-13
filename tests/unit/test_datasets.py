@@ -2,24 +2,25 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
-from datetime import datetime, timezone
 import json
-from pathlib import Path
 import shutil
 import sys
+from dataclasses import replace
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
-from hypothesis import given, strategies as st
 import polars as pl
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
 from histdatacom.dataset_cli import main as dataset_cli_main
 from histdatacom.datasets import (
     CANONICAL_TICK_PROJECTION_SCHEMA_VERSION,
     DATASET_TICK_PROJECTION_SCHEMA_VERSION,
-    DatasetAliasV1,
     CanonicalObservedPartitionV2,
+    DatasetAliasV1,
     DatasetCatalog,
     DatasetContractError,
     DatasetDescriptorV1,
@@ -43,8 +44,8 @@ from histdatacom.datasets import (
     read_resolution_receipt,
     synthetic_event_lineage_v2,
 )
-from histdatacom.orchestration.reconstruction import artifact_ref_for_file
 from histdatacom.histdata_com import main as histdatacom_main
+from histdatacom.orchestration.reconstruction import artifact_ref_for_file
 from histdatacom.synthetic.contracts import SyntheticEventV1
 
 _SYMBOL = "EURUSD"
@@ -197,6 +198,98 @@ def test_histdata_adapter_preserves_observed_cache_values_and_v1_identity(
         == 1
     )
     assert ProviderSourceInventoryV2.from_json(inventory.to_json()) == inventory
+
+
+def test_histdata_adapter_preserves_and_flags_vendor_timestamp_regression(
+    tmp_path: Path,
+) -> None:
+    source_root = tmp_path / "ASCII" / "T"
+    path, _ = _write_histdata_cache(source_root)
+    regressed = pl.DataFrame(
+        {
+            "datetime": [_START_MS, _START_MS + 3_600_000, _START_MS + 1_000],
+            "bid": [1.1000, 1.1001, 1.1002],
+            "ask": [1.1002, 1.1003, 1.1004],
+            "vol": [0, 0, 0],
+        },
+        schema={
+            "datetime": pl.Int64,
+            "bid": pl.Float64,
+            "ask": pl.Float64,
+            "vol": pl.Int32,
+        },
+    )
+    regressed.write_ipc(path)
+    adapter = HistDataProviderAdapter()
+    catalog, version = _catalog(adapter, source_root, tmp_path)
+    partition = version.partitions[0]
+
+    direct = adapter.read_partition(partition)
+    projected = project_observed_ascii_ticks_v2(adapter, version, partition)
+
+    assert adapter.descriptor.adapter_version == "1.1.0"
+    assert direct.equals(regressed)
+    assert partition.artifact.metadata["first_timestamp_ms"] == _START_MS
+    assert partition.artifact.metadata["last_timestamp_ms"] == (
+        _START_MS + 3_600_000
+    )
+    assert projected.get_column("source_row_id").to_list() == [1, 2, 3]
+    assert projected.get_column(
+        "dq_issue_non_monotonic_timestamp"
+    ).to_list() == [
+        False,
+        False,
+        True,
+    ]
+    assert catalog.verify("latest-qualified").partition_count == 1
+
+
+@pytest.mark.parametrize(
+    "timestamps",
+    (
+        (_START_MS, _START_MS + 3_600_001, _START_MS),
+        (
+            _START_MS,
+            _START_MS + 3_600_000,
+            _START_MS + 1_000,
+            _START_MS + 3_600_001,
+            _START_MS + 2_000,
+        ),
+    ),
+)
+def test_histdata_adapter_rejects_timestamp_regression_outside_vendor_bound(
+    tmp_path: Path,
+    timestamps: tuple[int, ...],
+) -> None:
+    source_root = tmp_path / "ASCII" / "T"
+    path, _ = _write_histdata_cache(source_root)
+    pl.DataFrame(
+        {
+            "datetime": timestamps,
+            "bid": [
+                1.1000 + index * 0.0001 for index in range(len(timestamps))
+            ],
+            "ask": [
+                1.1002 + index * 0.0001 for index in range(len(timestamps))
+            ],
+            "vol": [0] * len(timestamps),
+        },
+        schema={
+            "datetime": pl.Int64,
+            "bid": pl.Float64,
+            "ask": pl.Float64,
+            "vol": pl.Int32,
+        },
+    ).write_ipc(path)
+
+    with pytest.raises(DatasetContractError) as raised:
+        HistDataProviderAdapter().inspect_partition(
+            source_root,
+            symbol=_SYMBOL,
+            period=_PERIOD,
+        )
+
+    assert raised.value.code is DatasetFailureCode.INCONSISTENT_COVERAGE
 
 
 def test_fixture_adapter_proves_different_clock_partition_and_provider_boundary(

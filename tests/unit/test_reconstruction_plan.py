@@ -2,40 +2,55 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
-from datetime import datetime, timezone
 import hashlib
 import json
+from dataclasses import replace
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+import polars as pl
 import pyarrow as pa
-import pyarrow.ipc as ipc
 import pytest
+from pyarrow import ipc
 
+from histdatacom.cross_series_constraints import (
+    CrossSeriesConstraintPolicyV1,
+    read_cross_series_constraint_policy,
+)
+from histdatacom.data_quality.training_features import (
+    enrich_tick_cache_with_training_features,
+)
 from histdatacom.manifest_store import ManifestStatusStore
+from histdatacom.orchestration.queues import build_orchestration_worker_config
+from histdatacom.orchestration.reconstruction import (
+    RECONSTRUCTION_STAGE_ORDER,
+    ReconstructionStage,
+    ReconstructionStageInvocationV1,
+    artifact_ref_for_file,
+)
 from histdatacom.reconstruction import (
     ReconstructionClient,
     ReconstructionExecutionRequestV1,
     ReconstructionPlanError,
     ReconstructionPlanSetV1,
     ReconstructionPlanSpecV1,
+    ReconstructionPlanSpecV2,
     ReconstructionRefusedError,
     ReconstructionUnsupportedError,
     read_execution_request,
     read_operation_receipt,
+    read_plan_spec,
     read_reconstruction_plan_set,
     write_execution_request,
     write_operation_receipt,
 )
-
-from histdatacom.orchestration.reconstruction import (
-    RECONSTRUCTION_STAGE_ORDER,
-    ReconstructionStage,
-    artifact_ref_for_file,
+from histdatacom.reconstruction_evidence import (
+    ReconstructionEvidencePolicyV1,
+    read_reconstruction_evidence_policy,
 )
-from histdatacom.orchestration.queues import build_orchestration_worker_config
+from histdatacom.reconstruction_experiment import read_reconstruction_experiment
 from histdatacom.synthetic import (
     ASCII_TICK_SOURCE_KIND,
     FIRST_PARTY_RECONSTRUCTION_HANDLERS,
@@ -57,7 +72,14 @@ from histdatacom.synthetic import (
     validate_synthetic_infill_plan_for_execution,
     write_synthetic_infill_plan,
 )
+from histdatacom.synthetic import reconstruction_handlers as handlers_module
 from histdatacom.synthetic import reconstruction_plan as plan_module
+from histdatacom.synthetic.contracts import canonical_contract_json
+from histdatacom.synthetic.generation import EMPIRICAL_MOTIF_GENERATOR_ID
+from histdatacom.synthetic.proposal_engines import (
+    ProposalEngineEvidenceV1,
+    proposal_engine_default_configs,
+)
 
 _SYMBOLS = ("eurgbp", "eurusd", "gbpusd")
 _PERIOD = "202001"
@@ -68,7 +90,9 @@ def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def _write_tick_partition(path: Path, offset: int) -> None:
+def _write_tick_partition(
+    path: Path, offset: int, *, enriched: bool = False
+) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     table = pa.table(
         {
@@ -78,25 +102,44 @@ def _write_tick_partition(path: Path, offset: int) -> None:
             "vol": [0, 0],
         }
     )
-    with pa.OSFile(str(path), "wb") as sink:
-        with ipc.new_file(sink, table.schema) as writer:
-            writer.write_table(table)
+    if enriched:
+        frame = enrich_tick_cache_with_training_features(
+            pl.from_arrow(table),
+            symbol=path.parents[2].name.upper(),
+            data_format="ascii",
+            timeframe="T",
+            period=_PERIOD,
+        ).with_columns(pl.Series("dq_issue_precision_warning", [False, True]))
+        table = frame.to_arrow()
+    with (
+        pa.OSFile(str(path), "wb") as sink,
+        ipc.new_file(sink, table.schema) as writer,
+    ):
+        writer.write_table(table)
 
 
-def _artifact(tmp_path: Path, role: str, kind: str) -> Any:
+def _artifact(
+    tmp_path: Path,
+    role: str,
+    kind: str,
+    **identity: Any,
+) -> Any:
     path = tmp_path / "inputs" / f"{role}.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
-        json.dumps({"role": role}, sort_keys=True), encoding="utf-8"
+        json.dumps({"role": role, **identity}, sort_keys=True),
+        encoding="utf-8",
     )
     return artifact_ref_for_file(path, kind=kind)
 
 
-def _resolved_inputs(tmp_path: Path, source_root: Path) -> Any:
+def _resolved_inputs(
+    tmp_path: Path, source_root: Path, *, enriched: bool = False
+) -> Any:
     lineage: list[dict[str, str]] = []
     for ordinal, symbol in enumerate(_SYMBOLS):
         path = source_root / symbol / "2020" / "1" / ".data"
-        _write_tick_partition(path, ordinal)
+        _write_tick_partition(path, ordinal, enriched=enriched)
         lineage.append(
             {
                 "period": _PERIOD,
@@ -114,35 +157,59 @@ def _resolved_inputs(tmp_path: Path, source_root: Path) -> Any:
     )
     artifacts = {
         "feed_epochs": _artifact(
-            tmp_path, "feed-epochs", "feed_epoch_definition_v2"
+            tmp_path,
+            "feed-epochs",
+            "feed_epoch_definition_v2",
+            definition_id="feed-epochs-v2:test",
         ),
         "observation_operator": _artifact(
-            tmp_path, "observation", "observation-operator"
+            tmp_path,
+            "observation",
+            "observation-operator",
+            operator_id="observation-operator:test",
         ),
         "market_context": _artifact(
-            tmp_path, "market-context", "market_context_corpus_v1"
+            tmp_path,
+            "market-context",
+            "market_context_corpus_v1",
+            corpus_id="market-context:test",
         ),
         "cftc_positioning": _artifact(
-            tmp_path, "cftc-positioning", "cftc_positioning_corpus_v1"
+            tmp_path,
+            "cftc-positioning",
+            "cftc_positioning_corpus_v1",
+            corpus_id="cftc-positioning:test",
         ),
         "benchmark_manifest": _artifact(
-            tmp_path, "benchmark", "reverse_degradation_manifest_v1"
+            tmp_path,
+            "benchmark",
+            "reverse_degradation_manifest_v1",
+            schema_version="histdatacom.reverse-degradation-manifest.v1",
+            corpus={"corpus_id": "benchmark:test"},
         ),
         "motif_manifest": _artifact(
-            tmp_path, "motif-manifest", "modern_reference_motif_manifest_v1"
+            tmp_path,
+            "motif-manifest",
+            "modern_reference_motif_manifest_v1",
+            library_id="modern-reference-motif:test",
         ),
         "motif_index": _artifact(
-            tmp_path, "motif-index", "modern_reference_motif_index_v1"
+            tmp_path,
+            "motif-index",
+            "modern_reference_motif_index_v1",
+            index_id="motif-index:test",
         ),
         "motif_qualification": _artifact(
             tmp_path,
             "motif-qualification",
             "modern_reference_motif_qualification_v1",
+            library_id="modern-reference-motif:test",
         ),
         "motif_leakage_audit": _artifact(
             tmp_path,
             "motif-leakage",
             "modern_reference_motif_leakage_audit_v1",
+            library_id="modern-reference-motif:test",
         ),
     }
     return plan_module._ResolvedPlanInputs(
@@ -223,7 +290,18 @@ def test_public_builder_is_deterministic_bounded_and_stage_consumable(
     assert first.resources.planned_window_count == 2
     assert first.resources.executable_window_count == 2
     assert first.resources.ensemble_member_count == 4
-    assert len(first.workflow_requests) == 4
+    assert first.resources.retained_member_count == 2
+    assert len(first.workflow_requests) == 2
+    retention = json.loads(
+        Path(first.artifact_graph["retention_plan"].path).read_text(
+            encoding="utf-8"
+        )
+    )
+    assert {
+        task.window.ensemble_member_id
+        for request in first.workflow_requests
+        for task in request.tasks
+    } == set(retention["retained_member_ids"])
     assert (
         max(
             len(json.dumps(request.to_dict()).encode("utf-8"))
@@ -236,6 +314,22 @@ def test_public_builder_is_deterministic_bounded_and_stage_consumable(
     assert first.to_dict()["scientific_nonclaim"] == SCIENTIFIC_NONCLAIM
     assert first.to_dict()["immutable_anchor_policy"] == IMMUTABLE_ANCHOR_POLICY
     assert first.to_dict()["input_policy"] == TICK_ONLY_INPUT_POLICY
+    assert first.artifact_graph["evidence_policy"].kind == (
+        "reconstruction_evidence_policy_v1"
+    )
+    assert first.artifact_graph["cross_series_constraint_policy"].kind == (
+        "cross_series_constraint_policy_v1"
+    )
+    translated_portfolio = ReconstructionClient().proposal_portfolio(
+        plan_ref.path
+    )
+    assert tuple(item.engine_id for item in translated_portfolio.entries) == (
+        "histdatacom.empirical-motif-resampling",
+    )
+    assert translated_portfolio.selected_engine_ids == (
+        "histdatacom.empirical-motif-resampling",
+    )
+    assert len(ReconstructionClient().proposal_engines().descriptors) == 13
 
     validate_synthetic_infill_plan_for_execution(restored)
     task = restored.workflow_requests[0].tasks[0]
@@ -255,12 +349,228 @@ def test_public_builder_is_deterministic_bounded_and_stage_consumable(
         assert command.configuration_refs == (
             restored.artifact_graph["execution_manifest"],
         )
+        assert "evidence_policy" in loaded.execution_manifest.artifacts
+        assert (
+            "cross_series_constraint_policy"
+            in loaded.execution_manifest.artifacts
+        )
     broker_command = next(
         command
         for command in task.commands
         if command.stage is ReconstructionStage.BROKER_TRANSFER
     )
     assert broker_command.input_manifest_refs == ()
+
+
+def test_non_motif_portfolio_does_not_require_motif_generator_promotion(
+    planned_environment: tuple[Path, dict[str, Any]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_root, kwargs = planned_environment
+    resolved = plan_module._resolve_plan_inputs(
+        feed_epoch_definition_path=kwargs["feed_epoch_definition_path"],
+        observation_operator_path=kwargs["observation_operator_path"],
+        market_context_corpus_path=kwargs["market_context_corpus_path"],
+        cftc_positioning_corpus_path=kwargs["cftc_positioning_corpus_path"],
+        benchmark_manifest_path=kwargs["benchmark_manifest_path"],
+        motif_manifest_path=kwargs["motif_manifest_path"],
+        motif_index_path=kwargs["motif_index_path"],
+        motif_qualification_path=kwargs["motif_qualification_path"],
+        motif_leakage_audit_path=kwargs["motif_leakage_audit_path"],
+        symbols=_SYMBOLS,
+        require_motif_promotion=False,
+    )
+    observed: dict[str, bool] = {}
+
+    def capture_resolution(**arguments: Any) -> Any:
+        observed["require_motif_promotion"] = arguments[
+            "require_motif_promotion"
+        ]
+        return resolved
+
+    monkeypatch.setattr(plan_module, "_resolve_plan_inputs", capture_resolution)
+    engine_id = "histdatacom.marked-hawkes.diagonal_self_excitation"
+    monkeypatch.setattr(
+        plan_module,
+        "read_proposal_evidence_campaigns",
+        lambda _: (),
+    )
+    monkeypatch.setattr(
+        plan_module,
+        "proposal_evidence_from_campaigns",
+        lambda _: (),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="selected proposal engines are not reconstruction eligible",
+    ):
+        build_synthetic_infill_plan(
+            source_root,
+            **kwargs,
+            proposal_engine_ids=(engine_id,),
+            selected_proposal_engine_ids=(engine_id,),
+        )
+
+    assert observed == {"require_motif_promotion": False}
+
+
+def test_v2_spec_round_trips_explicit_portfolio_without_hidden_default(
+    planned_environment: tuple[Path, dict[str, Any]],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    source_root, kwargs = planned_environment
+    scorecard = tmp_path / "retained-scorecard.json"
+    scorecard.write_text("{}\n", encoding="utf-8")
+    monkeypatch.setattr(
+        plan_module, "read_proposal_evidence_campaigns", lambda _: ()
+    )
+    config_id = proposal_engine_default_configs()[
+        EMPIRICAL_MOTIF_GENERATOR_ID
+    ].config_id
+    monkeypatch.setattr(
+        plan_module,
+        "proposal_evidence_from_campaigns",
+        lambda _: (
+            ProposalEngineEvidenceV1(
+                engine_id=EMPIRICAL_MOTIF_GENERATOR_ID,
+                campaign_id="campaign:sha256:" + "1" * 64,
+                corpus_id="benchmark:test",
+                report_id="report:sha256:" + "2" * 64,
+                candidate_id="candidate:sha256:" + "3" * 64,
+                method_name="empirical_motif",
+                promotion_eligible=True,
+                provisional=False,
+                failure_count=0,
+                refusal_count=0,
+                failed_gate_ids=(),
+                config_ids=(config_id,),
+                fit_ids=(),
+                checkpoint_ids=(),
+                training_dataset_ids=(),
+            ),
+        ),
+    )
+    base = _public_spec(source_root, kwargs)
+    payload = base.to_dict()
+    payload.update(
+        {
+            "schema_version": "histdatacom.reconstruction-plan-spec.v2",
+            "proposal_engine_ids": ["histdatacom.empirical-motif-resampling"],
+            "selected_proposal_engine_ids": [
+                "histdatacom.empirical-motif-resampling"
+            ],
+            "proposal_evaluation_paths": [str(scorecard)],
+        }
+    )
+    spec = ReconstructionPlanSpecV2.from_dict(payload)
+    spec_path = tmp_path / "plan-spec-v2.json"
+    spec_path.write_text(json.dumps(spec.to_dict()), encoding="utf-8")
+
+    restored = read_plan_spec(spec_path)
+    plan_ref = ReconstructionClient().construct_plan(restored)
+    portfolio = ReconstructionClient().proposal_portfolio(plan_ref.path)
+
+    assert isinstance(restored, ReconstructionPlanSpecV2)
+    assert restored == spec
+    assert portfolio.selected_engine_ids == spec.selected_proposal_engine_ids
+
+
+def test_execution_rejects_registry_from_changed_installed_code(
+    planned_environment: tuple[Path, dict[str, Any]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_root, kwargs = planned_environment
+    plan = build_synthetic_infill_plan(source_root, **kwargs)
+    monkeypatch.setattr(plan_module, "proposal_engine_registry", object)
+
+    with pytest.raises(
+        ReconstructionPlanCompatibilityError,
+        match="differs from installed code",
+    ):
+        validate_synthetic_infill_plan_for_execution(
+            plan, verify_artifacts=False
+        )
+
+
+def test_catalog_selector_reproduces_legacy_translation_and_binds_experiment(
+    planned_environment: tuple[Path, dict[str, Any]],
+) -> None:
+    source_root, kwargs = planned_environment
+    legacy = build_synthetic_infill_plan(source_root, **kwargs)
+    catalog_path = legacy.artifact_graph["dataset_catalog"].path
+    catalog_spec = replace(
+        _public_spec(source_root, kwargs),
+        source_root=None,
+        dataset_catalog_path=catalog_path,
+        dataset_reference="reconstruction-selected",
+    )
+    client = ReconstructionClient()
+
+    compatibility = client.compatibility(
+        catalog_spec,
+        inspect_source=True,
+        inspect_artifacts=False,
+    )
+    selected_ref = client.construct_plan(catalog_spec)
+    selected = read_synthetic_infill_plan(selected_ref.path)
+    experiment = read_reconstruction_experiment(
+        selected.artifact_graph["experiment_manifest"].path
+    )
+
+    assert compatibility.executable
+    assert selected == legacy
+    assert experiment.experiment_id in selected.run.configuration_ids
+    assert experiment.dataset_version_ids == (
+        experiment.selections[0].dataset_version_id,
+    )
+    assert (
+        selected.artifact_graph["dataset_catalog"].kind == "dataset_catalog_v1"
+    )
+    assert selected.artifact_graph["dataset_resolution"].kind == (
+        "dataset_resolution_receipt_v1"
+    )
+
+
+def test_source_reader_preserves_complete_enriched_cache_row_evidence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source_root = tmp_path / "ASCII" / "T"
+    resolved = _resolved_inputs(tmp_path, source_root, enriched=True)
+    monkeypatch.setattr(
+        plan_module, "_resolve_plan_inputs", lambda **_: resolved
+    )
+    monkeypatch.setattr(
+        plan_module,
+        "preflight_market_context_corpus",
+        lambda *_, **__: SimpleNamespace(reasons=()),
+    )
+    monkeypatch.setattr(
+        plan_module,
+        "preflight_cftc_positioning_corpus",
+        lambda *_, **__: SimpleNamespace(ready=True, reasons=()),
+    )
+    plan = build_synthetic_infill_plan(source_root, **_builder_kwargs(tmp_path))
+    task = plan.workflow_requests[0].tasks[0]
+    command = task.commands[0]
+    invocation = ReconstructionStageInvocationV1(
+        run=plan.run,
+        task=task,
+        command=command,
+        prior_outcomes=(),
+    )
+
+    source_events, cached = handlers_module._read_source_events(
+        invocation, load_reconstruction_stage_plan(command)
+    )
+
+    assert all(len(events) == 2 for events in source_events.values())
+    assert len(cached) == 3
+    for schema_version, rows, complete in cached.values():
+        assert schema_version == "histdatacom.ascii-tick-training-features.v1"
+        assert complete
+        assert rows[2]["precision_warning"] is True
 
 
 def test_typed_public_facade_constructs_requests_and_preflights(
@@ -286,9 +596,109 @@ def test_typed_public_facade_constructs_requests_and_preflights(
     assert preflight.executable
     assert preflight.status == "ready"
     assert preflight.dry_run["information_mode"] == "ex_post_reconstruction"
-    assert preflight.dry_run["resources"]["workflow_request_count"] == 4
+    assert preflight.dry_run["resources"]["workflow_request_count"] == 2
     assert "benchmark_manifest" in preflight.evidence_refs
     assert "information_audit" in preflight.evidence_refs
+    assert "evidence_policy" in preflight.evidence_refs
+    assert "cross_series_constraint_policy" in preflight.evidence_refs
+
+
+def test_public_plan_spec_round_trips_and_applies_histdata_evidence_policy(
+    planned_environment: tuple[Path, dict[str, Any]],
+) -> None:
+    source_root, kwargs = planned_environment
+    policy = ReconstructionEvidencePolicyV1(
+        suspicious_gap_fallback_ms=86_400_000,
+        wide_spread_multiplier=4.0,
+        max_records=128,
+        max_row_records=32,
+    )
+    cross_policy = CrossSeriesConstraintPolicyV1(
+        nearest_prior_max_age_ns=4_000_000_000,
+        max_staleness_ns=20_000_000_000,
+        max_alignment_samples=32,
+    )
+    spec = replace(
+        _public_spec(source_root, kwargs),
+        evidence_policy=policy,
+        cross_series_constraint_policy=cross_policy,
+    )
+
+    restored = ReconstructionPlanSpecV1.from_dict(spec.to_dict())
+    plan_ref = ReconstructionClient().construct_plan(restored)
+    plan = read_synthetic_infill_plan(plan_ref.path)
+    installed = read_reconstruction_evidence_policy(
+        plan.artifact_graph["evidence_policy"].path
+    )
+    installed_cross_policy = read_cross_series_constraint_policy(
+        plan.artifact_graph["cross_series_constraint_policy"].path
+    )
+    assert restored.evidence_policy == policy
+    assert restored.cross_series_constraint_policy == cross_policy
+    assert installed == policy
+    assert installed_cross_policy == cross_policy
+    assert policy.policy_id in plan.run.configuration_ids
+    assert cross_policy.policy_id in plan.run.configuration_ids
+    assert plan.artifact_graph["evidence_policy"].sha256
+    assert plan.artifact_graph["cross_series_constraint_policy"].sha256
+
+
+def test_public_plan_spec_rejects_alternate_evidence_provider() -> None:
+    with pytest.raises(
+        ReconstructionUnsupportedError,
+        match="supports only HistData.com",
+    ):
+        ReconstructionPlanSpecV1(
+            source_root="/tmp/ASCII/T",
+            feed_epoch_definition_path="/tmp/feed.json",
+            observation_operator_path="/tmp/observation.json",
+            market_context_corpus_path="/tmp/context.json",
+            cftc_positioning_corpus_path="/tmp/cftc.json",
+            benchmark_manifest_path="/tmp/benchmark.json",
+            motif_manifest_path="/tmp/motif.json",
+            motif_index_path="/tmp/index.json",
+            motif_qualification_path="/tmp/qualification.json",
+            motif_leakage_audit_path="/tmp/leakage.json",
+            artifact_root="/tmp/artifacts",
+            output_root="/tmp/output",
+            checkpoint_root="/tmp/checkpoints",
+            scratch_root="/tmp/scratch",
+            information_mode=InformationMode.EX_POST_RECONSTRUCTION,
+            start_period="202001",
+            end_period="202001",
+            evidence_policy=ReconstructionEvidencePolicyV1(
+                supported_provider_ids=("histdata.com", "oanda")
+            ),
+        )
+
+
+def test_public_plan_spec_defers_cross_series_broker_adapters() -> None:
+    with pytest.raises(
+        ReconstructionUnsupportedError,
+        match="cross-series policy supports only HistData.com",
+    ):
+        ReconstructionPlanSpecV1(
+            source_root="/tmp/ASCII/T",
+            feed_epoch_definition_path="/tmp/feed.json",
+            observation_operator_path="/tmp/observation.json",
+            market_context_corpus_path="/tmp/context.json",
+            cftc_positioning_corpus_path="/tmp/cftc.json",
+            benchmark_manifest_path="/tmp/benchmark.json",
+            motif_manifest_path="/tmp/motif.json",
+            motif_index_path="/tmp/index.json",
+            motif_qualification_path="/tmp/qualification.json",
+            motif_leakage_audit_path="/tmp/leakage.json",
+            artifact_root="/tmp/artifacts",
+            output_root="/tmp/output",
+            checkpoint_root="/tmp/checkpoints",
+            scratch_root="/tmp/scratch",
+            information_mode=InformationMode.EX_POST_RECONSTRUCTION,
+            start_period="202001",
+            end_period="202001",
+            cross_series_constraint_policy=CrossSeriesConstraintPolicyV1(
+                supported_provider_ids=("histdata.com", "oanda")
+            ),
+        )
 
 
 def test_public_plan_set_shards_and_revalidates_bounded_full_range(
@@ -350,11 +760,80 @@ def test_public_plan_set_shards_and_revalidates_bounded_full_range(
     assert preflight.resource_summary == plan_set.resource_summary
     assert ReconstructionPlanSetV1.from_dict(plan_set.to_dict()) == plan_set
 
+    legacy_payload = plan_set.to_dict()
+    legacy_source = legacy_payload["source_spec"]
+    assert isinstance(legacy_source, dict)
+    for field_name in (
+        "dataset_catalog_path",
+        "dataset_reference",
+        "evidence_policy",
+        "cross_series_constraint_policy",
+    ):
+        legacy_source.pop(field_name)
+    legacy_payload.pop("plan_set_id")
+    legacy_id = (
+        "reconstruction-plan-set:sha256:"
+        + hashlib.sha256(
+            canonical_contract_json(legacy_payload).encode("utf-8")
+        ).hexdigest()
+    )
+    legacy_payload["plan_set_id"] = legacy_id
+    legacy_path = source_root / "legacy-plan-set.json"
+    legacy_path.write_text(
+        canonical_contract_json(legacy_payload) + "\n",
+        encoding="utf-8",
+    )
+
+    legacy = read_reconstruction_plan_set(legacy_path)
+    assert legacy.plan_set_id == legacy_id
+    assert legacy.to_dict() == legacy_payload
+    assert ReconstructionPlanSetV1.from_dict(legacy.to_dict()) == legacy
+
+    legacy_payload["status"] = "ready_with_refusals"
+    legacy_path.write_text(
+        canonical_contract_json(legacy_payload) + "\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(
+        ReconstructionPlanError,
+        match="status differs|identity differs",
+    ):
+        read_reconstruction_plan_set(legacy_path)
+
     Path(plan_set.shards[0].plan_ref.path).write_bytes(
         Path(plan_set.shards[0].plan_ref.path).read_bytes() + b"\n"
     )
     with pytest.raises(ReconstructionPlanError, match="shard artifact differs"):
         client.preflight_plan_set(ref.path)
+
+
+def test_legacy_all_member_task_layout_requires_complete_v1_rectangle() -> None:
+    """Pre-portfolio v1 tasks remain readable only as an exact member grid."""
+    member_ids = tuple(f"member-{index}" for index in range(4))
+    counts = {member_id: 59 for member_id in member_ids}
+    kwargs = {
+        "task_counts_by_member": counts,
+        "executable_window_count": 59,
+        "retained_member_count": 2,
+        "ensemble_member_count": 4,
+        "run_ensemble_member_ids": member_ids,
+        "artifact_names": ("configuration", "execution_manifest"),
+    }
+
+    assert plan_module._legacy_all_member_task_layout_is_valid(**kwargs)
+    assert not plan_module._legacy_all_member_task_layout_is_valid(
+        **{**kwargs, "task_counts_by_member": {**counts, "member-0": 58}}
+    )
+    assert not plan_module._legacy_all_member_task_layout_is_valid(
+        **{
+            **kwargs,
+            "artifact_names": (
+                "configuration",
+                "execution_manifest",
+                "proposal_engine_registry",
+            ),
+        }
+    )
 
 
 def test_public_plan_set_preserves_a_contiguous_refusal_only_shard(
@@ -579,10 +1058,10 @@ def test_public_submit_status_resume_and_receipt_round_trip(
     resumed = client.resume(restored, wait=False)
 
     assert restored == submitted
-    assert len(submitted.handles) == 4
+    assert len(submitted.handles) == 2
     assert status.status == "running"
     assert cancelled.status == "cancellation_requested"
-    assert len(cancelled.job_snapshots) == 4
+    assert len(cancelled.job_snapshots) == 2
     assert resumed.operation == "resume"
     assert resumed.execution_attempt_id == "resume-001"
     resume_calls = [
@@ -590,7 +1069,7 @@ def test_public_submit_status_resume_and_receipt_round_trip(
         for _, payload, _ in temporal.calls
         if payload.get("execution_attempt_id") == "resume-001"
     ]
-    assert len(resume_calls) == 4
+    assert len(resume_calls) == 2
     assert all(
         call["request"]["request_id"] == workflow_request.request_id
         for call, workflow_request in zip(

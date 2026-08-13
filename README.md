@@ -46,8 +46,16 @@ Works on macOS, Linux, and Windows.
     - [Feed-Regime Detection](#feed-regime-detection)
     - [Historical Feed-Observation Operators](#historical-feed-observation-operators)
     - [Reverse-Degradation Benchmark](#reverse-degradation-benchmark)
+    - [Qualified Proposal-Engine Bank](#qualified-proposal-engine-bank)
+    - [Classical Event-Clock Proposal Engines](#classical-event-clock-proposal-engines)
+    - [Marked Hawkes Proposal Engines](#marked-hawkes-proposal-engines)
+    - [Regime-Switching Hawkes Proposal Engines](#regime-switching-hawkes-proposal-engines)
+    - [Recurrent Marked Temporal Point-Process Engine](#recurrent-marked-temporal-point-process-engine)
+    - [Marked Add-Thin Sequence Engine](#marked-add-thin-sequence-engine)
     - [Empirical Reference-Motif Index](#empirical-reference-motif-index)
     - [Real Modern Reference-Motif Library](#real-modern-reference-motif-library)
+    - [Point-in-Time Reconstruction Evidence](#point-in-time-reconstruction-evidence)
+    - [Synchronized Cross-Series Constraints](#synchronized-cross-series-constraints)
     - [Empirical Motif Candidate Generation](#empirical-motif-candidate-generation)
     - [Historical Candidate Carving](#historical-candidate-carving)
     - [Cross-Currency Reconciliation](#cross-currency-reconciliation)
@@ -61,6 +69,7 @@ Works on macOS, Linux, and Windows.
     - [Reconstructed-History Strategy Sensitivity](#reconstructed-history-strategy-sensitivity)
     - [EURUSD Triangle Reconstruction Certification](#eurusd-triangle-reconstruction-certification)
     - [Temporal Reconstruction Orchestration](#temporal-reconstruction-orchestration)
+    - [Reconstruction Evidence Diagnostics](#reconstruction-evidence-diagnostics)
     - [Public Reconstruction CLI and API](#public-reconstruction-cli-and-api)
   - [Orchestration Runtime](#orchestration-runtime)
     - [Runtime Model and Install Surface](#runtime-model-and-install-surface)
@@ -130,6 +139,28 @@ See [Provider-neutral datasets and immutable catalog resolution](docs/provider-n
 for adapter authoring, manifest and configuration examples, licensing limits,
 row/cursor identity, synthetic lineage, reconstruction preflight, and the
 contract required by the future OANDA-compatible API in issue #77.
+
+### Catalog-bound Reconstruction Experiments
+
+Version 2.4 resolves a HistData catalog selector to immutable ASCII/T
+partitions before reconstruction plan identity is computed. One frozen
+experiment ID binds dataset version/revision, source hashes, roles, split and
+leakage policy, evidence/preprocessing/feature/gate identities, authoritative
+domain artifacts, and implementation versions. Every first-party stage carries
+the catalog, resolution receipt, and experiment manifest; committed v2 products
+retain the same identity at `source.experiment_id`.
+
+```bash
+histdatacom reconstruction --json experiment-list --root work/plan-artifacts
+histdatacom reconstruction --json experiment-inspect \
+  --manifest work/plan-artifacts/reconstruction-experiment-<sha256>.json
+histdatacom reconstruction --json experiment-verify \
+  --manifest work/plan-artifacts/reconstruction-experiment-<sha256>.json
+```
+
+Provider-neutral fields remain identity seams only. The executable milestone is
+HistData.com ASCII/T; OANDA, alternate providers, and broker feeds remain later
+milestones. See [Catalog-bound reconstruction experiments](docs/reconstruction-experiment-contracts.md).
 
 ### Show the help and options
 
@@ -2722,6 +2753,149 @@ content-addressed manifest, motif index, leakage audit, resource audit, and
 scorecard. Required fitted-operator or replay failures abort the campaign;
 dense and holdout event rows remain process-local.
 
+#### Qualified Proposal-Engine Bank
+
+The v2.4 proposal layer registers empirical motif, four event clocks, three
+marked Hawkes variants, two regime-Hawkes variants, RMTPP, Add-Thin, and the
+constrained Schrödinger bridge as one first-party model bank. Engine identity,
+campaign role, and product eligibility are independent. “Challenger” in older
+module/document names is a benchmark role, not an optional post-certification
+architecture or a permanent product classification.
+
+The public v2 plan explicitly orders engines, binds config/dataset/context/
+evidence artifacts, and names the reconstruction selection. Powered
+qualification can only reduce legacy eligibility. July's 18-window pilot
+correctly returned no decision; the expanded campaign freezes 96 synchronized
+windows across separate calibration, validation, and final-holdout periods.
+Of the three powered marked-Hawkes variants, only diagonal self-excitation
+passes all ten hard gates and is eligible for reconstruction and ensemble use.
+The other registered engines retain their failed, underpowered, refused, or
+research-only decisions and cannot enter the product. There is no silent motif
+fallback and no automatic winner. Legacy plans without a powered dossier
+retain their explicit single-qualified-engine compatibility behavior. See
+[`docs/proposal-engine-portfolios.md`](docs/proposal-engine-portfolios.md).
+
+#### Classical Event-Clock Proposal Engines
+
+`histdatacom.synthetic.event_clock` registers non-homogeneous Poisson,
+gamma-mixed Cox, exponential ACD(1,1), and two-state hidden Markov
+duration/mark engines in the generator-neutral benchmark.
+All four use calibration-only versioned fits, deterministic synchronized
+generation, explicit epoch/session support and refusal, bounded prior-only
+history, hard fit/generation resource limits, and family-specific diagnostics.
+
+Event-clock proposals project into the same structural candidate surface and
+historical-carving engine as empirical motifs. The v2 portfolio retains their
+audits and evidence but refuses them from product selection; no scorecard
+selects a winner automatically. The retained real campaign fitted
+all four families with zero generation failures or anchor violations, but none
+passed the frozen candidate gates. See
+[`docs/classical-event-clock-challengers.md`](docs/classical-event-clock-challengers.md)
+for likelihoods, conditioning/backoff semantics, deterministic lineage,
+resource bounds, carving integration, retained evidence, and primary sources.
+
+#### Marked Hawkes Proposal Engines
+
+`histdatacom.synthetic.marked_hawkes` adds separate zero-excitation,
+self-excitation, and full self/cross-excitation ablations without changing the
+fixed #450 event-clock registry. Calibration-only exponential-kernel fits use
+explicit epoch/session support, exact bounded-window likelihoods, versioned
+approximate uncertainty, source/destination quote-transition marks, and
+fail-closed spectral-radius checks.
+
+Generation uses one deterministic bounded Ogata timeline for the synchronized
+symbol group. Observed anchors and generated events update intensity strictly
+after their timestamps; prior carry is explicit and bounded; proposals remain
+inside immutable anchor intervals. Proposal, output, amplification, history,
+parameter, memory, and runtime limits refuse the complete attempt without
+partial rows. Hawkes batches satisfy the same generator-neutral carving
+protocol as empirical and event-clock candidates.
+
+The real reverse-degradation campaign evaluates all three Hawkes ablations
+beside the qualified empirical reference and all four classical engines,
+but continues to declare `automatic_winner: false`. See
+[`docs/marked-hawkes-challenger.md`](docs/marked-hawkes-challenger.md) for fit,
+stability, mark, synchronized-generation, lineage, resource, and benchmark
+semantics.
+
+#### Regime-Switching Hawkes Proposal Engines
+
+`histdatacom.synthetic.regime_hawkes` registers two two-state MMHP-delta
+ablations beyond the static Hawkes comparison: state-specific baseline/mark
+behavior with shared excitation, and state-specific baseline/excitation/mark
+behavior. The state is shared across the synchronized triangle, canonicalized
+as `calm`/`active` by expected activity, and never treated as an observed
+economic truth.
+
+Fixed-bin scaled forward-backward inference and bounded, likelihood-monotone
+generalized EM keep filtered and smoothed probabilities separate. Low
+occupancy, collapsed activity, unsupported transitions, label switching,
+instability, structural tampering, or any fit/generation resource violation
+fails closed without usable partial state. Events within a bin affect
+excitation only from the next bin.
+
+Technological feed epochs remain a separate context axis. Stable epochs bind
+their v2 epoch identity; transition windows bind boundary support and
+uncertainty periods. The real campaign reloads the corpus-bound feed-epoch
+artifact and rejects context mismatch. Candidate batches retain exact
+context/anchor digests and use the shared historical-carving protocol.
+
+The retained comparison contains the empirical reference, four event clocks,
+three static Hawkes models, and both regime engines, with no automatic winner
+or unqualified product selection. See
+[`docs/regime-switching-hawkes-challenger.md`](docs/regime-switching-hawkes-challenger.md)
+for the approximation, information boundaries, diagnostics, lineage,
+resource limits, carving seam, nonclaims, and primary references.
+
+#### Recurrent Marked Temporal Point-Process Engine
+
+`histdatacom.synthetic.neural_tpp` registers one dependency-free CPU RMTPP
+after the empirical, classical event-clock, static Hawkes, and regime-Hawkes
+comparisons. It uses an explicit start token, deterministic full-batch BPTT,
+whole-window train/tune splits, row-free protected-split leakage evidence, an
+immutable checkpoint, an exact closed-form intensity compensator, and exact
+inverse-CDF event-time sampling over 12 joint symbol/quote-transition marks.
+
+One synchronized recurrent state consumes observed anchors only when their
+time is reached. Generated events remain strictly inside immutable
+destination-symbol anchor pairs, retain exact state/intensity/mark lineage,
+and enter the same generator-neutral historical-carving path. Independent
+fit, gradient-work, checkpoint, history, step, amplification, memory, output,
+and wall-time limits fail closed without partial parameters or rows.
+
+The retained campaign contains 11 proposal candidates and 15 total reports,
+while continuing to declare `automatic_winner: false`; RMTPP remains
+benchmark-eligible and is refused from the current product. See
+[`docs/neural-tpp-challenger.md`](docs/neural-tpp-challenger.md) for the model,
+dataset/leakage boundary, exact likelihood and sampler, checkpoint/replay
+contracts, carving seam, nonclaims, and primary references.
+
+#### Marked Add-Thin Sequence Engine
+
+`histdatacom.synthetic.add_thin` registers one dependency-free CPU
+point-process diffusion engine. It uses the Add-Thin forward law and exact
+B/C/D/E reverse coefficients with a deliberately bounded, non-neural
+piecewise-constant time-bin × joint-mark posterior approximation. The fixed
+12 marks are a declared project extension; the reference paper models arrival
+times and leaves marks to future work.
+
+Whole Asia/London/New York windows split before fit. Validation and final
+holdout rows are reduced to row-free leakage evidence, while deterministic
+training/tuning corruptions select one additive-smoothing checkpoint.
+Generation begins from bounded homogeneous-Poisson noise, keeps observed
+anchors outside the denoising state, emits only core-owned points strictly
+inside destination-symbol anchor pairs, and records every B/C/D/E, thinning,
+collision, resource, and lineage decision.
+
+The retained campaign contains 12 proposal candidates and 16 total reports. The
+real closure comparison records no Add-Thin fit/generation failure, refusal,
+leakage, or anchor violation, but the challenger fails multiple promotion
+gates. It declares `automatic_winner: false` and remains refused from product
+selection. See
+[`docs/add-thin-challenger.md`](docs/add-thin-challenger.md) for the equations,
+approximation boundary, marked extension, strict contracts, resource limits,
+carving seam, retained evidence, nonclaims, and primary references.
+
 #### Empirical Reference-Motif Index
 
 `ReferenceMotifIndexV1` projects bounded windows from the augmented ASCII tick
@@ -2763,6 +2937,50 @@ enter those files. See
 [`docs/modern-reference-motif-library.md`](docs/modern-reference-motif-library.md)
 for the source profile, feature schema, corrected event-clock/transition
 semantics, qualification gates, CLI, and nonclaims.
+
+#### Point-in-Time Reconstruction Evidence
+
+The reconstruction plan now hash-binds a versioned evidence policy and the
+HistData source handler compiles bounded row, interval, window, partition, and
+series evidence sidecars before proposal work begins. Exact row findings keep
+their immutable source-row identity; aggregate quality and fingerprint state
+remain sidecars and cannot be flattened onto ticks. Ex-ante execution withholds
+future rows, values, and finding counts.
+
+Resolved gap, spread, and source-quality constraints affect proposal
+conditioning and historical carving, while reconciliation, delivery, and
+validation retain the projection and use-decision lineage through the
+committed delivery-quality manifest. The contracts are provider-neutral, but
+the public planner admits only HistData.com ASCII/T; OANDA,
+alternate-provider, and broker evidence adapters remain later-milestone work.
+See
+[`docs/reconstruction-evidence-contracts.md`](docs/reconstruction-evidence-contracts.md)
+for grain, availability, fallback, boundedness, and audit semantics.
+
+#### Synchronized Cross-Series Constraints
+
+The plan now also hash-binds a provider-neutral cross-series constraint policy.
+For the current milestone, source enrichment compiles only the complete
+HistData.com EURGBP/EURUSD/GBPUSD ASCII/T core window. Each bounded bundle
+strongly identifies dataset, series, partition, event identity, duplicate
+timestamps, coverage, availability, alignment support, #331 fingerprint
+content, residual severity, and readiness.
+
+Exact event-sequence alignment is preferred. Bounded nearest-prior evidence is
+diagnostic only: it never forward-fills, never turns timestamps into row
+identity, and never changes observed quotes. Proposal consumes one explicitly
+supported synchronization instant and records its constraint-window ID;
+carving, reconciliation, delivery, and validation preserve bundle, window, and
+use-decision IDs through the committed delivery-quality manifest.
+Contradictory or incomplete groups remain available for anomaly labeling but
+fail closed for proposal and every later production stage.
+
+The contracts establish the provider-neutral seam required by future dataset
+adapters, but OANDA, other historical providers, live feeds, and
+broker-specific adaptation remain later-milestone work and are rejected by the
+current planner. See
+[`docs/cross-series-constraint-contracts.md`](docs/cross-series-constraint-contracts.md)
+for alignment, point-in-time, readiness, lineage, and runtime semantics.
 
 #### Empirical Motif Candidate Generation
 
@@ -2859,6 +3077,10 @@ for calibration, confidence, diversity, retention, and replay semantics.
 
 #### Live Broker Delivery Capture
 
+> **Later milestone:** no live broker or OANDA feed is selected for the current
+> HistData-only reconstruction path. The contracts below preserve a future
+> capture seam; they do not qualify a v2.4 execution dataset.
+
 `histdatacom.broker_capture` records a broker feed as versioned measurement
 evidence rather than guessing modern delivery style from historical vendor
 data. Adapter messages retain optional broker/exchange timestamps with explicit
@@ -2881,6 +3103,10 @@ See [`docs/broker-capture-contracts.md`](docs/broker-capture-contracts.md) for
 clock, security, storage, replay, fixture, and fingerprint eligibility gates.
 
 #### Broker Delivery Fingerprints
+
+> **Later milestone:** broker/OANDA feed adaptation is not part of the current
+> HistData-only executable path. These contracts preserve the future seam, but
+> no broker dataset or profile is admitted by v2.4 compatibility.
 
 Qualified broker captures are converted into compact immutable delivery
 profiles with `fit_broker_delivery_fingerprint()`. Fitting verifies capture
@@ -2905,6 +3131,10 @@ for eligibility, streaming, condition, drift, persistence, and #445 handoff
 semantics.
 
 #### Broker-Conditioned Reconstruction
+
+> **Later milestone:** this research implementation remains non-executable in
+> the current public planner until a qualified broker feed exists. The v2.4
+> path accepts only HistData.com ASCII/T data and `modern_reference` delivery.
 
 `condition_broker_proposal()` applies a versioned, bounded broker-delivery
 strength to cadence, burst/quiet/outage, spread, and precision coordinates before
@@ -3085,7 +3315,7 @@ stratification, restoration, terminal states, and resource bounds.
 #### EURUSD Triangle Reconstruction Certification
 
 `modern_reference_triangle_certification_policy()` predeclares the current
-v2.1.0 scientific, operational, reporting, repository, and release contract for
+v2.4.0 scientific, operational, reporting, repository, and release contract for
 the EURGBP/EURUSD/GBPUSD product over common support beginning at `200203`. It
 fixes `modern_reference` delivery with the `unconditioned_reference` claim and
 explicitly excludes broker adaptation. The common end month, source-readiness
@@ -3093,7 +3323,8 @@ contracts, scientific thresholds, and peak-memory/scratch/runtime/storage and
 candidate-amplification budgets participate in the deterministic policy
 identity. The older broker-bound `eurusd_triangle_certification_policy()` and
 V1 dossiers remain readable for evidence replay but are not the #449 release
-path.
+path; the current factory additionally binds #491's powered portfolio,
+information-mode, and coherent diagnostic evidence.
 
 Certification consumes compact, verified report artifacts bound to that exact
 policy identity, so evidence cannot be reused after scope or threshold drift.
@@ -3105,7 +3336,8 @@ artifact instead of silently turning synthetic reference output into a broker
 claim.
 
 `evaluate_modern_reference_reconstruction_certification()` covers all fifteen
-#449 gate groups plus the individual source-readiness and operations seams and
+#491 gate groups plus the individual portfolio, diagnostics, source-readiness,
+and operations seams and
 returns one bounded `ReconstructionCertificationDossierV2`. The dossier can be
 `incomplete`, `failed`, `ready-for-promotion`, or `certified`.
 `ready-for-promotion` is narrowly reserved for the state where every check has
@@ -3156,6 +3388,29 @@ See
 for adapter registration, queue/resource policy, backpressure, recovery,
 cancellation, report reconciliation, and fault-injection guarantees.
 
+#### Reconstruction Evidence Diagnostics
+
+The first-party diagnostic publisher converts strong retained HistData
+experiment and qualification evidence into twelve bounded chart-data families
+with stable, scale-coherent views where one mixed axis would mislead.
+Missing product, carving, bar, or strategy evidence remains explicitly
+unavailable; underpowered qualification remains underpowered. Figures never
+select an engine or replace the machine-readable gates.
+
+```sh
+histdatacom reconstruction --json diagnostic-build \
+  --spec work/diagnostic-spec.json \
+  --output-directory work/diagnostics
+histdatacom reconstruction --json diagnostic-list \
+  --manifest work/diagnostics/reconstruction-diagnostic-publication-<sha256>.json
+```
+
+JSON publication works in the base install. The `histdatacom[viz]` extra adds
+deterministic, receipted SVG and PNG rendering. Current execution is restricted
+to HistData.com ASCII/T evidence; provider-neutral contracts preserve the
+future seam, while OANDA and broker data remain later milestones. See
+[`docs/reconstruction-diagnostics.md`](docs/reconstruction-diagnostics.md).
+
 #### Public Reconstruction CLI and API
 
 `histdatacom reconstruction` and `ReconstructionClient` expose the same typed
@@ -3179,10 +3434,52 @@ supported window is retained as a refusal-only shard with zero workflows and
 zero output estimates; acknowledging refusals makes that no-op safe to skip,
 but never turns the unsupported span into reconstructed output.
 
-Only ASCII/T and the complete EURGBP/EURUSD/GBPUSD triangle are accepted. M1,
-bar, partial-triangle, and broker-only requests fail before execution. Temporal
-is the production path; `--local` is an explicit first-party handler smoke and
-checkpoint-recovery mode, never an automatic fallback. Operation receipts bind
+Schema discovery and compatibility admission are also first-party:
+
+```sh
+histdatacom reconstruction schemas --json
+histdatacom reconstruction engines --json
+histdatacom reconstruction compatibility --plan plan-spec.json --json
+histdatacom reconstruction --json experiment-list --root work/plan-artifacts
+```
+
+The registry audits public contracts, explicitly accounts for internal-only
+schemas, distinguishes legacy raw and enriched HistData caches, and exposes the
+executable proposal-engine portfolio contracts. The planner consumes the same
+compatibility engine. A v1 input translates to an explicit motif-only
+portfolio; a v2 input must declare engine order, product selection, and
+retained evaluation evidence. Provider-neutral identity is the architectural
+foundation, while alternate providers, OANDA, and broker conditioning remain
+later-milestone work.
+
+Engine evaluation and resolved product eligibility are also public:
+
+```sh
+histdatacom reconstruction --json engine-evaluate \
+  --benchmark-manifest artifacts/reverse-degradation-manifest-<sha256>.json \
+  --source-root data/ASCII/T \
+  --output-directory work/proposal-evaluation
+histdatacom reconstruction --json qualify \
+  --evaluation work/proposal-evaluation/proposal-portfolio-evaluation-<sha256>.json \
+  --experiment work/experiment/reconstruction-experiment-<sha256>.json \
+  --output-directory work/qualification
+histdatacom reconstruction --json portfolio \
+  --plan work/plan-artifacts/synthetic-infill-plan-<sha256>.json
+```
+
+Failed and underpowered engines stay inspectable; they cannot enter a committed
+product. Qualification binds the exact experiment, evaluation, row-free metric
+trace, power study, engine decisions, and validation-fitted portfolio weights.
+The current expanded campaign admits only the diagonal self-excitation
+marked-Hawkes variant; every nonpassing engine remains inspectable but is
+excluded from execution. There is no silent fallback or automatic winner. See
+[`docs/powered-reconstruction-qualification.md`](docs/powered-reconstruction-qualification.md).
+
+Only HistData.com ASCII/T and the complete EURGBP/EURUSD/GBPUSD triangle are
+accepted. M1, bar, partial-triangle, alternate-provider, OANDA, and broker
+requests fail before execution. Temporal is the production path; `--local` is
+an explicit first-party handler smoke and checkpoint-recovery mode, never an
+automatic fallback. Operation receipts bind
 each workflow handle to its actual reconstruction status store, and resumed
 attempts preserve scientific/checkpoint identity while using fresh parent and
 child Temporal IDs.
@@ -3195,7 +3492,9 @@ and success exit codes.
 See
 [`docs/reconstruction-public-interfaces.md`](docs/reconstruction-public-interfaces.md)
 for exact JSON contracts, commands, Python examples, recovery semantics, and
-the exit-code table.
+the exit-code table, and
+[`docs/reconstruction-schema-compatibility.md`](docs/reconstruction-schema-compatibility.md)
+for discovery and admission semantics.
 
 ---
 

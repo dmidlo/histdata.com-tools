@@ -50,6 +50,7 @@ from histdatacom.synthetic.motifs import (
     extract_reference_motif_fragment,
     query_reference_motifs,
     reference_motif_condition_from_quotes,
+    reference_session_for_ns,
 )
 
 MODERN_REFERENCE_MOTIF_PROFILE_SCHEMA_VERSION = (
@@ -1096,7 +1097,7 @@ def _candidate_intervals(
         if _period_for_ns(start_ns) != period:
             continue
         end_ns = start_ns + duration_seconds * NANOSECONDS_PER_SECOND
-        candidate = (start_ns, end_ns, _session_for_ns(start_ns))
+        candidate = (start_ns, end_ns, reference_session_for_ns(start_ns))
         if any(
             left < end_ns and start_ns < right
             for left, right, _ in (*baseline, *contexts)
@@ -1218,17 +1219,6 @@ def _period_for_ns(value: int) -> str:
     ).strftime("%Y%m")
 
 
-def _session_for_ns(value: int) -> str:
-    hour = datetime.fromtimestamp(
-        value / NANOSECONDS_PER_SECOND, tz=timezone.utc
-    ).hour
-    if hour < 7:
-        return "asia"
-    if hour < 12:
-        return "london"
-    return "new_york"
-
-
 def _artifact_ref(path: Path, kind: str) -> ArtifactRef:
     return ArtifactRef(
         kind=kind,
@@ -1252,7 +1242,8 @@ def _stable_id(namespace: str, payload: Mapping[str, Any]) -> str:
 
 
 def _peak_memory_bytes() -> int:
-    return peak_rss_bytes()
+    peak_bytes: int = peak_rss_bytes()
+    return peak_bytes
 
 
 def _enforce_runtime(started: float, maximum: float) -> None:

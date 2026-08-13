@@ -13,14 +13,14 @@ original quote whenever a projection changed it.
 
 from __future__ import annotations
 
+import hashlib
+import json
+import math
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from enum import Enum
-import hashlib
-import json
-import math
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Protocol, cast, runtime_checkable
 
 from histdatacom.data_quality.synthetic_constraints import (
     SYNTHETIC_VALIDATION_SCHEMA_VERSION,
@@ -37,6 +37,7 @@ from histdatacom.synthetic.generation import (
     EmpiricalMotifCandidateBatchV1,
     MotifGenerationStatus,
 )
+from histdatacom.synthetic.information import InformationMode
 from histdatacom.synthetic.streaming import (
     CarryStateV1,
     ReconstructionRunV1,
@@ -87,6 +88,69 @@ HISTORICAL_CARVING_RULE_PRECEDENCE = (
     "conditioned.spread_projection.v1",
     "hard.final_local_validation.v1",
 )
+
+
+@runtime_checkable
+class ReconstructionCandidateLineageV1(Protocol):
+    """Minimum lineage pointer consumed by the carving engine."""
+
+    @property
+    def transformation_id(self) -> str:
+        """Return the immutable generator transformation identity."""
+
+
+@runtime_checkable
+class ReconstructionCandidateBatchV1(Protocol):
+    """Generator-neutral candidate surface accepted by historical carving."""
+
+    @property
+    def run_id(self) -> str: ...
+
+    @property
+    def window_id(self) -> str: ...
+
+    @property
+    def ensemble_member_id(self) -> str: ...
+
+    @property
+    def symbol(self) -> str: ...
+
+    @property
+    def anchor_interval_id(self) -> str: ...
+
+    @property
+    def left_anchor_event_id(self) -> str: ...
+
+    @property
+    def right_anchor_event_id(self) -> str: ...
+
+    @property
+    def generator_config_id(self) -> str: ...
+
+    @property
+    def information_mode(self) -> InformationMode: ...
+
+    @property
+    def session_state(self) -> str: ...
+
+    @property
+    def special_tags(self) -> tuple[str, ...]: ...
+
+    @property
+    def event_tags(self) -> tuple[str, ...]: ...
+
+    @property
+    def status(self) -> MotifGenerationStatus: ...
+
+    @property
+    def events(self) -> tuple[SyntheticEventV1, ...]: ...
+
+    @property
+    def batch_id(self) -> str: ...
+
+    def lineage_for(self, event_id: str) -> ReconstructionCandidateLineageV1:
+        """Return the compact lineage pointer for one candidate event."""
+
 
 MAX_CARVING_POLICIES = 64
 MAX_CARVING_QUARANTINES = 4096
@@ -216,7 +280,7 @@ class HistoricalCarvingConditionPolicyV1:
     @classmethod
     def from_dict(
         cls, data: Mapping[str, Any]
-    ) -> "HistoricalCarvingConditionPolicyV1":
+    ) -> HistoricalCarvingConditionPolicyV1:
         """Restore and verify one condition policy."""
         return cls(
             name=str(data.get("name", "")),
@@ -230,7 +294,7 @@ class HistoricalCarvingConditionPolicyV1:
         )
 
     @classmethod
-    def from_json(cls, text: str) -> "HistoricalCarvingConditionPolicyV1":
+    def from_json(cls, text: str) -> HistoricalCarvingConditionPolicyV1:
         """Restore a condition policy from deterministic JSON."""
         return cls.from_dict(_json_mapping(text))
 
@@ -290,7 +354,7 @@ class HistoricalCarvingQuarantineV1:
     @classmethod
     def from_dict(
         cls, data: Mapping[str, Any]
-    ) -> "HistoricalCarvingQuarantineV1":
+    ) -> HistoricalCarvingQuarantineV1:
         """Restore and verify one quarantine interval."""
         return cls(
             symbol=str(data.get("symbol", "")),
@@ -303,7 +367,7 @@ class HistoricalCarvingQuarantineV1:
         )
 
     @classmethod
-    def from_json(cls, text: str) -> "HistoricalCarvingQuarantineV1":
+    def from_json(cls, text: str) -> HistoricalCarvingQuarantineV1:
         """Restore a quarantine from deterministic JSON."""
         return cls.from_dict(_json_mapping(text))
 
@@ -473,7 +537,7 @@ class HistoricalCarvingConstraintSetV1:
     @classmethod
     def from_dict(
         cls, data: Mapping[str, Any]
-    ) -> "HistoricalCarvingConstraintSetV1":
+    ) -> HistoricalCarvingConstraintSetV1:
         """Restore and verify a version-one constraint set."""
         return cls(
             fingerprint_constraint_id=str(
@@ -516,7 +580,7 @@ class HistoricalCarvingConstraintSetV1:
         )
 
     @classmethod
-    def from_json(cls, text: str) -> "HistoricalCarvingConstraintSetV1":
+    def from_json(cls, text: str) -> HistoricalCarvingConstraintSetV1:
         """Restore a constraint set from deterministic JSON."""
         return cls.from_dict(_json_mapping(text))
 
@@ -582,9 +646,7 @@ class CarvingFingerprintEvidenceV1:
         return str(canonical_contract_json(self.to_dict()))
 
     @classmethod
-    def from_dict(
-        cls, data: Mapping[str, Any]
-    ) -> "CarvingFingerprintEvidenceV1":
+    def from_dict(cls, data: Mapping[str, Any]) -> CarvingFingerprintEvidenceV1:
         """Restore and verify fingerprint evidence."""
         return cls(
             validation_payload=_mapping(data.get("validation_payload")),
@@ -596,7 +658,7 @@ class CarvingFingerprintEvidenceV1:
         )
 
     @classmethod
-    def from_json(cls, text: str) -> "CarvingFingerprintEvidenceV1":
+    def from_json(cls, text: str) -> CarvingFingerprintEvidenceV1:
         """Restore fingerprint evidence from deterministic JSON."""
         return cls.from_dict(_json_mapping(text))
 
@@ -674,7 +736,7 @@ class HistoricalCarvingRejectionExampleV1:
     @classmethod
     def from_dict(
         cls, data: Mapping[str, Any]
-    ) -> "HistoricalCarvingRejectionExampleV1":
+    ) -> HistoricalCarvingRejectionExampleV1:
         """Restore and verify one bounded example."""
         return cls(
             candidate_event_id=str(data.get("candidate_event_id", "")),
@@ -821,7 +883,7 @@ class HistoricalCarvingEventLineageV1:
     @classmethod
     def from_dict(
         cls, data: Mapping[str, Any]
-    ) -> "HistoricalCarvingEventLineageV1":
+    ) -> HistoricalCarvingEventLineageV1:
         """Restore and verify accepted lineage."""
         return cls(
             output_event_id=str(data.get("output_event_id", "")),
@@ -916,7 +978,7 @@ class HistoricalCarvingValidationEvidenceV1:
     @classmethod
     def from_dict(
         cls, data: Mapping[str, Any]
-    ) -> "HistoricalCarvingValidationEvidenceV1":
+    ) -> HistoricalCarvingValidationEvidenceV1:
         """Restore and verify validation evidence."""
         return cls(
             fingerprint_evidence_id=_mapping_optional_text(
@@ -1019,7 +1081,7 @@ class HistoricalCarvedCandidateBatchV1:
         object.__setattr__(self, "accepted_events", events)
         object.__setattr__(self, "accepted_lineage", lineage)
         if not isinstance(self.rejection_summary, RejectionSummaryV1):
-            raise ValueError("carved batch requires a rejection summary")
+            raise TypeError("carved batch requires a rejection summary")
         if self.rejection_summary.run_id != self.run_id:
             raise ValueError("rejection summary run differs")
         if self.rejection_summary.window_id != self.window_id:
@@ -1038,9 +1100,9 @@ class HistoricalCarvedCandidateBatchV1:
         if not isinstance(
             self.validation_evidence, HistoricalCarvingValidationEvidenceV1
         ):
-            raise ValueError("carved batch requires validation evidence")
+            raise TypeError("carved batch requires validation evidence")
         if not isinstance(self.carry_state, CarryStateV1):
-            raise ValueError("carved batch requires carry state")
+            raise TypeError("carved batch requires carry state")
         if (
             self.carry_state.run_id != self.run_id
             or self.carry_state.ensemble_member_id != self.ensemble_member_id
@@ -1139,7 +1201,7 @@ class HistoricalCarvedCandidateBatchV1:
     @classmethod
     def from_dict(
         cls, data: Mapping[str, Any]
-    ) -> "HistoricalCarvedCandidateBatchV1":
+    ) -> HistoricalCarvedCandidateBatchV1:
         """Restore accepted rows and verify every derived identity."""
         refusal = data.get("refusal_reason")
         return cls(
@@ -1196,7 +1258,7 @@ class HistoricalCarvedCandidateBatchV1:
         )
 
     @classmethod
-    def from_json(cls, text: str) -> "HistoricalCarvedCandidateBatchV1":
+    def from_json(cls, text: str) -> HistoricalCarvedCandidateBatchV1:
         """Restore a carved batch from deterministic JSON."""
         return cls.from_dict(_json_mapping(text))
 
@@ -1223,8 +1285,54 @@ def carve_empirical_motif_candidates(
     constraints: HistoricalCarvingConstraintSetV1,
     fingerprint_evidence: CarvingFingerprintEvidenceV1 | None,
     substitution_batches: Sequence[EmpiricalMotifCandidateBatchV1] = (),
+    point_in_time_max_anchor_gap_ns: int | None = None,
+    point_in_time_wide_spread_threshold: float | None = None,
 ) -> HistoricalCarvedCandidateBatchV1:
-    """Carve one candidate batch using deterministic fail-closed precedence."""
+    """Preserve the v1 empirical entry point over generic carving."""
+    if not isinstance(candidate_batch, EmpiricalMotifCandidateBatchV1) or any(
+        not isinstance(item, EmpiricalMotifCandidateBatchV1)
+        for item in substitution_batches
+    ):
+        raise TypeError("empirical carving requires empirical motif batches")
+    return carve_reconstruction_candidates(
+        run=run,
+        window=window,
+        candidate_batch=candidate_batch,
+        observed_events=observed_events,
+        market_context=market_context,
+        constraints=constraints,
+        fingerprint_evidence=fingerprint_evidence,
+        substitution_batches=substitution_batches,
+        point_in_time_max_anchor_gap_ns=point_in_time_max_anchor_gap_ns,
+        point_in_time_wide_spread_threshold=(
+            point_in_time_wide_spread_threshold
+        ),
+    )
+
+
+def carve_reconstruction_candidates(
+    *,
+    run: ReconstructionRunV1,
+    window: ReconstructionWindowV1,
+    candidate_batch: ReconstructionCandidateBatchV1,
+    observed_events: Sequence[SyntheticEventV1],
+    market_context: MarketContextQueryV1,
+    constraints: HistoricalCarvingConstraintSetV1,
+    fingerprint_evidence: CarvingFingerprintEvidenceV1 | None,
+    substitution_batches: Sequence[ReconstructionCandidateBatchV1] = (),
+    point_in_time_max_anchor_gap_ns: int | None = None,
+    point_in_time_wide_spread_threshold: float | None = None,
+) -> HistoricalCarvedCandidateBatchV1:
+    """Carve one structural candidate batch with fail-closed precedence."""
+    if not isinstance(candidate_batch, ReconstructionCandidateBatchV1):
+        raise TypeError("carving requires a reconstruction candidate batch")
+    if any(
+        not isinstance(item, ReconstructionCandidateBatchV1)
+        for item in substitution_batches
+    ):
+        raise TypeError(
+            "substitutions must be reconstruction candidate batches"
+        )
     candidates = (candidate_batch, *tuple(substitution_batches))
     _validate_scope(run, window, candidates, market_context, constraints)
     ordered_batches = (
@@ -1272,6 +1380,7 @@ def carve_empirical_motif_candidates(
         market_context,
         constraints,
         fingerprint_evidence,
+        point_in_time_max_anchor_gap_ns,
     )
     if refusal is not None:
         return _terminal_batch(
@@ -1318,6 +1427,7 @@ def carve_empirical_motif_candidates(
             left_anchor,
             right_anchor,
             constraints,
+            point_in_time_wide_spread_threshold,
         )
         if hard_reason is not None:
             _record_rejection(
@@ -1532,7 +1642,7 @@ def carve_empirical_motif_candidates(
 def _validate_scope(
     run: ReconstructionRunV1,
     window: ReconstructionWindowV1,
-    batches: Sequence[EmpiricalMotifCandidateBatchV1],
+    batches: Sequence[ReconstructionCandidateBatchV1],
     market_context: MarketContextQueryV1,
     constraints: HistoricalCarvingConstraintSetV1,
 ) -> None:
@@ -1544,8 +1654,8 @@ def _validate_scope(
         raise ValueError("carving input batch count is outside bounds")
     primary = batches[0]
     for batch in batches:
-        if not isinstance(batch, EmpiricalMotifCandidateBatchV1):
-            raise ValueError("carving requires motif candidate batches")
+        if not isinstance(batch, ReconstructionCandidateBatchV1):
+            raise TypeError("carving requires reconstruction candidate batches")
         if (
             batch.run_id != run.run_id
             or batch.window_id != window.window_id
@@ -1576,15 +1686,12 @@ def _validate_scope(
         item.upper() for item in market_context.requested_symbols
     }:
         raise ValueError("market context requested symbols omit candidate")
-    if (
-        market_context.information_mode
-        is not primary.query_result.query.information_mode
-    ):
+    if market_context.information_mode is not primary.information_mode:
         raise ValueError("market context information mode differs")
 
 
 def _observed_anchors(
-    batch: EmpiricalMotifCandidateBatchV1,
+    batch: ReconstructionCandidateBatchV1,
     observed_events: Sequence[SyntheticEventV1],
 ) -> tuple[SyntheticEventV1, SyntheticEventV1]:
     by_id = {item.event_id: item for item in observed_events}
@@ -1604,15 +1711,25 @@ def _observed_anchors(
 
 def _support_refusal(
     run: ReconstructionRunV1,
-    primary: EmpiricalMotifCandidateBatchV1,
-    batches: Sequence[EmpiricalMotifCandidateBatchV1],
+    primary: ReconstructionCandidateBatchV1,
+    batches: Sequence[ReconstructionCandidateBatchV1],
     anchors: tuple[SyntheticEventV1, SyntheticEventV1],
     market_context: MarketContextQueryV1,
     constraints: HistoricalCarvingConstraintSetV1,
     fingerprint_evidence: CarvingFingerprintEvidenceV1 | None,
+    point_in_time_max_anchor_gap_ns: int | None,
 ) -> CarvingReason | None:
-    if anchors[1].event_time_ns - anchors[0].event_time_ns > (
+    evidence_gap = (
         constraints.max_anchor_gap_ns
+        if point_in_time_max_anchor_gap_ns is None
+        else _strict_int(
+            point_in_time_max_anchor_gap_ns, "point_in_time_max_anchor_gap_ns"
+        )
+    )
+    if evidence_gap <= 0:
+        raise ValueError("point_in_time_max_anchor_gap_ns must be positive")
+    if anchors[1].event_time_ns - anchors[0].event_time_ns > min(
+        constraints.max_anchor_gap_ns, evidence_gap
     ):
         return CarvingReason.ANCHOR_GAP_LIMIT
     if sum(len(item.events) for item in batches) > (
@@ -1624,7 +1741,7 @@ def _support_refusal(
     if constraints.require_fingerprint_validation:
         if fingerprint_evidence is None:
             return CarvingReason.FINGERPRINT_EVIDENCE_MISSING
-        if not set(item.batch_id for item in batches).issubset(
+        if not {item.batch_id for item in batches}.issubset(
             fingerprint_evidence.candidate_batch_ids
         ):
             return CarvingReason.FINGERPRINT_VALIDATION_FAILED
@@ -1647,15 +1764,14 @@ def _support_refusal(
 
 
 def _closed_session(
-    batch: EmpiricalMotifCandidateBatchV1,
+    batch: ReconstructionCandidateBatchV1,
     market_context: MarketContextQueryV1,
     constraints: HistoricalCarvingConstraintSetV1,
 ) -> bool:
     states = set(constraints.closed_session_states)
     calendar = market_context.calendar_state
-    return (
-        batch.query_result.query.condition.session_state.lower() in states
-        or (calendar is not None and calendar.session_state.lower() in states)
+    return batch.session_state.lower() in states or (
+        calendar is not None and calendar.session_state.lower() in states
     )
 
 
@@ -1665,6 +1781,7 @@ def _candidate_hard_reason(
     left_anchor: SyntheticEventV1,
     right_anchor: SyntheticEventV1,
     constraints: HistoricalCarvingConstraintSetV1,
+    point_in_time_wide_spread_threshold: float | None,
 ) -> CarvingReason | None:
     if (
         event.origin is not SyntheticEventOrigin.SYNTHETIC
@@ -1689,25 +1806,32 @@ def _candidate_hard_reason(
             and quarantine.start_ns <= event.event_time_ns < quarantine.end_ns
         ):
             return CarvingReason.QUARANTINED_INTERVAL
+    if point_in_time_wide_spread_threshold is not None:
+        threshold = _finite_float(
+            point_in_time_wide_spread_threshold,
+            "point_in_time_wide_spread_threshold",
+        )
+        if threshold < 0.0:
+            raise ValueError(
+                "point_in_time_wide_spread_threshold must be non-negative"
+            )
+        if event.ask - event.bid > (
+            threshold * constraints.max_combined_spread_multiplier
+        ):
+            return CarvingReason.PROJECTION_LIMIT
     return None
 
 
 def _matching_policies(
     event: SyntheticEventV1,
-    batch: EmpiricalMotifCandidateBatchV1,
+    batch: ReconstructionCandidateBatchV1,
     market_context: MarketContextQueryV1,
     constraints: HistoricalCarvingConstraintSetV1,
 ) -> tuple[tuple[HistoricalCarvingConditionPolicyV1, ...], tuple[str, ...]]:
     tokens = {
-        batch.query_result.query.condition.session_state.lower(),
-        *(
-            item.lower()
-            for item in batch.query_result.query.condition.special_tags
-        ),
-        *(
-            item.lower()
-            for item in batch.query_result.query.condition.event_tags
-        ),
+        batch.session_state.lower(),
+        *(item.lower() for item in batch.special_tags),
+        *(item.lower() for item in batch.event_tags),
     }
     calendar = market_context.calendar_state
     if calendar is not None:
@@ -1756,14 +1880,14 @@ def _motif_eligible(
 
 
 def _alternative_events(
-    batches: Sequence[EmpiricalMotifCandidateBatchV1],
+    batches: Sequence[ReconstructionCandidateBatchV1],
 ) -> dict[
     tuple[int, int],
-    tuple[tuple[EmpiricalMotifCandidateBatchV1, SyntheticEventV1], ...],
+    tuple[tuple[ReconstructionCandidateBatchV1, SyntheticEventV1], ...],
 ]:
     indexed: dict[
         tuple[int, int],
-        list[tuple[EmpiricalMotifCandidateBatchV1, SyntheticEventV1]],
+        list[tuple[ReconstructionCandidateBatchV1, SyntheticEventV1]],
     ] = {}
     for batch in batches:
         if batch.status is not MotifGenerationStatus.GENERATED:
@@ -1782,10 +1906,10 @@ def _eligible_substitution(
     primary: SyntheticEventV1,
     alternatives: Mapping[
         tuple[int, int],
-        Sequence[tuple[EmpiricalMotifCandidateBatchV1, SyntheticEventV1]],
+        Sequence[tuple[ReconstructionCandidateBatchV1, SyntheticEventV1]],
     ],
     policies: Sequence[HistoricalCarvingConditionPolicyV1],
-) -> tuple[EmpiricalMotifCandidateBatchV1, SyntheticEventV1] | None:
+) -> tuple[ReconstructionCandidateBatchV1, SyntheticEventV1] | None:
     for batch, event in alternatives.get(
         (primary.event_time_ns, primary.event_sequence), ()
     ):
@@ -1871,7 +1995,7 @@ def _accepted_action(projected: bool, substituted: bool) -> CarvingEventAction:
 def _validate_accepted_events(
     accepted: Sequence[SyntheticEventV1],
     observed_events: Sequence[SyntheticEventV1],
-    batch: EmpiricalMotifCandidateBatchV1,
+    batch: ReconstructionCandidateBatchV1,
     window: ReconstructionWindowV1,
     constraints: HistoricalCarvingConstraintSetV1,
 ) -> None:
@@ -1906,7 +2030,7 @@ def _terminal_batch(
     *,
     run: ReconstructionRunV1,
     window: ReconstructionWindowV1,
-    candidate_batch: EmpiricalMotifCandidateBatchV1,
+    candidate_batch: ReconstructionCandidateBatchV1,
     input_batch_ids: tuple[str, ...],
     market_context: MarketContextQueryV1,
     constraints: HistoricalCarvingConstraintSetV1,
@@ -1990,7 +2114,7 @@ def _record_rejection(
     rejected: Counter[str],
     examples: list[HistoricalCarvingRejectionExampleV1],
     event: SyntheticEventV1,
-    batch: EmpiricalMotifCandidateBatchV1,
+    batch: ReconstructionCandidateBatchV1,
     reason: CarvingReason,
     rule_id: str,
     example_limit: int,
@@ -2147,7 +2271,7 @@ def _strict_bool(value: Any, name: str) -> bool:
 
 def _finite_float(value: Any, name: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise ValueError(f"{name} must be numeric")
+        raise TypeError(f"{name} must be numeric")
     result = float(value)
     if not math.isfinite(result):
         raise ValueError(f"{name} must be finite")
@@ -2183,19 +2307,19 @@ def _sha256(value: Any, name: str) -> str:
 
 def _mapping(value: Any) -> Mapping[str, Any]:
     if not isinstance(value, Mapping):
-        raise ValueError("expected a mapping")
+        raise TypeError("expected a mapping")
     return cast(Mapping[str, Any], value)
 
 
 def _mapping_sequence(value: Any) -> tuple[Mapping[str, Any], ...]:
     if not isinstance(value, (list, tuple)):
-        raise ValueError("expected a sequence")
+        raise TypeError("expected a sequence")
     return tuple(_mapping(item) for item in value)
 
 
 def _string_tuple(value: Any) -> tuple[str, ...]:
     if not isinstance(value, (list, tuple)):
-        raise ValueError("expected a string sequence")
+        raise TypeError("expected a string sequence")
     if any(not isinstance(item, str) for item in value):
         raise ValueError("expected string sequence values")
     return tuple(cast(Sequence[str], value))

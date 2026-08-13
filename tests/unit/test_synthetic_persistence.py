@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import duckdb
@@ -12,14 +12,15 @@ import pyarrow.parquet as pq
 import pytest
 
 from histdatacom.broker_capture import fit_broker_delivery_fingerprint
+from histdatacom.reconstruction import ReconstructionClient
 from histdatacom.synthetic import (
     RECONSTRUCTION_PRODUCT_DIRECTORY,
     BrokerTransferConfigV1,
     ReconstructionCheckpointV1,
     ReconstructionCommitPhase,
-    ReconstructionProductManifestV2,
     ReconstructionPersistenceError,
     ReconstructionProductManifestV1,
+    ReconstructionProductManifestV2,
     ReconstructionStoragePolicyV1,
     ReconstructionStoragePreflightError,
     SyntheticEventOrigin,
@@ -29,19 +30,19 @@ from histdatacom.synthetic import (
     discover_reconstruction_manifests,
     estimate_reconstruction_retention,
     iter_reconstruction_event_batches,
+    project_modern_reference_delivery,
     publish_reconstruction_group,
     read_reconstruction_streams,
     reconstruction_parquet_paths,
-    project_modern_reference_delivery,
     render_broker_delivery,
     scan_reconstruction_events_polars,
-    stage_reconstruction_publication,
     stage_delivery_reconstruction_publication,
+    stage_reconstruction_publication,
     validate_cross_currency_output,
     verify_reconstruction_publication,
 )
-from histdatacom.synthetic.cross_currency import CrossCurrencyValidationStage
 from histdatacom.synthetic.contracts import SYNTHETIC_EVENT_ARROW_COLUMNS
+from histdatacom.synthetic.cross_currency import CrossCurrencyValidationStage
 from tests.unit.test_broker_delivery_fingerprints import (
     BASE_WALL_NS,
     _capture,
@@ -192,11 +193,17 @@ def test_generic_delivery_commit_recovers_after_atomic_rename(
         final_validation=validation,
         benchmark_artifact_ids=("benchmark:fixture",),
         benchmark_evidence={"gate": "passed"},
+        point_in_time_evidence_projection_ids=("projection:fixture",),
+        point_in_time_evidence_decision_ids=("decision:fixture",),
+        cross_series_constraint_bundle_ids=("bundle:fixture",),
+        cross_series_constraint_window_ids=("window:fixture",),
+        cross_series_constraint_decision_ids=("cross-decision:fixture",),
         immutable_source_anchors=anchors,
         symbol_group_id=window.synchronization_unit_id,
         retention_plan=retention,
         storage_policy=run.storage_policy,
         staging_root=tmp_path / "window-scratch" / "publication",
+        experiment_id="reconstruction-experiment:fixture",
         row_group_size=2,
     )
 
@@ -205,6 +212,44 @@ def test_generic_delivery_commit_recovers_after_atomic_rename(
     assert not committed.idempotent_retry
     assert not staged.staging_directory.exists()
     assert isinstance(committed.manifest, ReconstructionProductManifestV2)
+    assert committed.manifest.source.experiment_id == (
+        "reconstruction-experiment:fixture"
+    )
+    assert committed.manifest.quality.point_in_time_evidence_projection_ids == (
+        "projection:fixture",
+    )
+    assert committed.manifest.quality.point_in_time_evidence_decision_ids == (
+        "decision:fixture",
+    )
+    assert committed.manifest.quality.benchmark_evidence == {"gate": "passed"}
+    assert ReconstructionClient().replay(committed.manifest_path)[
+        "replay_verified"
+    ]
+    assert committed.manifest.quality.cross_series_constraint_bundle_ids == (
+        "bundle:fixture",
+    )
+    assert committed.manifest.quality.cross_series_constraint_window_ids == (
+        "window:fixture",
+    )
+    assert committed.manifest.quality.cross_series_constraint_decision_ids == (
+        "cross-decision:fixture",
+    )
+    legacy_quality = replace(
+        committed.manifest.quality,
+        point_in_time_evidence_projection_ids=(),
+        point_in_time_evidence_decision_ids=(),
+        cross_series_constraint_bundle_ids=(),
+        cross_series_constraint_window_ids=(),
+        cross_series_constraint_decision_ids=(),
+        quality_manifest_id="",
+    )
+    legacy_payload = legacy_quality.to_dict()
+    assert "point_in_time_evidence_projection_ids" not in legacy_payload
+    assert "point_in_time_evidence_decision_ids" not in legacy_payload
+    assert "cross_series_constraint_bundle_ids" not in legacy_payload
+    assert "cross_series_constraint_window_ids" not in legacy_payload
+    assert "cross_series_constraint_decision_ids" not in legacy_payload
+    assert type(legacy_quality).from_dict(legacy_payload) == legacy_quality
     assert discover_reconstruction_manifests(
         root,
         delivery_profile_id="modern-reference:fixture",

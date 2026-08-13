@@ -13,13 +13,13 @@ event identities never include a worker, retry, or window identifier.
 
 from __future__ import annotations
 
+import hashlib
+import json
+import math
 from bisect import bisect_left
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from enum import Enum
-import hashlib
-import json
-import math
 from typing import Any
 
 from histdatacom.runtime_contracts import JSONValue
@@ -724,6 +724,26 @@ class EmpiricalMotifCandidateBatchV1:
     def generator_config_id(self) -> str:
         """Return the semantic config ID repeated by every candidate event."""
         return self.generator_config.config_id
+
+    @property
+    def information_mode(self) -> InformationMode:
+        """Return the point-in-time mode bound by the retrieval query."""
+        return self.query_result.query.information_mode
+
+    @property
+    def session_state(self) -> str:
+        """Return the normalized session state used during generation."""
+        return str(self.query_result.query.condition.session_state)
+
+    @property
+    def special_tags(self) -> tuple[str, ...]:
+        """Return special-calendar tags used during generation."""
+        return tuple(self.query_result.query.condition.special_tags)
+
+    @property
+    def event_tags(self) -> tuple[str, ...]:
+        """Return event-context tags used during generation."""
+        return tuple(self.query_result.query.condition.event_tags)
 
     def payload(self) -> dict[str, JSONValue]:
         """Return semantic batch identity without embedding row payloads."""

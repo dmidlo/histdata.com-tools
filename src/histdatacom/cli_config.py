@@ -259,6 +259,7 @@ _ANALYTICS_SCALAR_ARGS = {
     "burst_interval_ms": "--burst-interval-ms",
     "calibration_period": "--calibration-period",
     "definition": "--definition",
+    "ensemble_member_count": "--ensemble-member-count",
     "cftc_positioning_corpus": "--cftc-positioning-corpus",
     "evidence": "--evidence",
     "epoch_artifact": "--epoch-artifact",

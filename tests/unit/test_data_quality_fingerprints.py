@@ -7,10 +7,10 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-import histdatacom.data_quality.symbols as symbols_module
-import histdatacom.data_quality.fingerprints as fingerprints_module
 import pytest
 
+import histdatacom.data_quality.fingerprints as fingerprints_module
+import histdatacom.data_quality.symbols as symbols_module
 from histdatacom.data_quality import (
     CROSS_SERIES_FINGERPRINT_METADATA_KEY,
     CROSS_SERIES_FINGERPRINT_RULE_ID,
@@ -21,8 +21,8 @@ from histdatacom.data_quality import (
     DEFAULT_FINGERPRINT_QUANTILES,
     DEFAULT_FINGERPRINT_ROLLING_WINDOWS,
     DEFAULT_FINGERPRINT_ROUNDING_DIGITS,
-    QUALITY_PROFILE_SCHEMA_VERSION,
     QUALITY_ENGINE_METADATA_KEY,
+    QUALITY_PROFILE_SCHEMA_VERSION,
     QUALITY_SKIP_EVENTS_SCHEMA_VERSION,
     SERIES_FINGERPRINT_RULE_ID,
     SYNTHETIC_CONSTRAINTS_SCHEMA_VERSION,
@@ -47,10 +47,10 @@ from histdatacom.data_quality import (
     TIME_SERIES_FINGERPRINT_TOPOLOGY_ATTENTION_SCHEMA_VERSION,
     TIME_SERIES_FINGERPRINT_TOPOLOGY_SUMMARY_METADATA_KEY,
     TIME_SERIES_FINGERPRINT_TOPOLOGY_SUMMARY_SCHEMA_VERSION,
+    HistDataCrossSeriesFingerprintRule,
     HistDataFingerprintDistributionAttentionProfile,
     HistDataFingerprintParityProfile,
     HistDataFingerprintProfile,
-    HistDataCrossSeriesFingerprintRule,
     HistDataSeriesFingerprintRule,
     QualityFinding,
     QualityReport,
@@ -58,9 +58,9 @@ from histdatacom.data_quality import (
     QualityTarget,
     QualityTargetKind,
     discover_quality_targets,
-    quality_rules_for_groups,
     quality_next_actions_summary,
     quality_report_to_json,
+    quality_rules_for_groups,
     quality_run_rules_for_groups,
     quality_target_from_path,
     run_quality_assessment,
@@ -194,6 +194,24 @@ def test_cross_series_fingerprint_profiles_unequal_triangle_and_identity(
     assert payload["group_count"] == 1
     triangular = _mapping(payload["triangular_consistency"])
     assert triangular["candidate_count"] == 1
+    triangle_distribution = _mapping(
+        triangular["relative_difference_distribution"]
+    )
+    assert triangle_distribution["status"] == "valid"
+    assert triangle_distribution["count"] == (
+        triangular["compared_timestamp_count"]
+    )
+    assert (
+        sum(
+            int(_mapping(item)["count"])
+            for item in _list(triangle_distribution["bins"])
+        )
+        == triangle_distribution["count"]
+    )
+    assert (
+        _mapping(_list(triangle_distribution["bins"])[1])["lower_exclusive"]
+        == 0.0
+    )
     assert grid["union_timestamp_count"] == 4
     assert grid["common_timestamp_count"] == 3
     assert grid["common_timestamp_ratio"] == 0.75
@@ -332,7 +350,12 @@ def test_cross_series_fingerprint_reports_inverse_sparse_and_stale_risk(
     group = _mapping(_list(payload["groups"])[0])
     pair = _mapping(_list(_mapping(group["return_correlation"])["pairs"])[0])
 
-    assert _mapping(payload["inverse_consistency"])["candidate_count"] == 1
+    inverse = _mapping(payload["inverse_consistency"])
+    assert inverse["candidate_count"] == 1
+    assert (
+        _mapping(inverse["relative_difference_distribution"])["count"]
+        == inverse["compared_timestamp_count"]
+    )
     assert _mapping(payload["stale_join_risk"])["risk_count"] == 1
     assert _mapping(group["timestamp_grid"])["common_timestamp_ratio"] == 0.25
     assert pair == {

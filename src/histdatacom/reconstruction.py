@@ -9,15 +9,19 @@ bounded metadata and strong references.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, replace
-from datetime import datetime, timezone
-from enum import IntEnum
 import hashlib
 import json
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass, field, replace
+from datetime import datetime, timezone
+from enum import IntEnum
+from itertools import pairwise
 from pathlib import Path
 from typing import Any, cast
 
+from histdatacom.cross_series_constraints import (
+    CrossSeriesConstraintPolicyV1,
+)
 from histdatacom.manifest_store import ManifestStatusStore
 from histdatacom.orchestration.client import (
     OrchestrationJobHandle,
@@ -37,6 +41,25 @@ from histdatacom.orchestration.reconstruction import (
     write_reconstruction_report,
 )
 from histdatacom.orchestration.supervisor import OrchestrationSupervisor
+from histdatacom.reconstruction_evidence import (
+    CURRENT_EVIDENCE_SOURCE_PROVIDER_ID,
+    ReconstructionEvidencePolicyV1,
+)
+from histdatacom.reconstruction_experiment import (
+    ReconstructionExperimentManifestV1,
+    ReconstructionExperimentVerificationV1,
+    discover_reconstruction_experiments,
+    read_reconstruction_experiment,
+    verify_reconstruction_experiment,
+)
+from histdatacom.reconstruction_schema import (
+    ReconstructionCompatibilityReportV1,
+    ReconstructionCompatibilityStatus,
+    ReconstructionSchemaRegistryV1,
+    evaluate_reconstruction_compatibility,
+    read_compatibility_plan,
+    reconstruction_schema_registry,
+)
 from histdatacom.runtime_contracts import ArtifactRef, JSONValue
 from histdatacom.synthetic.certification import (
     ReconstructionCertificationDossierV2,
@@ -48,6 +71,12 @@ from histdatacom.synthetic.certification_campaign import (
     run_modern_reference_certification_campaign,
 )
 from histdatacom.synthetic.contracts import canonical_contract_json
+from histdatacom.synthetic.diagnostics import (
+    DiagnosticPublicationManifestV1,
+    DiagnosticPublicationSpecV1,
+    diagnostic_publication_listing,
+    publish_reconstruction_diagnostics,
+)
 from histdatacom.synthetic.information import InformationMode
 from histdatacom.synthetic.persistence import (
     discover_reconstruction_manifests,
@@ -55,6 +84,17 @@ from histdatacom.synthetic.persistence import (
     load_reconstruction_manifest,
     read_reconstruction_streams,
     verify_reconstruction_publication,
+)
+from histdatacom.synthetic.proposal_engines import (
+    ProposalEnginePortfolioV1,
+    ProposalEngineRegistryV1,
+    ProposalPortfolioEvaluationV1,
+    proposal_engine_registry,
+    run_histdata_proposal_portfolio_evaluation,
+)
+from histdatacom.synthetic.qualification import (
+    PoweredQualificationDossierV1,
+    qualify_histdata_proposal_portfolio,
 )
 from histdatacom.synthetic.reconstruction_handlers import (
     register_first_party_reconstruction_handlers,
@@ -75,6 +115,9 @@ from histdatacom.synthetic.reconstruction_plan import (
 
 RECONSTRUCTION_PLAN_SPEC_SCHEMA_VERSION = (
     "histdatacom.reconstruction-plan-spec.v1"
+)
+RECONSTRUCTION_PLAN_SPEC_V2_SCHEMA_VERSION = (
+    "histdatacom.reconstruction-plan-spec.v2"
 )
 RECONSTRUCTION_PLAN_SET_SCHEMA_VERSION = (
     "histdatacom.reconstruction-plan-set.v1"
@@ -159,7 +202,7 @@ class ReconstructionValidationError(ReconstructionPublicError):
 class ReconstructionPlanSpecV1:
     """Serializable public inputs for constructing one first-party plan."""
 
-    source_root: str
+    source_root: str | None
     feed_epoch_definition_path: str
     observation_operator_path: str
     market_context_corpus_path: str
@@ -174,6 +217,8 @@ class ReconstructionPlanSpecV1:
     checkpoint_root: str
     scratch_root: str
     information_mode: InformationMode
+    dataset_catalog_path: str | None = None
+    dataset_reference: str = "reconstruction-selected"
     start_period: str | None = None
     end_period: str | None = None
     requested_start_ns: int | None = None
@@ -182,19 +227,31 @@ class ReconstructionPlanSpecV1:
     delivery_mode: ReconstructionDeliveryMode = (
         ReconstructionDeliveryMode.MODERN_REFERENCE
     )
+    evidence_policy: ReconstructionEvidencePolicyV1 = field(
+        default_factory=ReconstructionEvidencePolicyV1
+    )
+    cross_series_constraint_policy: CrossSeriesConstraintPolicyV1 = field(
+        default_factory=CrossSeriesConstraintPolicyV1
+    )
     broker_delivery_artifact: ArtifactRef | None = None
     source_format: str = RECONSTRUCTION_SOURCE_FORMAT
     timeframe: str = RECONSTRUCTION_TIMEFRAME
     symbols: tuple[str, ...] = RECONSTRUCTION_SYMBOLS
+    proposal_engine_ids: tuple[str, ...] = ()
+    selected_proposal_engine_ids: tuple[str, ...] = ()
+    proposal_evaluation_paths: tuple[str, ...] = ()
+    qualification_dossier_path: str | None = None
     schema_version: str = RECONSTRUCTION_PLAN_SPEC_SCHEMA_VERSION
 
     def __post_init__(self) -> None:
-        if self.schema_version != RECONSTRUCTION_PLAN_SPEC_SCHEMA_VERSION:
+        if self.schema_version not in {
+            RECONSTRUCTION_PLAN_SPEC_SCHEMA_VERSION,
+            RECONSTRUCTION_PLAN_SPEC_V2_SCHEMA_VERSION,
+        }:
             raise ReconstructionUnsupportedError(
                 "unsupported reconstruction plan-spec schema"
             )
         for name in (
-            "source_root",
             "feed_epoch_definition_path",
             "observation_operator_path",
             "market_context_corpus_path",
@@ -211,6 +268,34 @@ class ReconstructionPlanSpecV1:
         ):
             value = str(Path(_required_text(getattr(self, name))).expanduser())
             object.__setattr__(self, name, value)
+        source_root = _optional_text(self.source_root)
+        catalog_path = _optional_text(self.dataset_catalog_path)
+        if source_root is None and catalog_path is None:
+            raise ReconstructionUnsupportedError(
+                "supply dataset_catalog_path or the documented v2.3 source_root "
+                "translation"
+            )
+        object.__setattr__(
+            self,
+            "source_root",
+            (
+                str(Path(source_root).expanduser())
+                if source_root is not None
+                else None
+            ),
+        )
+        object.__setattr__(
+            self,
+            "dataset_catalog_path",
+            (
+                str(Path(catalog_path).expanduser())
+                if catalog_path is not None
+                else None
+            ),
+        )
+        object.__setattr__(
+            self, "dataset_reference", _required_text(self.dataset_reference)
+        )
         object.__setattr__(
             self,
             "information_mode",
@@ -221,6 +306,35 @@ class ReconstructionPlanSpecV1:
             "delivery_mode",
             ReconstructionDeliveryMode.from_value(self.delivery_mode),
         )
+        if not isinstance(self.evidence_policy, ReconstructionEvidencePolicyV1):
+            raise ReconstructionUnsupportedError(
+                "evidence_policy must use the installed v1 contract"
+            )
+        if self.evidence_policy.supported_provider_ids != (
+            CURRENT_EVIDENCE_SOURCE_PROVIDER_ID,
+        ):
+            raise ReconstructionUnsupportedError(
+                "the current evidence policy supports only HistData.com"
+            )
+        if not isinstance(
+            self.cross_series_constraint_policy,
+            CrossSeriesConstraintPolicyV1,
+        ):
+            raise ReconstructionUnsupportedError(
+                "cross_series_constraint_policy must use the installed v1 contract"
+            )
+        if self.cross_series_constraint_policy.supported_provider_ids != (
+            CURRENT_EVIDENCE_SOURCE_PROVIDER_ID,
+        ):
+            raise ReconstructionUnsupportedError(
+                "the current cross-series policy supports only HistData.com"
+            )
+        if self.cross_series_constraint_policy.required_symbols != (
+            RECONSTRUCTION_SYMBOLS
+        ):
+            raise ReconstructionUnsupportedError(
+                "the cross-series policy must cover the complete HistData triangle"
+            )
         _validate_public_input_contract(
             source_format=self.source_format,
             timeframe=self.timeframe,
@@ -229,6 +343,44 @@ class ReconstructionPlanSpecV1:
         object.__setattr__(self, "source_format", RECONSTRUCTION_SOURCE_FORMAT)
         object.__setattr__(self, "timeframe", RECONSTRUCTION_TIMEFRAME)
         object.__setattr__(self, "symbols", RECONSTRUCTION_SYMBOLS)
+        proposal_engine_ids = tuple(
+            _required_text(value) for value in self.proposal_engine_ids
+        )
+        selected_engine_ids = tuple(
+            _required_text(value) for value in self.selected_proposal_engine_ids
+        )
+        if len(set(proposal_engine_ids)) != len(proposal_engine_ids):
+            raise ReconstructionUnsupportedError(
+                "proposal_engine_ids cannot contain duplicates"
+            )
+        if len(set(selected_engine_ids)) != len(selected_engine_ids):
+            raise ReconstructionUnsupportedError(
+                "selected_proposal_engine_ids cannot contain duplicates"
+            )
+        evaluation_paths = tuple(
+            str(Path(_required_text(value)).expanduser())
+            for value in self.proposal_evaluation_paths
+        )
+        qualification_path = _optional_text(self.qualification_dossier_path)
+        if qualification_path is not None:
+            qualification_path = str(Path(qualification_path).expanduser())
+        if self.schema_version == RECONSTRUCTION_PLAN_SPEC_SCHEMA_VERSION and (
+            proposal_engine_ids
+            or selected_engine_ids
+            or evaluation_paths
+            or qualification_path is not None
+        ):
+            raise ReconstructionUnsupportedError(
+                "v1 plan translation cannot declare proposal portfolio fields"
+            )
+        object.__setattr__(self, "proposal_engine_ids", proposal_engine_ids)
+        object.__setattr__(
+            self, "selected_proposal_engine_ids", selected_engine_ids
+        )
+        object.__setattr__(self, "proposal_evaluation_paths", evaluation_paths)
+        object.__setattr__(
+            self, "qualification_dossier_path", qualification_path
+        )
         requested_start = self.requested_start_ns
         requested_end = self.requested_end_ns
         exact_bounds = (requested_start, requested_end)
@@ -273,9 +425,11 @@ class ReconstructionPlanSpecV1:
 
     def to_dict(self) -> dict[str, JSONValue]:
         """Return machine-readable planning metadata without row payloads."""
-        return {
+        payload: dict[str, JSONValue] = {
             "schema_version": self.schema_version,
             "source_root": self.source_root,
+            "dataset_catalog_path": self.dataset_catalog_path,
+            "dataset_reference": self.dataset_reference,
             "feed_epoch_definition_path": self.feed_epoch_definition_path,
             "observation_operator_path": self.observation_operator_path,
             "market_context_corpus_path": self.market_context_corpus_path,
@@ -296,6 +450,10 @@ class ReconstructionPlanSpecV1:
             "requested_end_ns": self.requested_end_ns,
             "window_size_ns": self.window_size_ns,
             "delivery_mode": self.delivery_mode.value,
+            "evidence_policy": self.evidence_policy.to_dict(),
+            "cross_series_constraint_policy": (
+                self.cross_series_constraint_policy.to_dict()
+            ),
             "broker_delivery_artifact": (
                 self.broker_delivery_artifact.to_dict()
                 if self.broker_delivery_artifact is not None
@@ -306,9 +464,21 @@ class ReconstructionPlanSpecV1:
             "symbols": list(self.symbols),
             "scientific_nonclaim": SCIENTIFIC_NONCLAIM,
         }
+        if self.schema_version == RECONSTRUCTION_PLAN_SPEC_V2_SCHEMA_VERSION:
+            payload["proposal_engine_ids"] = list(self.proposal_engine_ids)
+            payload["selected_proposal_engine_ids"] = list(
+                self.selected_proposal_engine_ids
+            )
+            payload["proposal_evaluation_paths"] = list(
+                self.proposal_evaluation_paths
+            )
+            payload["qualification_dossier_path"] = (
+                self.qualification_dossier_path
+            )
+        return payload
 
     @classmethod
-    def from_dict(cls, data: Mapping[str, Any]) -> "ReconstructionPlanSpecV1":
+    def from_dict(cls, data: Mapping[str, Any]) -> ReconstructionPlanSpecV1:
         """Restore a strict public plan specification."""
         broker_payload = data.get("broker_delivery_artifact")
         broker_ref = (
@@ -316,8 +486,24 @@ class ReconstructionPlanSpecV1:
             if broker_payload is not None
             else None
         )
+        evidence_payload = data.get("evidence_policy")
+        evidence_policy = (
+            ReconstructionEvidencePolicyV1()
+            if evidence_payload is None
+            else ReconstructionEvidencePolicyV1.from_dict(
+                _mapping(evidence_payload)
+            )
+        )
+        cross_series_payload = data.get("cross_series_constraint_policy")
+        cross_series_constraint_policy = (
+            CrossSeriesConstraintPolicyV1()
+            if cross_series_payload is None
+            else CrossSeriesConstraintPolicyV1.from_dict(
+                _mapping(cross_series_payload)
+            )
+        )
         return cls(
-            source_root=str(data.get("source_root", "")),
+            source_root=_optional_text(data.get("source_root")),
             feed_epoch_definition_path=str(
                 data.get("feed_epoch_definition_path", "")
             ),
@@ -348,6 +534,12 @@ class ReconstructionPlanSpecV1:
             information_mode=InformationMode.from_value(
                 str(data.get("information_mode", ""))
             ),
+            dataset_catalog_path=_optional_text(
+                data.get("dataset_catalog_path")
+            ),
+            dataset_reference=str(
+                data.get("dataset_reference", "reconstruction-selected")
+            ),
             start_period=_optional_text(data.get("start_period")),
             end_period=_optional_text(data.get("end_period")),
             requested_start_ns=(
@@ -369,6 +561,8 @@ class ReconstructionPlanSpecV1:
             delivery_mode=ReconstructionDeliveryMode.from_value(
                 str(data.get("delivery_mode", "modern_reference"))
             ),
+            evidence_policy=evidence_policy,
+            cross_series_constraint_policy=cross_series_constraint_policy,
             broker_delivery_artifact=broker_ref,
             source_format=str(data.get("source_format", "ascii")),
             timeframe=str(data.get("timeframe", "T")),
@@ -378,8 +572,55 @@ class ReconstructionPlanSpecV1:
                     data.get("symbols", RECONSTRUCTION_SYMBOLS)
                 )
             ),
+            proposal_engine_ids=tuple(
+                str(value)
+                for value in _sequence(data.get("proposal_engine_ids", ()))
+            ),
+            selected_proposal_engine_ids=tuple(
+                str(value)
+                for value in _sequence(
+                    data.get("selected_proposal_engine_ids", ())
+                )
+            ),
+            proposal_evaluation_paths=tuple(
+                str(value)
+                for value in _sequence(
+                    data.get("proposal_evaluation_paths", ())
+                )
+            ),
+            qualification_dossier_path=_optional_text(
+                data.get("qualification_dossier_path")
+            ),
             schema_version=str(data.get("schema_version", "")),
         )
+
+
+@dataclass(frozen=True, slots=True)
+class ReconstructionPlanSpecV2(ReconstructionPlanSpecV1):
+    """Executable HistData plan with bound proposal-portfolio evidence."""
+
+    schema_version: str = RECONSTRUCTION_PLAN_SPEC_V2_SCHEMA_VERSION
+
+    def __post_init__(self) -> None:
+        ReconstructionPlanSpecV1.__post_init__(self)
+        if not self.proposal_engine_ids:
+            raise ReconstructionUnsupportedError(
+                "v2 plan requires an explicit proposal engine ordering"
+            )
+        if not self.selected_proposal_engine_ids:
+            raise ReconstructionUnsupportedError(
+                "v2 plan requires an explicit reconstruction selection"
+            )
+        if not set(self.selected_proposal_engine_ids).issubset(
+            self.proposal_engine_ids
+        ):
+            raise ReconstructionUnsupportedError(
+                "v2 reconstruction selection is absent from its portfolio"
+            )
+        if not self.proposal_evaluation_paths:
+            raise ReconstructionUnsupportedError(
+                "v2 plan requires retained proposal evaluation evidence"
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -472,7 +713,7 @@ class ReconstructionPlanShardV1:
         return {**self.identity_payload(), "shard_id": self.shard_id}
 
     @classmethod
-    def from_dict(cls, data: Mapping[str, Any]) -> "ReconstructionPlanShardV1":
+    def from_dict(cls, data: Mapping[str, Any]) -> ReconstructionPlanShardV1:
         """Restore and identity-check one plan shard."""
         return cls(
             start_period=str(data.get("start_period", "")),
@@ -508,6 +749,13 @@ class ReconstructionPlanSetV1:
     status: str
     plan_set_id: str = ""
     schema_version: str = RECONSTRUCTION_PLAN_SET_SCHEMA_VERSION
+    _identity_source_spec_payload: Mapping[str, JSONValue] | None = field(
+        default=None,
+        init=False,
+        repr=False,
+        compare=False,
+        metadata={"reconstruction_schema": False},
+    )
 
     def __post_init__(self) -> None:
         if self.schema_version != RECONSTRUCTION_PLAN_SET_SCHEMA_VERSION:
@@ -521,7 +769,7 @@ class ReconstructionPlanSetV1:
             )
         if len({item.shard_id for item in shards}) != len(shards):
             raise ReconstructionPlanError("plan set contains duplicate shards")
-        for previous, current in zip(shards, shards[1:], strict=False):
+        for previous, current in pairwise(shards):
             if previous.requested_end_ns != current.requested_start_ns:
                 raise ReconstructionPlanError(
                     "plan set shards are not contiguous"
@@ -575,7 +823,11 @@ class ReconstructionPlanSetV1:
         """Return stable plan-set content without the derived identity."""
         return {
             "schema_version": self.schema_version,
-            "source_spec": self.source_spec.to_dict(),
+            "source_spec": (
+                dict(self._identity_source_spec_payload)
+                if self._identity_source_spec_payload is not None
+                else self.source_spec.to_dict()
+            ),
             "shards": [item.to_dict() for item in self.shards],
             "requested_start_ns": self.requested_start_ns,
             "requested_end_ns": self.requested_end_ns,
@@ -589,13 +841,14 @@ class ReconstructionPlanSetV1:
         return {**self.identity_payload(), "plan_set_id": self.plan_set_id}
 
     @classmethod
-    def from_dict(cls, data: Mapping[str, Any]) -> "ReconstructionPlanSetV1":
+    def from_dict(cls, data: Mapping[str, Any]) -> ReconstructionPlanSetV1:
         """Restore and identity-check one full-range plan set."""
         if data.get("scientific_nonclaim") != SCIENTIFIC_NONCLAIM:
             raise ReconstructionPlanError(
                 "plan set scientific nonclaim differs"
             )
-        return cls(
+        supplied_id = str(data.get("plan_set_id", ""))
+        restored = cls(
             source_spec=ReconstructionPlanSpecV1.from_dict(
                 _mapping(data.get("source_spec"))
             ),
@@ -611,9 +864,61 @@ class ReconstructionPlanSetV1:
             ),
             resource_summary=_mapping(data.get("resource_summary")),
             status=str(data.get("status", "")),
-            plan_set_id=str(data.get("plan_set_id", "")),
             schema_version=str(data.get("schema_version", "")),
         )
+        if supplied_id == restored.plan_set_id:
+            return restored
+
+        # Additive v1 source-spec defaults must not invalidate an immutable
+        # plan-set written before those fields existed.  Validate the complete
+        # original identity payload first, then retain that exact payload for
+        # faithful serialization; no shard, resource, or unknown field may use
+        # this compatibility path.
+        raw_identity = {
+            str(key): cast(JSONValue, value)
+            for key, value in data.items()
+            if key != "plan_set_id"
+        }
+        legacy_expected = _stable_id("reconstruction-plan-set", raw_identity)
+        normalized_identity = restored.identity_payload()
+        raw_source = _mapping(raw_identity.get("source_spec"))
+        normalized_source = _mapping(normalized_identity["source_spec"])
+        compatible_missing_fields = {
+            "dataset_catalog_path",
+            "dataset_reference",
+            "evidence_policy",
+            "cross_series_constraint_policy",
+        }
+        raw_without_source = dict(raw_identity)
+        normalized_without_source = dict(normalized_identity)
+        raw_without_source.pop("source_spec", None)
+        normalized_without_source.pop("source_spec", None)
+        missing_source_fields = set(normalized_source).difference(raw_source)
+        source_values_match = all(
+            key in normalized_source and value == normalized_source[key]
+            for key, value in raw_source.items()
+        )
+        legacy_compatible = (
+            supplied_id == legacy_expected
+            and raw_without_source == normalized_without_source
+            and bool(missing_source_fields)
+            and missing_source_fields.issubset(compatible_missing_fields)
+            and source_values_match
+        )
+        if not legacy_compatible:
+            raise ReconstructionPlanError(
+                "reconstruction plan-set identity differs"
+            )
+        object.__setattr__(
+            restored,
+            "_identity_source_spec_payload",
+            {
+                str(key): cast(JSONValue, value)
+                for key, value in raw_source.items()
+            },
+        )
+        object.__setattr__(restored, "plan_set_id", supplied_id)
+        return restored
 
 
 @dataclass(frozen=True, slots=True)
@@ -723,7 +1028,7 @@ class ReconstructionExecutionRequestV1:
     @classmethod
     def from_dict(
         cls, data: Mapping[str, Any]
-    ) -> "ReconstructionExecutionRequestV1":
+    ) -> ReconstructionExecutionRequestV1:
         """Restore and identity-check an operator execution request."""
         nonclaim = str(data.get("scientific_nonclaim", ""))
         if nonclaim != SCIENTIFIC_NONCLAIM:
@@ -848,7 +1153,7 @@ class ReconstructionOperationReceiptV1:
     @classmethod
     def from_dict(
         cls, data: Mapping[str, Any]
-    ) -> "ReconstructionOperationReceiptV1":
+    ) -> ReconstructionOperationReceiptV1:
         """Restore an identity-checked public operation receipt."""
         return cls(
             operation=str(data.get("operation", "")),
@@ -904,6 +1209,132 @@ class ReconstructionClient:
         self.supervisor = supervisor
         self.temporal_client = temporal_client
 
+    def schemas(self) -> ReconstructionSchemaRegistryV1:
+        """Return the installed deterministic reconstruction schema registry."""
+        return reconstruction_schema_registry()
+
+    def proposal_engines(self) -> ProposalEngineRegistryV1:
+        """Return every installed concrete proposal-engine descriptor."""
+        return proposal_engine_registry()
+
+    def proposal_portfolio(
+        self, plan_path: str | Path
+    ) -> ProposalEnginePortfolioV1:
+        """Read the exact qualified/refused portfolio bound to one plan."""
+        plan = _read_plan(plan_path)
+        ref = plan.artifact_graph.get("proposal_engine_portfolio")
+        if ref is None:
+            raise ReconstructionUnsupportedError(
+                "plan has no proposal portfolio artifact"
+            )
+        verify_artifact_ref(ref)
+        payload = _read_json_mapping(ref.path)
+        return ProposalEnginePortfolioV1.from_dict(payload)
+
+    def evaluate_proposal_portfolio(
+        self,
+        benchmark_manifest_path: str | Path,
+        source_root: str | Path,
+        *,
+        output_directory: str | Path,
+        engine_ids: Sequence[str] | None = None,
+    ) -> ProposalPortfolioEvaluationV1:
+        """Execute all HistData benchmark-eligible engines without promotion."""
+        try:
+            return run_histdata_proposal_portfolio_evaluation(
+                benchmark_manifest_path,
+                source_root,
+                output_directory=output_directory,
+                engine_ids=engine_ids,
+            )
+        except (OSError, TypeError, ValueError, RuntimeError) as err:
+            raise ReconstructionValidationError(str(err)) from err
+
+    def qualify_proposal_portfolio(
+        self,
+        evaluation_path: str | Path,
+        experiment_path: str | Path,
+        *,
+        output_directory: str | Path,
+    ) -> PoweredQualificationDossierV1:
+        """Produce powered decisions for one exact evaluation and experiment."""
+        try:
+            return qualify_histdata_proposal_portfolio(
+                evaluation_path,
+                experiment_path,
+                output_directory=output_directory,
+            )
+        except (OSError, TypeError, ValueError, RuntimeError) as err:
+            raise ReconstructionValidationError(str(err)) from err
+
+    def publish_diagnostics(
+        self,
+        spec: DiagnosticPublicationSpecV1 | str | Path,
+        *,
+        output_directory: str | Path,
+    ) -> DiagnosticPublicationManifestV1:
+        """Publish verified HistData reconstruction diagnostic evidence."""
+        try:
+            return publish_reconstruction_diagnostics(
+                spec, output_directory=output_directory
+            )
+        except ModuleNotFoundError as err:
+            raise ReconstructionUnsupportedError(str(err)) from err
+        except (OSError, TypeError, ValueError, RuntimeError) as err:
+            raise ReconstructionValidationError(str(err)) from err
+
+    def diagnostics(self, manifest_path: str | Path) -> Mapping[str, JSONValue]:
+        """Verify and list one publication-safe diagnostic bundle."""
+        try:
+            return cast(
+                Mapping[str, JSONValue],
+                diagnostic_publication_listing(manifest_path),
+            )
+        except (OSError, TypeError, ValueError, RuntimeError) as err:
+            raise ReconstructionValidationError(str(err)) from err
+
+    def experiments(
+        self, root: str | Path
+    ) -> tuple[Mapping[str, JSONValue], ...]:
+        """Discover publication-safe frozen experiment summaries."""
+        return tuple(
+            read_reconstruction_experiment(path).publication_summary()
+            for path in discover_reconstruction_experiments(root)
+        )
+
+    def inspect_experiment(
+        self, path: str | Path
+    ) -> ReconstructionExperimentManifestV1:
+        """Read and identity-check one bounded experiment manifest."""
+        return read_reconstruction_experiment(path)
+
+    def verify_experiment(
+        self, path: str | Path
+    ) -> ReconstructionExperimentVerificationV1:
+        """Recompute catalog, partition, artifact, split, and code identity."""
+        return verify_reconstruction_experiment(
+            read_reconstruction_experiment(path)
+        )
+
+    def compatibility(
+        self,
+        plan: ReconstructionPlanSpecV1 | Mapping[str, Any] | str | Path,
+        *,
+        inspect_source: bool = True,
+        inspect_artifacts: bool = True,
+    ) -> ReconstructionCompatibilityReportV1:
+        """Evaluate one plan without mutating its dataset or artifacts."""
+        payload = (
+            read_compatibility_plan(plan)
+            if isinstance(plan, (str, Path))
+            else plan
+        )
+        return evaluate_reconstruction_compatibility(
+            payload,
+            inspect_source=inspect_source,
+            inspect_artifacts=inspect_artifacts,
+        )
+
     def construct_plan(self, spec: ReconstructionPlanSpecV1) -> ArtifactRef:
         """Build, execution-validate, and persist one content-addressed plan."""
         plan = self._construct_plan_model(spec)
@@ -913,6 +1344,39 @@ class ReconstructionClient:
         self, spec: ReconstructionPlanSpecV1
     ) -> SyntheticInfillPlanV1:
         """Build one validated plan without a redundant persistence readback."""
+        compatibility = self.compatibility(
+            spec,
+            inspect_source=True,
+            # Contract-specific loaders below verify every strong input.  The
+            # public compatibility command additionally inspects their wire
+            # schema before construction.
+            inspect_artifacts=False,
+        )
+        if not compatibility.executable:
+            blocking = next(
+                (
+                    item
+                    for item in compatibility.findings
+                    if item.status
+                    not in {
+                        ReconstructionCompatibilityStatus.EXACT,
+                        ReconstructionCompatibilityStatus.COMPATIBLE_TRANSLATION,
+                        ReconstructionCompatibilityStatus.DEPRECATED,
+                    }
+                ),
+                None,
+            )
+            message = (
+                f"{blocking.code}: {blocking.message}"
+                if blocking is not None
+                else "reconstruction compatibility refused execution"
+            )
+            if (
+                compatibility.status
+                is ReconstructionCompatibilityStatus.RESEARCH_ONLY
+            ):
+                raise ReconstructionRefusedError(message)
+            raise ReconstructionUnsupportedError(message)
         try:
             plan = build_synthetic_infill_plan(
                 spec.source_root,
@@ -937,7 +1401,19 @@ class ReconstructionClient:
                 window_size_ns=spec.window_size_ns,
                 information_mode=spec.information_mode,
                 delivery_mode=spec.delivery_mode,
+                evidence_policy=spec.evidence_policy,
+                cross_series_constraint_policy=(
+                    spec.cross_series_constraint_policy
+                ),
                 broker_delivery_artifact=spec.broker_delivery_artifact,
+                dataset_catalog_path=spec.dataset_catalog_path,
+                dataset_reference=spec.dataset_reference,
+                proposal_engine_ids=spec.proposal_engine_ids,
+                selected_proposal_engine_ids=(
+                    spec.selected_proposal_engine_ids
+                ),
+                proposal_evaluation_paths=spec.proposal_evaluation_paths,
+                qualification_dossier_path=spec.qualification_dossier_path,
             )
             validate_synthetic_infill_plan_for_execution(plan)
             return plan
@@ -1231,6 +1707,7 @@ class ReconstructionClient:
                     "benchmark",
                     "certification",
                     "information",
+                    "policy",
                     "qualification",
                     "validation",
                 )
@@ -1541,6 +2018,10 @@ class ReconstructionClient:
         manifest = load_reconstruction_manifest(path)
         streams = read_reconstruction_streams(path)
         event_count = sum(len(stream.events) for stream in streams)
+        benchmark_evidence = cast(
+            Mapping[str, JSONValue],
+            getattr(manifest.quality, "benchmark_evidence", {}),
+        )
         return {
             "schema_version": RECONSTRUCTION_REPLAY_SCHEMA_VERSION,
             "manifest_path": str(path),
@@ -1552,6 +2033,24 @@ class ReconstructionClient:
             "event_count": event_count,
             "logical_content_sha256": manifest.replay.logical_content_sha256,
             "replay_verified": event_count == manifest.event_count,
+            "proposal_engine_registry_id": benchmark_evidence.get(
+                "proposal_engine_registry_id"
+            ),
+            "proposal_portfolio_id": benchmark_evidence.get(
+                "proposal_portfolio_id"
+            ),
+            "proposal_selected_engine_ids": benchmark_evidence.get(
+                "proposal_selected_engine_ids", []
+            ),
+            "proposal_portfolio_diversity_claim": (
+                benchmark_evidence.get("proposal_portfolio_diversity_claim")
+            ),
+            "proposal_eligibility_audit_ids": (
+                benchmark_evidence.get("proposal_eligibility_audit_ids", [])
+            ),
+            "proposal_evidence_ids": benchmark_evidence.get(
+                "proposal_evidence_ids", []
+            ),
         }
 
     def certify(
@@ -1564,9 +2063,13 @@ class ReconstructionClient:
         ModernReferenceCertificationCampaignResultV1,
     ]:
         """Run the public hash-verified modern-reference evidence campaign."""
-        return run_modern_reference_certification_campaign(
+        result: tuple[
+            ReconstructionCertificationDossierV2,
+            ModernReferenceCertificationCampaignResultV1,
+        ] = run_modern_reference_certification_campaign(
             spec_path, output_directory=output_directory
         )
+        return result
 
     def _executable_plan(
         self, request: ReconstructionExecutionRequestV1
@@ -1581,9 +2084,17 @@ class ReconstructionClient:
         return _bound_plan(request)
 
 
-def read_plan_spec(path: str | Path) -> ReconstructionPlanSpecV1:
+def read_plan_spec(
+    path: str | Path,
+) -> ReconstructionPlanSpecV1 | ReconstructionPlanSpecV2:
     """Read a public plan-spec JSON artifact."""
-    return ReconstructionPlanSpecV1.from_dict(_read_json_mapping(path))
+    payload = _read_json_mapping(path)
+    if (
+        payload.get("schema_version")
+        == RECONSTRUCTION_PLAN_SPEC_V2_SCHEMA_VERSION
+    ):
+        return ReconstructionPlanSpecV2.from_dict(payload)
+    return ReconstructionPlanSpecV1.from_dict(payload)
 
 
 def write_reconstruction_plan_set(
@@ -1716,7 +2227,7 @@ def _attempt_workflow_id(
     digest = hashlib.sha256(
         (
             f"{request.run.run_id}|{request.request_fingerprint}|{execution_attempt_id}"
-        ).encode("utf-8")
+        ).encode()
     ).hexdigest()[:24]
     return f"histdatacom-reconstruction-{request.request_id}-{digest}"
 
@@ -2092,19 +2603,29 @@ __all__ = [
     "DEFAULT_PREVIEW_LIMIT",
     "MAX_PREVIEW_LIMIT",
     "MAX_RECONSTRUCTION_PLAN_SHARDS",
-    "InformationMode",
     "RECONSTRUCTION_EXECUTION_REQUEST_SCHEMA_VERSION",
     "RECONSTRUCTION_PLAN_SET_PREFLIGHT_SCHEMA_VERSION",
     "RECONSTRUCTION_PLAN_SET_SCHEMA_VERSION",
     "RECONSTRUCTION_PLAN_SHARD_SCHEMA_VERSION",
     "RECONSTRUCTION_PLAN_SPEC_SCHEMA_VERSION",
+    "RECONSTRUCTION_PLAN_SPEC_V2_SCHEMA_VERSION",
     "RECONSTRUCTION_PREVIEW_SCHEMA_VERSION",
     "RECONSTRUCTION_RECEIPT_SCHEMA_VERSION",
     "RECONSTRUCTION_REPLAY_SCHEMA_VERSION",
     "RECONSTRUCTION_SOURCE_FORMAT",
     "RECONSTRUCTION_SYMBOLS",
     "RECONSTRUCTION_TIMEFRAME",
+    "CrossSeriesConstraintPolicyV1",
+    "DiagnosticPublicationManifestV1",
+    "DiagnosticPublicationSpecV1",
+    "InformationMode",
+    "ModernReferenceCertificationCampaignResultV1",
+    "ModernReferenceCertificationCampaignSpecV1",
+    "ReconstructionCertificationDossierV2",
     "ReconstructionClient",
+    "ReconstructionCompatibilityReportV1",
+    "ReconstructionCompatibilityStatus",
+    "ReconstructionEvidencePolicyV1",
     "ReconstructionExecutionRequestV1",
     "ReconstructionExitCode",
     "ReconstructionOperationReceiptV1",
@@ -2113,14 +2634,13 @@ __all__ = [
     "ReconstructionPlanSetV1",
     "ReconstructionPlanShardV1",
     "ReconstructionPlanSpecV1",
+    "ReconstructionPlanSpecV2",
     "ReconstructionPreflightV1",
     "ReconstructionPublicError",
     "ReconstructionRefusedError",
+    "ReconstructionSchemaRegistryV1",
     "ReconstructionUnsupportedError",
     "ReconstructionValidationError",
-    "ModernReferenceCertificationCampaignResultV1",
-    "ModernReferenceCertificationCampaignSpecV1",
-    "ReconstructionCertificationDossierV2",
     "read_execution_request",
     "read_modern_reference_certification_campaign_spec",
     "read_operation_receipt",

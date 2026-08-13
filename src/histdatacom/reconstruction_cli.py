@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import argparse
-from collections.abc import Mapping, Sequence
 import json
-from pathlib import Path
 import sys
+from collections.abc import Mapping, Sequence
+from pathlib import Path
 from typing import Any
 
 from histdatacom.cli_config import (
@@ -27,8 +27,9 @@ from histdatacom.reconstruction import (
     write_execution_request,
     write_operation_receipt,
 )
-from histdatacom.synthetic.information import InformationMode
+from histdatacom.reconstruction_schema import ReconstructionCompatibilityStatus
 from histdatacom.synthetic.certification import CertificationState
+from histdatacom.synthetic.information import InformationMode
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -59,6 +60,97 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(
         dest="reconstruction_command", required=True
     )
+
+    schemas = subparsers.add_parser(
+        "schemas",
+        help="discover installed reconstruction and evidence contracts",
+    )
+    schemas.add_argument(
+        "--json", action="store_true", default=argparse.SUPPRESS
+    )
+
+    engines = subparsers.add_parser(
+        "engines",
+        help="discover concrete proposal engines and their executable scope",
+    )
+    engines.add_argument(
+        "--json", action="store_true", default=argparse.SUPPRESS
+    )
+
+    portfolio = subparsers.add_parser(
+        "portfolio",
+        help="inspect qualified selections and refusals bound to one plan",
+    )
+    portfolio.add_argument("--plan", required=True, metavar="PATH")
+
+    engine_evaluate = subparsers.add_parser(
+        "engine-evaluate",
+        help="run every HistData benchmark-eligible proposal engine",
+    )
+    engine_evaluate.add_argument(
+        "--benchmark-manifest", required=True, metavar="PATH"
+    )
+    engine_evaluate.add_argument("--source-root", required=True, metavar="PATH")
+    engine_evaluate.add_argument(
+        "--output-directory", required=True, metavar="PATH"
+    )
+    engine_evaluate.add_argument(
+        "--engine",
+        action="append",
+        default=None,
+        metavar="ENGINE_ID",
+        help="evaluate one engine (repeat for an explicit portfolio)",
+    )
+
+    qualify = subparsers.add_parser(
+        "qualify",
+        help="power-qualify one exact HistData experiment and engine evaluation",
+    )
+    qualify.add_argument("--evaluation", required=True, metavar="PATH")
+    qualify.add_argument("--experiment", required=True, metavar="PATH")
+    qualify.add_argument("--output-directory", required=True, metavar="PATH")
+
+    diagnostic_build = subparsers.add_parser(
+        "diagnostic-build",
+        help="build verified chart data and optional deterministic static figures",
+    )
+    diagnostic_build.add_argument("--spec", required=True, metavar="PATH")
+    diagnostic_build.add_argument(
+        "--output-directory", required=True, metavar="PATH"
+    )
+
+    diagnostic_list = subparsers.add_parser(
+        "diagnostic-list",
+        help="verify and list one reconstruction diagnostic publication",
+    )
+    diagnostic_list.add_argument("--manifest", required=True, metavar="PATH")
+
+    compatibility = subparsers.add_parser(
+        "compatibility",
+        help="audit a proposed plan against installed executable contracts",
+    )
+    compatibility.add_argument("--plan", required=True, metavar="PATH")
+    compatibility.add_argument(
+        "--json", action="store_true", default=argparse.SUPPRESS
+    )
+
+    experiment_list = subparsers.add_parser(
+        "experiment-list",
+        help="discover publication-safe frozen HistData experiments",
+    )
+    experiment_list.add_argument("--root", required=True, metavar="PATH")
+
+    experiment_inspect = subparsers.add_parser(
+        "experiment-inspect",
+        help="inspect one frozen experiment without exposing local paths",
+    )
+    experiment_inspect.add_argument("--manifest", required=True, metavar="PATH")
+
+    experiment_verify = subparsers.add_parser(
+        "experiment-verify",
+        help="verify one experiment's catalogs, partitions, artifacts, and code",
+    )
+    experiment_verify.add_argument("--manifest", required=True, metavar="PATH")
 
     plan = subparsers.add_parser(
         "plan", help="construct and validate a plan from a JSON plan spec"
@@ -211,7 +303,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             exit_code=ReconstructionExitCode.INVALID_PLAN,
             as_json="--json" in raw_argv,
         )
-    except Exception as err:  # pragma: no cover - defensive CLI boundary
+    except Exception as err:  # noqa: BLE001  # pragma: no cover - CLI boundary
         return _write_error(
             err,
             reason_code="reconstruction_runtime_failure",
@@ -232,6 +324,69 @@ def _run_command(
     client: ReconstructionClient, args: argparse.Namespace
 ) -> tuple[Mapping[str, Any], ReconstructionExitCode]:
     command = args.reconstruction_command
+    if command == "schemas":
+        return client.schemas().to_dict(), ReconstructionExitCode.SUCCESS
+    if command == "engines":
+        return (
+            client.proposal_engines().to_dict(),
+            ReconstructionExitCode.SUCCESS,
+        )
+    if command == "portfolio":
+        return (
+            client.proposal_portfolio(args.plan).to_dict(),
+            ReconstructionExitCode.SUCCESS,
+        )
+    if command == "engine-evaluate":
+        evaluation = client.evaluate_proposal_portfolio(
+            args.benchmark_manifest,
+            args.source_root,
+            output_directory=args.output_directory,
+            engine_ids=args.engine,
+        )
+        return evaluation.to_dict(), ReconstructionExitCode.SUCCESS
+    if command == "qualify":
+        qualification = client.qualify_proposal_portfolio(
+            args.evaluation,
+            args.experiment,
+            output_directory=args.output_directory,
+        )
+        return qualification.to_dict(), ReconstructionExitCode.SUCCESS
+    if command == "diagnostic-build":
+        publication = client.publish_diagnostics(
+            args.spec, output_directory=args.output_directory
+        )
+        return publication.to_dict(), ReconstructionExitCode.SUCCESS
+    if command == "diagnostic-list":
+        return client.diagnostics(args.manifest), ReconstructionExitCode.SUCCESS
+    if command == "compatibility":
+        report = client.compatibility(args.plan)
+        if report.executable:
+            code = ReconstructionExitCode.SUCCESS
+        elif report.status is ReconstructionCompatibilityStatus.RESEARCH_ONLY:
+            code = ReconstructionExitCode.REFUSED
+        else:
+            code = ReconstructionExitCode.INVALID_PLAN
+        return report.to_dict(), code
+    if command == "experiment-list":
+        return (
+            {"experiments": list(client.experiments(args.root))},
+            ReconstructionExitCode.SUCCESS,
+        )
+    if command == "experiment-inspect":
+        return (
+            client.inspect_experiment(args.manifest).publication_summary(),
+            ReconstructionExitCode.SUCCESS,
+        )
+    if command == "experiment-verify":
+        verification = client.verify_experiment(args.manifest)
+        return (
+            verification.to_dict(),
+            (
+                ReconstructionExitCode.SUCCESS
+                if verification.verified
+                else ReconstructionExitCode.VALIDATION_FAILURE
+            ),
+        )
     if command == "plan":
         ref = client.construct_plan(read_plan_spec(args.spec))
         return ref.to_dict(), ReconstructionExitCode.SUCCESS
@@ -316,12 +471,12 @@ def _run_command(
     if command == "replay":
         return client.replay(args.manifest), ReconstructionExitCode.SUCCESS
     if command == "certify":
-        dossier, result = client.certify(
+        certification_dossier, result = client.certify(
             args.spec, output_directory=args.output_directory
         )
         payload = result.to_dict()
-        payload["summary"] = dossier.summary
-        return payload, _certification_exit_code(dossier.state)
+        payload["summary"] = certification_dossier.summary
+        return payload, _certification_exit_code(certification_dossier.state)
     raise ValueError(f"unsupported reconstruction command: {command}")
 
 
@@ -347,7 +502,57 @@ def _certification_exit_code(
 
 def _write_result(result: Mapping[str, Any], *, as_json: bool) -> None:
     if as_json:
-        print(json.dumps(result, indent=2, sort_keys=True))  # noqa:T201
+        print(json.dumps(result, indent=2, sort_keys=True))
+        return
+    schema_version = result.get("schema_version")
+    if schema_version == "histdatacom.reconstruction-schema-registry.v1":
+        print(
+            "Reconstruction schemas "
+            f"({result.get('registry_id', '')}): "
+            f"{result.get('contract_count', 0)} contracts"
+        )
+        scope = result.get("current_scope", {})
+        if isinstance(scope, Mapping):
+            print(
+                "executable scope: "
+                f"{scope.get('provider')}/"
+                f"{scope.get('source_format')}/"
+                f"{scope.get('timeframe')}"
+            )
+            print("broker/OANDA: later milestone")
+        counts = result.get("status_counts", {})
+        if isinstance(counts, Mapping):
+            summary = ", ".join(
+                f"{key}={counts[key]}" for key in sorted(counts)
+            )
+            print(f"contract status: {summary}")
+        return
+    if schema_version == "histdatacom.reconstruction-compatibility-report.v1":
+        print(
+            "Reconstruction compatibility "
+            f"{result.get('status')} ({result.get('report_id', '')})"
+        )
+        print(f"executable: {str(bool(result.get('executable'))).lower()}")
+        for finding in result.get("findings", ()):  # type: ignore[union-attr]
+            if isinstance(finding, Mapping):
+                print(
+                    f"{finding.get('status')} {finding.get('code')}: "
+                    f"{finding.get('message')}"
+                )
+        return
+    if schema_version == "histdatacom.reconstruction-diagnostic-publication.v1":
+        print(
+            "Reconstruction diagnostics "
+            f"({result.get('publication_id', '')}): "
+            f"{result.get('family_count', 0)} families, "
+            f"{result.get('chart_count', 0)} views"
+        )
+        counts = result.get("status_counts", {})
+        if isinstance(counts, Mapping):
+            summary = ", ".join(
+                f"{key}={counts[key]}" for key in sorted(counts)
+            )
+            print(f"diagnostic status: {summary}")
         return
     status = result.get("status") or result.get("kind") or "complete"
     identity = (
@@ -358,10 +563,10 @@ def _write_result(result: Mapping[str, Any], *, as_json: bool) -> None:
         or ""
     )
     suffix = f" ({identity})" if identity else ""
-    print(f"Reconstruction {status}{suffix}")  # noqa:T201
+    print(f"Reconstruction {status}{suffix}")
     for key in ("path", "request_path", "receipt_path", "manifest_path"):
         if result.get(key):
-            print(f"{key}: {result[key]}")  # noqa:T201
+            print(f"{key}: {result[key]}")
 
 
 def _write_error(
@@ -378,11 +583,9 @@ def _write_error(
         "exit_code": int(exit_code),
     }
     if as_json:
-        print(json.dumps(payload, sort_keys=True), file=sys.stderr)  # noqa:T201
+        print(json.dumps(payload, sort_keys=True), file=sys.stderr)
     else:
-        print(  # noqa:T201
-            f"reconstruction error [{reason_code}]: {error}", file=sys.stderr
-        )
+        print(f"reconstruction error [{reason_code}]: {error}", file=sys.stderr)
     return int(exit_code)
 
 

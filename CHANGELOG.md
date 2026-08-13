@@ -46,6 +46,11 @@
 
 ### Fixed
 
+- **reconstruction**: preserve and revalidate the exact content identity of
+  retained v1 plan sets written before additive dataset, evidence, and
+  cross-series source-spec defaults, without accepting changed shards,
+  resources, or unknown fields; admit the earlier complete all-ensemble task
+  layout while continuing to reject incomplete member/window grids (#491).
 - **portability**: make peak-RSS measurement import-safe on Windows, ship
   the required IANA timezone data, use Python 3.10-compatible container
   timestamps and portable filesystem durability operations, and isolate

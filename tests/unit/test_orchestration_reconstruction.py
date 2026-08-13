@@ -921,6 +921,36 @@ def test_client_submission_adds_workspace_queues_and_persists_snapshot(
     assert snapshot["metadata"]["window_count"] == 1
 
 
+def test_client_submission_normalizes_missing_temporal_run_id(
+    tmp_path: Path,
+) -> None:
+    """Temporal may omit a run ID from a newly started workflow handle."""
+    request = _request(tmp_path)
+    config = build_orchestration_worker_config(
+        workspace=tmp_path,
+        runtime_home=tmp_path / "runtime",
+    )
+
+    class FakeClient:
+        async def start_workflow(self, workflow, payload, **options):
+            return SimpleNamespace(id=options["id"], run_id=None)
+
+    handle = asyncio.run(
+        submit_reconstruction_request(
+            request,
+            config=config,
+            client=FakeClient(),
+        )
+    )
+
+    assert handle.run_id == ""
+    snapshot = ReconstructionCheckpointStore(
+        request.manifest_store_root
+    ).store.get_job_snapshot(handle.workflow_id)
+    assert snapshot is not None
+    assert snapshot["run_id"] == ""
+
+
 def test_recovery_submission_uses_fresh_parent_and_child_identities(
     tmp_path: Path,
 ) -> None:

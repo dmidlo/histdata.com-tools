@@ -22,6 +22,10 @@ from histdatacom.data_quality.contracts import (
     QualityTargetKind,
 )
 from histdatacom.histdata_ascii import TICK
+from histdatacom.reconstruction_evidence import (
+    ReconstructionEvidencePolicyV1,
+    resolve_reconstruction_evidence_thresholds,
+)
 from histdatacom.runtime_contracts import JSONValue
 
 TRAINING_SCHEMA_VERSION = "histdatacom.ascii-tick-training-features.v1"
@@ -658,12 +662,6 @@ def enrich_tick_cache_with_training_features(
     """
     import polars as pl
 
-    _ = (
-        quality_report,
-        quality_payload,
-        fingerprint_payload,
-        classification_profile,
-    )
     context = _training_context(
         target,
         symbol=symbol,
@@ -674,18 +672,63 @@ def enrich_tick_cache_with_training_features(
     )
     _require_ascii_tick_context(context)
     if "training_schema_version" in getattr(frame, "columns", ()):
+        if any(
+            value is not None
+            for value in (
+                quality_report,
+                quality_payload,
+                fingerprint_payload,
+                classification_profile,
+            )
+        ):
+            raise ValueError(
+                "external evidence cannot be silently applied to an already "
+                "enriched tick cache"
+            )
         return _ensure_registered_columns(frame)
 
     _require_observed_tick_columns(frame)
     observed_columns = set(frame.columns)
     series_id = _series_id(context)
+    median_spread = frame.select(
+        (pl.col("ask") - pl.col("bid"))
+        .filter(
+            pl.col("ask").is_not_null()
+            & pl.col("bid").is_not_null()
+            & (pl.col("ask") >= pl.col("bid"))
+        )
+        .median()
+    ).item()
+    threshold_resolution = resolve_reconstruction_evidence_thresholds(
+        spreads=(() if median_spread is None else (float(median_spread),)),
+        quality_report=quality_report,
+        quality_payload=quality_payload,
+        fingerprint_payload=fingerprint_payload,
+        classification_profile=classification_profile,
+        policy=ReconstructionEvidencePolicyV1(
+            suspicious_gap_fallback_ms=DEFAULT_SUSPICIOUS_TICK_GAP_MS
+        ),
+    )
+    external_issue_rows = _exact_quality_issue_rows(
+        quality_report,
+        quality_payload,
+        context=context,
+        row_timestamps_ms={
+            index: value
+            for index, value in enumerate(
+                frame.get_column("datetime").to_list(), start=1
+            )
+            if isinstance(value, int) and not isinstance(value, bool)
+        },
+    )
 
     enriched = frame.with_row_index("__training_row_index", offset=1)
     partial_exprs = [
         pl.col(column).is_null() if column in observed_columns else pl.lit(True)
         for column in ("datetime", "bid", "ask", "vol")
     ]
-    suspicious_gap_threshold = _suspicious_gap_threshold(context)
+    suspicious_gap_threshold = threshold_resolution.suspicious_gap_ms
+    wide_spread_threshold = threshold_resolution.wide_spread_threshold
     enriched = enriched.with_columns(
         [
             pl.lit(TRAINING_SCHEMA_VERSION).alias("training_schema_version"),
@@ -708,46 +751,80 @@ def enrich_tick_cache_with_training_features(
             .diff()
             .alias("gap_from_previous_ms"),
             pl.lit(None).cast(pl.Int64).alias("expected_gap_ms"),
-            pl.sum_horizontal(partial_exprs)
-            .gt(0)
-            .alias("dq_issue_partial_row"),
+            _with_exact_evidence_rows(
+                pl.sum_horizontal(partial_exprs).gt(0),
+                "dq_issue_partial_row",
+                external_issue_rows,
+            ).alias("dq_issue_partial_row"),
         ]
     )
     enriched = enriched.with_columns(
         [
-            pl.col("datetime")
-            .is_duplicated()
-            .fill_null(False)
-            .alias("dq_issue_duplicate_timestamp"),
-            pl.col("gap_from_previous_ms")
-            .lt(0)
-            .fill_null(False)
-            .alias("dq_issue_non_monotonic_timestamp"),
-            pl.col("gap_from_previous_ms")
-            .gt(suspicious_gap_threshold)
-            .fill_null(False)
-            .alias("dq_issue_suspicious_gap"),
-            pl.lit(False).alias("dq_issue_weekend_activity"),
-            pl.lit(False).alias("dq_issue_session_closed"),
-            pl.col("spread")
-            .lt(0)
-            .fill_null(False)
-            .alias("dq_issue_negative_spread"),
-            pl.col("spread")
-            .eq(0)
-            .fill_null(False)
-            .alias("dq_issue_zero_spread"),
-            pl.col("spread")
-            .gt(0.01)
-            .fill_null(False)
-            .alias("dq_issue_wide_spread"),
-            _invalid_row_expr().alias("dq_issue_invalid_row"),
-            pl.lit(False).alias("dq_issue_source_unavailable"),
-            pl.lit(False).alias("dq_issue_topology_unavailable"),
-            pl.lit(False).alias("dq_issue_distribution_missing"),
-            pl.lit(False).alias("dq_issue_precision_warning"),
-            pl.lit(False).alias("dq_issue_cache_float_precision"),
-            pl.lit(False).alias("dq_issue_fingerprint_unready"),
+            _with_exact_evidence_rows(
+                pl.col("datetime").is_duplicated().fill_null(False),
+                "dq_issue_duplicate_timestamp",
+                external_issue_rows,
+            ).alias("dq_issue_duplicate_timestamp"),
+            _with_exact_evidence_rows(
+                pl.col("gap_from_previous_ms").lt(0).fill_null(False),
+                "dq_issue_non_monotonic_timestamp",
+                external_issue_rows,
+            ).alias("dq_issue_non_monotonic_timestamp"),
+            _with_exact_evidence_rows(
+                pl.col("gap_from_previous_ms")
+                .gt(suspicious_gap_threshold)
+                .fill_null(False),
+                "dq_issue_suspicious_gap",
+                external_issue_rows,
+            ).alias("dq_issue_suspicious_gap"),
+            *(
+                _with_exact_evidence_rows(
+                    pl.lit(False), column, external_issue_rows
+                ).alias(column)
+                for column in (
+                    "dq_issue_weekend_activity",
+                    "dq_issue_session_closed",
+                )
+            ),
+            _with_exact_evidence_rows(
+                pl.col("spread").lt(0).fill_null(False),
+                "dq_issue_negative_spread",
+                external_issue_rows,
+            ).alias("dq_issue_negative_spread"),
+            _with_exact_evidence_rows(
+                pl.col("spread").eq(0).fill_null(False),
+                "dq_issue_zero_spread",
+                external_issue_rows,
+            ).alias("dq_issue_zero_spread"),
+            _with_exact_evidence_rows(
+                (
+                    pl.lit(False)
+                    if wide_spread_threshold is None
+                    else pl.col("spread")
+                    .gt(wide_spread_threshold)
+                    .fill_null(False)
+                ),
+                "dq_issue_wide_spread",
+                external_issue_rows,
+            ).alias("dq_issue_wide_spread"),
+            _with_exact_evidence_rows(
+                _invalid_row_expr(),
+                "dq_issue_invalid_row",
+                external_issue_rows,
+            ).alias("dq_issue_invalid_row"),
+            *(
+                _with_exact_evidence_rows(
+                    pl.lit(False), column, external_issue_rows
+                ).alias(column)
+                for column in (
+                    "dq_issue_source_unavailable",
+                    "dq_issue_topology_unavailable",
+                    "dq_issue_distribution_missing",
+                    "dq_issue_precision_warning",
+                    "dq_issue_cache_float_precision",
+                    "dq_issue_fingerprint_unready",
+                )
+            ),
         ]
     )
     enriched = enriched.with_columns(
@@ -1536,6 +1613,136 @@ def _require_observed_tick_columns(frame: Any) -> None:
         )
 
 
+def _exact_quality_issue_rows(
+    quality_report: QualityReport | None,
+    quality_payload: Mapping[str, JSONValue] | None,
+    *,
+    context: Mapping[str, str],
+    row_timestamps_ms: Mapping[int, int],
+) -> dict[str, tuple[int, ...]]:
+    """Return only explicitly row-located external findings by issue column."""
+    rows: dict[str, set[int]] = {}
+    if quality_report is not None:
+        for finding in quality_report.findings:
+            column = _issue_column_for_evidence(
+                f"{finding.code} {finding.rule_id}"
+            )
+            row_number = finding.location.row_number
+            timestamp_ms = finding.location.timestamp_utc_ms
+            if (
+                column is not None
+                and row_number is not None
+                and row_number > 0
+                and timestamp_ms is not None
+                and row_timestamps_ms.get(row_number) == timestamp_ms
+                and _quality_target_matches_context(finding.target, context)
+            ):
+                rows.setdefault(column, set()).add(row_number)
+    if quality_payload is not None:
+        rule_results = quality_payload.get("rule_results")
+        if isinstance(rule_results, list):
+            for result in rule_results:
+                if not isinstance(result, Mapping):
+                    continue
+                findings = result.get("findings")
+                if not isinstance(findings, list):
+                    continue
+                for payload_finding in findings:
+                    if not isinstance(payload_finding, Mapping):
+                        continue
+                    location = payload_finding.get("location")
+                    if not isinstance(location, Mapping):
+                        continue
+                    payload_row_number = location.get("row_number")
+                    if (
+                        isinstance(payload_row_number, bool)
+                        or not isinstance(payload_row_number, int)
+                        or payload_row_number <= 0
+                    ):
+                        continue
+                    payload_timestamp_ms = location.get("timestamp_utc_ms")
+                    target = payload_finding.get("target", result.get("target"))
+                    if (
+                        isinstance(payload_timestamp_ms, bool)
+                        or not isinstance(payload_timestamp_ms, int)
+                        or row_timestamps_ms.get(payload_row_number)
+                        != payload_timestamp_ms
+                        or not _quality_target_matches_context(target, context)
+                    ):
+                        continue
+                    column = _issue_column_for_evidence(
+                        f"{payload_finding.get('code', '')} "
+                        f"{payload_finding.get('rule_id', result.get('rule_id', ''))}"
+                    )
+                    if column is not None:
+                        rows.setdefault(column, set()).add(payload_row_number)
+    return {
+        column: tuple(sorted(row_numbers))
+        for column, row_numbers in rows.items()
+    }
+
+
+def _quality_target_matches_context(
+    target: Any, context: Mapping[str, str]
+) -> bool:
+    return (
+        _context_value(target, "symbol").upper() == context["symbol"]
+        and _context_value(target, "period") == context["period"]
+        and (
+            not _context_value(target, "data_format")
+            or _context_value(target, "data_format").lower()
+            == context["format"]
+        )
+        and (
+            not _context_value(target, "timeframe")
+            or _normalize_timeframe(_context_value(target, "timeframe"))
+            == context["timeframe"]
+        )
+    )
+
+
+def _issue_column_for_evidence(value: str) -> str | None:
+    normalized = value.lower()
+    return next(
+        (
+            column
+            for token, column in (
+                ("non_monotonic", "dq_issue_non_monotonic_timestamp"),
+                ("suspicious_gap", "dq_issue_suspicious_gap"),
+                ("duplicate", "dq_issue_duplicate_timestamp"),
+                ("weekend", "dq_issue_weekend_activity"),
+                ("session_closed", "dq_issue_session_closed"),
+                ("negative_spread", "dq_issue_negative_spread"),
+                ("zero_spread", "dq_issue_zero_spread"),
+                ("wide_spread", "dq_issue_wide_spread"),
+                ("source_unavailable", "dq_issue_source_unavailable"),
+                ("topology_unavailable", "dq_issue_topology_unavailable"),
+                ("distribution_missing", "dq_issue_distribution_missing"),
+                ("precision", "dq_issue_precision_warning"),
+                ("fingerprint_unready", "dq_issue_fingerprint_unready"),
+                ("partial", "dq_issue_partial_row"),
+                ("invalid", "dq_issue_invalid_row"),
+            )
+            if token in normalized
+        ),
+        None,
+    )
+
+
+def _with_exact_evidence_rows(
+    expression: Any,
+    column: str,
+    rows: Mapping[str, tuple[int, ...]],
+) -> Any:
+    """Union a local row fact with exact external row identities only."""
+    import polars as pl
+
+    selected = rows.get(column, ())
+    if not selected:
+        return expression
+    return expression | pl.col("__training_row_index").is_in(selected)
+
+
 def _series_id(context: Mapping[str, str]) -> str:
     return ":".join(
         (
@@ -1545,14 +1752,6 @@ def _series_id(context: Mapping[str, str]) -> str:
             context["source"].lower(),
         )
     )
-
-
-def _suspicious_gap_threshold(context: Mapping[str, str]) -> int:
-    value = context.get("suspicious_gap_ms", "")
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return DEFAULT_SUSPICIOUS_TICK_GAP_MS
 
 
 def _invalid_row_expr() -> Any:

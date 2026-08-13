@@ -1,6 +1,6 @@
 """Real-artifact closure gates for first-party reconstruction handlers.
 
-Set ``HISTDATACOM_REAL_RECONSTRUCTION_PLAN`` to a #465 plan artifact.  These
+Set ``HISTDATACOM_REAL_RECONSTRUCTION_PLAN`` to a #486 plan artifact.  These
 tests never replace scientific handlers; they re-home only execution roots so
 the committed products and injected failures remain isolated under pytest's
 temporary directory.
@@ -9,25 +9,22 @@ temporary directory.
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass, replace
-from datetime import datetime, timezone
 import hashlib
 import json
 import os
+from dataclasses import dataclass, replace
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 from histdatacom import reconstruction_cli
-from histdatacom.reconstruction import (
-    ReconstructionClient,
-    read_operation_receipt,
-    write_execution_request,
+from histdatacom.cross_series_constraints import (
+    CROSS_SERIES_CONSTRAINT_BUNDLE_ARTIFACT_KIND,
+    read_cross_series_constraint_bundle,
 )
-
 from histdatacom.orchestration.reconstruction import (
-    RegisteredReconstructionStageExecutor,
     ReconstructionCheckpointStore,
     ReconstructionStage,
     ReconstructionStageCommandV1,
@@ -36,8 +33,19 @@ from histdatacom.orchestration.reconstruction import (
     ReconstructionStageStatus,
     ReconstructionWindowTaskV1,
     ReconstructionWorkflowRequestV1,
+    RegisteredReconstructionStageExecutor,
     run_reconstruction_window,
 )
+from histdatacom.reconstruction import (
+    ReconstructionClient,
+    read_operation_receipt,
+    write_execution_request,
+)
+from histdatacom.reconstruction_evidence import (
+    RECONSTRUCTION_EVIDENCE_PROJECTION_ARTIFACT_KIND,
+    read_point_in_time_evidence_projection,
+)
+from histdatacom.reconstruction_experiment import read_reconstruction_experiment
 from histdatacom.runtime_contracts import ArtifactRef
 from histdatacom.synthetic.contracts import canonical_contract_json
 from histdatacom.synthetic.persistence import (
@@ -48,6 +56,7 @@ from histdatacom.synthetic.persistence import (
     read_reconstruction_streams,
 )
 from histdatacom.synthetic.reconstruction_handlers import (
+    STAGING_DESCRIPTOR_ARTIFACT_KIND,
     atomic_commit_handler,
     carving_handler,
     cross_series_reconciliation_handler,
@@ -58,8 +67,8 @@ from histdatacom.synthetic.reconstruction_handlers import (
     validation_handler,
 )
 from histdatacom.synthetic.reconstruction_plan import (
-    ReconstructionPlanResourceSummaryV1,
     ReconstructionPlanExecutionManifestV1,
+    ReconstructionPlanResourceSummaryV1,
     SyntheticInfillPlanV1,
     read_reconstruction_plan_execution_manifest,
     read_synthetic_infill_plan,
@@ -148,6 +157,10 @@ def test_real_triangle_is_deterministic_and_recovers_post_rename_crash(
     assert recovered.checkpoint.phase is ReconstructionCommitPhase.COMMITTED
     assert recovered.outcomes[-1].output_refs[0].metadata["idempotent_retry"]
     first_manifest = _committed_manifest(recovered)
+    experiment = read_reconstruction_experiment(
+        first.plan.artifact_graph["experiment_manifest"].path
+    )
+    assert first_manifest.source.experiment_id == experiment.experiment_id
     first_streams = read_reconstruction_streams(
         recovered.committed_manifest_ref.path  # type: ignore[union-attr]
     )
@@ -163,6 +176,104 @@ def test_real_triangle_is_deterministic_and_recovers_post_rename_crash(
         assert telemetry["scratch_bytes"] >= 0
         assert telemetry["output_bytes"] > 0
         assert "candidate_amplification" in telemetry
+    source_outcome = next(
+        outcome
+        for outcome in recovered.outcomes
+        if outcome.stage is ReconstructionStage.SOURCE_ENRICHMENT
+    )
+    source_ref = next(
+        ref
+        for ref in source_outcome.output_refs
+        if ref.kind == "reconstruction_source_stage_v2"
+    )
+    source_manifest = json.loads(
+        Path(source_ref.path).read_text(encoding="utf-8")
+    )
+    assert source_manifest["point_in_time_evidence_projection_ids"]
+    assert set(source_manifest["point_in_time_evidence_use"]) == {
+        "eurgbp",
+        "eurusd",
+        "gbpusd",
+    }
+    projection_refs = tuple(
+        ArtifactRef.from_dict(value)
+        for value in source_manifest["point_in_time_evidence_refs"].values()
+    )
+    assert all(
+        ref.kind == RECONSTRUCTION_EVIDENCE_PROJECTION_ARTIFACT_KIND
+        for ref in projection_refs
+    )
+    projections = tuple(
+        read_point_in_time_evidence_projection(ref.path)
+        for ref in projection_refs
+    )
+    assert all(projection.records for projection in projections)
+    assert all(
+        len(projection.to_json()) < 1_000_000 for projection in projections
+    )
+    assert all(
+        '"full_tick_rows_embedded":false' in item.to_json()
+        for item in projections
+    )
+    constraint_refs = tuple(
+        ArtifactRef.from_dict(value)
+        for value in source_manifest["cross_series_constraint_refs"].values()
+    )
+    assert all(
+        ref.kind == CROSS_SERIES_CONSTRAINT_BUNDLE_ARTIFACT_KIND
+        for ref in constraint_refs
+    )
+    constraint_bundles = tuple(
+        read_cross_series_constraint_bundle(ref.path) for ref in constraint_refs
+    )
+    assert [item.bundle_id for item in constraint_bundles] == (
+        source_manifest["cross_series_constraint_bundle_ids"]
+    )
+    assert all(item.windows for item in constraint_bundles)
+    assert all(len(item.to_json()) < 1_000_000 for item in constraint_bundles)
+    assert all(
+        '"full_tick_rows_embedded":false' in item.to_json()
+        for item in constraint_bundles
+    )
+    assert source_manifest["cross_series_constraint_use"]["status"] in {
+        "applied",
+        "not_applicable",
+    }
+    proposal_outcome = next(
+        outcome
+        for outcome in recovered.outcomes
+        if outcome.stage is ReconstructionStage.PROPOSAL
+    )
+    proposal_manifest = json.loads(
+        Path(proposal_outcome.output_refs[0].path).read_text(encoding="utf-8")
+    )
+    assert {
+        value["session_state"]
+        for value in proposal_manifest["query_conditions"].values()
+    } == {"asia"}
+    if proposal_manifest["proposal_engine_id"].startswith(
+        "histdatacom.marked-hawkes."
+    ):
+        assert proposal_manifest["proposal_generation_evidence"]["status"] == (
+            "generated"
+        )
+    assert proposal_manifest["synchronization_constraint_window_id"] in (
+        source_manifest["cross_series_constraint_window_ids"]
+    )
+    assert proposal_manifest["cross_series_constraint_use"]["status"] == (
+        "applied"
+    )
+    proposal_ledger_ref = ArtifactRef.from_dict(
+        proposal_manifest["batch_ledger_ref"]
+    )
+    with Path(proposal_ledger_ref.path).open("rb") as stream:
+        proposal_rows = tuple(json.loads(line) for line in stream)
+    assert all("cross_series_constraint_use" in row for row in proposal_rows)
+    assert all(
+        row["cross_series_synchronization_constraint_window_id"]
+        == proposal_manifest["synchronization_constraint_window_id"]
+        for row in proposal_rows
+    )
     carving_outcome = next(
         outcome
         for outcome in recovered.outcomes
@@ -175,16 +286,92 @@ def test_real_triangle_is_deterministic_and_recovers_post_rename_crash(
     assert carving_ref.size_bytes is not None
     assert carving_ref.size_bytes < 1_000_000
     assert carving_manifest["carved_batches_inline"] is False
+    assert carving_manifest["point_in_time_evidence_projection_ids"]
+    assert carving_manifest["point_in_time_evidence_decision_ids"]
     ledger_ref = ArtifactRef.from_dict(
         carving_manifest["carved_batch_ledger_ref"]
     )
-    assert ledger_ref.kind == "reconstruction_carved_batch_ledger_v1"
+    assert ledger_ref.kind == "reconstruction_carved_batch_ledger_v2"
     assert (
         ledger_ref.metadata["batch_count"]
         == carving_manifest["carved_batch_count"]
     )
     with Path(ledger_ref.path).open("rb") as stream:
-        assert sum(1 for _ in stream) == carving_manifest["carved_batch_count"]
+        rows = tuple(json.loads(line) for line in stream)
+    assert len(rows) == carving_manifest["carved_batch_count"]
+    assert all("point_in_time_evidence_use" in row for row in rows)
+    assert all("cross_series_constraint_use" in row for row in rows)
+    for stage in (
+        ReconstructionStage.CROSS_SERIES_RECONCILIATION,
+        ReconstructionStage.BROKER_TRANSFER,
+    ):
+        outcome = next(
+            item for item in recovered.outcomes if item.stage is stage
+        )
+        downstream = json.loads(
+            Path(outcome.output_refs[0].path).read_text(encoding="utf-8")
+        )
+        assert downstream["point_in_time_evidence_projection_ids"] == (
+            carving_manifest["point_in_time_evidence_projection_ids"]
+        )
+        assert downstream["point_in_time_evidence_decision_ids"] == (
+            carving_manifest["point_in_time_evidence_decision_ids"]
+        )
+        assert downstream["cross_series_constraint_bundle_ids"] == (
+            carving_manifest["cross_series_constraint_bundle_ids"]
+        )
+        assert downstream["cross_series_constraint_window_ids"] == (
+            carving_manifest["cross_series_constraint_window_ids"]
+        )
+        assert downstream["cross_series_constraint_decision_ids"]
+    validation_outcome = next(
+        item
+        for item in recovered.outcomes
+        if item.stage is ReconstructionStage.VALIDATION
+    )
+    descriptor_ref = next(
+        ref
+        for ref in validation_outcome.output_refs
+        if ref.kind == STAGING_DESCRIPTOR_ARTIFACT_KIND
+    )
+    descriptor = json.loads(
+        Path(descriptor_ref.path).read_text(encoding="utf-8")
+    )
+    assert descriptor["point_in_time_evidence_projection_ids"] == (
+        carving_manifest["point_in_time_evidence_projection_ids"]
+    )
+    assert (
+        list(first_manifest.quality.point_in_time_evidence_projection_ids)
+        == descriptor["point_in_time_evidence_projection_ids"]
+    )
+    assert list(first_manifest.quality.point_in_time_evidence_decision_ids) == (
+        descriptor["point_in_time_evidence_decision_ids"]
+    )
+    assert descriptor["point_in_time_evidence_validation_use"]["stage"] == (
+        "validation"
+    )
+    assert descriptor["point_in_time_evidence_validation_use"]["status"] in {
+        "applied",
+        "not_applicable",
+    }
+    assert descriptor["cross_series_constraint_bundle_ids"] == (
+        carving_manifest["cross_series_constraint_bundle_ids"]
+    )
+    assert descriptor["cross_series_constraint_window_ids"] == (
+        carving_manifest["cross_series_constraint_window_ids"]
+    )
+    assert descriptor["cross_series_constraint_validation_use"]["status"] == (
+        "applied"
+    )
+    assert list(first_manifest.quality.cross_series_constraint_bundle_ids) == (
+        descriptor["cross_series_constraint_bundle_ids"]
+    )
+    assert list(first_manifest.quality.cross_series_constraint_window_ids) == (
+        descriptor["cross_series_constraint_window_ids"]
+    )
+    assert list(
+        first_manifest.quality.cross_series_constraint_decision_ids
+    ) == (descriptor["cross_series_constraint_decision_ids"])
 
     second = _case(tmp_path / "concurrency-2", max_parallel_windows=2)
     second_state = asyncio.run(
@@ -207,12 +394,14 @@ def test_real_triangle_is_deterministic_and_recovers_post_rename_crash(
     )
 
 
-def test_real_validation_refusal_prevents_atomic_commit(tmp_path: Path) -> None:
-    """A schema-valid but failing qualification cannot become discoverable."""
+def test_real_scientific_evidence_refusal_prevents_atomic_commit(
+    tmp_path: Path,
+) -> None:
+    """Schema-valid cross-split leakage evidence cannot become discoverable."""
     case = _case(
         tmp_path / "negative-validation",
         max_parallel_windows=1,
-        failing_qualification=True,
+        failing_scientific_evidence=True,
     )
     register_first_party_reconstruction_handlers()
     state = asyncio.run(
@@ -405,7 +594,7 @@ def _case(
     root: Path,
     *,
     max_parallel_windows: int,
-    failing_qualification: bool = False,
+    failing_scientific_evidence: bool = False,
 ) -> _Case:
     plan = _real_plan()
     start = _real_start_ns()
@@ -428,12 +617,12 @@ def _case(
         original.commands[0].configuration_refs[0].path
     )
     artifacts = dict(old_execution.artifacts)
-    replacement_qualification: ArtifactRef | None = None
-    if failing_qualification:
-        replacement_qualification = _failing_qualification(
-            root / "artifacts", artifacts["motif_qualification"]
+    replacement_leakage: ArtifactRef | None = None
+    if failing_scientific_evidence:
+        replacement_leakage = _failing_scientific_evidence(
+            root / "artifacts", artifacts["motif_leakage_audit"]
         )
-        artifacts["motif_qualification"] = replacement_qualification
+        artifacts["motif_leakage_audit"] = replacement_leakage
     execution = replace(
         old_execution,
         artifacts=artifacts,
@@ -456,11 +645,11 @@ def _case(
     commands = []
     for ordinal, command in enumerate(original.commands):
         input_refs = command.input_manifest_refs
-        if replacement_qualification is not None:
+        if replacement_leakage is not None:
             input_refs = tuple(
                 (
-                    replacement_qualification
-                    if ref.kind == replacement_qualification.kind
+                    replacement_leakage
+                    if ref.kind == replacement_leakage.kind
                     else ref
                 )
                 for ref in input_refs
@@ -546,15 +735,17 @@ def _write_execution_manifest(
     )
 
 
-def _failing_qualification(root: Path, original: ArtifactRef) -> ArtifactRef:
+def _failing_scientific_evidence(
+    root: Path, original: ArtifactRef
+) -> ArtifactRef:
     payload: dict[str, Any] = json.loads(
         Path(original.path).read_text(encoding="utf-8")
     )
-    payload["candidate_promotion_eligible"] = False
+    payload["post_exclusion_cross_split_finding_count"] = 1
     encoded = canonical_contract_json(payload).encode("utf-8") + b"\n"
     digest = hashlib.sha256(encoded).hexdigest()
     root.mkdir(parents=True, exist_ok=True)
-    path = root / f"modern-reference-motif-qualification-{digest}.json"
+    path = root / f"modern-reference-motif-leakage-audit-{digest}.json"
     path.write_bytes(encoded)
     return ArtifactRef(
         kind=original.kind,

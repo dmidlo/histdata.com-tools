@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 import sys
-from typing import Any
+from pathlib import Path
+from typing import Any, ClassVar
 
 import pytest
 
-from histdatacom import histdata_com
-from histdatacom import reconstruction_cli
+from histdatacom import histdata_com, reconstruction_cli
 from histdatacom.cli_config import configured_reconstruction_argv
 from histdatacom.reconstruction import (
     ReconstructionExecutionRequestV1,
@@ -23,8 +22,8 @@ from histdatacom.reconstruction import (
     read_operation_receipt,
 )
 from histdatacom.runtime_contracts import ArtifactRef
-from histdatacom.synthetic.information import InformationMode
 from histdatacom.synthetic.certification import CertificationState
+from histdatacom.synthetic.information import InformationMode
 
 
 def _request(tmp_path: Path) -> ReconstructionExecutionRequestV1:
@@ -57,6 +56,14 @@ def test_installed_help_lists_complete_reconstruction_family(
     assert exc_info.value.code == 0
     output = capsys.readouterr().out
     for command in (
+        "schemas",
+        "engines",
+        "portfolio",
+        "engine-evaluate",
+        "qualify",
+        "diagnostic-build",
+        "diagnostic-list",
+        "compatibility",
         "plan",
         "plan-set",
         "preflight-set",
@@ -74,6 +81,178 @@ def test_installed_help_lists_complete_reconstruction_family(
         assert command in output
     assert "not recovered historical truth" in output
     assert "M1/bar inputs" in output
+
+
+def test_cli_exposes_engine_discovery_portfolio_and_selected_evaluation(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    calls: list[tuple[str, Any]] = []
+
+    class Result:
+        def __init__(self, schema_version: str) -> None:
+            self.schema_version = schema_version
+
+        def to_dict(self) -> dict[str, Any]:
+            return {"schema_version": self.schema_version}
+
+    class FakeClient:
+        def proposal_engines(self):
+            calls.append(("engines", None))
+            return Result("histdatacom.proposal-engine-registry.v1")
+
+        def proposal_portfolio(self, plan):
+            calls.append(("portfolio", plan))
+            return Result("histdatacom.proposal-engine-portfolio.v1")
+
+        def evaluate_proposal_portfolio(
+            self,
+            benchmark,
+            source,
+            *,
+            output_directory,
+            engine_ids,
+        ):
+            calls.append(
+                (
+                    "evaluate",
+                    (benchmark, source, output_directory, tuple(engine_ids)),
+                )
+            )
+            return Result("histdatacom.proposal-portfolio-evaluation.v1")
+
+        def qualify_proposal_portfolio(
+            self,
+            evaluation,
+            experiment,
+            *,
+            output_directory,
+        ):
+            calls.append(
+                (
+                    "qualify",
+                    (evaluation, experiment, output_directory),
+                )
+            )
+            return Result("histdatacom.powered-qualification-dossier.v1")
+
+        def publish_diagnostics(self, spec, *, output_directory):
+            calls.append(("diagnostic-build", (spec, output_directory)))
+            return Result(
+                "histdatacom.reconstruction-diagnostic-publication.v1"
+            )
+
+        def diagnostics(self, manifest):
+            calls.append(("diagnostic-list", manifest))
+            return {
+                "schema_version": (
+                    "histdatacom.reconstruction-diagnostic-publication.v1"
+                ),
+                "family_count": 12,
+                "status_counts": {"available": 12},
+            }
+
+    monkeypatch.setattr(reconstruction_cli, "_client", lambda _: FakeClient())
+
+    assert reconstruction_cli.main(["--json", "engines"]) == 0
+    assert json.loads(capsys.readouterr().out)["schema_version"].endswith(
+        "registry.v1"
+    )
+    assert (
+        reconstruction_cli.main(["--json", "portfolio", "--plan", "plan.json"])
+        == 0
+    )
+    assert json.loads(capsys.readouterr().out)["schema_version"].endswith(
+        "portfolio.v1"
+    )
+    assert (
+        reconstruction_cli.main(
+            [
+                "--json",
+                "engine-evaluate",
+                "--benchmark-manifest",
+                "benchmark.json",
+                "--source-root",
+                "ASCII/T",
+                "--output-directory",
+                "evaluation",
+                "--engine",
+                "histdatacom.event-clock.nhpp",
+            ]
+        )
+        == 0
+    )
+    assert json.loads(capsys.readouterr().out)["schema_version"].endswith(
+        "evaluation.v1"
+    )
+    assert (
+        reconstruction_cli.main(
+            [
+                "--json",
+                "qualify",
+                "--evaluation",
+                "evaluation.json",
+                "--experiment",
+                "experiment.json",
+                "--output-directory",
+                "qualification",
+            ]
+        )
+        == 0
+    )
+    assert json.loads(capsys.readouterr().out)["schema_version"].endswith(
+        "dossier.v1"
+    )
+    assert (
+        reconstruction_cli.main(
+            [
+                "--json",
+                "diagnostic-build",
+                "--spec",
+                "diagnostics.json",
+                "--output-directory",
+                "publication",
+            ]
+        )
+        == 0
+    )
+    assert json.loads(capsys.readouterr().out)["schema_version"].endswith(
+        "publication.v1"
+    )
+    assert (
+        reconstruction_cli.main(
+            [
+                "--json",
+                "diagnostic-list",
+                "--manifest",
+                "publication.json",
+            ]
+        )
+        == 0
+    )
+    assert json.loads(capsys.readouterr().out)["family_count"] == 12
+    assert calls == [
+        ("engines", None),
+        ("portfolio", "plan.json"),
+        (
+            "evaluate",
+            (
+                "benchmark.json",
+                "ASCII/T",
+                "evaluation",
+                ("histdatacom.event-clock.nhpp",),
+            ),
+        ),
+        (
+            "qualify",
+            ("evaluation.json", "experiment.json", "qualification"),
+        ),
+        (
+            "diagnostic-build",
+            ("diagnostics.json", "publication"),
+        ),
+        ("diagnostic-list", "publication.json"),
+    ]
 
 
 def test_cli_constructs_and_preflights_public_plan_set(
@@ -472,7 +651,10 @@ def test_cli_certify_runs_public_campaign_and_maps_state(
     captured: dict[str, str] = {}
 
     class FakeDossier:
-        summary = {"passed_gate_count": 14, "missing_gate_count": 1}
+        summary: ClassVar[dict[str, int]] = {
+            "passed_gate_count": 14,
+            "missing_gate_count": 1,
+        }
 
         def __init__(self, selected_state: CertificationState) -> None:
             self.state = selected_state

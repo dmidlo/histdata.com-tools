@@ -78,6 +78,22 @@ MAX_REFERENCE_MOTIF_MATCHES = 128
 MAX_REFERENCE_MOTIF_EXCLUSIONS = 4096
 MAX_REFERENCE_MOTIF_ARTIFACT_BYTES = 256 * 1024**2
 MAX_REFERENCE_MOTIF_LEAKAGE_FINDINGS = 128
+NANOSECONDS_PER_SECOND = 1_000_000_000
+
+
+def reference_session_for_ns(value: int) -> str:
+    """Return the frozen clock-session coordinate used by model artifacts."""
+    timestamp_ns = _bounded_int64(value, "event_time_ns")
+    hour = datetime.fromtimestamp(
+        timestamp_ns / NANOSECONDS_PER_SECOND,
+        tz=timezone.utc,
+    ).hour
+    if hour < 7:
+        return "asia"
+    if hour < 12:
+        return "london"
+    return "new_york"
+
 
 REFERENCE_MOTIF_METRIC_NAMES = (
     "return_value",

@@ -519,7 +519,7 @@ def test_proposal_query_evidence_is_compact_and_restores_incrementally(
     )
     ledger_ref = artifact_ref_for_file(
         ledger_path,
-        kind="reconstruction_candidate_batch_ledger_v1",
+        kind="reconstruction_candidate_batch_ledger_v2",
         metadata={
             "batch_count": 1,
             "format": "canonical-json-lines-v1",
