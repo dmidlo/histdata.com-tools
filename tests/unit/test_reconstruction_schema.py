@@ -19,6 +19,7 @@ from histdatacom.data_quality.training_features import (
 )
 from histdatacom.reconstruction import (
     ReconstructionClient,
+    RECONSTRUCTION_PLAN_SET_SCHEMA_VERSION,
     ReconstructionPlanSpecV1,
     ReconstructionRefusedError,
 )
@@ -182,6 +183,15 @@ def test_registry_is_deterministic_complete_and_matches_golden() -> None:
         "status_counts": registry.to_dict()["status_counts"],
     }
     registered = {item.contract_schema_version for item in registry.contracts}
+    plan_set = next(
+        item
+        for item in registry.contracts
+        if item.contract_schema_version
+        == RECONSTRUCTION_PLAN_SET_SCHEMA_VERSION
+    )
+    assert "_identity_source_spec_payload" not in {
+        item.name for item in plan_set.fields
+    }
     for module_name in _AUDITED_MODULES:
         module = importlib.import_module(module_name)
         versions = {

@@ -74,6 +74,7 @@ from histdatacom.synthetic import (
 )
 from histdatacom.synthetic import reconstruction_handlers as handlers_module
 from histdatacom.synthetic import reconstruction_plan as plan_module
+from histdatacom.synthetic.contracts import canonical_contract_json
 from histdatacom.synthetic.generation import EMPIRICAL_MOTIF_GENERATOR_ID
 from histdatacom.synthetic.proposal_engines import (
     ProposalEngineEvidenceV1,
@@ -759,11 +760,80 @@ def test_public_plan_set_shards_and_revalidates_bounded_full_range(
     assert preflight.resource_summary == plan_set.resource_summary
     assert ReconstructionPlanSetV1.from_dict(plan_set.to_dict()) == plan_set
 
+    legacy_payload = plan_set.to_dict()
+    legacy_source = legacy_payload["source_spec"]
+    assert isinstance(legacy_source, dict)
+    for field_name in (
+        "dataset_catalog_path",
+        "dataset_reference",
+        "evidence_policy",
+        "cross_series_constraint_policy",
+    ):
+        legacy_source.pop(field_name)
+    legacy_payload.pop("plan_set_id")
+    legacy_id = (
+        "reconstruction-plan-set:sha256:"
+        + hashlib.sha256(
+            canonical_contract_json(legacy_payload).encode("utf-8")
+        ).hexdigest()
+    )
+    legacy_payload["plan_set_id"] = legacy_id
+    legacy_path = source_root / "legacy-plan-set.json"
+    legacy_path.write_text(
+        canonical_contract_json(legacy_payload) + "\n",
+        encoding="utf-8",
+    )
+
+    legacy = read_reconstruction_plan_set(legacy_path)
+    assert legacy.plan_set_id == legacy_id
+    assert legacy.to_dict() == legacy_payload
+    assert ReconstructionPlanSetV1.from_dict(legacy.to_dict()) == legacy
+
+    legacy_payload["status"] = "ready_with_refusals"
+    legacy_path.write_text(
+        canonical_contract_json(legacy_payload) + "\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(
+        ReconstructionPlanError,
+        match="status differs|identity differs",
+    ):
+        read_reconstruction_plan_set(legacy_path)
+
     Path(plan_set.shards[0].plan_ref.path).write_bytes(
         Path(plan_set.shards[0].plan_ref.path).read_bytes() + b"\n"
     )
     with pytest.raises(ReconstructionPlanError, match="shard artifact differs"):
         client.preflight_plan_set(ref.path)
+
+
+def test_legacy_all_member_task_layout_requires_complete_v1_rectangle() -> None:
+    """Pre-portfolio v1 tasks remain readable only as an exact member grid."""
+    member_ids = tuple(f"member-{index}" for index in range(4))
+    counts = {member_id: 59 for member_id in member_ids}
+    kwargs = {
+        "task_counts_by_member": counts,
+        "executable_window_count": 59,
+        "retained_member_count": 2,
+        "ensemble_member_count": 4,
+        "run_ensemble_member_ids": member_ids,
+        "artifact_names": ("configuration", "execution_manifest"),
+    }
+
+    assert plan_module._legacy_all_member_task_layout_is_valid(**kwargs)
+    assert not plan_module._legacy_all_member_task_layout_is_valid(
+        **{**kwargs, "task_counts_by_member": {**counts, "member-0": 58}}
+    )
+    assert not plan_module._legacy_all_member_task_layout_is_valid(
+        **{
+            **kwargs,
+            "artifact_names": (
+                "configuration",
+                "execution_manifest",
+                "proposal_engine_registry",
+            ),
+        }
+    )
 
 
 def test_public_plan_set_preserves_a_contiguous_refusal_only_shard(

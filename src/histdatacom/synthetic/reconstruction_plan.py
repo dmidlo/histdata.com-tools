@@ -15,6 +15,7 @@ import json
 import math
 import os
 import re
+from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -1426,6 +1427,32 @@ class ReconstructionStagePlanV1:
                 )
 
 
+def _legacy_all_member_task_layout_is_valid(
+    *,
+    task_counts_by_member: Mapping[str, int],
+    executable_window_count: int,
+    retained_member_count: int,
+    ensemble_member_count: int,
+    run_ensemble_member_ids: Sequence[str],
+    artifact_names: Iterable[str],
+) -> bool:
+    """Recognize the bounded pre-portfolio v1 all-member task rectangle."""
+    artifact_name_set = set(artifact_names)
+    return (
+        "proposal_engine_registry" not in artifact_name_set
+        and "proposal_portfolio_evaluation" not in artifact_name_set
+        and "powered_qualification_dossier" not in artifact_name_set
+        and retained_member_count < ensemble_member_count
+        and sum(task_counts_by_member.values())
+        == executable_window_count * ensemble_member_count
+        and set(task_counts_by_member) == set(run_ensemble_member_ids)
+        and all(
+            count == executable_window_count
+            for count in task_counts_by_member.values()
+        )
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class SyntheticInfillPlanV1:
     """Executable, bounded, first-party ASCII tick reconstruction plan."""
@@ -1506,10 +1533,24 @@ class SyntheticInfillPlanV1:
             raise TypeError("synthetic infill plan requires a resource summary")
         if self.resources.workflow_request_count != len(requests):
             raise ValueError("resource workflow request count differs")
-        if (
+        expected_retained_tasks = (
             self.resources.executable_window_count
             * self.resources.retained_member_count
-            != len(tasks)
+        )
+        task_counts_by_member = Counter(
+            item.window.ensemble_member_id for item in tasks
+        )
+        legacy_all_member_layout = _legacy_all_member_task_layout_is_valid(
+            task_counts_by_member=task_counts_by_member,
+            executable_window_count=self.resources.executable_window_count,
+            retained_member_count=self.resources.retained_member_count,
+            ensemble_member_count=self.resources.ensemble_member_count,
+            run_ensemble_member_ids=self.run.ensemble_member_ids,
+            artifact_names=graph,
+        )
+        if (
+            len(tasks) != expected_retained_tasks
+            and not legacy_all_member_layout
         ):
             raise ValueError(
                 "retained-member executable window count differs from tasks"

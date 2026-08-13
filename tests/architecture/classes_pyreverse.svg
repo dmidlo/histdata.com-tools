@@ -16976,24 +16976,25 @@
 <!-- histdatacom.reconstruction.ReconstructionPlanSetV1 -->
 <g id="node670" class="node">
 <title>histdatacom.reconstruction.ReconstructionPlanSetV1</title>
-<polygon fill="none" stroke="black" points="27403.89,-3104 27403.89,-3375.5 28799.14,-3375.5 28799.14,-3104 27403.89,-3104"/>
-<text text-anchor="start" x="28031.77" y="-3358.2" font-family="Times,serif" font-size="14.00">ReconstructionPlanSetV1</text>
-<polyline fill="none" stroke="black" points="27403.89,-3351 28799.14,-3351"/>
-<text text-anchor="start" x="27972.89" y="-3333.7" font-family="Times,serif" font-size="14.00">executable : bool</text>
-<text text-anchor="start" x="27972.89" y="-3317.2" font-family="Times,serif" font-size="14.00">plan_set_id : str</text>
-<text text-anchor="start" x="27972.89" y="-3300.7" font-family="Times,serif" font-size="14.00">requested_end_ns : int</text>
-<text text-anchor="start" x="27972.89" y="-3284.2" font-family="Times,serif" font-size="14.00">requested_start_ns : int</text>
-<text text-anchor="start" x="27972.89" y="-3267.7" font-family="Times,serif" font-size="14.00">resource_summary : Mapping[str, JSONValue]</text>
-<text text-anchor="start" x="27972.89" y="-3251.2" font-family="Times,serif" font-size="14.00">schema_version : str</text>
-<text text-anchor="start" x="27972.89" y="-3234.7" font-family="Times,serif" font-size="14.00">shards : tuple[ReconstructionPlanShardV1, ...]</text>
-<text text-anchor="start" x="27972.89" y="-3218.2" font-family="Times,serif" font-size="14.00">source_spec</text>
-<text text-anchor="start" x="27972.89" y="-3201.7" font-family="Times,serif" font-size="14.00">status : str</text>
-<polyline fill="none" stroke="black" points="27403.89,-3194.5 28799.14,-3194.5"/>
-<text text-anchor="start" x="27411.89" y="-3177.2" font-family="Times,serif" font-size="14.00">__init__(self, source_spec: ReconstructionPlanSpecV1, shards: tuple[ReconstructionPlanShardV1, ...], requested_start_ns: int, requested_end_ns: int, resource_summary: Mapping[str, JSONValue], status: str, plan_set_id: str, schema_version: str): None</text>
-<text text-anchor="start" x="27411.89" y="-3160.7" font-family="Times,serif" font-size="14.00">__post_init__(): None</text>
-<text text-anchor="start" x="27411.89" y="-3144.2" font-family="Times,serif" font-size="14.00">from_dict(data: Mapping[str, Any]): ReconstructionPlanSetV1</text>
-<text text-anchor="start" x="27411.89" y="-3127.7" font-family="Times,serif" font-size="14.00">identity_payload(): dict[str, JSONValue]</text>
-<text text-anchor="start" x="27411.89" y="-3111.2" font-family="Times,serif" font-size="14.00">to_dict(): dict[str, JSONValue]</text>
+<polygon fill="none" stroke="black" points="27403.89,-3095.75 27403.89,-3383.75 28799.14,-3383.75 28799.14,-3095.75 27403.89,-3095.75"/>
+<text text-anchor="start" x="28031.77" y="-3366.45" font-family="Times,serif" font-size="14.00">ReconstructionPlanSetV1</text>
+<polyline fill="none" stroke="black" points="27403.89,-3359.25 28799.14,-3359.25"/>
+<text text-anchor="start" x="27920.02" y="-3341.95" font-family="Times,serif" font-size="14.00">_identity_source_spec_payload : Mapping[str, JSONValue] | None</text>
+<text text-anchor="start" x="27920.02" y="-3325.45" font-family="Times,serif" font-size="14.00">executable : bool</text>
+<text text-anchor="start" x="27920.02" y="-3308.95" font-family="Times,serif" font-size="14.00">plan_set_id : str</text>
+<text text-anchor="start" x="27920.02" y="-3292.45" font-family="Times,serif" font-size="14.00">requested_end_ns : int</text>
+<text text-anchor="start" x="27920.02" y="-3275.95" font-family="Times,serif" font-size="14.00">requested_start_ns : int</text>
+<text text-anchor="start" x="27920.02" y="-3259.45" font-family="Times,serif" font-size="14.00">resource_summary : Mapping[str, JSONValue]</text>
+<text text-anchor="start" x="27920.02" y="-3242.95" font-family="Times,serif" font-size="14.00">schema_version : str</text>
+<text text-anchor="start" x="27920.02" y="-3226.45" font-family="Times,serif" font-size="14.00">shards : tuple[ReconstructionPlanShardV1, ...]</text>
+<text text-anchor="start" x="27920.02" y="-3209.95" font-family="Times,serif" font-size="14.00">source_spec</text>
+<text text-anchor="start" x="27920.02" y="-3193.45" font-family="Times,serif" font-size="14.00">status : str</text>
+<polyline fill="none" stroke="black" points="27403.89,-3186.25 28799.14,-3186.25"/>
+<text text-anchor="start" x="27411.89" y="-3168.95" font-family="Times,serif" font-size="14.00">__init__(self, source_spec: ReconstructionPlanSpecV1, shards: tuple[ReconstructionPlanShardV1, ...], requested_start_ns: int, requested_end_ns: int, resource_summary: Mapping[str, JSONValue], status: str, plan_set_id: str, schema_version: str): None</text>
+<text text-anchor="start" x="27411.89" y="-3152.45" font-family="Times,serif" font-size="14.00">__post_init__(): None</text>
+<text text-anchor="start" x="27411.89" y="-3135.95" font-family="Times,serif" font-size="14.00">from_dict(data: Mapping[str, Any]): ReconstructionPlanSetV1</text>
+<text text-anchor="start" x="27411.89" y="-3119.45" font-family="Times,serif" font-size="14.00">identity_payload(): dict[str, JSONValue]</text>
+<text text-anchor="start" x="27411.89" y="-3102.95" font-family="Times,serif" font-size="14.00">to_dict(): dict[str, JSONValue]</text>
 </g>
 <!-- histdatacom.reconstruction.ReconstructionPlanSpecV1 -->
 <g id="node672" class="node">
@@ -17044,7 +17045,7 @@
 <!-- histdatacom.reconstruction.ReconstructionPlanSetV1&#45;&gt;histdatacom.reconstruction.ReconstructionPlanSpecV1 -->
 <g id="edge293" class="edge">
 <title>histdatacom.reconstruction.ReconstructionPlanSetV1&#45;&gt;histdatacom.reconstruction.ReconstructionPlanSpecV1</title>
-<path fill="none" stroke="black" d="M28052.16,-3375.88C28003.47,-3535.8 27955.54,-3798.99 28102.52,-3947 28123.46,-3968.09 30212.94,-3962.09 30242.52,-3965 30715.59,-4011.51 31226.19,-4096.21 31686.52,-4185.71"/>
+<path fill="none" stroke="black" d="M28049.69,-3384.08C28001.9,-3544.66 27958.02,-3801.49 28102.52,-3947 28123.46,-3968.09 30212.94,-3962.09 30242.52,-3965 30715.59,-4011.51 31226.19,-4096.21 31686.52,-4185.71"/>
 <polygon fill="black" stroke="black" points="31696.19,-4187.59 31685.51,-4190.09 31692.47,-4186.87 31686.37,-4185.68 31686.37,-4185.68 31686.37,-4185.68 31692.47,-4186.87 31687.23,-4181.26 31696.19,-4187.59"/>
 <text text-anchor="middle" x="28135.52" y="-3764.45" font-family="Times,serif" font-size="14.00" fill="green">source_spec</text>
 </g>

@@ -749,6 +749,13 @@ class ReconstructionPlanSetV1:
     status: str
     plan_set_id: str = ""
     schema_version: str = RECONSTRUCTION_PLAN_SET_SCHEMA_VERSION
+    _identity_source_spec_payload: Mapping[str, JSONValue] | None = field(
+        default=None,
+        init=False,
+        repr=False,
+        compare=False,
+        metadata={"reconstruction_schema": False},
+    )
 
     def __post_init__(self) -> None:
         if self.schema_version != RECONSTRUCTION_PLAN_SET_SCHEMA_VERSION:
@@ -816,7 +823,11 @@ class ReconstructionPlanSetV1:
         """Return stable plan-set content without the derived identity."""
         return {
             "schema_version": self.schema_version,
-            "source_spec": self.source_spec.to_dict(),
+            "source_spec": (
+                dict(self._identity_source_spec_payload)
+                if self._identity_source_spec_payload is not None
+                else self.source_spec.to_dict()
+            ),
             "shards": [item.to_dict() for item in self.shards],
             "requested_start_ns": self.requested_start_ns,
             "requested_end_ns": self.requested_end_ns,
@@ -836,7 +847,8 @@ class ReconstructionPlanSetV1:
             raise ReconstructionPlanError(
                 "plan set scientific nonclaim differs"
             )
-        return cls(
+        supplied_id = str(data.get("plan_set_id", ""))
+        restored = cls(
             source_spec=ReconstructionPlanSpecV1.from_dict(
                 _mapping(data.get("source_spec"))
             ),
@@ -852,9 +864,61 @@ class ReconstructionPlanSetV1:
             ),
             resource_summary=_mapping(data.get("resource_summary")),
             status=str(data.get("status", "")),
-            plan_set_id=str(data.get("plan_set_id", "")),
             schema_version=str(data.get("schema_version", "")),
         )
+        if supplied_id == restored.plan_set_id:
+            return restored
+
+        # Additive v1 source-spec defaults must not invalidate an immutable
+        # plan-set written before those fields existed.  Validate the complete
+        # original identity payload first, then retain that exact payload for
+        # faithful serialization; no shard, resource, or unknown field may use
+        # this compatibility path.
+        raw_identity = {
+            str(key): cast(JSONValue, value)
+            for key, value in data.items()
+            if key != "plan_set_id"
+        }
+        legacy_expected = _stable_id("reconstruction-plan-set", raw_identity)
+        normalized_identity = restored.identity_payload()
+        raw_source = _mapping(raw_identity.get("source_spec"))
+        normalized_source = _mapping(normalized_identity["source_spec"])
+        compatible_missing_fields = {
+            "dataset_catalog_path",
+            "dataset_reference",
+            "evidence_policy",
+            "cross_series_constraint_policy",
+        }
+        raw_without_source = dict(raw_identity)
+        normalized_without_source = dict(normalized_identity)
+        raw_without_source.pop("source_spec", None)
+        normalized_without_source.pop("source_spec", None)
+        missing_source_fields = set(normalized_source).difference(raw_source)
+        source_values_match = all(
+            key in normalized_source and value == normalized_source[key]
+            for key, value in raw_source.items()
+        )
+        legacy_compatible = (
+            supplied_id == legacy_expected
+            and raw_without_source == normalized_without_source
+            and bool(missing_source_fields)
+            and missing_source_fields.issubset(compatible_missing_fields)
+            and source_values_match
+        )
+        if not legacy_compatible:
+            raise ReconstructionPlanError(
+                "reconstruction plan-set identity differs"
+            )
+        object.__setattr__(
+            restored,
+            "_identity_source_spec_payload",
+            {
+                str(key): cast(JSONValue, value)
+                for key, value in raw_source.items()
+            },
+        )
+        object.__setattr__(restored, "plan_set_id", supplied_id)
+        return restored
 
 
 @dataclass(frozen=True, slots=True)

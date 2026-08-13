@@ -743,6 +743,8 @@ def _fields_from_dataclass(
 ) -> tuple[ReconstructionFieldDefinitionV1, ...]:
     definitions = []
     for item in fields(candidate):
+        if item.metadata.get("reconstruction_schema") is False:
+            continue
         nullable = _nullable(item.type, item.default)
         status = (
             ReconstructionContractStatus.OPTIONAL
