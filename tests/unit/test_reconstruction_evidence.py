@@ -22,6 +22,7 @@ from histdatacom.data_quality.training_features import (
 from histdatacom.reconstruction_evidence import (
     HISTDATA_ENRICHED_CACHE_SCHEMA_VERSION,
     HISTDATA_LEGACY_CACHE_SCHEMA_VERSION,
+    HISTDATA_QUOTE_ORDER_PROJECTION_METRIC_ID,
     PointInTimeEvidenceProjectionV1,
     ReconstructionEvidenceInformationMode,
     ReconstructionEvidenceKind,
@@ -114,6 +115,33 @@ def test_projection_preserves_duplicate_rows_and_keeps_aggregates_sidecar() -> (
     assert '"bid"' not in projection.to_json()
     assert '"ask"' not in projection.to_json()
     assert '"full_reports_embedded":false' in projection.to_json()
+
+
+def test_explicit_quote_order_projection_is_advisory_not_negative_spread() -> (
+    None
+):
+    projection = _projection(
+        (_Event(1_000_000_000, 1, 1.0, 1.0002),),
+        cached_row_evidence={
+            1: {HISTDATA_QUOTE_ORDER_PROJECTION_METRIC_ID: True}
+        },
+    )
+    decision = reconstruction_evidence_use(
+        (projection,), stage="source_enrichment", used_at_ns=10_000_000_000
+    )
+
+    assert any(
+        item.metric_id == HISTDATA_QUOTE_ORDER_PROJECTION_METRIC_ID
+        for item in projection.row_records
+    )
+    assert all(
+        item.metric_id != "negative_spread" for item in projection.row_records
+    )
+    assert any(
+        item.metric_id == "quote_order_projected_count" and item.value == 1
+        for item in projection.sidecar_records
+    )
+    assert decision.status is ReconstructionEvidenceUseStatus.APPLIED
 
 
 def test_exact_report_location_projects_but_period_summary_does_not_copy_to_rows() -> (

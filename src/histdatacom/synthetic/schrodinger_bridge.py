@@ -4264,7 +4264,7 @@ def build_schrodinger_bridge_candidate_batches(
                     ask=item.ask,
                     run_id=run.run_id,
                     ensemble_member_id=window.ensemble_member_id,
-                    source_version_id=fit_result.fit_id,
+                    source_version_id=left.source_version_id,
                     left_anchor_event_id=left.event_id,
                     right_anchor_event_id=right.event_id,
                     anchor_interval_id=interval_id,

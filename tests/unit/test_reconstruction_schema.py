@@ -211,6 +211,9 @@ def test_registry_explains_legacy_training_event_and_future_seams() -> None:
     training = contracts[TRAINING_SCHEMA_VERSION]
     event = contracts["histdatacom.synthetic-event.v1"]
     evidence = contracts["histdatacom.reconstruction-evidence-projection.v1"]
+    historical_conditioning = contracts[
+        "histdatacom.historical-product-observation-conditioning.v2"
+    ]
     cross_constraint = contracts[
         "histdatacom.cross-series-constraint-window.v1"
     ]
@@ -218,6 +221,10 @@ def test_registry_explains_legacy_training_event_and_future_seams() -> None:
     portfolio = contracts[PORTFOLIO_PLAN_SCHEMA_VERSION]
 
     assert "histdatacom.time-series-fingerprint.v1" in contracts
+    assert (
+        historical_conditioning.status
+        is ReconstructionContractStatus.INTERNAL_ONLY
+    )
     assert {
         "benchmark",
         "certification",

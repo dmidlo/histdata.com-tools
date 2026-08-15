@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
 import hashlib
+from dataclasses import replace
 
 import pytest
 
@@ -16,6 +16,7 @@ from histdatacom.synthetic import (
     CrossCurrencyConditionV1,
     CrossCurrencyExcludedReason,
     CrossCurrencyGroupStatus,
+    CrossCurrencyJoinPolicy,
     CrossCurrencyReconciledGroupV1,
     CrossCurrencyReconciliationConfigV1,
     CrossCurrencyRelationshipKind,
@@ -244,6 +245,25 @@ def _reconciled_group() -> tuple[
         conditions=(_condition(),),
     )
     return run, window, streams, group
+
+
+def test_reconciliation_config_preserves_legacy_engine_identity() -> None:
+    """The v1 reader replays issued configs after additive capabilities."""
+    current = eurusd_triangle_reconciliation_config()
+    legacy = replace(current, engine_version="1.0.1", config_id="")
+    bounded_legacy = replace(current, engine_version="1.1.0", config_id="")
+
+    assert current.engine_version == "1.2.0"
+    assert legacy.config_id != current.config_id
+    assert bounded_legacy.config_id != current.config_id
+    assert (
+        CrossCurrencyReconciliationConfigV1.from_dict(legacy.to_dict())
+        == legacy
+    )
+    assert (
+        CrossCurrencyReconciliationConfigV1.from_dict(bounded_legacy.to_dict())
+        == bounded_legacy
+    )
 
 
 def test_common_window_plan_records_unequal_and_missing_coverage() -> None:
@@ -475,8 +495,8 @@ def test_triangle_projection_falls_back_after_negative_spread_target() -> None:
     assert group.generation_validation.anchor_preserved is True
 
 
-def test_observed_conflict_and_missing_leg_refuse_without_projection() -> None:
-    """Infeasible anchors and absent legs remain visible refused results."""
+def test_observed_conflict_is_audited_while_missing_leg_refuses() -> None:
+    """Immutable source defects stay visible while missing support refuses."""
     config = eurusd_triangle_reconciliation_config()
     run = _run(config)
     window = _window(run)
@@ -485,15 +505,70 @@ def test_observed_conflict_and_missing_leg_refuse_without_projection() -> None:
         direct_midpoint=0.9,
         middle_origin=SyntheticEventOrigin.OBSERVED,
     )
-    refused = reconcile_cross_currency_window(
+    preserved = reconcile_cross_currency_window(
         run=run,
         window=window,
         streams=observed_conflict,
         config=config,
     )
+    assert preserved.status is CrossCurrencyGroupStatus.RECONCILED
+    assert preserved.generation_validation.anchor_preserved is True
+    assert preserved.projection_lineage == ()
+    support = preserved.generation_validation.relationship_support[0]
+    assert support.observed_only_residual_exceedance_count == 1
+    assert support.infeasible_count == 0
+    assert preserved.generation_validation.failure_reasons == ()
+    post = validate_cross_currency_output(
+        run=run,
+        window=window,
+        streams={stream.symbol: stream for stream in preserved.streams},
+        config=config,
+        stage=CrossCurrencyValidationStage.POST_BROKER,
+        observed_anchors=(
+            event
+            for stream in observed_conflict.values()
+            for event in stream.events
+        ),
+    )
+    assert post.passed
+    assert (
+        post.relationship_support[0].observed_only_residual_exceedance_count
+        == 1
+    )
+    assert (
+        CrossCurrencyReconciledGroupV1.from_json(preserved.to_json())
+        == preserved
+    )
+
+    legacy_config = replace(config, engine_version="1.1.0", config_id="")
+    legacy_run = _run(legacy_config)
+    legacy_window = _window(legacy_run)
+    legacy_refusal = reconcile_cross_currency_window(
+        run=legacy_run,
+        window=legacy_window,
+        streams=_triangle_streams(
+            legacy_run,
+            direct_midpoint=0.9,
+            middle_origin=SyntheticEventOrigin.OBSERVED,
+        ),
+        config=legacy_config,
+    )
+    assert legacy_refusal.status is CrossCurrencyGroupStatus.REFUSED
+    assert (
+        legacy_refusal.generation_validation.relationship_support[
+            0
+        ].observed_only_residual_exceedance_count
+        == 0
+    )
+
+    synthetic_conflict = _triangle_streams(run, direct_midpoint=0.9)
+    refused = reconcile_cross_currency_window(
+        run=run,
+        window=window,
+        streams=synthetic_conflict,
+        config=config,
+    )
     assert refused.status is CrossCurrencyGroupStatus.REFUSED
-    assert refused.generation_validation.anchor_preserved is True
-    assert refused.projection_lineage == ()
     assert any(
         reason.startswith("infeasible_relationship_point:")
         for reason in refused.generation_validation.failure_reasons
@@ -516,8 +591,8 @@ def test_observed_conflict_and_missing_leg_refuse_without_projection() -> None:
     )
 
 
-def test_many_observed_conflicts_return_bounded_auditable_refusal() -> None:
-    """Large immutable-anchor conflicts refuse instead of overflowing evidence."""
+def test_many_observed_conflicts_return_bounded_auditable_support() -> None:
+    """Large immutable-anchor conflicts remain bounded nonblocking evidence."""
     config = eurusd_triangle_reconciliation_config()
     run = _run(config)
     window = _window(run)
@@ -542,23 +617,23 @@ def test_many_observed_conflicts_return_bounded_auditable_refusal() -> None:
         for symbol, midpoint in midpoints.items()
     }
 
-    refused = reconcile_cross_currency_window(
+    preserved = reconcile_cross_currency_window(
         run=run,
         window=window,
         streams=streams,
         config=config,
     )
 
-    assert refused.status is CrossCurrencyGroupStatus.REFUSED
-    reasons = refused.generation_validation.failure_reasons
-    assert len(reasons) == 128
-    assert any(
-        reason.startswith("failure_reasons_truncated:total=130:sha256=")
-        for reason in reasons
-    )
-    assert refused.generation_validation.anchor_preserved is True
+    assert preserved.status is CrossCurrencyGroupStatus.RECONCILED
+    assert preserved.generation_validation.failure_reasons == ()
+    support = preserved.generation_validation.relationship_support[0]
+    assert support.support_count == 130
+    assert support.observed_only_residual_exceedance_count == 130
+    assert support.infeasible_count == 0
+    assert preserved.generation_validation.anchor_preserved is True
     assert (
-        CrossCurrencyReconciledGroupV1.from_json(refused.to_json()) == refused
+        CrossCurrencyReconciledGroupV1.from_json(preserved.to_json())
+        == preserved
     )
 
 
@@ -594,6 +669,94 @@ def test_duplicate_and_asynchronous_times_are_bounded_without_forward_fill() -> 
     support = group.generation_validation.relationship_support[0]
     assert support.support_count == 3
     assert len(group.stream_for("EURUSD").events) == 7
+
+
+def test_bounded_nearest_prior_reconciles_an_asynchronous_triangle() -> None:
+    """A declared age bound supports asynchronous output without forward fill."""
+    config = eurusd_triangle_reconciliation_config()
+    run = _run(config)
+    window = ReconstructionWindowV1(
+        run_id=run.run_id,
+        ensemble_member_id=MEMBER,
+        symbols=run.symbols,
+        core_start_ns=START_NS + 1,
+        core_end_ns=END_NS - 1,
+    )
+    streams = _triangle_streams(run)
+    offsets = {"eurgbp": 0, "eurusd": 1_000_000, "gbpusd": 2_000_000}
+    asynchronous = {
+        symbol: SyntheticEventStreamV1(
+            run_id=stream.run_id,
+            ensemble_member_id=stream.ensemble_member_id,
+            symbol=stream.symbol,
+            events=tuple(
+                (
+                    replace(
+                        event,
+                        event_time_ns=event.event_time_ns
+                        + offsets[stream.symbol],
+                        event_id="",
+                    )
+                    if event.origin is SyntheticEventOrigin.SYNTHETIC
+                    else event
+                )
+                for event in stream.events
+            ),
+            source_version_ids=stream.source_version_ids,
+        )
+        for symbol, stream in streams.items()
+    }
+
+    exact = reconcile_cross_currency_window(
+        run=run,
+        window=window,
+        streams=asynchronous,
+        config=config,
+    )
+    assert exact.status is CrossCurrencyGroupStatus.REFUSED
+    assert any(
+        reason.startswith("relationship_no_exact_event_time_support:")
+        for reason in exact.generation_validation.failure_reasons
+    )
+
+    bounded = reconcile_cross_currency_window(
+        run=run,
+        window=window,
+        streams=asynchronous,
+        config=config,
+        join_policy=(
+            CrossCurrencyJoinPolicy.NEAREST_PRIOR_BOUNDED_NO_FORWARD_FILL
+        ),
+        nearest_prior_max_age_ns=2_000_000,
+    )
+    assert bounded.status is CrossCurrencyGroupStatus.RECONCILED
+    report = bounded.generation_validation
+    assert report.join_policy is (
+        CrossCurrencyJoinPolicy.NEAREST_PRIOR_BOUNDED_NO_FORWARD_FILL
+    )
+    assert report.nearest_prior_max_age_ns == 2_000_000
+    assert report.common_timestamp_count == 0
+    assert report.relationship_support[0].support_count == 1
+    assert report.anchor_preserved
+    assert (
+        CrossCurrencyReconciledGroupV1.from_json(bounded.to_json()) == bounded
+    )
+
+    unsupported = reconcile_cross_currency_window(
+        run=run,
+        window=window,
+        streams=asynchronous,
+        config=config,
+        join_policy=(
+            CrossCurrencyJoinPolicy.NEAREST_PRIOR_BOUNDED_NO_FORWARD_FILL
+        ),
+        nearest_prior_max_age_ns=1_000_000,
+    )
+    assert unsupported.status is CrossCurrencyGroupStatus.REFUSED
+    assert any(
+        reason.startswith("relationship_no_bounded_nearest_event_time_support:")
+        for reason in unsupported.generation_validation.failure_reasons
+    )
 
 
 def test_inverse_relationship_projects_a_synthetic_leg() -> None:
@@ -681,6 +844,22 @@ def test_post_broker_validation_and_atomic_manifest_gate() -> None:
         manifest,
         post_broker_validation=post_broker,
     )
+    mismatched_join = replace(
+        post_broker,
+        join_policy=(
+            CrossCurrencyJoinPolicy.NEAREST_PRIOR_BOUNDED_NO_FORWARD_FILL
+        ),
+        nearest_prior_max_age_ns=5_000_000_000,
+        validation_id="",
+    )
+    with pytest.raises(
+        ValueError,
+        match="post-broker join contract differs from generation",
+    ):
+        group.validate_atomic_manifest(
+            manifest,
+            post_broker_validation=mismatched_join,
+        )
 
     direct = group.stream_for("EURGBP")
     bad_events = tuple(

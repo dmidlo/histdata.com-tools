@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
 import hashlib
 import math
+from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -15,9 +16,12 @@ from histdatacom.data_analytics import (
     FeedEpochEvidenceV1,
     fit_feed_epochs,
 )
+from histdatacom.data_analytics.feed_epochs_v2 import (
+    read_active_time_feed_epoch_definition,
+)
 from histdatacom.synthetic import (
-    InformationMode,
     OBSERVATION_PARAMETER_NAMES,
+    InformationMode,
     ObservationApplicationResultV1,
     ObservationCarryStateV1,
     ObservationContextV1,
@@ -30,6 +34,9 @@ from histdatacom.synthetic import (
     fit_observation_operator,
     read_observation_operator_artifact,
     write_observation_operator,
+)
+from histdatacom.synthetic.reconstruction_handlers import (
+    _historical_product_observation_conditioning,
 )
 
 SYMBOL = "EURUSD"
@@ -212,6 +219,98 @@ def _window(start: int = 0, end: int = 1_000) -> ReconstructionWindowV1:
         core_start_ns=start,
         core_end_ns=end,
     )
+
+
+def test_historical_product_cardinality_uses_supported_joint_epoch_evidence(
+    epoch_definition: FeedEpochDefinitionV1,
+) -> None:
+    operator = _operator(
+        epoch_definition,
+        parameters={"retention_probability": 0.25},
+    )
+    conditions = {
+        "eurusd": SimpleNamespace(feed_epoch_id="epoch-001"),
+    }
+
+    first = _historical_product_observation_conditioning(
+        operator,
+        conditions=conditions,  # type: ignore[arg-type]
+    )
+    second = _historical_product_observation_conditioning(
+        operator,
+        conditions=conditions,  # type: ignore[arg-type]
+    )
+
+    assert first == second
+    assert first["conditioning_id"].startswith(
+        "historical-product-observation-conditioning:sha256:"
+    )
+    assert first["observation_operator_id"] == operator.operator_id
+    assert first["resolution_basis"] == (
+        "synchronized-epoch-aggregate-for-qualified-multivariate-cardinality-v1"
+    )
+    joint = first["joint_retention"]  # type: ignore[assignment]
+    assert joint["stratum_level"] == "epoch"
+    assert joint["retention_probability"] == 0.25
+    symbol = first["symbols"]["EURUSD"]  # type: ignore[index]
+    assert symbol["stratum_level"] == "symbol_epoch"
+    assert symbol["retention_probability"] == 0.25
+    assert symbol["support_count"] > 0
+    assert symbol["context"]["state"] is None
+
+
+def test_historical_product_transition_uses_declared_ex_post_bridge() -> None:
+    root = Path(__file__).resolve().parents[2]
+    definition = read_active_time_feed_epoch_definition(
+        root / "data/.histdatacom/analytics/feed-epochs-v2-issue-460/"
+        "feed-epochs-v2-definition.json"
+    )
+    operator = ObservationOperatorV1.from_json(
+        (
+            root / "data/.histdatacom/analytics/"
+            "observation-calibration-v2-issue-462/"
+            "observation-calibration-v2-operator.json"
+        ).read_text(encoding="utf-8")
+    )
+    used_at_ns = 1_242_345_600_000_000_000
+    assignment = definition.assign(
+        symbol="EURUSD", timestamp_utc_ms=used_at_ns // 1_000_000
+    )
+    assert assignment.assignment_kind == "transition"
+    conditions = {
+        symbol: SimpleNamespace(feed_epoch_id=assignment.label)
+        for symbol in ("eurgbp", "eurusd", "gbpusd")
+    }
+
+    conditioning = _historical_product_observation_conditioning(
+        operator,
+        conditions=conditions,  # type: ignore[arg-type]
+        feed_epoch_definition=definition,
+        used_at_ns=used_at_ns,
+        information_mode=InformationMode.EX_POST_RECONSTRUCTION,
+    )
+
+    assert conditioning["conditioning_mode"] == (
+        "ex-post-adjacent-epoch-linear-transition-v1"
+    )
+    assert conditioning["feed_epoch_id"] == assignment.label
+    assert conditioning["transition_left_epoch_id"] == "technology_epoch_02"
+    assert conditioning["transition_right_epoch_id"] == "technology_epoch_03"
+    assert conditioning["transition_left_weight"] + conditioning[
+        "transition_right_weight"
+    ] == pytest.approx(1.0)
+    joint = conditioning["joint_retention"]  # type: ignore[assignment]
+    assert joint["stratum_level"] == "transition_bridge"
+    assert 0.24065855 < joint["retention_probability"] < 0.49569722
+
+    with pytest.raises(ValueError, match="qualified only for ex-post"):
+        _historical_product_observation_conditioning(
+            operator,
+            conditions=conditions,  # type: ignore[arg-type]
+            feed_epoch_definition=definition,
+            used_at_ns=used_at_ns,
+            information_mode=InformationMode.EX_ANTE_SIMULATION,
+        )
 
 
 def test_canonical_epoch_projection_is_replayable_and_does_not_overclaim(

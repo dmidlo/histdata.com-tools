@@ -20,9 +20,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from histdatacom.cross_series_constraints import (
-    CrossSeriesConstraintPolicyV1,
-)
+from histdatacom.cross_series_constraints import CrossSeriesConstraintPolicyV1
 from histdatacom.data_quality.training_features import (
     IDENTITY_COLUMNS,
     SYNTHETIC_PLACEHOLDER_COLUMNS,
@@ -35,9 +33,7 @@ from histdatacom.datasets import (
     DatasetOrigin,
     DatasetQueryScopeV1,
 )
-from histdatacom.reconstruction_evidence import (
-    ReconstructionEvidencePolicyV1,
-)
+from histdatacom.reconstruction_evidence import ReconstructionEvidencePolicyV1
 
 RECONSTRUCTION_SCHEMA_REGISTRY_VERSION = (
     "histdatacom.reconstruction-schema-registry.v1"
@@ -375,6 +371,7 @@ _AUDITED_MODULES = (
     "histdatacom.synthetic.streaming",
     "histdatacom.synthetic.information",
     "histdatacom.synthetic.observation",
+    "histdatacom.synthetic.historical_conditioning",
     "histdatacom.synthetic.observation_calibration",
     "histdatacom.synthetic.benchmark",
     "histdatacom.synthetic.benchmark_corpus",
@@ -433,6 +430,18 @@ _REQUIRED_SCHEMA_TOKENS = (
     "reconstruction-ensemble-config",
     "reconstruction-plan-spec.v1",
     "reconstruction-plan-spec.v2",
+    "reconstruction-context-availability-qualification",
+    "reconstruction-plan-cftc-support",
+    "reconstruction-plan-source-support",
+    "reconstruction-plan-support-window",
+    "reconstruction-plan-support-map",
+    "reconstruction-plan-support-map-index",
+    "reconstruction-plan-set-execution-request",
+    "reconstruction-plan-set-receipt-index",
+    "reconstruction-campaign-product-entry",
+    "reconstruction-campaign-product-shard",
+    "reconstruction-campaign-product-index",
+    "reconstruction-campaign-dataset-publication",
     "proposal-engine-descriptor",
     "proposal-engine-registry",
     "proposal-engine-portfolio",
@@ -451,6 +460,9 @@ _REQUIRED_SCHEMA_TOKENS = (
     "synthetic-infill-plan",
     "reconstruction-checkpoint",
     "reconstruction-product.v2",
+    "reconstruction-product.v3",
+    "reconstruction-observed-anchor-segment",
+    "reconstruction-replay-manifest.v2",
 )
 
 _RESERVED_CONTRACTS = (

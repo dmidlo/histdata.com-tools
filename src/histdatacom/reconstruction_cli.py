@@ -23,9 +23,12 @@ from histdatacom.reconstruction import (
     read_execution_request,
     read_operation_receipt,
     read_plan_spec,
+    read_reconstruction_plan_set_execution_request,
+    read_reconstruction_plan_set_receipt_index,
     reconstruction_exit_code,
     write_execution_request,
     write_operation_receipt,
+    write_reconstruction_plan_set_execution_request,
 )
 from histdatacom.reconstruction_schema import ReconstructionCompatibilityStatus
 from histdatacom.synthetic.certification import CertificationState
@@ -171,6 +174,65 @@ def build_parser() -> argparse.ArgumentParser:
     )
     preflight_set.add_argument("--plan-set", required=True, metavar="PATH")
 
+    support_map = subparsers.add_parser(
+        "support-map",
+        help="materialize exact executable/refused coverage for a plan set",
+    )
+    support_map.add_argument("--plan-set", required=True, metavar="PATH")
+    support_map.add_argument(
+        "--output-directory", required=True, metavar="PATH"
+    )
+
+    support_inspect = subparsers.add_parser(
+        "support-inspect",
+        help="inspect a bounded slice of monolithic or indexed support",
+    )
+    support_inspect.add_argument("--support-map", required=True, metavar="PATH")
+    support_inspect.add_argument("--start-ns", type=int)
+    support_inspect.add_argument("--end-ns", type=int)
+    support_inspect.add_argument("--limit", type=int, default=100)
+
+    product_index = subparsers.add_parser(
+        "product-index",
+        help="reconcile every support outcome with committed member products",
+    )
+    product_index.add_argument("--plan-set", required=True, metavar="PATH")
+    product_index.add_argument("--support-map", required=True, metavar="PATH")
+    product_index.add_argument(
+        "--output-directory", required=True, metavar="PATH"
+    )
+    product_index.add_argument(
+        "--manifest-only",
+        action="store_true",
+        help="skip full Parquet replay while building an in-progress index",
+    )
+
+    product_inspect = subparsers.add_parser(
+        "product-inspect",
+        help="inspect bounded products/outcomes from a campaign",
+    )
+    product_inspect.add_argument(
+        "--product-index", required=True, metavar="PATH"
+    )
+    product_inspect.add_argument("--start-ns", type=int)
+    product_inspect.add_argument("--end-ns", type=int)
+    product_inspect.add_argument("--limit", type=int, default=100)
+
+    dataset_publish = subparsers.add_parser(
+        "dataset-publish",
+        help="publish a complete campaign as a provider-neutral dataset version",
+    )
+    dataset_publish.add_argument(
+        "--product-index", required=True, metavar="PATH"
+    )
+    dataset_publish.add_argument(
+        "--output-directory", required=True, metavar="PATH"
+    )
+    dataset_publish.add_argument(
+        "--dataset-id",
+        default="histdata-triangle-modern-reference-synthetic",
+    )
+
     request = subparsers.add_parser(
         "request", help="bind explicit operator intent to an immutable plan"
     )
@@ -191,6 +253,29 @@ def build_parser() -> argparse.ArgumentParser:
         help="execute supported windows while retaining explicit refusals",
     )
     request.add_argument("--output", required=True, metavar="PATH")
+
+    request_set = subparsers.add_parser(
+        "request-set",
+        help="bind operator intent to every plan shard and its support map",
+    )
+    request_set.add_argument("--plan-set", required=True, metavar="PATH")
+    request_set.add_argument("--support-map", required=True, metavar="PATH")
+    request_set.add_argument(
+        "--information-mode",
+        required=True,
+        choices=tuple(mode.value for mode in InformationMode),
+    )
+    request_set.add_argument(
+        "--acknowledge-scientific-nonclaim", action="store_true"
+    )
+    request_set.add_argument(
+        "--disallow-refusals",
+        action="store_true",
+        help="refuse the campaign if any shard contains an explicit refusal",
+    )
+    request_set.add_argument(
+        "--output-directory", required=True, metavar="PATH"
+    )
 
     preflight = subparsers.add_parser(
         "preflight", help="validate readiness and print dry-run resources"
@@ -220,6 +305,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     run.add_argument("--receipt", required=True, metavar="PATH")
 
+    run_set = subparsers.add_parser(
+        "run-set",
+        help="execute or submit every shard in a durable campaign request",
+    )
+    run_set.add_argument("--request-set", required=True, metavar="PATH")
+    run_set_mode = run_set.add_mutually_exclusive_group()
+    run_set_mode.add_argument("--submit-only", action="store_true")
+    run_set_mode.add_argument("--local", action="store_true")
+    run_set.add_argument("--output-directory", required=True, metavar="PATH")
+
     status = subparsers.add_parser(
         "status", help="inspect every job in an operation receipt"
     )
@@ -229,12 +324,26 @@ def build_parser() -> argparse.ArgumentParser:
     )
     status.add_argument("--output", default="", metavar="PATH")
 
+    status_set = subparsers.add_parser(
+        "status-set", help="inspect every shard from a campaign receipt index"
+    )
+    status_set.add_argument("--receipt-index", required=True, metavar="PATH")
+    status_set.add_argument("--offline", action="store_true")
+    status_set.add_argument("--output-directory", required=True, metavar="PATH")
+
     cancel = subparsers.add_parser(
         "cancel", help="request cancellation for every submitted job"
     )
     cancel.add_argument("--receipt", required=True, metavar="PATH")
     cancel.add_argument("--reason", default="")
     cancel.add_argument("--output", required=True, metavar="PATH")
+
+    cancel_set = subparsers.add_parser(
+        "cancel-set", help="cancel every shard from a campaign receipt index"
+    )
+    cancel_set.add_argument("--receipt-index", required=True, metavar="PATH")
+    cancel_set.add_argument("--reason", default="")
+    cancel_set.add_argument("--output-directory", required=True, metavar="PATH")
 
     resume = subparsers.add_parser(
         "resume", help="resume durable checkpoints using fresh workflow IDs"
@@ -244,6 +353,16 @@ def build_parser() -> argparse.ArgumentParser:
     resume_mode.add_argument("--submit-only", action="store_true")
     resume_mode.add_argument("--local", action="store_true")
     resume.add_argument("--output", required=True, metavar="PATH")
+
+    resume_set = subparsers.add_parser(
+        "resume-set",
+        help="resume every shard from durable campaign checkpoints",
+    )
+    resume_set.add_argument("--receipt-index", required=True, metavar="PATH")
+    resume_set_mode = resume_set.add_mutually_exclusive_group()
+    resume_set_mode.add_argument("--submit-only", action="store_true")
+    resume_set_mode.add_argument("--local", action="store_true")
+    resume_set.add_argument("--output-directory", required=True, metavar="PATH")
 
     outputs = subparsers.add_parser(
         "outputs", help="list verified committed products for a request"
@@ -406,6 +525,47 @@ def _run_command(
                 else ReconstructionExitCode.REFUSED
             ),
         )
+    if command == "support-map":
+        ref = client.construct_plan_support_map(
+            args.plan_set,
+            output_directory=args.output_directory,
+        )
+        return ref.to_dict(), ReconstructionExitCode.SUCCESS
+    if command == "support-inspect":
+        return (
+            client.inspect_plan_support_map(
+                args.support_map,
+                start_ns=args.start_ns,
+                end_ns=args.end_ns,
+                limit=args.limit,
+            ),
+            ReconstructionExitCode.SUCCESS,
+        )
+    if command == "product-index":
+        ref = client.construct_campaign_product_index(
+            args.plan_set,
+            args.support_map,
+            output_directory=args.output_directory,
+            verify_products=not args.manifest_only,
+        )
+        return ref.to_dict(), ReconstructionExitCode.SUCCESS
+    if command == "product-inspect":
+        return (
+            client.inspect_campaign_products(
+                args.product_index,
+                start_ns=args.start_ns,
+                end_ns=args.end_ns,
+                limit=args.limit,
+            ),
+            ReconstructionExitCode.SUCCESS,
+        )
+    if command == "dataset-publish":
+        ref = client.publish_campaign_dataset(
+            args.product_index,
+            output_directory=args.output_directory,
+            dataset_id=args.dataset_id,
+        )
+        return ref.to_dict(), ReconstructionExitCode.SUCCESS
     if command == "request":
         request = client.create_request(
             args.plan,
@@ -420,6 +580,20 @@ def _run_command(
             "request": request.to_dict(),
             "request_path": str(path),
         }, ReconstructionExitCode.SUCCESS
+    if command == "request-set":
+        request_set = client.create_plan_set_execution_request(
+            args.plan_set,
+            args.support_map,
+            information_mode=args.information_mode,
+            acknowledge_scientific_nonclaim=(
+                args.acknowledge_scientific_nonclaim
+            ),
+            allow_refusals=not args.disallow_refusals,
+        )
+        ref = write_reconstruction_plan_set_execution_request(
+            request_set, args.output_directory
+        )
+        return ref.to_dict(), ReconstructionExitCode.SUCCESS
     if command == "preflight":
         preflight = client.preflight(read_execution_request(args.request))
         return preflight.to_dict(), reconstruction_exit_code(preflight)
@@ -432,6 +606,18 @@ def _run_command(
         )
         path = write_operation_receipt(receipt, args.receipt)
         return _receipt_result(receipt, path), reconstruction_exit_code(receipt)
+    if command == "run-set":
+        request_set = read_reconstruction_plan_set_execution_request(
+            args.request_set
+        )
+        ref = client.run_plan_set_execution_request(
+            request_set,
+            output_directory=args.output_directory,
+            wait=not args.submit_only,
+            local=args.local,
+        )
+        index = read_reconstruction_plan_set_receipt_index(ref.path)
+        return ref.to_dict(), reconstruction_exit_code(index)
     if command == "status":
         receipt = client.inspect(
             read_operation_receipt(args.receipt), offline=args.offline
@@ -444,12 +630,30 @@ def _run_command(
         return _receipt_result(receipt, status_path), reconstruction_exit_code(
             receipt
         )
+    if command == "status-set":
+        ref = client.operate_plan_set_receipt_index(
+            args.receipt_index,
+            operation="status",
+            output_directory=args.output_directory,
+            offline=args.offline,
+        )
+        index = read_reconstruction_plan_set_receipt_index(ref.path)
+        return ref.to_dict(), reconstruction_exit_code(index)
     if command == "cancel":
         receipt = client.cancel(
             read_operation_receipt(args.receipt), reason=args.reason
         )
         path = write_operation_receipt(receipt, args.output)
         return _receipt_result(receipt, path), reconstruction_exit_code(receipt)
+    if command == "cancel-set":
+        ref = client.operate_plan_set_receipt_index(
+            args.receipt_index,
+            operation="cancel",
+            output_directory=args.output_directory,
+            reason=args.reason,
+        )
+        index = read_reconstruction_plan_set_receipt_index(ref.path)
+        return ref.to_dict(), reconstruction_exit_code(index)
     if command == "resume":
         receipt = client.resume(
             read_operation_receipt(args.receipt),
@@ -458,6 +662,16 @@ def _run_command(
         )
         path = write_operation_receipt(receipt, args.output)
         return _receipt_result(receipt, path), reconstruction_exit_code(receipt)
+    if command == "resume-set":
+        ref = client.operate_plan_set_receipt_index(
+            args.receipt_index,
+            operation="resume",
+            output_directory=args.output_directory,
+            wait=not args.submit_only,
+            local=args.local,
+        )
+        index = read_reconstruction_plan_set_receipt_index(ref.path)
+        return ref.to_dict(), reconstruction_exit_code(index)
     if command == "outputs":
         return (
             client.outputs(read_execution_request(args.request)),

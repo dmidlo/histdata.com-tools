@@ -9,6 +9,7 @@ temporary directory.
 from __future__ import annotations
 
 import asyncio
+import gzip
 import hashlib
 import json
 import os
@@ -49,7 +50,7 @@ from histdatacom.reconstruction_experiment import read_reconstruction_experiment
 from histdatacom.runtime_contracts import ArtifactRef
 from histdatacom.synthetic.contracts import canonical_contract_json
 from histdatacom.synthetic.persistence import (
-    ReconstructionProductManifestV2,
+    ReconstructionProductManifestV3,
     ReconstructionRetentionPlanV1,
     discover_reconstruction_manifests,
     load_reconstruction_manifest,
@@ -68,16 +69,13 @@ from histdatacom.synthetic.reconstruction_handlers import (
 )
 from histdatacom.synthetic.reconstruction_plan import (
     ReconstructionPlanExecutionManifestV1,
-    ReconstructionPlanResourceSummaryV1,
     SyntheticInfillPlanV1,
     read_reconstruction_plan_execution_manifest,
     read_synthetic_infill_plan,
-    write_synthetic_infill_plan,
 )
 from histdatacom.synthetic.streaming import (
     ReconstructionCommitPhase,
     ReconstructionResourceEstimateV1,
-    ReconstructionWindowV1,
 )
 
 _PLAN_ENV = "HISTDATACOM_REAL_RECONSTRUCTION_PLAN"
@@ -113,6 +111,7 @@ class _StopBeforeCommitExecutor:
 
 def test_real_triangle_is_deterministic_and_recovers_post_rename_crash(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """All seven real handlers commit deterministic queryable Parquet."""
     first = _case(tmp_path / "concurrency-1", max_parallel_windows=1)
@@ -139,6 +138,11 @@ def test_real_triangle_is_deterministic_and_recovers_post_rename_crash(
         task=first.task,
         command=first.task.commands[-1],
         prior_outcomes=validated.outcomes,
+    )
+    monkeypatch.setattr(
+        "histdatacom.synthetic.reconstruction_handlers."
+        "_cleanup_committed_window_scratch",
+        lambda *_, **__: 0,
     )
     promoted_without_receipt = atomic_commit_handler(commit_invocation)
     assert (
@@ -266,7 +270,7 @@ def test_real_triangle_is_deterministic_and_recovers_post_rename_crash(
     proposal_ledger_ref = ArtifactRef.from_dict(
         proposal_manifest["batch_ledger_ref"]
     )
-    with Path(proposal_ledger_ref.path).open("rb") as stream:
+    with gzip.open(proposal_ledger_ref.path, "rb") as stream:
         proposal_rows = tuple(json.loads(line) for line in stream)
     assert all("cross_series_constraint_use" in row for row in proposal_rows)
     assert all(
@@ -291,12 +295,14 @@ def test_real_triangle_is_deterministic_and_recovers_post_rename_crash(
     ledger_ref = ArtifactRef.from_dict(
         carving_manifest["carved_batch_ledger_ref"]
     )
-    assert ledger_ref.kind == "reconstruction_carved_batch_ledger_v2"
+    assert ledger_ref.kind == "reconstruction_carved_batch_ledger_v3"
+    assert ledger_ref.metadata["format"] == "canonical-json-lines-gzip-v1"
+    assert ledger_ref.path.endswith(".ndjson.gz")
     assert (
         ledger_ref.metadata["batch_count"]
         == carving_manifest["carved_batch_count"]
     )
-    with Path(ledger_ref.path).open("rb") as stream:
+    with gzip.open(ledger_ref.path, "rb") as stream:
         rows = tuple(json.loads(line) for line in stream)
     assert len(rows) == carving_manifest["carved_batch_count"]
     assert all("point_in_time_evidence_use" in row for row in rows)
@@ -373,6 +379,7 @@ def test_real_triangle_is_deterministic_and_recovers_post_rename_crash(
         first_manifest.quality.cross_series_constraint_decision_ids
     ) == (descriptor["cross_series_constraint_decision_ids"])
 
+    monkeypatch.undo()
     second = _case(tmp_path / "concurrency-2", max_parallel_windows=2)
     second_state = asyncio.run(
         run_reconstruction_window(
@@ -392,6 +399,74 @@ def test_real_triangle_is_deterministic_and_recovers_post_rename_crash(
     assert second_manifest.replay.partition_byte_sha256 == (
         first_manifest.replay.partition_byte_sha256
     )
+    scratch_entries = {
+        item.name for item in Path(second.task.scratch_directory).iterdir()
+    }
+    assert scratch_entries == {"receipts", "validation"}
+    # The commit handler removes every disposable stage artifact before it
+    # returns.  The orchestration boundary then durably writes the one final
+    # atomic-commit receipt, which is required to recover a crash between the
+    # publication rename and checkpoint persistence.  No earlier stage
+    # receipt or intermediate may survive the successful commit.
+    atomic_receipt = Path(second.task.commands[-1].receipt_path)
+    assert {item.resolve() for item in atomic_receipt.parent.iterdir()} == {
+        atomic_receipt.resolve()
+    }
+    receipt_outcome = ReconstructionStageOutcomeV1.from_json(
+        atomic_receipt.read_text(encoding="utf-8")
+    )
+    assert receipt_outcome.outcome_id == second_state.outcomes[-1].outcome_id
+    assert (
+        second_state.outcomes[-1]
+        .output_refs[0]
+        .metadata["removed_scratch_bytes"]
+        > 0
+    )
+
+
+def test_real_zero_deficit_triangle_commits_observed_only(
+    tmp_path: Path,
+) -> None:
+    """A qualified zero-cardinality deficit remains a verified product."""
+    case = _case(
+        tmp_path / "zero-deficit",
+        max_parallel_windows=1,
+        preserve_planned_candidate_count=True,
+    )
+    if case.task.resource_estimate.candidate_event_count != 0:
+        pytest.skip("selected real plan window does not have zero deficit")
+    register_first_party_reconstruction_handlers()
+
+    state = asyncio.run(
+        run_reconstruction_window(
+            case.request,
+            case.task,
+            checkpoint_store=ReconstructionCheckpointStore(
+                case.request.manifest_store_root
+            ),
+            stage_executor=RegisteredReconstructionStageExecutor(),
+        )
+    )
+    manifest = _committed_manifest(state)
+
+    assert state.checkpoint.phase is ReconstructionCommitPhase.COMMITTED
+    assert len(state.outcomes) == 7
+    assert manifest.observed_event_count > 0
+    assert manifest.synthetic_event_count == 0
+    assert manifest.physical_event_count == 0
+    assert manifest.partitions == ()
+    assert (
+        sum(item.row_count for item in manifest.observed_anchor_segments)
+        == manifest.observed_event_count
+    )
+    assert manifest.source.observed_values_verified_exactly
+    assert manifest.quality.final_validation_status == "passed"
+    assert manifest.quality.cross_instrument_quality_status == "passed"
+    replay = ReconstructionClient().replay(
+        state.committed_manifest_ref.path  # type: ignore[union-attr]
+    )
+    assert replay["event_count"] == manifest.observed_event_count
+    assert replay["replay_verified"]
 
 
 def test_real_scientific_evidence_refusal_prevents_atomic_commit(
@@ -459,52 +534,13 @@ def test_real_public_cli_and_api_execute_same_one_window_product(
 ) -> None:
     """Installed CLI and typed API meet at one real committed logical output."""
     case = _case(tmp_path / "public-cli-api", max_parallel_windows=1)
-    estimate = case.task.resource_estimate
-    resources = ReconstructionPlanResourceSummaryV1(
-        source_event_count=estimate.input_event_count,
-        source_size_bytes=sum(
-            ref.size_bytes or 0
-            for ref in case.execution.artifacts.values()
-            if ref.kind == "histdata_ascii_tick_arrow"
-        ),
-        planned_window_count=1,
-        executable_window_count=1,
-        refused_window_count=0,
-        ensemble_member_count=1,
-        retained_member_count=1,
-        workflow_request_count=1,
-        estimated_input_event_count=estimate.input_event_count,
-        estimated_candidate_event_count=estimate.candidate_event_count,
-        estimated_candidate_bytes=estimate.estimated_scratch_bytes,
-        estimated_peak_memory_bytes=estimate.estimated_memory_bytes,
-        estimated_peak_scratch_bytes=estimate.estimated_scratch_bytes,
-        estimated_output_bytes=estimate.estimated_output_bytes,
-        estimated_partition_count=3,
-    )
-    execution_ref = case.task.commands[0].configuration_refs[0]
-    public_plan = SyntheticInfillPlanV1(
-        run=case.plan.run,
-        configuration_id=case.plan.configuration_id,
-        execution_manifest_id=case.execution.manifest_id,
-        information_mode=case.plan.information_mode,
-        delivery_mode=case.plan.delivery_mode,
-        requested_start_ns=case.task.window.core_start_ns,
-        requested_end_ns=case.task.window.core_end_ns,
-        workflow_requests=(case.request,),
-        artifact_graph={
-            "execution_manifest": execution_ref,
-            **case.execution.artifacts,
-        },
-        resources=resources,
-    )
-    plan_ref = write_synthetic_infill_plan(
-        public_plan, tmp_path / "public-plan"
-    )
+    plan_path = str(Path(os.environ[_PLAN_ENV]).expanduser().resolve())
     client = ReconstructionClient()
     execution_request = client.create_request(
-        plan_ref.path,
+        plan_path,
         information_mode=case.plan.information_mode,
         acknowledge_scientific_nonclaim=True,
+        allow_refusals=bool(case.plan.refusals),
     )
     request_path = write_execution_request(
         execution_request, tmp_path / "execution-request.json"
@@ -534,7 +570,7 @@ def test_real_public_cli_and_api_execute_same_one_window_product(
     )
     manifest_path = cli_receipt.reports[0].committed_manifest_refs[0].path
     manifest = load_reconstruction_manifest(manifest_path)
-    assert isinstance(manifest, ReconstructionProductManifestV2)
+    assert isinstance(manifest, ReconstructionProductManifestV3)
 
     assert cli_run["status"] == "committed"
     assert cli_receipt.reports == api_receipt.reports
@@ -595,6 +631,7 @@ def _case(
     *,
     max_parallel_windows: int,
     failing_scientific_evidence: bool = False,
+    preserve_planned_candidate_count: bool = False,
 ) -> _Case:
     plan = _real_plan()
     start = _real_start_ns()
@@ -632,15 +669,12 @@ def _case(
         manifest_id="",
     )
     execution_ref = _write_execution_manifest(root / "artifacts", execution)
-    window = ReconstructionWindowV1(
-        run_id=plan.run.run_id,
-        ensemble_member_id=primary,
-        symbols=plan.run.symbols,
-        core_start_ns=start,
-        core_end_ns=start + 5 * 60 * 1_000_000_000,
-        left_halo_ns=original.window.left_halo_ns,
-        right_lookahead_ns=original.window.right_lookahead_ns,
-    )
+    # The source-support contract is keyed to the exact adaptive
+    # synchronization unit selected by the planner.  Reusing only its start
+    # and inventing a five-minute end produces a window that the plan never
+    # qualified, so the runtime must (correctly) refuse it as source
+    # corruption.  Exercise the real planned window end to end instead.
+    window = original.window
     scratch = root / "scratch" / window.window_id
     commands = []
     for ordinal, command in enumerate(original.commands):
@@ -672,9 +706,13 @@ def _case(
         window=window,
         resource_estimate=ReconstructionResourceEstimateV1(
             input_event_count=integration_input_event_estimate,
-            candidate_event_count=int(
-                integration_input_event_estimate
-                * plan.run.storage_policy.max_candidate_amplification
+            candidate_event_count=(
+                original.resource_estimate.candidate_event_count
+                if preserve_planned_candidate_count
+                else int(
+                    integration_input_event_estimate
+                    * plan.run.storage_policy.max_candidate_amplification
+                )
             ),
             retained_ensemble_members=1,
             inflight_batches=1,
@@ -756,8 +794,8 @@ def _failing_scientific_evidence(
     )
 
 
-def _committed_manifest(state: Any) -> ReconstructionProductManifestV2:
+def _committed_manifest(state: Any) -> ReconstructionProductManifestV3:
     assert state.committed_manifest_ref is not None
     manifest = load_reconstruction_manifest(state.committed_manifest_ref.path)
-    assert isinstance(manifest, ReconstructionProductManifestV2)
+    assert isinstance(manifest, ReconstructionProductManifestV3)
     return manifest

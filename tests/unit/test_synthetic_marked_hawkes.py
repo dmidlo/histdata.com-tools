@@ -107,6 +107,60 @@ def test_operator_conditioned_count_predictive_is_deterministic_and_variable() -
     assert len(ensemble) > 1
 
 
+def test_operator_conditioned_identity_with_only_fixed_anchors_is_empty() -> (
+    None
+):
+    """A zero modeled deficit is a successful empty generation, not refusal."""
+    config = MarkedHawkesConfigV1(HawkesExcitationStructure.DIAGONAL)
+    fit = fit_marked_hawkes_challenger(config, _calibration_windows())
+    generator = build_fitted_marked_hawkes_generator(
+        config, fit, ensemble_member_ids=("member-01",)
+    )
+    anchors = _events(GENERATION_START)
+    scenario = BenchmarkScenarioV1(
+        split_kind=BenchmarkSplitKind.VALIDATION,
+        epoch_id="technology_epoch_03",
+        severity_id="dense-identity",
+        observation_operator_id="operator-identity",
+        degradation_parameters={"retention_probability": 1.0},
+    )
+
+    assert (
+        hawkes_module._sample_negative_binomial_failures(
+            0, 1.0, random.Random(451)
+        )
+        == 0
+    )
+    assert hawkes_module._operator_conditioned_missing_counts(
+        config,
+        anchors,
+        scenario=scenario,
+        ensemble_member_id="member-01",
+    ) == dict.fromkeys(SYMBOLS, 0)
+
+    result = generator.generate_with_evidence(
+        anchors,
+        scenario=scenario,
+        window=_window(),
+        ensemble_member_id="member-01",
+    )
+
+    assert result.evidence.status is MarkedHawkesGenerationStatus.EMPTY
+    assert result.evidence.generated_event_count == 0
+    assert result.event_lineage == ()
+    assert result.events == tuple(
+        sorted(
+            anchors,
+            key=lambda item: (
+                item.event_time_ns,
+                item.symbol,
+                item.event_sequence,
+                item.benchmark_event_id,
+            ),
+        )
+    )
+
+
 def test_operator_conditioned_count_predictive_fails_closed_at_resource_bound() -> (
     None
 ):
@@ -448,6 +502,17 @@ def test_generation_is_deterministic_synchronized_marked_and_anchor_safe(
         second.evidence.generated_event_count
     )
     assert first.evidence.proposal_count == second.evidence.proposal_count
+    changed_telemetry = replace(
+        first.evidence,
+        wall_time_ms=first.evidence.wall_time_ms + 1,
+        peak_memory_bytes=first.evidence.peak_memory_bytes + 1,
+        evidence_id="",
+    )
+    assert changed_telemetry.evidence_id == first.evidence.evidence_id
+    assert (
+        changed_telemetry.to_dict()["wall_time_ms"]
+        == first.evidence.wall_time_ms + 1
+    )
     assert first.evidence.status in {
         MarkedHawkesGenerationStatus.GENERATED,
         MarkedHawkesGenerationStatus.EMPTY,
@@ -656,6 +721,42 @@ def test_resource_overflow_refuses_without_partial_rows() -> None:
     assert "limit exceeded" in (result.evidence.failure_reason or "")
 
 
+def test_operator_path_draw_truncates_at_candidate_bound_without_partial_leak() -> (
+    None
+):
+    limits = MarkedHawkesResourceLimitsV1(
+        max_generated_events_per_interval=1,
+        max_generated_events_per_window=1,
+    )
+    config = MarkedHawkesConfigV1(
+        HawkesExcitationStructure.FULL,
+        limits=limits,
+    )
+    fit = fit_marked_hawkes_challenger(config, _calibration_windows())
+    _, _, model = hawkes_module._conditioning_model(
+        fit,
+        _anchors(),
+        _scenario(),
+    )
+
+    events, lineages, _ = hawkes_module._simulate_events(
+        config,
+        fit,
+        model,
+        _anchors(),
+        scenario=_scenario(),
+        window=_window(),
+        ensemble_member_id="member-01",
+        history_events=(),
+        proposal_counter=[0],
+        missing_scale_override=1.0,
+        truncate_at_candidate_bound=True,
+    )
+
+    assert len(lineages) <= 1
+    assert len(events) == len(_anchors()) + len(lineages)
+
+
 def test_hawkes_batches_use_shared_carving_and_detect_anchor_tampering() -> (
     None
 ):
@@ -724,6 +825,9 @@ def test_hawkes_batches_use_shared_carving_and_detect_anchor_tampering() -> (
         )
     batch = next(item for item in batches if item.status.value == "generated")
     assert isinstance(batch, ReconstructionCandidateBatchV1)
+    assert {item.source_version_id for item in batch.events} == {
+        "source-version:hawkes-test"
+    }
     assert (
         tuple(
             MarkedHawkesCandidateLineageV1.from_dict(item.to_dict())

@@ -70,7 +70,7 @@ MARKED_HAWKES_CANDIDATE_BATCH_SCHEMA_VERSION = (
 MARKED_HAWKES_LEGACY_IMPLEMENTATION_VERSION = "1.0.0"
 MARKED_HAWKES_TRANSITION_MARK_IMPLEMENTATION_VERSION = "1.1.0"
 MARKED_HAWKES_HT_IMPLEMENTATION_VERSION = "1.2.0"
-MARKED_HAWKES_IMPLEMENTATION_VERSION = "1.3.0"
+MARKED_HAWKES_IMPLEMENTATION_VERSION = "1.4.0"
 MARKED_HAWKES_GENERATOR_PREFIX = "histdatacom.marked-hawkes"
 
 NANOSECONDS_PER_SECOND = 1_000_000_000
@@ -986,6 +986,7 @@ class MarkedHawkesGenerationEvidenceV1:
         object.__setattr__(self, "evidence_id", expected)
 
     def identity_payload(self) -> dict[str, JSONValue]:
+        """Return scientific identity without machine-dependent telemetry."""
         return {
             "schema_version": self.schema_version,
             "fit_id": self.fit_id,
@@ -1002,13 +1003,16 @@ class MarkedHawkesGenerationEvidenceV1:
             "conditioning_model_key": self.conditioning_model_key,
             "spectral_radius": self.spectral_radius,
             "lineage_content_sha256": self.lineage_content_sha256,
-            "wall_time_ms": self.wall_time_ms,
-            "peak_memory_bytes": self.peak_memory_bytes,
             "failure_reason": self.failure_reason,
         }
 
     def to_dict(self) -> dict[str, JSONValue]:
-        return {**self.identity_payload(), "evidence_id": self.evidence_id}
+        return {
+            **self.identity_payload(),
+            "wall_time_ms": self.wall_time_ms,
+            "peak_memory_bytes": self.peak_memory_bytes,
+            "evidence_id": self.evidence_id,
+        }
 
     def to_json(self) -> str:
         return str(canonical_contract_json(self.to_dict()))
@@ -1835,7 +1839,7 @@ def build_marked_hawkes_candidate_batches(
                     ask=item.ask,
                     run_id=run.run_id,
                     ensemble_member_id=window.ensemble_member_id,
-                    source_version_id=fit_result.fit_id,
+                    source_version_id=left_anchor.source_version_id,
                     left_anchor_event_id=left_anchor.event_id,
                     right_anchor_event_id=right_anchor.event_id,
                     anchor_interval_id=interval_id,
@@ -2609,6 +2613,7 @@ def _generate_events(
     )
     pooled_events: list[BenchmarkEventV1] = []
     pooled_lineages: list[MarkedHawkesGenerationLineageV1] = []
+    support: Counter[str] = Counter()
     for draw_index in range(OPERATOR_CONDITIONED_PATH_DRAWS):
         events, lineages, _ = _simulate_events(
             config,
@@ -2622,13 +2627,20 @@ def _generate_events(
             proposal_counter=proposal_counter,
             simulation_draw_index=draw_index,
             missing_scale_override=simulation_scale,
+            truncate_at_candidate_bound=True,
         )
-        lineage_ids = {item.source_event_id for item in lineages}
-        pooled_events.extend(
-            item for item in events if item.source_event_id in lineage_ids
-        )
-        pooled_lineages.extend(lineages)
-        support = Counter(item.destination_symbol for item in pooled_lineages)
+        generated_by_id = {
+            item.source_event_id: item
+            for item in events
+            if item.sparsity.startswith("marked-hawkes-")
+        }
+        for lineage in lineages:
+            symbol = lineage.destination_symbol
+            if support[symbol] >= target_by_symbol[symbol]:
+                continue
+            pooled_events.append(generated_by_id[lineage.source_event_id])
+            pooled_lineages.append(lineage)
+            support[symbol] += 1
         if all(
             support[symbol] >= target
             for symbol, target in target_by_symbol.items()
@@ -2668,6 +2680,7 @@ def _simulate_events(
     proposal_counter: list[int],
     simulation_draw_index: int = 0,
     missing_scale_override: float | None = None,
+    truncate_at_candidate_bound: bool = False,
 ) -> tuple[
     tuple[BenchmarkEventV1, ...],
     tuple[MarkedHawkesGenerationLineageV1, ...],
@@ -2877,10 +2890,14 @@ def _simulate_events(
         if per_interval[interval_key] > (
             config.limits.max_generated_events_per_interval
         ):
+            if truncate_at_candidate_bound:
+                break
             raise MarkedHawkesGenerationError(
                 "generated interval cardinality exceeds limit"
             )
         if len(generated) >= config.limits.max_generated_events_per_window:
+            if truncate_at_candidate_bound:
+                break
             raise MarkedHawkesGenerationError(
                 "generated window cardinality exceeds limit"
             )
@@ -2890,6 +2907,8 @@ def _simulate_events(
                 len(anchors) * config.limits.max_candidate_amplification
             ),
         ):
+            if truncate_at_candidate_bound:
+                break
             raise MarkedHawkesGenerationError(
                 "candidate amplification limit exceeded"
             )
@@ -3080,7 +3099,7 @@ def _sample_negative_binomial_failures(
 ) -> int:
     """Draw failures before successes from the conjugate count predictive."""
     successes = _bounded_int(
-        success_count, "success_count", 1, MAX_HAWKES_GENERATED_EVENTS
+        success_count, "success_count", 0, MAX_HAWKES_GENERATED_EVENTS
     )
     probability = _finite_float(success_probability, "success_probability")
     if not 0.0 < probability <= 1.0:

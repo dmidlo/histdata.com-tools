@@ -15,7 +15,9 @@ import os
 import random
 import statistics
 from collections import defaultdict
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Iterator, Mapping, Sequence
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -88,6 +90,10 @@ MAX_POWER_REPLICATIONS = 4096
 MAX_POWER_REGIONS = 16
 DEFAULT_POWER_SAMPLE_SIZES = (3, 6, 12, 24, 48)
 DEFAULT_SCORE_FEATURE_EXCLUSIONS = frozenset({"window_duration_seconds"})
+
+_VERIFIED_QUALIFICATION_DOSSIERS: ContextVar[dict[str, Any] | None] = (
+    ContextVar("verified_qualification_dossiers", default=None)
+)
 QUALIFICATION_CONTROL_METHODS = (
     "dense_identity",
     "linear_interpolation",
@@ -2283,6 +2289,21 @@ def verify_powered_qualification_dossier(
     dossier: PoweredQualificationDossierV1,
 ) -> None:
     """Fail closed when retained qualification evidence is stale or mismatched."""
+    cache = _VERIFIED_QUALIFICATION_DOSSIERS.get()
+    dossier_id = str(getattr(dossier, "dossier_id", ""))
+    if cache is not None and dossier_id in cache:
+        if cache[dossier_id] != dossier:
+            raise ValueError("qualification dossier identity collision")
+        return
+    _verify_powered_qualification_dossier_uncached(dossier)
+    if cache is not None:
+        cache[dossier_id] = dossier
+
+
+def _verify_powered_qualification_dossier_uncached(
+    dossier: PoweredQualificationDossierV1,
+) -> None:
+    """Perform the complete deterministic powered-evidence recomputation."""
     if not isinstance(dossier, PoweredQualificationDossierV1):
         raise TypeError("qualification dossier must use v1")
     if dossier.implementation_sha256 != _implementation_sha256():
@@ -2355,6 +2376,20 @@ def verify_powered_qualification_dossier(
         raise ValueError(
             "qualification dossier differs from deterministic recomputation"
         )
+
+
+@contextmanager
+def powered_qualification_verification_scope() -> Iterator[None]:
+    """Reuse one verified dossier only within a bounded top-level operation."""
+    existing = _VERIFIED_QUALIFICATION_DOSSIERS.get()
+    if existing is not None:
+        yield
+        return
+    token = _VERIFIED_QUALIFICATION_DOSSIERS.set({})
+    try:
+        yield
+    finally:
+        _VERIFIED_QUALIFICATION_DOSSIERS.reset(token)
 
 
 def write_powered_qualification_dossier(
@@ -3181,30 +3216,29 @@ def _observed_gate_statuses(
     statuses: dict[str, QualificationStatus] = {}
     for gate_id, observed in values.items():
         reliability = power_study.result(gate_id).status
-        if reliability is not QualificationStatus.PASSED:
-            statuses[gate_id] = QualificationStatus.INSUFFICIENT_EVIDENCE
-        elif (
-            gate_id
-            in {
-                "time_uniformity",
-                "time_serial_dependence",
-                "mark_calibration",
-            }
-            and residual is not None
-            and residual.status is QualificationStatus.INSUFFICIENT_EVIDENCE
+        if (
+            reliability is not QualificationStatus.PASSED
+            or (
+                gate_id
+                in {
+                    "time_uniformity",
+                    "time_serial_dependence",
+                    "mark_calibration",
+                }
+                and residual is not None
+                and residual.status is QualificationStatus.INSUFFICIENT_EVIDENCE
+            )
+            or (
+                calibration.status is QualificationStatus.INSUFFICIENT_EVIDENCE
+                and gate_id
+                in {
+                    "multivariate_energy",
+                    "multivariate_variogram",
+                    "calibration_sharpness",
+                }
+            )
+            or observed is None
         ):
-            statuses[gate_id] = QualificationStatus.INSUFFICIENT_EVIDENCE
-        elif (
-            calibration.status is QualificationStatus.INSUFFICIENT_EVIDENCE
-            and gate_id
-            in {
-                "multivariate_energy",
-                "multivariate_variogram",
-                "calibration_sharpness",
-            }
-        ):
-            statuses[gate_id] = QualificationStatus.INSUFFICIENT_EVIDENCE
-        elif observed is None:
             statuses[gate_id] = QualificationStatus.INSUFFICIENT_EVIDENCE
         else:
             statuses[gate_id] = (
@@ -3946,6 +3980,7 @@ __all__ = [
     "QualificationPowerStudyV1",
     "QualificationStatus",
     "evaluate_point_process_residuals",
+    "powered_qualification_verification_scope",
     "qualify_histdata_proposal_portfolio",
     "read_powered_qualification_dossier",
     "run_qualification_power_study",

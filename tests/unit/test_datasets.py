@@ -74,6 +74,35 @@ def _write_histdata_cache(root: Path) -> tuple[Path, pl.DataFrame]:
     return path, frame
 
 
+def test_histdata_adapter_preserves_and_labels_raw_quote_order_inversions(
+    tmp_path: Path,
+) -> None:
+    source_root = tmp_path / "ASCII" / "T"
+    path, frame = _write_histdata_cache(source_root)
+    inverted = frame.with_columns(
+        pl.when(pl.int_range(pl.len()) < 2)
+        .then(pl.col("bid") - 0.0004)
+        .otherwise(pl.col("ask"))
+        .alias("ask")
+    )
+    inverted.write_ipc(path)
+
+    adapter = HistDataProviderAdapter()
+    partition = adapter.inspect_partition(
+        source_root, symbol=_SYMBOL, period=_PERIOD
+    )
+
+    assert partition.adapter_version == "1.2.0"
+    assert partition.artifact.metadata["raw_negative_spread_count"] == 2
+    assert partition.artifact.metadata["raw_negative_spread_rate"] == (
+        pytest.approx(2 / 3)
+    )
+    assert partition.artifact.metadata["quote_order_projection_policy"] == (
+        "rowwise-min-bid-max-ask-preserve-raw-v1"
+    )
+    assert adapter.read_partition(partition).equals(inverted)
+
+
 def _write_fixture_csv(
     root: Path,
     *,
@@ -227,7 +256,7 @@ def test_histdata_adapter_preserves_and_flags_vendor_timestamp_regression(
     direct = adapter.read_partition(partition)
     projected = project_observed_ascii_ticks_v2(adapter, version, partition)
 
-    assert adapter.descriptor.adapter_version == "1.1.0"
+    assert adapter.descriptor.adapter_version == "1.2.0"
     assert direct.equals(regressed)
     assert partition.artifact.metadata["first_timestamp_ms"] == _START_MS
     assert partition.artifact.metadata["last_timestamp_ms"] == (

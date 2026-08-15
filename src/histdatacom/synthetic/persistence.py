@@ -4,8 +4,11 @@ This module is the durable boundary between a fully validated delivered group
 and the final reconstructed tick archive.  Version one retains the legacy
 broker-rendered contract; version two accepts an explicit generic delivery
 without inventing a broker identity.  Both write only the exact
-``SyntheticEventV1`` Arrow schema plus compact manifests.  Analytical feature
-frames, candidate rows, and rejection rows are never accepted by this API.
+``SyntheticEventV1`` logical schema plus compact manifests.  Version-three
+synthetic-delta Parquet omits only deterministic ``event_id`` and
+``anchor_interval_id`` columns and reconstructs them from their retained
+identity inputs on every verified read.  Analytical feature frames, candidate
+rows, and rejection rows are never accepted by this API.
 
 Publication is a directory-level transaction on one filesystem.  Parquet
 partitions and the manifest are written below undiscoverable scratch, validated
@@ -26,6 +29,7 @@ import tempfile
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from functools import lru_cache
 from pathlib import Path, PurePosixPath
 from typing import Any, cast
 from urllib.parse import quote
@@ -43,6 +47,7 @@ from histdatacom.synthetic.contracts import (
     SyntheticEventStreamV1,
     SyntheticEventV1,
     canonical_contract_json,
+    derive_anchor_interval_id,
     synthetic_event_arrow_schema,
     synthetic_event_stream_to_arrow,
 )
@@ -62,6 +67,12 @@ RECONSTRUCTION_PRODUCT_SCHEMA_VERSION = "histdatacom.reconstruction-product.v1"
 RECONSTRUCTION_PRODUCT_V2_SCHEMA_VERSION = (
     "histdatacom.reconstruction-product.v2"
 )
+RECONSTRUCTION_PRODUCT_V3_SCHEMA_VERSION = (
+    "histdatacom.reconstruction-product.v3"
+)
+RECONSTRUCTION_OBSERVED_ANCHOR_SEGMENT_SCHEMA_VERSION = (
+    "histdatacom.reconstruction-observed-anchor-segment.v1"
+)
 RECONSTRUCTION_PARTITION_SCHEMA_VERSION = (
     "histdatacom.reconstruction-product-partition.v1"
 )
@@ -80,6 +91,9 @@ RECONSTRUCTION_DELIVERY_QUALITY_MANIFEST_SCHEMA_VERSION = (
 RECONSTRUCTION_REPLAY_MANIFEST_SCHEMA_VERSION = (
     "histdatacom.reconstruction-replay-manifest.v1"
 )
+RECONSTRUCTION_REPLAY_V2_MANIFEST_SCHEMA_VERSION = (
+    "histdatacom.reconstruction-replay-manifest.v2"
+)
 RECONSTRUCTION_RETENTION_PLAN_SCHEMA_VERSION = (
     "histdatacom.reconstruction-retention-plan.v1"
 )
@@ -94,12 +108,41 @@ RECONSTRUCTION_PARQUET_ARTIFACT_KIND = "reconstruction-product-parquet"
 RECONSTRUCTION_LOGICAL_HASH_ALGORITHM = "sha256-canonical-event-json-lines-v1"
 RECONSTRUCTION_BYTE_HASH_ALGORITHM = "sha256-path-byte-digests-v1"
 RECONSTRUCTION_WRITER_ID = "histdatacom.pyarrow-parquet-zstd.v1"
+RECONSTRUCTION_SYNTHETIC_DELTA_WRITER_V1_ID = (
+    "histdatacom.pyarrow-parquet-zstd.synthetic-delta.v1"
+)
+RECONSTRUCTION_SYNTHETIC_DELTA_WRITER_ID = (
+    "histdatacom.pyarrow-parquet-zstd.synthetic-delta-derived-ids.v2"
+)
+SUPPORTED_RECONSTRUCTION_SYNTHETIC_DELTA_WRITER_IDS = frozenset(
+    {
+        RECONSTRUCTION_SYNTHETIC_DELTA_WRITER_V1_ID,
+        RECONSTRUCTION_SYNTHETIC_DELTA_WRITER_ID,
+    }
+)
+RECONSTRUCTION_SYNTHETIC_DELTA_DERIVED_COLUMNS = (
+    "anchor_interval_id",
+    "event_id",
+    "left_anchor_event_id",
+    "right_anchor_event_id",
+)
+_SYNTHETIC_DELTA_ANCHOR_ORDINAL_COLUMNS = (
+    "left_anchor_ordinal",
+    "right_anchor_ordinal",
+)
+_SYNTHETIC_DELTA_STORAGE_METADATA_KEY = (
+    b"histdatacom.synthetic_delta_storage_schema"
+)
+_SYNTHETIC_DELTA_STORAGE_SCHEMA_VERSION = (
+    "histdatacom.synthetic-delta-storage.v2"
+)
 RECONSTRUCTION_COMPRESSION = "zstd"
 DEFAULT_RECONSTRUCTION_ROW_GROUP_SIZE = 65_536
 DEFAULT_ESTIMATED_BYTES_PER_EVENT = 256
 DEFAULT_ESTIMATED_COMPRESSION_RATIO = 0.35
 MAX_RECONSTRUCTION_BENCHMARK_EVIDENCE_BYTES = 64 * 1024
 DEFAULT_MANIFEST_BYTES_PER_PARTITION = 4_096
+DEFAULT_MANIFEST_BYTES_PER_PRODUCT = 32_768
 MAX_RECONSTRUCTION_PARTITIONS = 4_096
 MAX_RECONSTRUCTION_MANIFEST_BYTES = 4 * 1024**2
 MAX_RECONSTRUCTION_TEXT = 1_024
@@ -148,6 +191,10 @@ class ReconstructionRetentionPlanV1:
     estimated_manifest_bytes: int
     estimated_total_output_bytes: int
     storage_policy_id: str
+    member_physical_event_counts: Mapping[str, int] = field(
+        default_factory=dict
+    )
+    estimated_product_count: int = 0
     plan_id: str = ""
     schema_version: str = RECONSTRUCTION_RETENTION_PLAN_SCHEMA_VERSION
 
@@ -180,8 +227,33 @@ class ReconstructionRetentionPlanV1:
         object.__setattr__(
             self, "member_event_counts", dict(sorted(counts.items()))
         )
+        supplied_physical = dict(self.member_physical_event_counts)
+        physical_counts = (
+            {
+                _required_text(member): _nonnegative_int(
+                    count, f"member_physical_event_counts.{member}"
+                )
+                for member, count in supplied_physical.items()
+            }
+            if supplied_physical
+            else dict(counts)
+        )
+        if set(physical_counts) != set(retained):
+            raise ValueError(
+                "physical member event estimates must cover retained members exactly"
+            )
+        if any(physical_counts[member] > counts[member] for member in retained):
+            raise ValueError(
+                "physical member events exceed logical member events"
+            )
+        object.__setattr__(
+            self,
+            "member_physical_event_counts",
+            dict(sorted(physical_counts.items())),
+        )
         for name in (
             "estimated_partition_count",
+            "estimated_product_count",
             "estimated_bytes_per_event",
             "estimated_primary_bytes",
             "estimated_retained_bytes",
@@ -193,7 +265,7 @@ class ReconstructionRetentionPlanV1:
                 name,
                 _nonnegative_int(getattr(self, name), name),
             )
-        has_estimated_events = any(counts.values())
+        has_estimated_events = any(physical_counts.values())
         if (self.estimated_partition_count == 0) != (not has_estimated_events):
             raise ValueError(
                 "zero-event retention plans must have zero partitions"
@@ -208,13 +280,13 @@ class ReconstructionRetentionPlanV1:
             raise ValueError("estimated_compression_ratio must be in (0, 1]")
         object.__setattr__(self, "estimated_compression_ratio", ratio)
         expected_primary = _estimated_event_bytes(
-            counts[self.primary_member_id],
+            physical_counts[self.primary_member_id],
             self.estimated_bytes_per_event,
             ratio,
         )
         expected_retained = sum(
             _estimated_event_bytes(
-                counts[member], self.estimated_bytes_per_event, ratio
+                physical_counts[member], self.estimated_bytes_per_event, ratio
             )
             for member in retained
         )
@@ -239,7 +311,7 @@ class ReconstructionRetentionPlanV1:
 
     def payload(self) -> dict[str, JSONValue]:
         """Return deterministic estimate fields."""
-        return {
+        payload: dict[str, JSONValue] = {
             "schema_version": self.schema_version,
             "run_id": self.run_id,
             "primary_member_id": self.primary_member_id,
@@ -255,6 +327,21 @@ class ReconstructionRetentionPlanV1:
             "storage_policy_id": self.storage_policy_id,
             "estimate_basis": "event-count-compression-upper-bound-v1",
         }
+        if dict(self.member_physical_event_counts) != dict(
+            self.member_event_counts
+        ):
+            payload["member_physical_event_counts"] = dict(
+                self.member_physical_event_counts
+            )
+            payload["physical_storage_layout"] = (
+                "synthetic-delta-with-referenced-observed-anchors-v1"
+            )
+        if self.estimated_product_count:
+            payload["estimated_product_count"] = self.estimated_product_count
+            payload["manifest_estimate_basis"] = (
+                "partition-plus-product-manifest-upper-bound-v1"
+            )
+        return payload
 
     def to_dict(self) -> dict[str, JSONValue]:
         """Return the compact retention plan."""
@@ -275,6 +362,18 @@ class ReconstructionRetentionPlanV1:
             "estimate_basis",
             "event-count-compression-upper-bound-v1",
         )
+        if "member_physical_event_counts" in data:
+            _require_derived(
+                data,
+                "physical_storage_layout",
+                "synthetic-delta-with-referenced-observed-anchors-v1",
+            )
+        if "estimated_product_count" in data:
+            _require_derived(
+                data,
+                "manifest_estimate_basis",
+                "partition-plus-product-manifest-upper-bound-v1",
+            )
         return cls(
             run_id=str(data.get("run_id", "")),
             primary_member_id=str(data.get("primary_member_id", "")),
@@ -316,6 +415,17 @@ class ReconstructionRetentionPlanV1:
                 "estimated_total_output_bytes",
             ),
             storage_policy_id=str(data.get("storage_policy_id", "")),
+            member_physical_event_counts={
+                str(key): _strict_int(value, str(key))
+                for key, value in _mapping(
+                    data.get("member_physical_event_counts", {}),
+                    "member_physical_event_counts",
+                ).items()
+            },
+            estimated_product_count=_strict_int(
+                data.get("estimated_product_count", 0),
+                "estimated_product_count",
+            ),
             plan_id=str(data.get("plan_id", "")),
             schema_version=str(data.get("schema_version", "")),
         )
@@ -326,7 +436,9 @@ def estimate_reconstruction_retention(
     run_id: str,
     primary_member_id: str,
     retained_member_event_counts: Mapping[str, int],
+    retained_member_physical_event_counts: Mapping[str, int] | None = None,
     estimated_partition_count: int,
+    estimated_product_count: int = 0,
     storage_policy: ReconstructionStoragePolicyV1,
     estimated_bytes_per_event: int = DEFAULT_ESTIMATED_BYTES_PER_EVENT,
     estimated_compression_ratio: float = (DEFAULT_ESTIMATED_COMPRESSION_RATIO),
@@ -338,11 +450,28 @@ def estimate_reconstruction_retention(
         _required_text(member): _nonnegative_int(count, str(member))
         for member, count in retained_member_event_counts.items()
     }
+    physical_counts = (
+        {
+            _required_text(member): _nonnegative_int(count, str(member))
+            for member, count in retained_member_physical_event_counts.items()
+        }
+        if retained_member_physical_event_counts is not None
+        else dict(counts)
+    )
+    if set(physical_counts) != set(counts):
+        raise ValueError(
+            "physical retained estimates must cover logical members exactly"
+        )
+    if any(physical_counts[member] > counts[member] for member in counts):
+        raise ValueError("physical retained estimates exceed logical estimates")
     primary = _required_text(primary_member_id)
     if primary not in counts:
         raise ValueError("primary member is absent from retained estimates")
     partition_count = _nonnegative_int(
         estimated_partition_count, "estimated_partition_count"
+    )
+    product_count = _nonnegative_int(
+        estimated_product_count, "estimated_product_count"
     )
     bytes_per_event = _positive_int(
         estimated_bytes_per_event, "estimated_bytes_per_event"
@@ -353,13 +482,16 @@ def estimate_reconstruction_retention(
     if not 0.0 < ratio <= 1.0:
         raise ValueError("estimated_compression_ratio must be in (0, 1]")
     primary_bytes = _estimated_event_bytes(
-        counts[primary], bytes_per_event, ratio
+        physical_counts[primary], bytes_per_event, ratio
     )
     retained_bytes = sum(
         _estimated_event_bytes(value, bytes_per_event, ratio)
-        for value in counts.values()
+        for value in physical_counts.values()
     )
-    manifest_bytes = partition_count * DEFAULT_MANIFEST_BYTES_PER_PARTITION
+    manifest_bytes = (
+        partition_count * DEFAULT_MANIFEST_BYTES_PER_PARTITION
+        + product_count * DEFAULT_MANIFEST_BYTES_PER_PRODUCT
+    )
     plan = ReconstructionRetentionPlanV1(
         run_id=run_id,
         primary_member_id=primary,
@@ -373,6 +505,8 @@ def estimate_reconstruction_retention(
         estimated_manifest_bytes=manifest_bytes,
         estimated_total_output_bytes=retained_bytes + manifest_bytes,
         storage_policy_id=storage_policy.policy_id,
+        member_physical_event_counts=physical_counts,
+        estimated_product_count=product_count,
     )
     violations: list[str] = []
     if len(counts) > storage_policy.max_retained_ensemble_members:
@@ -701,6 +835,11 @@ class ReconstructionSourceManifestV1:
             raise ValueError("source manifest_id differs")
         object.__setattr__(self, "source_manifest_id", expected)
 
+    @property
+    def observed_values_verified_exactly(self) -> bool:
+        """Return the immutable-anchor verification invariant."""
+        return True
+
     def payload(self) -> dict[str, JSONValue]:
         """Return immutable-source evidence."""
         payload: dict[str, JSONValue] = {
@@ -711,7 +850,7 @@ class ReconstructionSourceManifestV1:
             "observed_event_count": self.observed_event_count,
             "observed_content_sha256": self.observed_content_sha256,
             "observed_event_ids_sha256": self.observed_event_ids_sha256,
-            "observed_values_verified_exactly": True,
+            "observed_values_verified_exactly": self.observed_values_verified_exactly,
         }
         if self.experiment_id is not None:
             payload["experiment_id"] = self.experiment_id
@@ -1469,6 +1608,124 @@ class ReconstructionReplayManifestV1:
 
 
 @dataclass(frozen=True, slots=True)
+class ReconstructionReplayManifestV2:
+    """Logical replay plus synthetic-delta physical writer evidence."""
+
+    logical_content_sha256: str
+    partition_byte_sha256: str
+    logical_hash_algorithm: str
+    byte_hash_algorithm: str
+    writer_id: str
+    writer_library: str
+    writer_library_version: str
+    python_runtime: str
+    compression: str
+    row_group_size: int
+    canonicalized_metadata_exclusions: tuple[str, ...]
+    replay_manifest_id: str = ""
+    schema_version: str = RECONSTRUCTION_REPLAY_V2_MANIFEST_SCHEMA_VERSION
+
+    def __post_init__(self) -> None:
+        _require_version(
+            self.schema_version,
+            RECONSTRUCTION_REPLAY_V2_MANIFEST_SCHEMA_VERSION,
+            "reconstruction replay v2 manifest",
+        )
+        for name in ("logical_content_sha256", "partition_byte_sha256"):
+            object.__setattr__(
+                self, name, _required_sha256(getattr(self, name), name)
+            )
+        for name in (
+            "logical_hash_algorithm",
+            "byte_hash_algorithm",
+            "writer_id",
+            "writer_library",
+            "writer_library_version",
+            "python_runtime",
+            "compression",
+        ):
+            object.__setattr__(self, name, _required_text(getattr(self, name)))
+        if self.logical_hash_algorithm != RECONSTRUCTION_LOGICAL_HASH_ALGORITHM:
+            raise ValueError("unsupported reconstruction logical hash")
+        if self.byte_hash_algorithm != RECONSTRUCTION_BYTE_HASH_ALGORITHM:
+            raise ValueError("unsupported reconstruction byte hash")
+        if (
+            self.writer_id
+            not in SUPPORTED_RECONSTRUCTION_SYNTHETIC_DELTA_WRITER_IDS
+        ):
+            raise ValueError(
+                "unsupported reconstruction synthetic-delta writer"
+            )
+        if self.compression != RECONSTRUCTION_COMPRESSION:
+            raise ValueError("unsupported reconstruction compression")
+        object.__setattr__(
+            self,
+            "row_group_size",
+            _positive_int(self.row_group_size, "row_group_size"),
+        )
+        object.__setattr__(
+            self,
+            "canonicalized_metadata_exclusions",
+            _normalized_text_tuple(self.canonicalized_metadata_exclusions),
+        )
+        expected = _stable_id("reconstruction-replay-v2", self.payload())
+        supplied = _optional_text(self.replay_manifest_id)
+        if supplied is not None and supplied != expected:
+            raise ValueError("replay v2 manifest_id differs")
+        object.__setattr__(self, "replay_manifest_id", expected)
+
+    def payload(self) -> dict[str, JSONValue]:
+        """Return replay and synthetic-delta writer evidence."""
+        return {
+            "schema_version": self.schema_version,
+            "logical_content_sha256": self.logical_content_sha256,
+            "partition_byte_sha256": self.partition_byte_sha256,
+            "logical_hash_algorithm": self.logical_hash_algorithm,
+            "byte_hash_algorithm": self.byte_hash_algorithm,
+            "writer_id": self.writer_id,
+            "writer_library": self.writer_library,
+            "writer_library_version": self.writer_library_version,
+            "python_runtime": self.python_runtime,
+            "compression": self.compression,
+            "row_group_size": self.row_group_size,
+            "canonicalized_metadata_exclusions": list(
+                self.canonicalized_metadata_exclusions
+            ),
+        }
+
+    def to_dict(self) -> dict[str, JSONValue]:
+        """Return compact replay v2 JSON."""
+        return {**self.payload(), "replay_manifest_id": self.replay_manifest_id}
+
+    @classmethod
+    def from_dict(
+        cls, data: Mapping[str, Any]
+    ) -> ReconstructionReplayManifestV2:
+        """Restore and verify synthetic-delta replay evidence."""
+        _require_schema(data, RECONSTRUCTION_REPLAY_V2_MANIFEST_SCHEMA_VERSION)
+        return cls(
+            logical_content_sha256=str(data.get("logical_content_sha256", "")),
+            partition_byte_sha256=str(data.get("partition_byte_sha256", "")),
+            logical_hash_algorithm=str(data.get("logical_hash_algorithm", "")),
+            byte_hash_algorithm=str(data.get("byte_hash_algorithm", "")),
+            writer_id=str(data.get("writer_id", "")),
+            writer_library=str(data.get("writer_library", "")),
+            writer_library_version=str(data.get("writer_library_version", "")),
+            python_runtime=str(data.get("python_runtime", "")),
+            compression=str(data.get("compression", "")),
+            row_group_size=_strict_int(
+                data.get("row_group_size"), "row_group_size"
+            ),
+            canonicalized_metadata_exclusions=_string_tuple(
+                data.get("canonicalized_metadata_exclusions"),
+                "canonicalized_metadata_exclusions",
+            ),
+            replay_manifest_id=str(data.get("replay_manifest_id", "")),
+            schema_version=str(data.get("schema_version", "")),
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class ReconstructionProductManifestV1:
     """One atomically committed synchronized reconstruction unit."""
 
@@ -2081,6 +2338,534 @@ class ReconstructionProductManifestV2:
 
 
 @dataclass(frozen=True, slots=True)
+class ReconstructionObservedAnchorSegmentV1:
+    """One contiguous immutable row range in a canonical source partition."""
+
+    symbol: str
+    source_version_id: str
+    source_series_id: str
+    source_period: str
+    source_artifact: ArtifactRef
+    source_row_start_id: int
+    source_row_end_id: int
+    row_count: int
+    segment_id: str = ""
+    schema_version: str = RECONSTRUCTION_OBSERVED_ANCHOR_SEGMENT_SCHEMA_VERSION
+
+    def __post_init__(self) -> None:
+        _require_version(
+            self.schema_version,
+            RECONSTRUCTION_OBSERVED_ANCHOR_SEGMENT_SCHEMA_VERSION,
+            "observed anchor segment",
+        )
+        object.__setattr__(self, "symbol", _normalized_symbol(self.symbol))
+        for name in ("source_version_id", "source_series_id", "source_period"):
+            object.__setattr__(self, name, _required_text(getattr(self, name)))
+        artifact = self.source_artifact
+        if not isinstance(artifact, ArtifactRef):
+            raise TypeError("observed anchor segment requires an artifact ref")
+        _required_text(artifact.kind)
+        _required_text(artifact.path)
+        _required_sha256(artifact.sha256, "source_artifact.sha256")
+        if artifact.size_bytes is None:
+            raise ValueError("observed anchor artifact requires a byte size")
+        _positive_int(artifact.size_bytes, "source_artifact.size_bytes")
+        start = _positive_int(self.source_row_start_id, "source_row_start_id")
+        end = _positive_int(self.source_row_end_id, "source_row_end_id")
+        if end < start:
+            raise ValueError("observed anchor row range is reversed")
+        count = _positive_int(self.row_count, "row_count")
+        if count != end - start + 1:
+            raise ValueError("observed anchor segment row count differs")
+        object.__setattr__(self, "source_row_start_id", start)
+        object.__setattr__(self, "source_row_end_id", end)
+        object.__setattr__(self, "row_count", count)
+        expected_symbol = artifact.metadata.get("symbol")
+        if (
+            expected_symbol is not None
+            and str(expected_symbol).lower() != self.symbol
+        ):
+            raise ValueError("observed anchor artifact symbol differs")
+        expected_period = artifact.metadata.get("period")
+        if (
+            expected_period is not None
+            and str(expected_period) != self.source_period
+        ):
+            raise ValueError("observed anchor artifact period differs")
+        expected = _stable_id(
+            "reconstruction-observed-anchor-segment", self.payload()
+        )
+        supplied = _optional_text(self.segment_id)
+        if supplied is not None and supplied != expected:
+            raise ValueError("observed anchor segment_id differs")
+        object.__setattr__(self, "segment_id", expected)
+
+    def payload(self) -> dict[str, JSONValue]:
+        """Return path-independent logical row-range identity."""
+        return {
+            "schema_version": self.schema_version,
+            "symbol": self.symbol,
+            "source_version_id": self.source_version_id,
+            "source_series_id": self.source_series_id,
+            "source_period": self.source_period,
+            "source_artifact_kind": self.source_artifact.kind,
+            "source_artifact_sha256": self.source_artifact.sha256,
+            "source_artifact_size_bytes": self.source_artifact.size_bytes,
+            "source_row_start_id": self.source_row_start_id,
+            "source_row_end_id": self.source_row_end_id,
+            "row_count": self.row_count,
+            "row_identity_basis": "one-based-arrow-row-id-inclusive-v1",
+        }
+
+    def to_dict(self) -> dict[str, JSONValue]:
+        """Return portable segment evidence plus its resolvable artifact ref."""
+        return {
+            **self.payload(),
+            "source_artifact": self.source_artifact.to_dict(),
+            "segment_id": self.segment_id,
+        }
+
+    @classmethod
+    def from_dict(
+        cls, data: Mapping[str, Any]
+    ) -> ReconstructionObservedAnchorSegmentV1:
+        """Restore and verify one immutable source row range."""
+        _require_schema(
+            data, RECONSTRUCTION_OBSERVED_ANCHOR_SEGMENT_SCHEMA_VERSION
+        )
+        _require_derived(
+            data, "row_identity_basis", "one-based-arrow-row-id-inclusive-v1"
+        )
+        artifact = ArtifactRef.from_dict(
+            _mapping(data.get("source_artifact"), "source_artifact")
+        )
+        _require_derived(data, "source_artifact_kind", artifact.kind)
+        _require_derived(data, "source_artifact_sha256", artifact.sha256)
+        _require_derived(
+            data, "source_artifact_size_bytes", artifact.size_bytes
+        )
+        return cls(
+            symbol=str(data.get("symbol", "")),
+            source_version_id=str(data.get("source_version_id", "")),
+            source_series_id=str(data.get("source_series_id", "")),
+            source_period=str(data.get("source_period", "")),
+            source_artifact=artifact,
+            source_row_start_id=_strict_int(
+                data.get("source_row_start_id"), "source_row_start_id"
+            ),
+            source_row_end_id=_strict_int(
+                data.get("source_row_end_id"), "source_row_end_id"
+            ),
+            row_count=_strict_int(data.get("row_count"), "row_count"),
+            segment_id=str(data.get("segment_id", "")),
+            schema_version=str(data.get("schema_version", "")),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class ReconstructionProductManifestV3:
+    """Logical observed-plus-synthetic product with synthetic-only Parquet."""
+
+    run_id: str
+    window_id: str
+    synchronization_unit_id: str
+    ensemble_member_id: str
+    delivery_profile_id: str
+    symbol_group_id: str
+    symbols: tuple[str, ...]
+    symbol_event_counts: Mapping[str, int]
+    partitions: tuple[ReconstructionProductPartitionV1, ...]
+    observed_anchor_segments: tuple[ReconstructionObservedAnchorSegmentV1, ...]
+    logical_min_event_time_ns: int
+    logical_max_event_time_ns: int
+    source: ReconstructionSourceManifestV1
+    constraints: ReconstructionConstraintManifestV1
+    quality: ReconstructionDeliveryQualityManifestV1
+    replay: ReconstructionReplayManifestV2
+    ensemble: ReconstructionEnsembleManifestV1
+    retention: ReconstructionRetentionPlanV1
+    publication_id: str = ""
+    manifest_id: str = ""
+    schema_version: str = RECONSTRUCTION_PRODUCT_V3_SCHEMA_VERSION
+
+    def __post_init__(self) -> None:
+        _require_version(
+            self.schema_version,
+            RECONSTRUCTION_PRODUCT_V3_SCHEMA_VERSION,
+            "reconstruction product v3 manifest",
+        )
+        for name in (
+            "run_id",
+            "window_id",
+            "synchronization_unit_id",
+            "ensemble_member_id",
+            "delivery_profile_id",
+            "symbol_group_id",
+        ):
+            object.__setattr__(self, name, _required_text(getattr(self, name)))
+        symbols = tuple(
+            sorted({_normalized_symbol(item) for item in self.symbols})
+        )
+        if not symbols:
+            raise ValueError("product v3 manifest requires symbols")
+        object.__setattr__(self, "symbols", symbols)
+        counts = {
+            _normalized_symbol(symbol): _nonnegative_int(
+                count, f"symbol_event_counts.{symbol}"
+            )
+            for symbol, count in self.symbol_event_counts.items()
+        }
+        if set(counts) != set(symbols) or not sum(counts.values()):
+            raise ValueError("product v3 logical symbol counts are incomplete")
+        object.__setattr__(
+            self, "symbol_event_counts", dict(sorted(counts.items()))
+        )
+        partitions = tuple(
+            sorted(
+                self.partitions,
+                key=lambda item: (
+                    item.symbol,
+                    item.event_date,
+                    item.partition_id,
+                ),
+            )
+        )
+        if len(partitions) > MAX_RECONSTRUCTION_PARTITIONS:
+            raise ValueError("product v3 partition count is unbounded")
+        if len({item.relative_path for item in partitions}) != len(partitions):
+            raise ValueError("product v3 has duplicate partition paths")
+        if any(item.observed_event_count for item in partitions):
+            raise ValueError(
+                "product v3 Parquet must contain synthetic rows only"
+            )
+        if any(item.symbol not in symbols for item in partitions):
+            raise ValueError("product v3 partition symbol is outside the group")
+        if sum(item.synthetic_event_count for item in partitions) != (
+            self.constraints.synthetic_event_count
+        ):
+            raise ValueError("product v3 synthetic partition counts differ")
+        object.__setattr__(self, "partitions", partitions)
+        segments = tuple(
+            sorted(
+                self.observed_anchor_segments,
+                key=lambda item: (
+                    item.symbol,
+                    item.source_period,
+                    item.source_row_start_id,
+                    item.segment_id,
+                ),
+            )
+        )
+        if not segments:
+            raise ValueError("product v3 requires immutable observed anchors")
+        if len({item.segment_id for item in segments}) != len(segments):
+            raise ValueError(
+                "product v3 has duplicate observed anchor segments"
+            )
+        if any(item.symbol not in symbols for item in segments):
+            raise ValueError("product v3 anchor symbol is outside the group")
+        if (
+            sum(item.row_count for item in segments)
+            != self.source.observed_event_count
+        ):
+            raise ValueError("product v3 observed segment counts differ")
+        object.__setattr__(self, "observed_anchor_segments", segments)
+        minimum = _strict_int(
+            self.logical_min_event_time_ns, "logical_min_event_time_ns"
+        )
+        maximum = _strict_int(
+            self.logical_max_event_time_ns, "logical_max_event_time_ns"
+        )
+        if maximum < minimum:
+            raise ValueError("product v3 logical time bounds are reversed")
+        object.__setattr__(self, "logical_min_event_time_ns", minimum)
+        object.__setattr__(self, "logical_max_event_time_ns", maximum)
+        if not isinstance(self.source, ReconstructionSourceManifestV1):
+            raise TypeError("product v3 requires source evidence")
+        if not isinstance(self.constraints, ReconstructionConstraintManifestV1):
+            raise TypeError("product v3 requires constraint evidence")
+        if not isinstance(
+            self.quality, ReconstructionDeliveryQualityManifestV1
+        ):
+            raise TypeError("product v3 requires delivery quality evidence")
+        if not isinstance(self.replay, ReconstructionReplayManifestV2):
+            raise TypeError("product v3 requires replay evidence")
+        if (
+            self.replay.writer_id
+            not in SUPPORTED_RECONSTRUCTION_SYNTHETIC_DELTA_WRITER_IDS
+        ):
+            raise ValueError("product v3 requires the synthetic-delta writer")
+        expected_exclusions = (
+            RECONSTRUCTION_SYNTHETIC_DELTA_DERIVED_COLUMNS
+            if self.replay.writer_id == RECONSTRUCTION_SYNTHETIC_DELTA_WRITER_ID
+            else ()
+        )
+        if self.replay.canonicalized_metadata_exclusions != expected_exclusions:
+            raise ValueError(
+                "product v3 derived-column exclusions differ from its writer"
+            )
+        if not isinstance(self.ensemble, ReconstructionEnsembleManifestV1):
+            raise TypeError("product v3 requires ensemble evidence")
+        if not isinstance(self.retention, ReconstructionRetentionPlanV1):
+            raise TypeError("product v3 requires retention evidence")
+        if self.retention.run_id != self.run_id:
+            raise ValueError("retention run differs from product v3 run")
+        if self.ensemble_member_id not in self.retention.retained_member_ids:
+            raise ValueError("product v3 member is not retained")
+        if (
+            self.ensemble.run_id != self.run_id
+            or self.ensemble.materialized_member_id != self.ensemble_member_id
+            or self.ensemble.primary_member_id
+            != self.retention.primary_member_id
+            or self.ensemble.retained_member_ids
+            != self.retention.retained_member_ids
+            or dict(self.ensemble.member_event_estimates)
+            != dict(self.retention.member_event_counts)
+            or self.ensemble.retention_plan_id != self.retention.plan_id
+        ):
+            raise ValueError("product v3 ensemble does not reconcile")
+        logical_rows = sum(counts.values())
+        if (
+            logical_rows
+            > self.retention.member_event_counts[self.ensemble_member_id]
+        ):
+            raise ValueError("product v3 logical rows exceed preflight")
+        if len(partitions) > self.retention.estimated_partition_count:
+            raise ValueError("product v3 partitions exceed preflight")
+        if (
+            self.source.observed_event_count
+            + self.constraints.synthetic_event_count
+            != logical_rows
+        ):
+            raise ValueError("product v3 source/constraint counts differ")
+        if (
+            self.quality.observed_event_count
+            != self.source.observed_event_count
+        ):
+            raise ValueError("product v3 delivery/source counts differ")
+        if (
+            self.quality.synthetic_event_count
+            != self.constraints.synthetic_event_count
+        ):
+            raise ValueError("product v3 delivery/constraint counts differ")
+        if self.quality.delivery_profile_id != self.delivery_profile_id:
+            raise ValueError("delivery profile differs from product v3 axis")
+        expected_publication = _stable_id(
+            "reconstruction-publication-v3", self.publication_payload()
+        )
+        supplied_publication = _optional_text(self.publication_id)
+        if (
+            supplied_publication is not None
+            and supplied_publication != expected_publication
+        ):
+            raise ValueError("product v3 publication_id differs")
+        object.__setattr__(self, "publication_id", expected_publication)
+        expected_manifest = _stable_id(
+            "reconstruction-manifest-v3", self.payload()
+        )
+        supplied_manifest = _optional_text(self.manifest_id)
+        if (
+            supplied_manifest is not None
+            and supplied_manifest != expected_manifest
+        ):
+            raise ValueError("product v3 manifest_id differs")
+        object.__setattr__(self, "manifest_id", expected_manifest)
+        if (
+            len(self.to_json().encode("utf-8"))
+            > MAX_RECONSTRUCTION_MANIFEST_BYTES
+        ):
+            raise ValueError("reconstruction product v3 manifest exceeds limit")
+
+    @property
+    def event_count(self) -> int:
+        """Return logical observed-plus-synthetic event count."""
+        return sum(self.symbol_event_counts.values())
+
+    @property
+    def observed_event_count(self) -> int:
+        """Return immutable observed row count referenced by the product."""
+        return self.source.observed_event_count
+
+    @property
+    def synthetic_event_count(self) -> int:
+        """Return physically materialized synthetic row count."""
+        return self.constraints.synthetic_event_count
+
+    @property
+    def physical_event_count(self) -> int:
+        """Return rows stored in synthetic-delta Parquet partitions."""
+        return sum(item.row_count for item in self.partitions)
+
+    @property
+    def min_event_time_ns(self) -> int:
+        """Return the first logical event time."""
+        return self.logical_min_event_time_ns
+
+    @property
+    def max_event_time_ns(self) -> int:
+        """Return the last logical event time."""
+        return self.logical_max_event_time_ns
+
+    def publication_payload(self) -> dict[str, JSONValue]:
+        """Return path-independent logical publication identity."""
+        return {
+            "schema_version": self.schema_version,
+            "event_schema_version": SYNTHETIC_EVENT_SCHEMA_VERSION,
+            "run_id": self.run_id,
+            "window_id": self.window_id,
+            "synchronization_unit_id": self.synchronization_unit_id,
+            "ensemble_member_id": self.ensemble_member_id,
+            "delivery_profile_id": self.delivery_profile_id,
+            "delivery_mode": self.quality.delivery_mode.value,
+            "symbol_group_id": self.symbol_group_id,
+            "symbols": list(self.symbols),
+            "symbol_event_counts": dict(self.symbol_event_counts),
+            "logical_content_sha256": self.replay.logical_content_sha256,
+            "source_manifest_id": self.source.source_manifest_id,
+            "observed_anchor_segment_ids": [
+                item.segment_id for item in self.observed_anchor_segments
+            ],
+            "constraint_manifest_id": self.constraints.constraint_manifest_id,
+            "quality_manifest_id": self.quality.quality_manifest_id,
+            "ensemble_manifest_id": self.ensemble.ensemble_manifest_id,
+            "retention_plan_id": self.retention.plan_id,
+        }
+
+    def payload(self) -> dict[str, JSONValue]:
+        """Return complete synthetic-delta manifest evidence."""
+        return {
+            **self.publication_payload(),
+            "publication_id": self.publication_id,
+            "partitions": [item.to_dict() for item in self.partitions],
+            "observed_anchor_segments": [
+                item.to_dict() for item in self.observed_anchor_segments
+            ],
+            "source": self.source.to_dict(),
+            "constraints": self.constraints.to_dict(),
+            "quality": self.quality.to_dict(),
+            "replay": self.replay.to_dict(),
+            "ensemble": self.ensemble.to_dict(),
+            "retention": self.retention.to_dict(),
+            "event_count": self.event_count,
+            "observed_event_count": self.observed_event_count,
+            "synthetic_event_count": self.synthetic_event_count,
+            "min_event_time_ns": self.min_event_time_ns,
+            "max_event_time_ns": self.max_event_time_ns,
+            "physical_event_count": self.physical_event_count,
+            "observed_anchor_storage": "immutable-arrow-row-range-reference-v1",
+            "event_rows_inline": False,
+            "analytical_frame_columns_inline": False,
+        }
+
+    def to_dict(self) -> dict[str, JSONValue]:
+        """Return deterministic product v3 JSON."""
+        return {**self.payload(), "manifest_id": self.manifest_id}
+
+    def to_json(self) -> str:
+        """Return deterministic compact product v3 JSON."""
+        return str(canonical_contract_json(self.to_dict()))
+
+    @classmethod
+    def from_dict(
+        cls, data: Mapping[str, Any]
+    ) -> ReconstructionProductManifestV3:
+        """Restore and reconcile a synthetic-delta product manifest."""
+        _require_schema(data, RECONSTRUCTION_PRODUCT_V3_SCHEMA_VERSION)
+        _require_derived(
+            data, "event_schema_version", SYNTHETIC_EVENT_SCHEMA_VERSION
+        )
+        _require_derived(
+            data,
+            "observed_anchor_storage",
+            "immutable-arrow-row-range-reference-v1",
+        )
+        _require_derived(data, "event_rows_inline", False)
+        _require_derived(data, "analytical_frame_columns_inline", False)
+        manifest = cls(
+            run_id=str(data.get("run_id", "")),
+            window_id=str(data.get("window_id", "")),
+            synchronization_unit_id=str(
+                data.get("synchronization_unit_id", "")
+            ),
+            ensemble_member_id=str(data.get("ensemble_member_id", "")),
+            delivery_profile_id=str(data.get("delivery_profile_id", "")),
+            symbol_group_id=str(data.get("symbol_group_id", "")),
+            symbols=_string_tuple(data.get("symbols"), "symbols"),
+            symbol_event_counts={
+                str(key): _strict_int(value, str(key))
+                for key, value in _mapping(
+                    data.get("symbol_event_counts"), "symbol_event_counts"
+                ).items()
+            },
+            partitions=tuple(
+                ReconstructionProductPartitionV1.from_dict(item)
+                for item in _mapping_sequence(
+                    data.get("partitions"), "partitions"
+                )
+            ),
+            observed_anchor_segments=tuple(
+                ReconstructionObservedAnchorSegmentV1.from_dict(item)
+                for item in _mapping_sequence(
+                    data.get("observed_anchor_segments"),
+                    "observed_anchor_segments",
+                )
+            ),
+            logical_min_event_time_ns=_strict_int(
+                data.get("min_event_time_ns"), "min_event_time_ns"
+            ),
+            logical_max_event_time_ns=_strict_int(
+                data.get("max_event_time_ns"), "max_event_time_ns"
+            ),
+            source=ReconstructionSourceManifestV1.from_dict(
+                _mapping(data.get("source"), "source")
+            ),
+            constraints=ReconstructionConstraintManifestV1.from_dict(
+                _mapping(data.get("constraints"), "constraints")
+            ),
+            quality=ReconstructionDeliveryQualityManifestV1.from_dict(
+                _mapping(data.get("quality"), "quality")
+            ),
+            replay=ReconstructionReplayManifestV2.from_dict(
+                _mapping(data.get("replay"), "replay")
+            ),
+            ensemble=ReconstructionEnsembleManifestV1.from_dict(
+                _mapping(data.get("ensemble"), "ensemble")
+            ),
+            retention=ReconstructionRetentionPlanV1.from_dict(
+                _mapping(data.get("retention"), "retention")
+            ),
+            publication_id=str(data.get("publication_id", "")),
+            manifest_id=str(data.get("manifest_id", "")),
+            schema_version=str(data.get("schema_version", "")),
+        )
+        _require_derived(
+            data, "delivery_mode", manifest.quality.delivery_mode.value
+        )
+        _require_derived(
+            data,
+            "observed_anchor_segment_ids",
+            [item.segment_id for item in manifest.observed_anchor_segments],
+        )
+        _require_derived(
+            data,
+            "physical_event_count",
+            manifest.physical_event_count,
+        )
+        for name in (
+            "event_count",
+            "observed_event_count",
+            "synthetic_event_count",
+        ):
+            _require_derived(data, name, getattr(manifest, name))
+        return manifest
+
+    @classmethod
+    def from_json(cls, text: str) -> ReconstructionProductManifestV3:
+        """Restore product v3 from JSON."""
+        return cls.from_dict(_json_mapping(text))
+
+
+@dataclass(frozen=True, slots=True)
 class StagedReconstructionPublicationV1:
     """Process-local reference to a validated, undiscoverable transaction."""
 
@@ -2130,6 +2915,31 @@ class PublishedReconstructionV2:
     """One committed generic-delivery publication and retry status."""
 
     manifest: ReconstructionProductManifestV2
+    manifest_path: Path
+    manifest_ref: ArtifactRef
+    idempotent_retry: bool
+
+
+@dataclass(frozen=True, slots=True)
+class StagedReconstructionPublicationV3:
+    """Validated synthetic-delta transaction awaiting atomic promotion."""
+
+    root: Path
+    staging_directory: Path
+    committed_directory: Path
+    manifest: ReconstructionProductManifestV3
+
+    @property
+    def manifest_path(self) -> Path:
+        """Return the temporary manifest path."""
+        return self.staging_directory / RECONSTRUCTION_MANIFEST_FILENAME
+
+
+@dataclass(frozen=True, slots=True)
+class PublishedReconstructionV3:
+    """One committed synthetic-delta publication and retry status."""
+
+    manifest: ReconstructionProductManifestV3
     manifest_path: Path
     manifest_ref: ArtifactRef
     idempotent_retry: bool
@@ -2402,13 +3212,14 @@ def stage_delivery_reconstruction_publication(
     cross_series_constraint_window_ids: Sequence[str] = (),
     cross_series_constraint_decision_ids: Sequence[str] = (),
     immutable_source_anchors: Iterable[SyntheticEventV1],
+    immutable_source_artifacts: Mapping[str, ArtifactRef] | None = None,
     symbol_group_id: str,
     retention_plan: ReconstructionRetentionPlanV1,
     storage_policy: ReconstructionStoragePolicyV1,
     staging_root: str | Path,
     experiment_id: str | None = None,
     row_group_size: int = DEFAULT_RECONSTRUCTION_ROW_GROUP_SIZE,
-) -> StagedReconstructionPublicationV2:
+) -> StagedReconstructionPublicationV2 | StagedReconstructionPublicationV3:
     """Stage one validated generic-delivery group in cancellable scratch."""
     _validate_delivery_publication_inputs(
         delivered_group,
@@ -2416,6 +3227,12 @@ def stage_delivery_reconstruction_publication(
         retention_plan,
         storage_policy,
     )
+    if immutable_source_artifacts is None and dict(
+        retention_plan.member_physical_event_counts
+    ) != dict(retention_plan.member_event_counts):
+        raise ReconstructionPersistenceError(
+            "product v2 cannot use a synthetic-delta retention estimate"
+        )
     group_id = _required_text(symbol_group_id)
     row_group = _positive_int(row_group_size, "row_group_size")
     events = tuple(
@@ -2431,8 +3248,20 @@ def stage_delivery_reconstruction_publication(
         )
     anchors = tuple(immutable_source_anchors)
     _validate_immutable_anchors(events, anchors)
-    logical_hash = reconstruction_logical_content_sha256(events)
     root_path = Path(root).expanduser().resolve()
+    portable_source_artifacts = (
+        _materialize_portable_source_artifacts(
+            root_path, immutable_source_artifacts
+        )
+        if immutable_source_artifacts is not None
+        else None
+    )
+    anchor_segments = (
+        _observed_anchor_segments(anchors, portable_source_artifacts)
+        if portable_source_artifacts is not None
+        else None
+    )
+    logical_hash = reconstruction_logical_content_sha256(events)
     manifest = delivered_group.manifest
     axis_directory = _delivery_axis_directory(
         root_path,
@@ -2440,6 +3269,11 @@ def stage_delivery_reconstruction_publication(
         delivery_profile_id=manifest.delivery_profile_id,
         ensemble_member_id=manifest.ensemble_member_id,
         symbol_group_id=group_id,
+        schema_version=(
+            RECONSTRUCTION_PRODUCT_V3_SCHEMA_VERSION
+            if anchor_segments is not None
+            else RECONSTRUCTION_PRODUCT_V2_SCHEMA_VERSION
+        ),
     )
     axis_directory.mkdir(parents=True, exist_ok=True)
     scratch = Path(staging_root).expanduser().resolve()
@@ -2452,11 +3286,19 @@ def stage_delivery_reconstruction_publication(
         tempfile.mkdtemp(prefix="publication.tmp-", dir=scratch)
     )
     try:
-        partitions = _write_product_partitions(
-            staging_directory,
-            delivered_group.streams,
-            row_group_size=row_group,
-        )
+        if anchor_segments is None:
+            partitions = _write_product_partitions(
+                staging_directory,
+                delivered_group.streams,
+                row_group_size=row_group,
+            )
+        else:
+            partitions = _write_synthetic_product_partitions(
+                staging_directory,
+                delivered_group.streams,
+                immutable_source_anchors=anchors,
+                row_group_size=row_group,
+            )
         source = _source_manifest(events, anchors, experiment_id=experiment_id)
         constraints = _constraint_manifest(events)
         quality = _delivery_quality_manifest(
@@ -2489,43 +3331,90 @@ def stage_delivery_reconstruction_publication(
             retention_plan_id=retention_plan.plan_id,
         )
         pa, _ = _arrow_modules()
-        replay = ReconstructionReplayManifestV1(
-            logical_content_sha256=logical_hash,
-            partition_byte_sha256=_partition_byte_digest(partitions),
-            logical_hash_algorithm=RECONSTRUCTION_LOGICAL_HASH_ALGORITHM,
-            byte_hash_algorithm=RECONSTRUCTION_BYTE_HASH_ALGORITHM,
-            writer_id=RECONSTRUCTION_WRITER_ID,
-            writer_library="pyarrow",
-            writer_library_version=str(pa.__version__),
-            python_runtime=(
-                f"{sys.version_info.major}.{sys.version_info.minor}."
-                f"{sys.version_info.micro}"
-            ),
-            compression=RECONSTRUCTION_COMPRESSION,
-            row_group_size=row_group,
-            canonicalized_metadata_exclusions=(),
-        )
         counts = {
             stream.symbol: len(stream.events)
             for stream in delivered_group.streams
         }
-        product = ReconstructionProductManifestV2(
-            run_id=manifest.run_id,
-            window_id=manifest.window_id,
-            synchronization_unit_id=manifest.synchronization_unit_id,
-            ensemble_member_id=manifest.ensemble_member_id,
-            delivery_profile_id=manifest.delivery_profile_id,
-            symbol_group_id=group_id,
-            symbols=tuple(counts),
-            symbol_event_counts=counts,
-            partitions=partitions,
-            source=source,
-            constraints=constraints,
-            quality=quality,
-            replay=replay,
-            ensemble=ensemble,
-            retention=retention_plan,
+        product: (
+            ReconstructionProductManifestV2 | ReconstructionProductManifestV3
         )
+        if anchor_segments is None:
+            replay_v1 = ReconstructionReplayManifestV1(
+                logical_content_sha256=logical_hash,
+                partition_byte_sha256=_partition_byte_digest(partitions),
+                logical_hash_algorithm=RECONSTRUCTION_LOGICAL_HASH_ALGORITHM,
+                byte_hash_algorithm=RECONSTRUCTION_BYTE_HASH_ALGORITHM,
+                writer_id=RECONSTRUCTION_WRITER_ID,
+                writer_library="pyarrow",
+                writer_library_version=str(pa.__version__),
+                python_runtime=(
+                    f"{sys.version_info.major}.{sys.version_info.minor}."
+                    f"{sys.version_info.micro}"
+                ),
+                compression=RECONSTRUCTION_COMPRESSION,
+                row_group_size=row_group,
+                canonicalized_metadata_exclusions=(),
+            )
+            product = ReconstructionProductManifestV2(
+                run_id=manifest.run_id,
+                window_id=manifest.window_id,
+                synchronization_unit_id=manifest.synchronization_unit_id,
+                ensemble_member_id=manifest.ensemble_member_id,
+                delivery_profile_id=manifest.delivery_profile_id,
+                symbol_group_id=group_id,
+                symbols=tuple(counts),
+                symbol_event_counts=counts,
+                partitions=partitions,
+                source=source,
+                constraints=constraints,
+                quality=quality,
+                replay=replay_v1,
+                ensemble=ensemble,
+                retention=retention_plan,
+            )
+        else:
+            replay_v2 = ReconstructionReplayManifestV2(
+                logical_content_sha256=logical_hash,
+                partition_byte_sha256=_partition_byte_digest(partitions),
+                logical_hash_algorithm=RECONSTRUCTION_LOGICAL_HASH_ALGORITHM,
+                byte_hash_algorithm=RECONSTRUCTION_BYTE_HASH_ALGORITHM,
+                writer_id=RECONSTRUCTION_SYNTHETIC_DELTA_WRITER_ID,
+                writer_library="pyarrow",
+                writer_library_version=str(pa.__version__),
+                python_runtime=(
+                    f"{sys.version_info.major}.{sys.version_info.minor}."
+                    f"{sys.version_info.micro}"
+                ),
+                compression=RECONSTRUCTION_COMPRESSION,
+                row_group_size=row_group,
+                canonicalized_metadata_exclusions=(
+                    RECONSTRUCTION_SYNTHETIC_DELTA_DERIVED_COLUMNS
+                ),
+            )
+            product = ReconstructionProductManifestV3(
+                run_id=manifest.run_id,
+                window_id=manifest.window_id,
+                synchronization_unit_id=manifest.synchronization_unit_id,
+                ensemble_member_id=manifest.ensemble_member_id,
+                delivery_profile_id=manifest.delivery_profile_id,
+                symbol_group_id=group_id,
+                symbols=tuple(counts),
+                symbol_event_counts=counts,
+                partitions=partitions,
+                observed_anchor_segments=anchor_segments,
+                logical_min_event_time_ns=min(
+                    event.event_time_ns for event in events
+                ),
+                logical_max_event_time_ns=max(
+                    event.event_time_ns for event in events
+                ),
+                source=source,
+                constraints=constraints,
+                quality=quality,
+                replay=replay_v2,
+                ensemble=ensemble,
+                retention=retention_plan,
+            )
         manifest_bytes = product.to_json().encode("utf-8")
         _validate_actual_storage(partitions, manifest_bytes, storage_policy)
         committed_directory = (
@@ -2535,16 +3424,33 @@ def stage_delivery_reconstruction_publication(
             staging_directory / RECONSTRUCTION_MANIFEST_FILENAME,
             manifest_bytes,
         )
-        staged = StagedReconstructionPublicationV2(
-            root=root_path,
-            staging_directory=staging_directory,
-            committed_directory=committed_directory,
-            manifest=product,
+        staged: (
+            StagedReconstructionPublicationV2
+            | StagedReconstructionPublicationV3
         )
+        if isinstance(product, ReconstructionProductManifestV3):
+            staged = StagedReconstructionPublicationV3(
+                root=root_path,
+                staging_directory=staging_directory,
+                committed_directory=committed_directory,
+                manifest=product,
+            )
+        else:
+            staged = StagedReconstructionPublicationV2(
+                root=root_path,
+                staging_directory=staging_directory,
+                committed_directory=committed_directory,
+                manifest=product,
+            )
         _verify_publication_directory(
             staging_directory,
             product,
             require_committed_layout=False,
+            source_artifact_root=(
+                root_path / RECONSTRUCTION_PRODUCT_DIRECTORY
+                if isinstance(product, ReconstructionProductManifestV3)
+                else None
+            ),
         )
         return staged
     except Exception:
@@ -2554,19 +3460,27 @@ def stage_delivery_reconstruction_publication(
 
 
 def commit_delivery_reconstruction_publication(
-    staged: StagedReconstructionPublicationV2,
-) -> PublishedReconstructionV2:
+    staged: (
+        StagedReconstructionPublicationV2 | StagedReconstructionPublicationV3
+    ),
+) -> PublishedReconstructionV2 | PublishedReconstructionV3:
     """Atomically promote or recover one generic-delivery publication."""
-    if not isinstance(staged, StagedReconstructionPublicationV2):
-        raise TypeError("delivery commit requires a staged v2 publication")
+    if not isinstance(
+        staged,
+        (StagedReconstructionPublicationV2, StagedReconstructionPublicationV3),
+    ):
+        raise TypeError(
+            "delivery commit requires a staged delivery publication"
+        )
     manifest = staged.manifest
+    expected_type = type(manifest)
     final_directory = staged.committed_directory
     if final_directory.exists():
         existing_path = final_directory / RECONSTRUCTION_MANIFEST_FILENAME
         existing = verify_reconstruction_publication(existing_path)
-        if not isinstance(existing, ReconstructionProductManifestV2):
+        if not isinstance(existing, expected_type):
             raise ReconstructionPersistenceError(
-                "delivery publication identity contains a legacy manifest"
+                "delivery publication identity contains another schema"
             )
         if existing != manifest:
             raise ReconstructionPersistenceError(
@@ -2574,16 +3488,20 @@ def commit_delivery_reconstruction_publication(
             )
         if staged.staging_directory.exists():
             shutil.rmtree(staged.staging_directory)
-        return PublishedReconstructionV2(
-            manifest=existing,
-            manifest_path=existing_path,
-            manifest_ref=_artifact_ref_for_manifest(existing_path, existing),
+        return _published_delivery_reconstruction(
+            existing,
+            existing_path,
             idempotent_retry=True,
         )
     _verify_publication_directory(
         staged.staging_directory,
         manifest,
         require_committed_layout=False,
+        source_artifact_root=(
+            staged.root / RECONSTRUCTION_PRODUCT_DIRECTORY
+            if isinstance(manifest, ReconstructionProductManifestV3)
+            else None
+        ),
     )
     final_directory.parent.mkdir(parents=True, exist_ok=True)
     try:
@@ -2593,9 +3511,9 @@ def commit_delivery_reconstruction_publication(
             raise
         existing_path = final_directory / RECONSTRUCTION_MANIFEST_FILENAME
         existing = verify_reconstruction_publication(existing_path)
-        if not isinstance(existing, ReconstructionProductManifestV2):
+        if not isinstance(existing, expected_type):
             raise ReconstructionPersistenceError(
-                "concurrent delivery commit produced a legacy manifest"
+                "concurrent delivery commit produced another schema"
             )
         if existing != manifest:
             raise ReconstructionPersistenceError(
@@ -2603,30 +3521,55 @@ def commit_delivery_reconstruction_publication(
             )
         if staged.staging_directory.exists():
             shutil.rmtree(staged.staging_directory)
-        return PublishedReconstructionV2(
-            manifest=existing,
-            manifest_path=existing_path,
-            manifest_ref=_artifact_ref_for_manifest(existing_path, existing),
+        return _published_delivery_reconstruction(
+            existing,
+            existing_path,
             idempotent_retry=True,
         )
     _fsync_directory(final_directory.parent)
     manifest_path = final_directory / RECONSTRUCTION_MANIFEST_FILENAME
     committed = verify_reconstruction_publication(manifest_path)
-    if not isinstance(committed, ReconstructionProductManifestV2):
+    if not isinstance(committed, expected_type):
         raise ReconstructionPersistenceError(
-            "committed delivery publication restored a legacy manifest"
+            "committed delivery publication restored another schema"
+        )
+    return _published_delivery_reconstruction(
+        committed,
+        manifest_path,
+        idempotent_retry=False,
+    )
+
+
+def _published_delivery_reconstruction(
+    manifest: ReconstructionProductManifestV2 | ReconstructionProductManifestV3,
+    manifest_path: Path,
+    *,
+    idempotent_retry: bool,
+) -> PublishedReconstructionV2 | PublishedReconstructionV3:
+    """Build a schema-narrow published-delivery result."""
+    manifest_ref = _artifact_ref_for_manifest(manifest_path, manifest)
+    if isinstance(manifest, ReconstructionProductManifestV3):
+        return PublishedReconstructionV3(
+            manifest=manifest,
+            manifest_path=manifest_path,
+            manifest_ref=manifest_ref,
+            idempotent_retry=idempotent_retry,
         )
     return PublishedReconstructionV2(
-        manifest=committed,
+        manifest=manifest,
         manifest_path=manifest_path,
-        manifest_ref=_artifact_ref_for_manifest(manifest_path, committed),
-        idempotent_retry=False,
+        manifest_ref=manifest_ref,
+        idempotent_retry=idempotent_retry,
     )
 
 
 def load_reconstruction_manifest(
     path: str | Path,
-) -> ReconstructionProductManifestV1 | ReconstructionProductManifestV2:
+) -> (
+    ReconstructionProductManifestV1
+    | ReconstructionProductManifestV2
+    | ReconstructionProductManifestV3
+):
     """Load and verify compact manifest identities without reading Parquet."""
     target = Path(path)
     payload = target.read_bytes()
@@ -2646,6 +3589,8 @@ def load_reconstruction_manifest(
         return ReconstructionProductManifestV1.from_dict(data)
     if version == RECONSTRUCTION_PRODUCT_V2_SCHEMA_VERSION:
         return ReconstructionProductManifestV2.from_dict(data)
+    if version == RECONSTRUCTION_PRODUCT_V3_SCHEMA_VERSION:
+        return ReconstructionProductManifestV3.from_dict(data)
     raise ReconstructionPersistenceError(
         "unsupported reconstruction product manifest version"
     )
@@ -2653,7 +3598,11 @@ def load_reconstruction_manifest(
 
 def verify_reconstruction_publication(
     manifest_path: str | Path,
-) -> ReconstructionProductManifestV1 | ReconstructionProductManifestV2:
+) -> (
+    ReconstructionProductManifestV1
+    | ReconstructionProductManifestV2
+    | ReconstructionProductManifestV3
+):
     """Fail closed unless every committed file and replay hash reconciles."""
     path = Path(manifest_path).expanduser().resolve()
     manifest = load_reconstruction_manifest(path)
@@ -2691,7 +3640,13 @@ def discover_reconstruction_manifests(
             if manifest.broker_profile_id != broker_profile_id:
                 continue
         if delivery_profile_id is not None:
-            if not isinstance(manifest, ReconstructionProductManifestV2):
+            if not isinstance(
+                manifest,
+                (
+                    ReconstructionProductManifestV2,
+                    ReconstructionProductManifestV3,
+                ),
+            ):
                 continue
             if manifest.delivery_profile_id != delivery_profile_id:
                 continue
@@ -2756,21 +3711,46 @@ def iter_reconstruction_event_batches(
     if unknown:
         raise ValueError(f"unknown reconstruction columns: {sorted(unknown)}")
     size = _positive_int(batch_size, "batch_size")
+    lower = None if start_ns is None else _strict_int(start_ns, "start_ns")
+    upper = None if end_ns is None else _strict_int(end_ns, "end_ns")
+    if lower is not None and upper is not None and upper <= lower:
+        raise ValueError("end_ns must be greater than start_ns")
+    manifest = load_reconstruction_manifest(manifest_path)
+    if isinstance(manifest, ReconstructionProductManifestV3):
+        selected_symbols = {_normalized_symbol(symbol) for symbol in symbols}
+        if selected_symbols and not selected_symbols.issubset(manifest.symbols):
+            raise ValueError("query symbols are outside the product manifest")
+        pa, _ = _arrow_modules()
+        rows = [
+            event.to_dict()
+            for stream in read_reconstruction_streams(manifest_path)
+            if not selected_symbols or stream.symbol in selected_symbols
+            for event in stream.events
+            if (lower is None or event.event_time_ns >= lower)
+            and (upper is None or event.event_time_ns < upper)
+        ]
+        table = pa.Table.from_pylist(
+            rows, schema=synthetic_event_arrow_schema()
+        )
+        yield from table.select(list(requested)).to_batches(max_chunksize=size)
+        return
     paths = reconstruction_parquet_paths(
         manifest_path,
         symbols=symbols,
-        start_ns=start_ns,
-        end_ns=end_ns,
+        start_ns=lower,
+        end_ns=upper,
     )
     _, _, ds = _arrow_dataset_modules()
     expression = None
-    if start_ns is not None:
-        expression = ds.field("event_time_ns") >= _strict_int(
-            start_ns, "start_ns"
+    if lower is not None:
+        expression = ds.field("event_time_ns") >= lower
+    if upper is not None:
+        upper_expression = ds.field("event_time_ns") < upper
+        expression = (
+            upper_expression
+            if expression is None
+            else expression & upper_expression
         )
-    if end_ns is not None:
-        upper = ds.field("event_time_ns") < _strict_int(end_ns, "end_ns")
-        expression = upper if expression is None else expression & upper
     for partition_path in paths:
         dataset = ds.dataset(partition_path, format="parquet")
         scanner = dataset.scanner(
@@ -2797,11 +3777,33 @@ def scan_reconstruction_events_polars(
     unknown = set(requested).difference(SYNTHETIC_EVENT_ARROW_COLUMNS)
     if unknown:
         raise ValueError(f"unknown reconstruction columns: {sorted(unknown)}")
+    lower = None if start_ns is None else _strict_int(start_ns, "start_ns")
+    upper = None if end_ns is None else _strict_int(end_ns, "end_ns")
+    if lower is not None and upper is not None and upper <= lower:
+        raise ValueError("end_ns must be greater than start_ns")
+    manifest = load_reconstruction_manifest(manifest_path)
+    if isinstance(manifest, ReconstructionProductManifestV3):
+        selected_symbols = {_normalized_symbol(symbol) for symbol in symbols}
+        if selected_symbols and not selected_symbols.issubset(manifest.symbols):
+            raise ValueError("query symbols are outside the product manifest")
+        pa, _ = _arrow_modules()
+        rows = [
+            event.to_dict()
+            for stream in read_reconstruction_streams(manifest_path)
+            if not selected_symbols or stream.symbol in selected_symbols
+            for event in stream.events
+            if (lower is None or event.event_time_ns >= lower)
+            and (upper is None or event.event_time_ns < upper)
+        ]
+        table = pa.Table.from_pylist(
+            rows, schema=synthetic_event_arrow_schema()
+        )
+        return _polars_module().from_arrow(table).lazy().select(list(requested))
     paths = reconstruction_parquet_paths(
         manifest_path,
         symbols=symbols,
-        start_ns=start_ns,
-        end_ns=end_ns,
+        start_ns=lower,
+        end_ns=upper,
     )
     pl = _polars_module()
     if not paths:
@@ -2813,10 +3815,10 @@ def scan_reconstruction_events_polars(
         hive_partitioning=False,
         use_statistics=True,
     )
-    if start_ns is not None:
-        lazy = lazy.filter(pl.col("event_time_ns") >= start_ns)
-    if end_ns is not None:
-        lazy = lazy.filter(pl.col("event_time_ns") < end_ns)
+    if lower is not None:
+        lazy = lazy.filter(pl.col("event_time_ns") >= lower)
+    if upper is not None:
+        lazy = lazy.filter(pl.col("event_time_ns") < upper)
     return lazy.select(list(requested))
 
 
@@ -2829,9 +3831,18 @@ def read_reconstruction_streams(
     by_symbol: dict[str, list[SyntheticEventV1]] = {
         symbol: [] for symbol in manifest.symbols
     }
+    anchor_event_ids: tuple[str, ...] = ()
+    if isinstance(manifest, ReconstructionProductManifestV3):
+        observed_events = _read_observed_anchor_events(
+            manifest, _reconstruction_product_root_from_path(path)
+        )
+        anchor_event_ids = tuple(event.event_id for event in observed_events)
+        for event in observed_events:
+            by_symbol[event.symbol].append(event)
     for partition in manifest.partitions:
         for event in _iter_partition_events(
-            path.parent / partition.relative_path
+            path.parent / partition.relative_path,
+            anchor_event_ids=anchor_event_ids,
         ):
             by_symbol[event.symbol].append(event)
     streams = tuple(
@@ -2839,12 +3850,16 @@ def read_reconstruction_streams(
             run_id=manifest.run_id,
             ensemble_member_id=manifest.ensemble_member_id,
             symbol=symbol,
-            events=tuple(by_symbol[symbol]),
-            source_version_ids=tuple(
-                source
-                for partition in manifest.partitions
-                if partition.symbol == symbol
-                for source in partition.source_version_ids
+            events=tuple(sorted(by_symbol[symbol], key=_event_order_key)),
+            source_version_ids=(
+                manifest.source.source_version_ids
+                if isinstance(manifest, ReconstructionProductManifestV3)
+                else tuple(
+                    source
+                    for partition in manifest.partitions
+                    if partition.symbol == symbol
+                    for source in partition.source_version_ids
+                )
             ),
         )
         for symbol in manifest.symbols
@@ -2899,6 +3914,12 @@ def _validate_publication_inputs(
     if retention.storage_policy_id != policy.policy_id:
         raise ReconstructionPersistenceError(
             "retention preflight uses a different storage policy"
+        )
+    if dict(retention.member_physical_event_counts) != dict(
+        retention.member_event_counts
+    ):
+        raise ReconstructionPersistenceError(
+            "legacy publication cannot use a synthetic-delta estimate"
         )
     manifest = rendered_group.manifest
     if retention.run_id != manifest.run_id:
@@ -3024,11 +4045,199 @@ def _validate_immutable_anchors(
         )
 
 
+def _observed_anchor_segments(
+    anchors: Iterable[SyntheticEventV1],
+    artifacts_by_series_id: Mapping[str, ArtifactRef],
+) -> tuple[ReconstructionObservedAnchorSegmentV1, ...]:
+    """Compress exact observed lineage into contiguous source row ranges."""
+    anchor_rows = tuple(anchors)
+    grouped: dict[tuple[str, str, str, str], tuple[ArtifactRef, list[int]]] = {}
+    for event in anchor_rows:
+        if event.origin is not SyntheticEventOrigin.OBSERVED:
+            raise ReconstructionPersistenceError(
+                "observed anchor segmentation received a synthetic row"
+            )
+        if (
+            event.source_series_id is None
+            or event.source_period is None
+            or event.source_row_id is None
+        ):
+            raise ReconstructionPersistenceError(
+                "observed anchor lacks immutable source row lineage"
+            )
+        artifact = artifacts_by_series_id.get(event.source_series_id)
+        if artifact is None:
+            raise ReconstructionPersistenceError(
+                "observed anchor source artifact is absent"
+            )
+        key = (
+            event.symbol,
+            event.source_version_id,
+            event.source_series_id,
+            event.source_period,
+        )
+        existing = grouped.get(key)
+        if existing is None:
+            grouped[key] = (artifact, [event.source_row_id])
+        else:
+            if existing[0].sha256 != artifact.sha256:
+                raise ReconstructionPersistenceError(
+                    "one source series resolves to multiple artifacts"
+                )
+            existing[1].append(event.source_row_id)
+    segments: list[ReconstructionObservedAnchorSegmentV1] = []
+    for (symbol, version, series, period), (artifact, row_ids) in sorted(
+        grouped.items()
+    ):
+        ordered = sorted(row_ids)
+        if len(set(ordered)) != len(ordered):
+            raise ReconstructionPersistenceError(
+                "observed anchors duplicate a source row identity"
+            )
+        range_start = ordered[0]
+        previous = ordered[0]
+        for row_id in (*ordered[1:], None):
+            if row_id is not None and row_id == previous + 1:
+                previous = row_id
+                continue
+            segments.append(
+                ReconstructionObservedAnchorSegmentV1(
+                    symbol=symbol,
+                    source_version_id=version,
+                    source_series_id=series,
+                    source_period=period,
+                    source_artifact=artifact,
+                    source_row_start_id=range_start,
+                    source_row_end_id=previous,
+                    row_count=previous - range_start + 1,
+                )
+            )
+            if row_id is not None:
+                range_start = row_id
+                previous = row_id
+    if sum(item.row_count for item in segments) != len(anchor_rows):
+        raise ReconstructionPersistenceError(
+            "observed anchor segmentation lost source rows"
+        )
+    return tuple(segments)
+
+
+def _materialize_portable_source_artifacts(
+    root: Path,
+    artifacts_by_series_id: Mapping[str, ArtifactRef],
+) -> dict[str, ArtifactRef]:
+    """Deduplicate exact source Arrow files beneath the retained bundle root."""
+    product_root = root / RECONSTRUCTION_PRODUCT_DIRECTORY
+    source_root = product_root / "source-artifacts"
+    source_root.mkdir(parents=True, exist_ok=True)
+    portable: dict[str, ArtifactRef] = {}
+    for series_id, artifact in sorted(artifacts_by_series_id.items()):
+        source = Path(_required_text(artifact.path)).expanduser().resolve()
+        if not source.is_file():
+            raise ReconstructionPersistenceError(
+                "immutable source artifact is missing"
+            )
+        if (
+            artifact.size_bytes is None
+            or source.stat().st_size != artifact.size_bytes
+        ):
+            raise ReconstructionPersistenceError(
+                "immutable source artifact byte size differs"
+            )
+        _verify_cached_exact_file(
+            source,
+            expected_size=artifact.size_bytes,
+            expected_sha256=artifact.sha256,
+            label="immutable source artifact",
+        )
+        relative = Path("source-artifacts") / f"{artifact.sha256}.arrow"
+        target = product_root / relative
+        if not target.exists():
+            descriptor, temporary_name = tempfile.mkstemp(
+                prefix=f".{artifact.sha256}.", dir=source_root
+            )
+            os.close(descriptor)
+            temporary = Path(temporary_name)
+            temporary.unlink()
+            try:
+                try:
+                    os.link(source, temporary)
+                except OSError:
+                    shutil.copyfile(source, temporary)
+                _fsync_file(temporary)
+                os.replace(temporary, target)
+                _fsync_directory(source_root)
+            finally:
+                temporary.unlink(missing_ok=True)
+        if not os.path.samefile(source, target):
+            _verify_cached_exact_file(
+                target,
+                expected_size=artifact.size_bytes,
+                expected_sha256=artifact.sha256,
+                label="portable source artifact",
+            )
+        portable[_required_text(series_id)] = ArtifactRef(
+            kind=artifact.kind,
+            path=relative.as_posix(),
+            size_bytes=artifact.size_bytes,
+            sha256=artifact.sha256,
+            metadata=dict(artifact.metadata),
+        )
+    return portable
+
+
+def _write_synthetic_product_partitions(
+    staging_directory: Path,
+    streams: Iterable[SyntheticEventStreamV1],
+    *,
+    immutable_source_anchors: Iterable[SyntheticEventV1],
+    row_group_size: int,
+) -> tuple[ReconstructionProductPartitionV1, ...]:
+    """Persist only generated deltas; immutable anchors remain referenced."""
+    synthetic_streams: list[SyntheticEventStreamV1] = []
+    for stream in streams:
+        events = tuple(
+            event
+            for event in stream.events
+            if event.origin is SyntheticEventOrigin.SYNTHETIC
+        )
+        if not events:
+            continue
+        synthetic_streams.append(
+            SyntheticEventStreamV1(
+                run_id=stream.run_id,
+                ensemble_member_id=stream.ensemble_member_id,
+                symbol=stream.symbol,
+                events=events,
+                source_version_ids=stream.source_version_ids,
+            )
+        )
+    if not synthetic_streams:
+        return ()
+    anchor_event_ids = tuple(
+        event.event_id
+        for event in sorted(immutable_source_anchors, key=_event_order_key)
+    )
+    if len(anchor_event_ids) != len(set(anchor_event_ids)):
+        raise ReconstructionPersistenceError(
+            "synthetic-delta anchors contain duplicate event IDs"
+        )
+    return _write_product_partitions(
+        staging_directory,
+        synthetic_streams,
+        row_group_size=row_group_size,
+        synthetic_delta=True,
+        anchor_event_ids=anchor_event_ids,
+    )
+
+
 def _write_product_partitions(
     staging_directory: Path,
     streams: Iterable[SyntheticEventStreamV1],
     *,
     row_group_size: int,
+    synthetic_delta: bool = False,
+    anchor_event_ids: Sequence[str] = (),
 ) -> tuple[ReconstructionProductPartitionV1, ...]:
     partitions: list[ReconstructionProductPartitionV1] = []
     for stream in sorted(streams, key=lambda item: item.symbol):
@@ -3049,7 +4258,11 @@ def _write_product_partitions(
             target = staging_directory / relative
             target.parent.mkdir(parents=True, exist_ok=True)
             _write_parquet_partition(
-                partition_stream, target, row_group_size=row_group_size
+                partition_stream,
+                target,
+                row_group_size=row_group_size,
+                synthetic_delta=synthetic_delta,
+                anchor_event_ids=anchor_event_ids,
             )
             _, pq = _arrow_modules()
             parquet = pq.ParquetFile(target)
@@ -3071,7 +4284,17 @@ def _write_product_partitions(
                 size_bytes=target.stat().st_size,
                 row_group_count=parquet.num_row_groups,
             )
-            _validate_partition_file(target, partition, row_group_size)
+            _validate_partition_file(
+                target,
+                partition,
+                row_group_size,
+                expected_writer_id=(
+                    RECONSTRUCTION_SYNTHETIC_DELTA_WRITER_ID
+                    if synthetic_delta
+                    else RECONSTRUCTION_WRITER_ID
+                ),
+                anchor_event_ids=anchor_event_ids,
+            )
             partitions.append(partition)
     if not partitions:
         raise ReconstructionPersistenceError(
@@ -3102,17 +4325,85 @@ def _validate_actual_storage(
         )
 
 
+def _synthetic_delta_arrow_schema() -> Any:
+    """Return the physical v3 delta schema with only derived IDs omitted."""
+    pa, _ = _arrow_modules()
+    logical = synthetic_event_arrow_schema()
+    omitted = set(RECONSTRUCTION_SYNTHETIC_DELTA_DERIVED_COLUMNS)
+    metadata = dict(logical.metadata or {})
+    metadata[_SYNTHETIC_DELTA_STORAGE_METADATA_KEY] = (
+        _SYNTHETIC_DELTA_STORAGE_SCHEMA_VERSION.encode("ascii")
+    )
+    fields = []
+    for arrow_field in logical:
+        if arrow_field.name == "left_anchor_event_id":
+            fields.append(
+                pa.field("left_anchor_ordinal", pa.int32(), nullable=False)
+            )
+        elif arrow_field.name == "right_anchor_event_id":
+            fields.append(
+                pa.field("right_anchor_ordinal", pa.int32(), nullable=False)
+            )
+        elif arrow_field.name not in omitted:
+            fields.append(arrow_field)
+    return pa.schema(fields, metadata=metadata)
+
+
+def _synthetic_delta_stream_to_arrow(
+    stream: SyntheticEventStreamV1,
+    anchor_event_ids: Sequence[str],
+) -> Any:
+    """Serialize logical events without duplicating deterministic row IDs."""
+    pa, _ = _arrow_modules()
+    schema = _synthetic_delta_arrow_schema()
+    omitted = set(RECONSTRUCTION_SYNTHETIC_DELTA_DERIVED_COLUMNS)
+    anchor_ordinals = {
+        _required_text(event_id): ordinal
+        for ordinal, event_id in enumerate(anchor_event_ids)
+    }
+    if len(anchor_ordinals) != len(anchor_event_ids):
+        raise ReconstructionPersistenceError(
+            "synthetic-delta anchor dictionary contains duplicates"
+        )
+    rows = []
+    for event in stream.events:
+        left = cast(str, event.left_anchor_event_id)
+        right = cast(str, event.right_anchor_event_id)
+        if left not in anchor_ordinals or right not in anchor_ordinals:
+            raise ReconstructionPersistenceError(
+                "synthetic-delta event references an unretained anchor"
+            )
+        rows.append(
+            {
+                key: value
+                for key, value in event.to_dict().items()
+                if key not in omitted
+            }
+            | {
+                "left_anchor_ordinal": anchor_ordinals[left],
+                "right_anchor_ordinal": anchor_ordinals[right],
+            }
+        )
+    return pa.Table.from_pylist(rows, schema=schema)
+
+
 def _write_parquet_partition(
     stream: SyntheticEventStreamV1,
     target: Path,
     *,
     row_group_size: int,
+    synthetic_delta: bool = False,
+    anchor_event_ids: Sequence[str] = (),
 ) -> None:
     _, pq = _arrow_modules()
     partial = target.with_name(target.name + ".partial")
     try:
         pq.write_table(
-            synthetic_event_stream_to_arrow(stream),
+            (
+                _synthetic_delta_stream_to_arrow(stream, anchor_event_ids)
+                if synthetic_delta
+                else synthetic_event_stream_to_arrow(stream)
+            ),
             partial,
             compression=RECONSTRUCTION_COMPRESSION,
             use_dictionary=False,
@@ -3134,6 +4425,9 @@ def _validate_partition_file(
     path: Path,
     expected: ReconstructionProductPartitionV1,
     row_group_size: int,
+    *,
+    expected_writer_id: str = RECONSTRUCTION_WRITER_ID,
+    anchor_event_ids: Sequence[str] = (),
 ) -> None:
     if not path.is_file() or path.is_symlink():
         raise ReconstructionPersistenceError("partition is missing or unsafe")
@@ -3149,7 +4443,11 @@ def _validate_partition_file(
             "partition footer is unreadable"
         ) from err
     actual_schema = parquet.schema_arrow.remove_metadata()
-    required_schema = synthetic_event_arrow_schema().remove_metadata()
+    required_schema = (
+        _synthetic_delta_arrow_schema().remove_metadata()
+        if expected_writer_id == RECONSTRUCTION_SYNTHETIC_DELTA_WRITER_ID
+        else synthetic_event_arrow_schema().remove_metadata()
+    )
     if not actual_schema.equals(required_schema):
         raise ReconstructionPersistenceError(
             "partition does not contain the exact final event schema"
@@ -3163,7 +4461,9 @@ def _validate_partition_file(
             raise ReconstructionPersistenceError(
                 "partition row group exceeds the configured bound"
             )
-    events = tuple(_iter_partition_events(path))
+    events = tuple(
+        _iter_partition_events(path, anchor_event_ids=anchor_event_ids)
+    )
     if len(events) != expected.row_count:
         raise ReconstructionPersistenceError("partition row count differs")
     if any(event.symbol != expected.symbol for event in events):
@@ -3190,12 +4490,55 @@ def _validate_partition_file(
         raise ReconstructionPersistenceError("partition logical hash differs")
 
 
-def _iter_partition_events(path: Path) -> Iterator[SyntheticEventV1]:
+def _iter_partition_events(
+    path: Path,
+    *,
+    anchor_event_ids: Sequence[str] = (),
+) -> Iterator[SyntheticEventV1]:
     _, pq = _arrow_modules()
     try:
         parquet = pq.ParquetFile(path)
+        actual_schema = parquet.schema_arrow.remove_metadata()
+        logical_schema = synthetic_event_arrow_schema().remove_metadata()
+        compact_schema = _synthetic_delta_arrow_schema().remove_metadata()
+        if not actual_schema.equals(
+            logical_schema
+        ) and not actual_schema.equals(compact_schema):
+            raise ReconstructionPersistenceError(
+                "partition does not contain a supported event schema"
+            )
+        compact = actual_schema.equals(compact_schema)
+        anchors = tuple(anchor_event_ids)
+        if compact and not anchors:
+            raise ReconstructionPersistenceError(
+                "synthetic-delta partition requires its anchor dictionary"
+            )
         for batch in parquet.iter_batches(batch_size=65_536, use_threads=False):
             for row in batch.to_pylist():
+                if compact:
+                    left_ordinal = _strict_int(
+                        row.pop("left_anchor_ordinal", None),
+                        "left_anchor_ordinal",
+                    )
+                    right_ordinal = _strict_int(
+                        row.pop("right_anchor_ordinal", None),
+                        "right_anchor_ordinal",
+                    )
+                    if not (
+                        0 <= left_ordinal < len(anchors)
+                        and 0 <= right_ordinal < len(anchors)
+                    ):
+                        raise ReconstructionPersistenceError(
+                            "synthetic-delta anchor ordinal is out of range"
+                        )
+                    left = anchors[left_ordinal]
+                    right = anchors[right_ordinal]
+                    row["left_anchor_event_id"] = left
+                    row["right_anchor_event_id"] = right
+                    row["anchor_interval_id"] = derive_anchor_interval_id(
+                        left, right
+                    )
+                    row["event_id"] = ""
                 yield SyntheticEventV1.from_dict(row)
     except ReconstructionPersistenceError:
         raise
@@ -3405,11 +4748,202 @@ def _delivery_quality_manifest(
     )
 
 
+def _read_observed_anchor_events(
+    manifest: ReconstructionProductManifestV3,
+    source_artifact_root: Path,
+) -> tuple[SyntheticEventV1, ...]:
+    """Rehydrate immutable anchors from exact Arrow row-range references."""
+    try:
+        import pyarrow as pa
+        from pyarrow import ipc
+    except ImportError as err:  # pragma: no cover - package dependency
+        raise RuntimeError("synthetic-delta replay requires pyarrow") from err
+    by_artifact: dict[
+        tuple[str, str], list[ReconstructionObservedAnchorSegmentV1]
+    ] = {}
+    for segment in manifest.observed_anchor_segments:
+        key = (segment.source_artifact.path, segment.source_artifact.sha256)
+        by_artifact.setdefault(key, []).append(segment)
+    raw: dict[str, list[tuple[int, float, float, str, int, str]]] = {
+        symbol: [] for symbol in manifest.symbols
+    }
+    seen_rows: set[tuple[str, int]] = set()
+    for segments in by_artifact.values():
+        artifact = segments[0].source_artifact
+        artifact_path = Path(artifact.path).expanduser()
+        artifact_path = (
+            artifact_path.resolve()
+            if artifact_path.is_absolute()
+            else (source_artifact_root / artifact_path).resolve()
+        )
+        if artifact.size_bytes is None:
+            raise ReconstructionPersistenceError(
+                "observed anchor source artifact lacks byte size"
+            )
+        _verify_cached_exact_file(
+            artifact_path,
+            expected_size=artifact.size_bytes,
+            expected_sha256=artifact.sha256,
+            label="observed anchor source artifact",
+        )
+        source_stat = artifact_path.stat()
+        batch_index = _source_arrow_batch_row_index(
+            str(artifact_path),
+            source_stat.st_size,
+            source_stat.st_mtime_ns,
+            source_stat.st_ctime_ns,
+            artifact.sha256,
+        )
+        with pa.memory_map(str(artifact_path), "r") as source:
+            try:
+                reader = ipc.open_file(source)
+            except Exception as err:
+                raise ReconstructionPersistenceError(
+                    "observed anchor source artifact is not Arrow IPC"
+                ) from err
+            dt_index = reader.schema.get_field_index("datetime")
+            bid_index = reader.schema.get_field_index("bid")
+            ask_index = reader.schema.get_field_index("ask")
+            if min(dt_index, bid_index, ask_index) < 0:
+                raise ReconstructionPersistenceError(
+                    "observed anchor source lacks datetime/bid/ask"
+                )
+            remaining = set(range(len(segments)))
+            for batch_ordinal, batch_start, row_count in batch_index:
+                batch = reader.get_batch(batch_ordinal)
+                if batch.num_rows != row_count:
+                    raise ReconstructionPersistenceError(
+                        "observed anchor source batch index changed"
+                    )
+                batch_end = batch_start + row_count - 1
+                for index in tuple(remaining):
+                    segment = segments[index]
+                    if segment.source_row_end_id < batch_start:
+                        remaining.remove(index)
+                        continue
+                    if segment.source_row_start_id > batch_end:
+                        continue
+                    overlap_start = max(
+                        segment.source_row_start_id, batch_start
+                    )
+                    overlap_end = min(segment.source_row_end_id, batch_end)
+                    offset = overlap_start - batch_start
+                    length = overlap_end - overlap_start + 1
+                    times = (
+                        batch.column(dt_index).slice(offset, length).to_pylist()
+                    )
+                    bids = (
+                        batch.column(bid_index)
+                        .slice(offset, length)
+                        .to_pylist()
+                    )
+                    asks = (
+                        batch.column(ask_index)
+                        .slice(offset, length)
+                        .to_pylist()
+                    )
+                    quote_policy = artifact.metadata.get(
+                        "quote_order_projection_policy"
+                    )
+                    for position, (timestamp_ms, bid_raw, ask_raw) in enumerate(
+                        zip(times, bids, asks, strict=True)
+                    ):
+                        row_id = overlap_start + position
+                        row_key = (segment.source_series_id, row_id)
+                        if row_key in seen_rows:
+                            raise ReconstructionPersistenceError(
+                                "observed anchor segments overlap"
+                            )
+                        seen_rows.add(row_key)
+                        bid, ask = _canonical_source_quote_for_replay(
+                            bid_raw, ask_raw, quote_policy
+                        )
+                        raw[segment.symbol].append(
+                            (
+                                _strict_int(timestamp_ms, "source datetime")
+                                * 1_000_000,
+                                bid,
+                                ask,
+                                segment.source_period,
+                                row_id,
+                                segment.source_series_id,
+                            )
+                        )
+                    if overlap_end == segment.source_row_end_id:
+                        remaining.remove(index)
+            if remaining:
+                raise ReconstructionPersistenceError(
+                    "observed anchor row range exceeds source artifact"
+                )
+    events: list[SyntheticEventV1] = []
+    for symbol, rows in sorted(raw.items()):
+        sequences: dict[int, int] = {}
+        for timestamp, bid, ask, period, row_id, series_id in sorted(
+            rows, key=lambda row: (row[0], row[3], row[4], row[5])
+        ):
+            sequence = sequences.get(timestamp, 0)
+            sequences[timestamp] = sequence + 1
+            events.append(
+                SyntheticEventV1.observed(
+                    symbol=symbol,
+                    event_time_ns=timestamp,
+                    event_sequence=sequence,
+                    bid=bid,
+                    ask=ask,
+                    run_id=manifest.run_id,
+                    ensemble_member_id=manifest.ensemble_member_id,
+                    source_version_id=next(
+                        item.source_version_id
+                        for item in manifest.observed_anchor_segments
+                        if item.source_series_id == series_id
+                    ),
+                    source_series_id=series_id,
+                    source_period=period,
+                    source_row_id=row_id,
+                )
+            )
+    return tuple(sorted(events, key=_event_order_key))
+
+
+def _canonical_source_quote_for_replay(
+    bid_raw: object,
+    ask_raw: object,
+    quote_order_projection_policy: object,
+) -> tuple[float, float]:
+    """Apply only the source-declared HistData quote-order projection."""
+    try:
+        bid = float(cast(Any, bid_raw))
+        ask = float(cast(Any, ask_raw))
+    except (TypeError, ValueError) as err:
+        raise ReconstructionPersistenceError(
+            "observed anchor bid/ask are not numeric"
+        ) from err
+    if not math.isfinite(bid) or not math.isfinite(ask) or min(bid, ask) <= 0.0:
+        raise ReconstructionPersistenceError(
+            "observed anchor bid/ask are not finite and positive"
+        )
+    if ask >= bid:
+        return bid, ask
+    if (
+        quote_order_projection_policy
+        != "rowwise-min-bid-max-ask-preserve-raw-v1"
+    ):
+        raise ReconstructionPersistenceError(
+            "negative source spread lacks its declared quote-order projection"
+        )
+    return ask, bid
+
+
 def _verify_publication_directory(
     directory: Path,
-    manifest: ReconstructionProductManifestV1 | ReconstructionProductManifestV2,
+    manifest: (
+        ReconstructionProductManifestV1
+        | ReconstructionProductManifestV2
+        | ReconstructionProductManifestV3
+    ),
     *,
     require_committed_layout: bool,
+    source_artifact_root: Path | None = None,
 ) -> None:
     manifest_path = directory / RECONSTRUCTION_MANIFEST_FILENAME
     disk_manifest = load_reconstruction_manifest(manifest_path)
@@ -3419,17 +4953,78 @@ def _verify_publication_directory(
         )
     if require_committed_layout:
         _validate_committed_manifest_location(manifest_path, manifest)
+    observed_events: tuple[SyntheticEventV1, ...] = ()
+    anchor_event_ids: tuple[str, ...] = ()
+    if isinstance(manifest, ReconstructionProductManifestV3):
+        observed_events = _read_observed_anchor_events(
+            manifest,
+            source_artifact_root
+            or _reconstruction_product_root_from_path(directory),
+        )
+        anchor_event_ids = tuple(event.event_id for event in observed_events)
     for partition in manifest.partitions:
         _validate_partition_file(
             directory / partition.relative_path,
             partition,
             manifest.replay.row_group_size,
+            expected_writer_id=manifest.replay.writer_id,
+            anchor_event_ids=anchor_event_ids,
         )
     actual_byte_hash = _partition_byte_digest(manifest.partitions)
     if actual_byte_hash != manifest.replay.partition_byte_sha256:
         raise ReconstructionPersistenceError(
             "partition byte aggregate differs from replay manifest"
         )
+    if isinstance(manifest, ReconstructionProductManifestV3):
+        synthetic_events = tuple(
+            event
+            for partition in manifest.partitions
+            for event in _iter_partition_events(
+                directory / partition.relative_path,
+                anchor_event_ids=anchor_event_ids,
+            )
+        )
+        if any(
+            event.origin is not SyntheticEventOrigin.SYNTHETIC
+            for event in synthetic_events
+        ):
+            raise ReconstructionPersistenceError(
+                "synthetic-delta partitions contain observed rows"
+            )
+        logical_events = tuple(
+            sorted((*observed_events, *synthetic_events), key=_event_order_key)
+        )
+        if reconstruction_logical_content_sha256(logical_events) != (
+            manifest.replay.logical_content_sha256
+        ):
+            raise ReconstructionPersistenceError(
+                "synthetic-delta logical replay hash differs"
+            )
+        if _observed_content_sha256(observed_events) != (
+            manifest.source.observed_content_sha256
+        ):
+            raise ReconstructionPersistenceError(
+                "synthetic-delta observed-anchor hash differs"
+            )
+        if _text_sequence_sha256(
+            event.event_id for event in observed_events
+        ) != (manifest.source.observed_event_ids_sha256):
+            raise ReconstructionPersistenceError(
+                "synthetic-delta observed IDs differ"
+            )
+        if (
+            len(logical_events),
+            len(observed_events),
+            len(synthetic_events),
+        ) != (
+            manifest.event_count,
+            manifest.observed_event_count,
+            manifest.synthetic_event_count,
+        ):
+            raise ReconstructionPersistenceError(
+                "synthetic-delta event counts differ"
+            )
+        return
     digest = hashlib.sha256(_LOGICAL_HASH_HEADER)
     observed_digest = hashlib.sha256(_OBSERVED_HASH_HEADER)
     observed_ids: list[str] = []
@@ -3520,7 +5115,11 @@ def _find_matching_publication(
 
 def _validate_committed_manifest_location(
     path: Path,
-    manifest: ReconstructionProductManifestV1 | ReconstructionProductManifestV2,
+    manifest: (
+        ReconstructionProductManifestV1
+        | ReconstructionProductManifestV2
+        | ReconstructionProductManifestV3
+    ),
 ) -> None:
     if path.name != RECONSTRUCTION_MANIFEST_FILENAME:
         raise ReconstructionPersistenceError("unexpected manifest filename")
@@ -3539,11 +5138,16 @@ def _validate_committed_manifest_location(
     if isinstance(manifest, ReconstructionProductManifestV1):
         profile_axis = f"broker={_path_component(manifest.broker_profile_id)}"
         schema_version = RECONSTRUCTION_PRODUCT_SCHEMA_VERSION
-    else:
+    elif isinstance(manifest, ReconstructionProductManifestV2):
         profile_axis = (
             f"delivery={_path_component(manifest.delivery_profile_id)}"
         )
         schema_version = RECONSTRUCTION_PRODUCT_V2_SCHEMA_VERSION
+    else:
+        profile_axis = (
+            f"delivery={_path_component(manifest.delivery_profile_id)}"
+        )
+        schema_version = RECONSTRUCTION_PRODUCT_V3_SCHEMA_VERSION
     expected_axes = (
         f"group={_path_component(manifest.symbol_group_id)}",
         f"member={_path_component(manifest.ensemble_member_id)}",
@@ -3562,6 +5166,17 @@ def _validate_committed_manifest_location(
         raise ReconstructionPersistenceError(
             "manifest is outside the reconstruction product root"
         )
+
+
+def _reconstruction_product_root_from_path(path: Path) -> Path:
+    """Locate the portable product-bundle root from a committed descendant."""
+    resolved = path.expanduser().resolve()
+    for candidate in (resolved, *resolved.parents):
+        if candidate.name == RECONSTRUCTION_PRODUCT_DIRECTORY:
+            return candidate
+    raise ReconstructionPersistenceError(
+        "cannot resolve reconstruction product root for source artifacts"
+    )
 
 
 def _axis_directory(
@@ -3590,11 +5205,17 @@ def _delivery_axis_directory(
     delivery_profile_id: str,
     ensemble_member_id: str,
     symbol_group_id: str,
+    schema_version: str = RECONSTRUCTION_PRODUCT_V2_SCHEMA_VERSION,
 ) -> Path:
+    if schema_version not in {
+        RECONSTRUCTION_PRODUCT_V2_SCHEMA_VERSION,
+        RECONSTRUCTION_PRODUCT_V3_SCHEMA_VERSION,
+    }:
+        raise ValueError("unsupported generic-delivery product schema")
     return (
         root
         / RECONSTRUCTION_PRODUCT_DIRECTORY
-        / f"schema={_path_component(RECONSTRUCTION_PRODUCT_V2_SCHEMA_VERSION)}"
+        / f"schema={_path_component(schema_version)}"
         / f"run={_path_component(run_id)}"
         / f"delivery={_path_component(delivery_profile_id)}"
         / f"member={_path_component(ensemble_member_id)}"
@@ -3707,7 +5328,11 @@ def _stable_id(prefix: str, payload: Mapping[str, JSONValue]) -> str:
 
 def _artifact_ref_for_manifest(
     path: Path,
-    manifest: ReconstructionProductManifestV1 | ReconstructionProductManifestV2,
+    manifest: (
+        ReconstructionProductManifestV1
+        | ReconstructionProductManifestV2
+        | ReconstructionProductManifestV3
+    ),
 ) -> ArtifactRef:
     payload = path.read_bytes()
     return ArtifactRef(
@@ -3797,6 +5422,68 @@ def _file_sha256(path: Path) -> str:
         while chunk := stream.read(1024**2):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _verify_cached_exact_file(
+    path: Path,
+    *,
+    expected_size: int,
+    expected_sha256: str,
+    label: str,
+) -> None:
+    """Hash immutable large artifacts once per unchanged filesystem identity."""
+    if not path.is_file():
+        raise ReconstructionPersistenceError(f"{label} is missing")
+    stat = path.stat()
+    if stat.st_size != expected_size:
+        raise ReconstructionPersistenceError(f"{label} byte size differs")
+    actual = _cached_file_sha256(
+        str(path.resolve()),
+        stat.st_size,
+        stat.st_mtime_ns,
+        stat.st_ctime_ns,
+    )
+    if actual != expected_sha256:
+        raise ReconstructionPersistenceError(f"{label} hash differs")
+
+
+@lru_cache(maxsize=2_048)
+def _cached_file_sha256(
+    path: str,
+    size_bytes: int,
+    modified_ns: int,
+    changed_ns: int,
+) -> str:
+    """Return a hash keyed by path and mutation-sensitive stat evidence."""
+    del size_bytes, modified_ns, changed_ns
+    return _file_sha256(Path(path))
+
+
+@lru_cache(maxsize=2_048)
+def _source_arrow_batch_row_index(
+    path: str,
+    size_bytes: int,
+    modified_ns: int,
+    changed_ns: int,
+    artifact_sha256: str,
+) -> tuple[tuple[int, int, int], ...]:
+    """Cache one-based row offsets so delta replay opens only used batches."""
+    del size_bytes, modified_ns, changed_ns, artifact_sha256
+    try:
+        import pyarrow as pa
+        from pyarrow import ipc
+    except ImportError as err:  # pragma: no cover - package dependency
+        raise RuntimeError("synthetic-delta replay requires pyarrow") from err
+    indexed: list[tuple[int, int, int]] = []
+    row_start = 1
+    with pa.memory_map(path, "r") as source:
+        reader = ipc.open_file(source)
+        for batch_ordinal in range(reader.num_record_batches):
+            row_count = reader.get_batch(batch_ordinal).num_rows
+            if row_count:
+                indexed.append((batch_ordinal, row_start, row_count))
+            row_start += row_count
+    return tuple(indexed)
 
 
 def _event_date(event_time_ns: int) -> str:
@@ -4015,31 +5702,40 @@ __all__ = [
     "RECONSTRUCTION_LOGICAL_HASH_ALGORITHM",
     "RECONSTRUCTION_MANIFEST_ARTIFACT_KIND",
     "RECONSTRUCTION_MANIFEST_FILENAME",
+    "RECONSTRUCTION_OBSERVED_ANCHOR_SEGMENT_SCHEMA_VERSION",
     "RECONSTRUCTION_PARTITION_SCHEMA_VERSION",
     "RECONSTRUCTION_PRODUCT_DIRECTORY",
     "RECONSTRUCTION_PRODUCT_SCHEMA_VERSION",
     "RECONSTRUCTION_PRODUCT_V2_SCHEMA_VERSION",
+    "RECONSTRUCTION_PRODUCT_V3_SCHEMA_VERSION",
     "RECONSTRUCTION_QUALITY_MANIFEST_SCHEMA_VERSION",
     "RECONSTRUCTION_REPLAY_MANIFEST_SCHEMA_VERSION",
+    "RECONSTRUCTION_REPLAY_V2_MANIFEST_SCHEMA_VERSION",
     "RECONSTRUCTION_RETENTION_PLAN_SCHEMA_VERSION",
     "RECONSTRUCTION_SOURCE_MANIFEST_SCHEMA_VERSION",
+    "RECONSTRUCTION_SYNTHETIC_DELTA_WRITER_ID",
     "RECONSTRUCTION_WRITER_ID",
     "PublishedReconstructionV1",
     "PublishedReconstructionV2",
+    "PublishedReconstructionV3",
     "ReconstructionConstraintManifestV1",
     "ReconstructionDeliveryQualityManifestV1",
     "ReconstructionEnsembleManifestV1",
+    "ReconstructionObservedAnchorSegmentV1",
     "ReconstructionPersistenceError",
     "ReconstructionProductManifestV1",
     "ReconstructionProductManifestV2",
+    "ReconstructionProductManifestV3",
     "ReconstructionProductPartitionV1",
     "ReconstructionQualityManifestV1",
     "ReconstructionReplayManifestV1",
+    "ReconstructionReplayManifestV2",
     "ReconstructionRetentionPlanV1",
     "ReconstructionSourceManifestV1",
     "ReconstructionStoragePreflightError",
     "StagedReconstructionPublicationV1",
     "StagedReconstructionPublicationV2",
+    "StagedReconstructionPublicationV3",
     "cleanup_reconstruction_scratch",
     "commit_delivery_reconstruction_publication",
     "commit_reconstruction_publication",

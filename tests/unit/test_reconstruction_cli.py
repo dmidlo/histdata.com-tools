@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, ClassVar
 
 import pytest
@@ -67,12 +68,22 @@ def test_installed_help_lists_complete_reconstruction_family(
         "plan",
         "plan-set",
         "preflight-set",
+        "support-map",
+        "support-inspect",
+        "product-index",
+        "product-inspect",
+        "dataset-publish",
         "request",
+        "request-set",
         "preflight",
         "run",
+        "run-set",
         "status",
+        "status-set",
         "cancel",
+        "cancel-set",
         "resume",
+        "resume-set",
         "outputs",
         "preview",
         "replay",
@@ -280,6 +291,13 @@ def test_cli_constructs_and_preflights_public_plan_set(
         shard_preflights=(),
     )
     calls: list[tuple[str, int | str]] = []
+    support_ref = ArtifactRef(
+        kind="reconstruction_plan_support_map_v1",
+        path=str(tmp_path / "support-map.json"),
+        size_bytes=10,
+        sha256="2" * 64,
+        metadata={"support_map_id": "reconstruction-plan-support-map:test"},
+    )
 
     class FakeClient:
         def construct_plan_set(self, supplied, *, periods_per_shard):
@@ -290,6 +308,10 @@ def test_cli_constructs_and_preflights_public_plan_set(
         def preflight_plan_set(self, supplied):
             calls.append(("preflight-set", supplied))
             return preflight
+
+        def construct_plan_support_map(self, supplied, *, output_directory):
+            calls.append(("support-map", f"{supplied}:{output_directory}"))
+            return support_ref
 
     monkeypatch.setattr(reconstruction_cli, "_client", lambda _: FakeClient())
     monkeypatch.setattr(reconstruction_cli, "read_plan_spec", lambda _: spec)
@@ -319,7 +341,146 @@ def test_cli_constructs_and_preflights_public_plan_set(
     payload = json.loads(capsys.readouterr().out)
     assert payload["verified_shard_count"] == 25
     assert payload["refusal_count"] == 3
-    assert calls == [("plan-set", 6), ("preflight-set", "plan-set.json")]
+    assert (
+        reconstruction_cli.main(
+            [
+                "--json",
+                "support-map",
+                "--plan-set",
+                "plan-set.json",
+                "--output-directory",
+                "support",
+            ]
+        )
+        == ReconstructionExitCode.SUCCESS
+    )
+    assert json.loads(capsys.readouterr().out)["kind"] == (
+        "reconstruction_plan_support_map_v1"
+    )
+    assert calls == [
+        ("plan-set", 6),
+        ("preflight-set", "plan-set.json"),
+        ("support-map", "plan-set.json:support"),
+    ]
+
+
+def test_cli_persists_and_controls_a_complete_plan_set_campaign(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    request_set = object()
+    request_ref = ArtifactRef(
+        kind="reconstruction_plan_set_execution_request_v1",
+        path=str(tmp_path / "request-set.json"),
+        size_bytes=10,
+        sha256="3" * 64,
+        metadata={
+            "request_set_id": "reconstruction-plan-set-execution-request:test"
+        },
+    )
+    receipt_ref = ArtifactRef(
+        kind="reconstruction_plan_set_receipt_index_v1",
+        path=str(tmp_path / "receipt-index.json"),
+        size_bytes=10,
+        sha256="4" * 64,
+        metadata={
+            "receipt_index_id": "reconstruction-plan-set-receipt-index:test"
+        },
+    )
+    calls: list[tuple[str, Any]] = []
+
+    class FakeClient:
+        def create_plan_set_execution_request(
+            self, *args: Any, **kwargs: Any
+        ) -> Any:
+            calls.append(("request-set", (args, kwargs)))
+            return request_set
+
+        def run_plan_set_execution_request(
+            self, supplied: Any, **kwargs: Any
+        ) -> Any:
+            assert supplied is request_set
+            calls.append(("run-set", kwargs))
+            return receipt_ref
+
+        def operate_plan_set_receipt_index(
+            self, supplied: Any, **kwargs: Any
+        ) -> Any:
+            calls.append((f"{kwargs['operation']}-set", (supplied, kwargs)))
+            return receipt_ref
+
+    monkeypatch.setattr(reconstruction_cli, "_client", lambda _: FakeClient())
+    monkeypatch.setattr(
+        reconstruction_cli,
+        "write_reconstruction_plan_set_execution_request",
+        lambda supplied, _: request_ref if supplied is request_set else None,
+    )
+    monkeypatch.setattr(
+        reconstruction_cli,
+        "read_reconstruction_plan_set_execution_request",
+        lambda _: request_set,
+    )
+    monkeypatch.setattr(
+        reconstruction_cli,
+        "read_reconstruction_plan_set_receipt_index",
+        lambda _: SimpleNamespace(status="submitted"),
+    )
+
+    assert (
+        reconstruction_cli.main(
+            [
+                "--json",
+                "request-set",
+                "--plan-set",
+                "plan-set.json",
+                "--support-map",
+                "support-index.json",
+                "--information-mode",
+                "ex_post_reconstruction",
+                "--acknowledge-scientific-nonclaim",
+                "--output-directory",
+                "request",
+            ]
+        )
+        == ReconstructionExitCode.SUCCESS
+    )
+    assert json.loads(capsys.readouterr().out)["kind"] == request_ref.kind
+    assert (
+        reconstruction_cli.main(
+            [
+                "--json",
+                "run-set",
+                "--request-set",
+                "request-set.json",
+                "--submit-only",
+                "--output-directory",
+                "submit",
+            ]
+        )
+        == ReconstructionExitCode.SUCCESS
+    )
+    assert json.loads(capsys.readouterr().out)["kind"] == receipt_ref.kind
+    for command, operation in (
+        ("status-set", "status"),
+        ("cancel-set", "cancel"),
+        ("resume-set", "resume"),
+    ):
+        assert (
+            reconstruction_cli.main(
+                [
+                    "--json",
+                    command,
+                    "--receipt-index",
+                    "receipt-index.json",
+                    "--output-directory",
+                    command,
+                ]
+            )
+            == ReconstructionExitCode.SUCCESS
+        )
+        assert json.loads(capsys.readouterr().out)["kind"] == receipt_ref.kind
+        assert any(name == f"{operation}-set" for name, _ in calls)
 
 
 def test_histdatacom_main_dispatches_reconstruction_command(

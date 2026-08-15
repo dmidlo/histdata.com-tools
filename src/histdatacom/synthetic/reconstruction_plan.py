@@ -15,18 +15,22 @@ import json
 import math
 import os
 import re
-from collections import Counter
+from bisect import bisect_left
+from collections import Counter, OrderedDict
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
 from functools import lru_cache
+from itertools import pairwise
 from pathlib import Path
 from typing import Any, cast
 
 from histdatacom.cross_series_constraints import (
     CROSS_SERIES_CONSTRAINT_POLICY_ARTIFACT_KIND,
+    CrossSeriesAlignmentPolicy,
     CrossSeriesConstraintPolicyV1,
+    read_cross_series_constraint_policy,
 )
 from histdatacom.data_analytics.feed_epochs_v2 import (
     read_active_time_feed_epoch_definition,
@@ -40,14 +44,19 @@ from histdatacom.datasets import (
     DatasetResolutionV1,
     HistDataProviderAdapter,
 )
+from histdatacom.histdata_ascii import (
+    MAX_HISTDATA_SOURCE_ORDER_REGRESSION_MS,
+    MAX_HISTDATA_SOURCE_ORDER_REGRESSIONS_PER_PARTITION,
+)
 from histdatacom.market_context import (
     CftcPositioningCorpusV1,
+    CftcPositioningQueryStatus,
     CftcReportFamily,
     CftcReportScope,
     MarketContextCorpusV1,
     MarketContextKind,
-    preflight_cftc_positioning_corpus,
     preflight_market_context_corpus,
+    query_cftc_positioning_corpus,
     read_cftc_positioning_corpus,
     read_market_context_corpus,
 )
@@ -93,6 +102,7 @@ from histdatacom.synthetic.cross_currency import (
     CrossCurrencyReconciliationConfigV1,
     CrossCurrencySymbolCoverageV1,
     CrossCurrencyWindowPlanStatus,
+    CrossCurrencyWindowPlanV1,
     eurusd_triangle_reconciliation_config,
     plan_cross_currency_windows,
 )
@@ -104,6 +114,10 @@ from histdatacom.synthetic.ensembles import (
 from histdatacom.synthetic.generation import (
     EMPIRICAL_MOTIF_GENERATOR_ID,
     EmpiricalMotifGeneratorConfigV1,
+)
+from histdatacom.synthetic.historical_conditioning import (
+    historical_product_observation_conditioning,
+    historical_product_retention_probability,
 )
 from histdatacom.synthetic.information import (
     InformationAuditReportV1,
@@ -119,6 +133,10 @@ from histdatacom.synthetic.information import (
     reconstruction_information_window_plan_id,
     require_reconstruction_information_audit,
 )
+from histdatacom.synthetic.marked_hawkes import (
+    OPERATOR_CONDITIONED_CARDINALITY_POLICY,
+    MarkedHawkesConfigV1,
+)
 from histdatacom.synthetic.motif_library import (
     ModernReferenceMotifProfileV1,
     read_modern_reference_motif_artifact,
@@ -128,7 +146,10 @@ from histdatacom.synthetic.observation import (
     ObservationOperatorV1,
     read_observation_operator_artifact,
 )
-from histdatacom.synthetic.persistence import estimate_reconstruction_retention
+from histdatacom.synthetic.persistence import (
+    DEFAULT_MANIFEST_BYTES_PER_PRODUCT,
+    estimate_reconstruction_retention,
+)
 from histdatacom.synthetic.proposal_engines import (
     PROPOSAL_ENGINE_PORTFOLIO_SCHEMA_VERSION,
     ProposalEngineBindingV1,
@@ -170,8 +191,23 @@ RECONSTRUCTION_PLAN_CONFIGURATION_V2_SCHEMA_VERSION = (
 RECONSTRUCTION_PLAN_EXECUTION_MANIFEST_SCHEMA_VERSION = (
     "histdatacom.reconstruction-plan-execution-manifest.v1"
 )
+RECONSTRUCTION_WINDOW_SIZING_AUDIT_SCHEMA_VERSION = (
+    "histdatacom.reconstruction-window-sizing-audit.v1"
+)
 RECONSTRUCTION_PLAN_REFUSAL_SCHEMA_VERSION = (
     "histdatacom.reconstruction-plan-refusal.v1"
+)
+RECONSTRUCTION_PLAN_SOURCE_SUPPORT_SCHEMA_VERSION = (
+    "histdatacom.reconstruction-plan-source-support.v1"
+)
+RECONSTRUCTION_PLAN_SOURCE_SUPPORT_MAP_SCHEMA_VERSION = (
+    "histdatacom.reconstruction-plan-source-support-map.v1"
+)
+RECONSTRUCTION_PLAN_CFTC_SUPPORT_SCHEMA_VERSION = (
+    "histdatacom.reconstruction-plan-cftc-support.v1"
+)
+RECONSTRUCTION_CONTEXT_AVAILABILITY_QUALIFICATION_SCHEMA_VERSION = (
+    "histdatacom.reconstruction-context-availability-qualification.v1"
 )
 RECONSTRUCTION_PLAN_RESOURCE_SUMMARY_SCHEMA_VERSION = (
     "histdatacom.reconstruction-plan-resource-summary.v1"
@@ -180,6 +216,7 @@ SYNTHETIC_INFILL_PLAN_SCHEMA_VERSION = "histdatacom.synthetic-infill-plan.v1"
 
 ASCII_TICK_SOURCE_KIND = "histdata_ascii_tick_arrow"
 SOURCE_INVENTORY_ARTIFACT_KIND = "reconstruction_source_inventory_v1"
+SOURCE_SUPPORT_MAP_ARTIFACT_KIND = "reconstruction_plan_source_support_map_v1"
 PLAN_CONFIGURATION_ARTIFACT_KIND = "reconstruction_plan_configuration_v1"
 PLAN_CONFIGURATION_V2_ARTIFACT_KIND = "reconstruction_plan_configuration_v2"
 PROPOSAL_ENGINE_REGISTRY_ARTIFACT_KIND = "proposal_engine_registry_v1"
@@ -189,9 +226,13 @@ PROPOSAL_ENGINE_EVALUATION_ARTIFACT_KIND = (
     "proposal_engine_evaluation_scorecard_v1"
 )
 POWERED_QUALIFICATION_DOSSIER_ARTIFACT_KIND = "powered_qualification_dossier_v1"
+CONTEXT_AVAILABILITY_QUALIFICATION_ARTIFACT_KIND = (
+    "reconstruction_context_availability_qualification_v1"
+)
 PLAN_EXECUTION_MANIFEST_ARTIFACT_KIND = (
     "reconstruction_plan_execution_manifest_v1"
 )
+WINDOW_SIZING_AUDIT_ARTIFACT_KIND = "reconstruction_window_sizing_audit_v1"
 SYNTHETIC_INFILL_PLAN_ARTIFACT_KIND = "synthetic_infill_plan_v1"
 
 DEFAULT_RECONSTRUCTION_WINDOW_SIZE_NS = 30 * 24 * 60 * 60 * 1_000_000_000
@@ -200,7 +241,8 @@ DEFAULT_RECONSTRUCTION_MAX_PARALLEL_WINDOWS = 2
 DEFAULT_RECONSTRUCTION_BASE_SEED = 20260715
 _RESOURCE_FIXED_OVERHEAD_BYTES = 512 * 1024 * 1024
 _RESOURCE_LEDGER_BYTES_PER_INTERVAL = 8 * 1024
-_SOURCE_ROW_DENSITY_SAFETY_FACTOR = 4
+_ADAPTIVE_CARDINALITY_SAFETY_FRACTION = 0.85
+_MAX_ADAPTIVE_TIMESTAMP_CACHE_PARTITIONS = 12
 MAX_RECONSTRUCTION_PLAN_ARTIFACTS = 64
 MAX_RECONSTRUCTION_PLAN_REFUSALS = 4096
 MAX_RECONSTRUCTION_PLAN_REQUESTS = 4096
@@ -218,6 +260,25 @@ IMMUTABLE_ANCHOR_POLICY = (
 TICK_ONLY_INPUT_POLICY = (
     "Only ASCII/T bid-ask tick caches are reconstruction inputs. M1, bars, "
     "OHLC, and downstream bar projections are never anchors or inputs."
+)
+QUALIFIED_CFTC_UNAVAILABLE_ENGINE_ID = (
+    "histdatacom.marked-hawkes.diagonal_self_excitation"
+)
+CFTC_UNAVAILABLE_RUNTIME_DEPENDENCY = (
+    "lineage-tag-only-not-intensity-mark-or-fit-input-v1"
+)
+CFTC_UNAVAILABLE_CONDITIONING_MODE = (
+    "cftc-unavailable-explicit-unconditioned-v1"
+)
+CFTC_READY_CONDITIONING_MODE = "cftc-weekly-state-conditioned-v1"
+CFTC_UNCONDITIONED_AVAILABILITY_STATUSES = frozenset(
+    {
+        CftcPositioningQueryStatus.PRE_COVERAGE,
+        CftcPositioningQueryStatus.MISSING,
+        CftcPositioningQueryStatus.STALE,
+        CftcPositioningQueryStatus.NOT_AVAILABLE,
+        CftcPositioningQueryStatus.RESTATEMENT_INCOMPLETE,
+    }
 )
 
 FIRST_PARTY_RECONSTRUCTION_HANDLERS: Mapping[ReconstructionStage, str] = {
@@ -252,10 +313,29 @@ class ReconstructionPlanCompatibilityError(ValueError):
 class ReconstructionPlanRefusalCode(str, Enum):
     """Stable pre-execution refusal categories."""
 
+    SOURCE_TRIANGLE_INCOMPLETE = "source_triangle_incomplete"
+    CROSS_SERIES_UNSUPPORTED = "cross_series_unsupported"
     FEED_EPOCH_UNSUPPORTED = "feed_epoch_unsupported"
     MARKET_CONTEXT_UNSUPPORTED = "market_context_unsupported"
     CFTC_POSITIONING_UNSUPPORTED = "cftc_positioning_unsupported"
     INFORMATION_LEAKAGE = "information_leakage"
+
+
+class ReconstructionPlanSourceSupportStatus(str, Enum):
+    """Exact immutable-anchor readiness for one synchronized window."""
+
+    COMPLETE = "complete"
+    EMPTY = "empty"
+    INCOMPLETE = "incomplete"
+
+
+class ReconstructionCftcConditioningMode(str, Enum):
+    """Per-window CFTC conditioning applied by the qualified runtime."""
+
+    CONDITIONED = CFTC_READY_CONDITIONING_MODE
+    UNCONDITIONED_UNAVAILABLE = CFTC_UNAVAILABLE_CONDITIONING_MODE
+    NOT_EVALUATED = "not-evaluated-nonexecutable-source-v1"
+    REFUSED = "refused-unavailable-cftc-state-v1"
 
 
 @dataclass(frozen=True, slots=True)
@@ -495,8 +575,8 @@ class ReconstructionSourceInventoryV1:
         selected = tuple(
             item
             for item in self.partitions
-            if item.coverage_end_ns > window.input_start_ns
-            and item.coverage_start_ns < window.input_end_ns
+            if (item.last_timestamp_ms + 1) * 1_000_000 > window.input_start_ns
+            and item.first_timestamp_ms * 1_000_000 < window.input_end_ns
         )
         if {item.symbol for item in selected} != set(self.symbols):
             raise ReconstructionPlanCompatibilityError(
@@ -920,6 +1000,736 @@ class ReconstructionPlanRefusalV1:
 
 
 @dataclass(frozen=True, slots=True)
+class ReconstructionPlanSourceSupportV1:
+    """Exact per-symbol and synchronized anchor support for one core window."""
+
+    start_ns: int
+    end_ns: int
+    core_event_counts: Mapping[str, int]
+    input_event_counts: Mapping[str, int]
+    common_exact_core_timestamp_count: int
+    status: ReconstructionPlanSourceSupportStatus
+    reason: str
+    bounded_nearest_core_timestamp_count: int = 0
+    bounded_nearest_core_stale_timestamp_count: int = 0
+    bounded_nearest_core_maximum_age_ns: int = 0
+    bounded_nearest_core_p95_age_ns: int = 0
+    selected_cross_series_alignment: str = "unavailable"
+    recommended_cross_series_event_time_ns: int | None = None
+    cross_series_policy_id: str = ""
+    symbols: tuple[str, ...] = EURUSD_TRIANGLE_SYMBOLS
+    support_id: str = ""
+    schema_version: str = RECONSTRUCTION_PLAN_SOURCE_SUPPORT_SCHEMA_VERSION
+
+    def __post_init__(self) -> None:
+        if (
+            self.schema_version
+            != RECONSTRUCTION_PLAN_SOURCE_SUPPORT_SCHEMA_VERSION
+        ):
+            raise ValueError(
+                "unsupported reconstruction plan source-support schema"
+            )
+        start = _int64(self.start_ns, "start_ns")
+        end = _int64(self.end_ns, "end_ns")
+        if end <= start:
+            raise ValueError("source-support interval is empty")
+        symbols = _symbols(self.symbols)
+        core = _source_count_mapping(
+            self.core_event_counts, symbols=symbols, name="core_event_counts"
+        )
+        inputs = _source_count_mapping(
+            self.input_event_counts,
+            symbols=symbols,
+            name="input_event_counts",
+        )
+        if any(core[symbol] > inputs[symbol] for symbol in symbols):
+            raise ValueError("core source counts exceed input source counts")
+        common_exact = _strict_int(
+            self.common_exact_core_timestamp_count,
+            "common_exact_core_timestamp_count",
+        )
+        if common_exact < 0:
+            raise ValueError("common exact core timestamp count is negative")
+        if common_exact > min(core.values()):
+            raise ValueError(
+                "common exact core timestamp count exceeds a symbol core count"
+            )
+        nearest_count = _nonnegative_int(
+            self.bounded_nearest_core_timestamp_count,
+            "bounded_nearest_core_timestamp_count",
+        )
+        nearest_stale = _nonnegative_int(
+            self.bounded_nearest_core_stale_timestamp_count,
+            "bounded_nearest_core_stale_timestamp_count",
+        )
+        nearest_maximum_age = _nonnegative_int(
+            self.bounded_nearest_core_maximum_age_ns,
+            "bounded_nearest_core_maximum_age_ns",
+        )
+        nearest_p95_age = _nonnegative_int(
+            self.bounded_nearest_core_p95_age_ns,
+            "bounded_nearest_core_p95_age_ns",
+        )
+        if nearest_count > sum(core.values()) or nearest_stale > nearest_count:
+            raise ValueError("bounded-nearest core support counts are invalid")
+        if nearest_p95_age > nearest_maximum_age:
+            raise ValueError("bounded-nearest p95 age exceeds maximum age")
+        alignment = CrossSeriesAlignmentPolicy(
+            self.selected_cross_series_alignment
+        )
+        if alignment not in {
+            CrossSeriesAlignmentPolicy.EXACT_EVENT_SEQUENCE,
+            CrossSeriesAlignmentPolicy.NEAREST_PRIOR_BOUNDED,
+            CrossSeriesAlignmentPolicy.UNAVAILABLE,
+        }:
+            raise ValueError("source-support selected alignment is invalid")
+        recommended = self.recommended_cross_series_event_time_ns
+        if recommended is not None:
+            recommended = _int64(
+                recommended, "recommended_cross_series_event_time_ns"
+            )
+            if not start <= recommended < end:
+                raise ValueError(
+                    "source-support recommended alignment lies outside core"
+                )
+        policy_id = str(self.cross_series_policy_id or "").strip()
+        if alignment is CrossSeriesAlignmentPolicy.EXACT_EVENT_SEQUENCE:
+            if not common_exact or recommended is None:
+                raise ValueError("exact selected alignment lacks exact support")
+        elif alignment is CrossSeriesAlignmentPolicy.NEAREST_PRIOR_BOUNDED:
+            if not nearest_count or recommended is None or not policy_id:
+                raise ValueError(
+                    "bounded-nearest selected alignment lacks policy support"
+                )
+        elif recommended is not None:
+            raise ValueError("unavailable alignment cannot recommend a time")
+        status = ReconstructionPlanSourceSupportStatus(self.status)
+        complete = all(
+            core[symbol] > 0 and inputs[symbol] >= 2 for symbol in symbols
+        )
+        empty = all(core[symbol] == 0 for symbol in symbols)
+        expected_status = (
+            ReconstructionPlanSourceSupportStatus.COMPLETE
+            if complete
+            else (
+                ReconstructionPlanSourceSupportStatus.EMPTY
+                if empty
+                else ReconstructionPlanSourceSupportStatus.INCOMPLETE
+            )
+        )
+        if status is not expected_status:
+            raise ValueError(
+                "source-support status differs from exact anchor counts"
+            )
+        object.__setattr__(self, "start_ns", start)
+        object.__setattr__(self, "end_ns", end)
+        object.__setattr__(self, "symbols", symbols)
+        object.__setattr__(self, "core_event_counts", core)
+        object.__setattr__(self, "input_event_counts", inputs)
+        object.__setattr__(
+            self, "common_exact_core_timestamp_count", common_exact
+        )
+        object.__setattr__(
+            self, "bounded_nearest_core_timestamp_count", nearest_count
+        )
+        object.__setattr__(
+            self,
+            "bounded_nearest_core_stale_timestamp_count",
+            nearest_stale,
+        )
+        object.__setattr__(
+            self, "bounded_nearest_core_maximum_age_ns", nearest_maximum_age
+        )
+        object.__setattr__(
+            self, "bounded_nearest_core_p95_age_ns", nearest_p95_age
+        )
+        object.__setattr__(
+            self, "selected_cross_series_alignment", alignment.value
+        )
+        object.__setattr__(
+            self, "recommended_cross_series_event_time_ns", recommended
+        )
+        object.__setattr__(self, "cross_series_policy_id", policy_id)
+        object.__setattr__(self, "status", status)
+        object.__setattr__(self, "reason", _bounded_text(self.reason, 2048))
+        expected = _stable_id(
+            "reconstruction-plan-source-support", self.identity_payload()
+        )
+        if self.support_id and self.support_id != expected:
+            raise ValueError("source-support identity differs")
+        object.__setattr__(self, "support_id", expected)
+
+    def identity_payload(self) -> dict[str, JSONValue]:
+        payload: dict[str, JSONValue] = {
+            "schema_version": self.schema_version,
+            "start_ns": self.start_ns,
+            "end_ns": self.end_ns,
+            "symbols": list(self.symbols),
+            "core_event_counts": dict(self.core_event_counts),
+            "input_event_counts": dict(self.input_event_counts),
+            "common_exact_core_timestamp_count": (
+                self.common_exact_core_timestamp_count
+            ),
+            "status": self.status.value,
+            "reason": self.reason,
+            "count_basis": "exact-half-open-immutable-arrow-timestamps-v1",
+        }
+        if self.cross_series_policy_id:
+            payload.update(
+                {
+                    "bounded_nearest_core_timestamp_count": (
+                        self.bounded_nearest_core_timestamp_count
+                    ),
+                    "bounded_nearest_core_stale_timestamp_count": (
+                        self.bounded_nearest_core_stale_timestamp_count
+                    ),
+                    "bounded_nearest_core_maximum_age_ns": (
+                        self.bounded_nearest_core_maximum_age_ns
+                    ),
+                    "bounded_nearest_core_p95_age_ns": (
+                        self.bounded_nearest_core_p95_age_ns
+                    ),
+                    "selected_cross_series_alignment": (
+                        self.selected_cross_series_alignment
+                    ),
+                    "recommended_cross_series_event_time_ns": (
+                        self.recommended_cross_series_event_time_ns
+                    ),
+                    "cross_series_policy_id": self.cross_series_policy_id,
+                    "cross_series_support_basis": (
+                        "exact-or-bounded-nearest-prior-no-forward-fill-v1"
+                    ),
+                }
+            )
+        return payload
+
+    def to_dict(self) -> dict[str, JSONValue]:
+        return {**self.identity_payload(), "support_id": self.support_id}
+
+    @classmethod
+    def from_dict(
+        cls, data: Mapping[str, Any]
+    ) -> ReconstructionPlanSourceSupportV1:
+        _require_schema(data, RECONSTRUCTION_PLAN_SOURCE_SUPPORT_SCHEMA_VERSION)
+        _require_derived(
+            data,
+            "count_basis",
+            "exact-half-open-immutable-arrow-timestamps-v1",
+        )
+        return cls(
+            start_ns=_strict_int(data.get("start_ns"), "start_ns"),
+            end_ns=_strict_int(data.get("end_ns"), "end_ns"),
+            symbols=_string_tuple(data.get("symbols")),
+            core_event_counts={
+                str(key): _strict_int(value, f"core_event_counts[{key}]")
+                for key, value in _mapping(
+                    data.get("core_event_counts")
+                ).items()
+            },
+            input_event_counts={
+                str(key): _strict_int(value, f"input_event_counts[{key}]")
+                for key, value in _mapping(
+                    data.get("input_event_counts")
+                ).items()
+            },
+            common_exact_core_timestamp_count=_strict_int(
+                data.get("common_exact_core_timestamp_count"),
+                "common_exact_core_timestamp_count",
+            ),
+            bounded_nearest_core_timestamp_count=_strict_int(
+                data.get("bounded_nearest_core_timestamp_count", 0),
+                "bounded_nearest_core_timestamp_count",
+            ),
+            bounded_nearest_core_stale_timestamp_count=_strict_int(
+                data.get("bounded_nearest_core_stale_timestamp_count", 0),
+                "bounded_nearest_core_stale_timestamp_count",
+            ),
+            bounded_nearest_core_maximum_age_ns=_strict_int(
+                data.get("bounded_nearest_core_maximum_age_ns", 0),
+                "bounded_nearest_core_maximum_age_ns",
+            ),
+            bounded_nearest_core_p95_age_ns=_strict_int(
+                data.get("bounded_nearest_core_p95_age_ns", 0),
+                "bounded_nearest_core_p95_age_ns",
+            ),
+            selected_cross_series_alignment=str(
+                data.get("selected_cross_series_alignment", "unavailable")
+            ),
+            recommended_cross_series_event_time_ns=(
+                None
+                if data.get("recommended_cross_series_event_time_ns") is None
+                else _strict_int(
+                    data.get("recommended_cross_series_event_time_ns"),
+                    "recommended_cross_series_event_time_ns",
+                )
+            ),
+            cross_series_policy_id=str(data.get("cross_series_policy_id", "")),
+            status=ReconstructionPlanSourceSupportStatus(
+                str(data.get("status", ""))
+            ),
+            reason=str(data.get("reason", "")),
+            support_id=str(data.get("support_id", "")),
+            schema_version=str(data.get("schema_version", "")),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class ReconstructionPlanSourceSupportMapV1:
+    """Runtime-readable exact source and cross-series support by boundary."""
+
+    source_inventory_id: str
+    cross_series_policy_id: str
+    windows: tuple[ReconstructionPlanSourceSupportV1, ...]
+    support_map_id: str = ""
+    schema_version: str = RECONSTRUCTION_PLAN_SOURCE_SUPPORT_MAP_SCHEMA_VERSION
+
+    def __post_init__(self) -> None:
+        if (
+            self.schema_version
+            != RECONSTRUCTION_PLAN_SOURCE_SUPPORT_MAP_SCHEMA_VERSION
+        ):
+            raise ValueError(
+                "unsupported reconstruction source-support map schema"
+            )
+        object.__setattr__(
+            self,
+            "source_inventory_id",
+            _required_text(self.source_inventory_id),
+        )
+        policy_id = _required_text(self.cross_series_policy_id)
+        object.__setattr__(self, "cross_series_policy_id", policy_id)
+        windows = tuple(sorted(self.windows, key=lambda item: item.start_ns))
+        if not windows or len({item.support_id for item in windows}) != len(
+            windows
+        ):
+            raise ValueError(
+                "source-support map windows are empty or duplicated"
+            )
+        if any(item.cross_series_policy_id != policy_id for item in windows):
+            raise ValueError(
+                "source-support map policy differs from its windows"
+            )
+        for previous, current in pairwise(windows):
+            if previous.end_ns != current.start_ns:
+                raise ValueError(
+                    "source-support map windows are not contiguous"
+                )
+        object.__setattr__(self, "windows", windows)
+        expected = _stable_id(
+            "reconstruction-plan-source-support-map", self.identity_payload()
+        )
+        if self.support_map_id and self.support_map_id != expected:
+            raise ValueError("source-support map identity differs")
+        object.__setattr__(self, "support_map_id", expected)
+
+    def identity_payload(self) -> dict[str, JSONValue]:
+        return {
+            "schema_version": self.schema_version,
+            "source_inventory_id": self.source_inventory_id,
+            "cross_series_policy_id": self.cross_series_policy_id,
+            "windows": [item.to_dict() for item in self.windows],
+            "selection_policy": (
+                "prefer-exact-else-max-support-bounded-nearest-no-forward-fill-v1"
+            ),
+        }
+
+    def to_dict(self) -> dict[str, JSONValue]:
+        return {
+            **self.identity_payload(),
+            "support_map_id": self.support_map_id,
+        }
+
+    def to_json(self) -> str:
+        return str(canonical_contract_json(self.to_dict()))
+
+    @classmethod
+    def from_dict(
+        cls, data: Mapping[str, Any]
+    ) -> ReconstructionPlanSourceSupportMapV1:
+        _require_schema(
+            data, RECONSTRUCTION_PLAN_SOURCE_SUPPORT_MAP_SCHEMA_VERSION
+        )
+        _require_derived(
+            data,
+            "selection_policy",
+            "prefer-exact-else-max-support-bounded-nearest-no-forward-fill-v1",
+        )
+        return cls(
+            source_inventory_id=str(data.get("source_inventory_id", "")),
+            cross_series_policy_id=str(data.get("cross_series_policy_id", "")),
+            windows=tuple(
+                ReconstructionPlanSourceSupportV1.from_dict(_mapping(item))
+                for item in _sequence(data.get("windows"))
+            ),
+            support_map_id=str(data.get("support_map_id", "")),
+            schema_version=str(data.get("schema_version", "")),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class ReconstructionContextAvailabilityQualificationV1:
+    """Structural qualification for explicit unavailable-CFTC operation."""
+
+    proposal_portfolio_id: str
+    powered_qualification_dossier_id: str
+    powered_engine_decision_id: str
+    carving_constraint_set_id: str
+    selected_engine_ids: tuple[str, ...]
+    qualification_id: str = ""
+    schema_version: str = (
+        RECONSTRUCTION_CONTEXT_AVAILABILITY_QUALIFICATION_SCHEMA_VERSION
+    )
+
+    def __post_init__(self) -> None:
+        if (
+            self.schema_version
+            != RECONSTRUCTION_CONTEXT_AVAILABILITY_QUALIFICATION_SCHEMA_VERSION
+        ):
+            raise ValueError(
+                "unsupported context-availability qualification schema"
+            )
+        for name in (
+            "proposal_portfolio_id",
+            "powered_qualification_dossier_id",
+            "powered_engine_decision_id",
+            "carving_constraint_set_id",
+        ):
+            object.__setattr__(self, name, _required_text(getattr(self, name)))
+        engines = tuple(
+            _required_text(item) for item in self.selected_engine_ids
+        )
+        if engines != (QUALIFIED_CFTC_UNAVAILABLE_ENGINE_ID,):
+            raise ValueError(
+                "unavailable-CFTC qualification covers only the selected "
+                "diagonal Hawkes engine"
+            )
+        object.__setattr__(self, "selected_engine_ids", engines)
+        expected = _stable_id(
+            "reconstruction-context-availability-qualification",
+            self.identity_payload(),
+        )
+        if self.qualification_id and self.qualification_id != expected:
+            raise ValueError("context-availability qualification differs")
+        object.__setattr__(self, "qualification_id", expected)
+
+    def identity_payload(self) -> dict[str, JSONValue]:
+        conditioning_modes: list[JSONValue] = [
+            CFTC_READY_CONDITIONING_MODE,
+            CFTC_UNAVAILABLE_CONDITIONING_MODE,
+        ]
+        unavailable_statuses: list[JSONValue] = [
+            value
+            for value in sorted(
+                item.value for item in CFTC_UNCONDITIONED_AVAILABILITY_STATUSES
+            )
+        ]
+        return {
+            "schema_version": self.schema_version,
+            "proposal_portfolio_id": self.proposal_portfolio_id,
+            "powered_qualification_dossier_id": (
+                self.powered_qualification_dossier_id
+            ),
+            "powered_engine_decision_id": self.powered_engine_decision_id,
+            "carving_constraint_set_id": self.carving_constraint_set_id,
+            "selected_engine_ids": list(self.selected_engine_ids),
+            "permitted_conditioning_modes": conditioning_modes,
+            "permitted_unavailable_query_statuses": unavailable_statuses,
+            "runtime_cftc_dependency": CFTC_UNAVAILABLE_RUNTIME_DEPENDENCY,
+            "cftc_imputation": "forbidden",
+            "cftc_missingness_visibility": "required-in-plan-runtime-and-product",
+            "carving_cftc_condition_policy_count": 0,
+            "qualification_basis": (
+                "powered-engine-eligibility-plus-structural-runtime-isolation-v1"
+            ),
+            "status": "qualified",
+        }
+
+    def to_dict(self) -> dict[str, JSONValue]:
+        return {
+            **self.identity_payload(),
+            "qualification_id": self.qualification_id,
+        }
+
+    @classmethod
+    def from_dict(
+        cls, data: Mapping[str, Any]
+    ) -> ReconstructionContextAvailabilityQualificationV1:
+        _require_schema(
+            data,
+            RECONSTRUCTION_CONTEXT_AVAILABILITY_QUALIFICATION_SCHEMA_VERSION,
+        )
+        for key, expected in (
+            ("runtime_cftc_dependency", CFTC_UNAVAILABLE_RUNTIME_DEPENDENCY),
+            ("cftc_imputation", "forbidden"),
+            (
+                "cftc_missingness_visibility",
+                "required-in-plan-runtime-and-product",
+            ),
+            ("carving_cftc_condition_policy_count", 0),
+            (
+                "qualification_basis",
+                "powered-engine-eligibility-plus-structural-runtime-isolation-v1",
+            ),
+            ("status", "qualified"),
+        ):
+            _require_derived(data, key, expected)
+        _require_derived(
+            data,
+            "permitted_conditioning_modes",
+            [CFTC_READY_CONDITIONING_MODE, CFTC_UNAVAILABLE_CONDITIONING_MODE],
+        )
+        _require_derived(
+            data,
+            "permitted_unavailable_query_statuses",
+            sorted(
+                item.value for item in CFTC_UNCONDITIONED_AVAILABILITY_STATUSES
+            ),
+        )
+        return cls(
+            proposal_portfolio_id=str(data.get("proposal_portfolio_id", "")),
+            powered_qualification_dossier_id=str(
+                data.get("powered_qualification_dossier_id", "")
+            ),
+            powered_engine_decision_id=str(
+                data.get("powered_engine_decision_id", "")
+            ),
+            carving_constraint_set_id=str(
+                data.get("carving_constraint_set_id", "")
+            ),
+            selected_engine_ids=_string_tuple(data.get("selected_engine_ids")),
+            qualification_id=str(data.get("qualification_id", "")),
+            schema_version=str(data.get("schema_version", "")),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class ReconstructionWindowSizingAuditV1:
+    """Content-bound proof that window cardinality fits proposal limits."""
+
+    proposal_engine_id: str
+    proposal_config_id: str
+    requested_max_window_size_ns: int
+    minimum_window_size_ns: int
+    runtime_generated_event_limit: int
+    modeled_missing_event_limit: int
+    initial_window_count: int
+    final_window_count: int
+    subdivided_window_count: int
+    maximum_modeled_missing_events: float
+    width_counts: Mapping[str, int]
+    audit_id: str = ""
+    schema_version: str = RECONSTRUCTION_WINDOW_SIZING_AUDIT_SCHEMA_VERSION
+
+    def __post_init__(self) -> None:
+        if (
+            self.schema_version
+            != RECONSTRUCTION_WINDOW_SIZING_AUDIT_SCHEMA_VERSION
+        ):
+            raise ValueError(
+                "unsupported reconstruction window-sizing audit schema"
+            )
+        for name in ("proposal_engine_id", "proposal_config_id"):
+            object.__setattr__(self, name, _required_text(getattr(self, name)))
+        for name in (
+            "requested_max_window_size_ns",
+            "minimum_window_size_ns",
+            "runtime_generated_event_limit",
+            "modeled_missing_event_limit",
+            "initial_window_count",
+            "final_window_count",
+            "subdivided_window_count",
+        ):
+            object.__setattr__(
+                self, name, _nonnegative_int(getattr(self, name), name)
+            )
+        if self.requested_max_window_size_ns < self.minimum_window_size_ns:
+            raise ValueError("window-sizing minimum exceeds requested maximum")
+        if (
+            self.modeled_missing_event_limit
+            >= self.runtime_generated_event_limit
+        ):
+            raise ValueError(
+                "modeled missing-event limit lacks runtime headroom"
+            )
+        maximum = float(self.maximum_modeled_missing_events)
+        if not math.isfinite(maximum) or maximum < 0.0:
+            raise ValueError("maximum_modeled_missing_events must be finite")
+        if maximum > self.modeled_missing_event_limit:
+            raise ValueError("window-sizing audit exceeds modeled event limit")
+        object.__setattr__(self, "maximum_modeled_missing_events", maximum)
+        counts = {
+            _required_text(str(key)): _nonnegative_int(
+                value, f"width_counts.{key}"
+            )
+            for key, value in self.width_counts.items()
+        }
+        if sum(counts.values()) != self.final_window_count:
+            raise ValueError("window-sizing widths do not reconcile")
+        object.__setattr__(self, "width_counts", dict(sorted(counts.items())))
+        expected = _stable_id(
+            "reconstruction-window-sizing-audit", self.payload()
+        )
+        if self.audit_id and self.audit_id != expected:
+            raise ValueError("window-sizing audit identity differs")
+        object.__setattr__(self, "audit_id", expected)
+
+    def payload(self) -> dict[str, JSONValue]:
+        return {
+            "schema_version": self.schema_version,
+            "proposal_engine_id": self.proposal_engine_id,
+            "proposal_config_id": self.proposal_config_id,
+            "requested_max_window_size_ns": self.requested_max_window_size_ns,
+            "minimum_window_size_ns": self.minimum_window_size_ns,
+            "runtime_generated_event_limit": self.runtime_generated_event_limit,
+            "modeled_missing_event_limit": self.modeled_missing_event_limit,
+            "initial_window_count": self.initial_window_count,
+            "final_window_count": self.final_window_count,
+            "subdivided_window_count": self.subdivided_window_count,
+            "maximum_modeled_missing_events": self.maximum_modeled_missing_events,
+            "width_counts": dict(self.width_counts),
+            "sizing_policy": "recursive-observation-conditioned-cardinality-v1",
+            "cardinality_safety_fraction": _ADAPTIVE_CARDINALITY_SAFETY_FRACTION,
+            "count_basis": "exact-immutable-arrow-input-counts-v1",
+        }
+
+    def to_dict(self) -> dict[str, JSONValue]:
+        return {**self.payload(), "audit_id": self.audit_id}
+
+    def to_json(self) -> str:
+        return str(canonical_contract_json(self.to_dict()))
+
+
+@dataclass(frozen=True, slots=True)
+class ReconstructionPlanCftcSupportV1:
+    """Exact CFTC availability and conditioning decision for one window."""
+
+    start_ns: int
+    end_ns: int
+    source_support_id: str
+    query_status: str
+    conditioning_mode: ReconstructionCftcConditioningMode
+    reason: str
+    query_id: str | None = None
+    qualification_id: str | None = None
+    support_id: str = ""
+    schema_version: str = RECONSTRUCTION_PLAN_CFTC_SUPPORT_SCHEMA_VERSION
+
+    def __post_init__(self) -> None:
+        if (
+            self.schema_version
+            != RECONSTRUCTION_PLAN_CFTC_SUPPORT_SCHEMA_VERSION
+        ):
+            raise ValueError(
+                "unsupported reconstruction plan CFTC-support schema"
+            )
+        start = _int64(self.start_ns, "start_ns")
+        end = _int64(self.end_ns, "end_ns")
+        if end <= start:
+            raise ValueError("CFTC-support interval is empty")
+        object.__setattr__(self, "start_ns", start)
+        object.__setattr__(self, "end_ns", end)
+        object.__setattr__(
+            self, "source_support_id", _required_text(self.source_support_id)
+        )
+        status = _required_text(self.query_status)
+        mode = ReconstructionCftcConditioningMode(self.conditioning_mode)
+        query_id = (
+            _required_text(self.query_id) if self.query_id is not None else None
+        )
+        qualification_id = (
+            _required_text(self.qualification_id)
+            if self.qualification_id is not None
+            else None
+        )
+        if mode is ReconstructionCftcConditioningMode.CONDITIONED:
+            if (
+                status != CftcPositioningQueryStatus.READY.value
+                or query_id is None
+                or qualification_id is not None
+            ):
+                raise ValueError(
+                    "conditioned CFTC support requires a ready query"
+                )
+        elif (
+            mode is ReconstructionCftcConditioningMode.UNCONDITIONED_UNAVAILABLE
+        ):
+            if (
+                status
+                not in {
+                    item.value
+                    for item in CFTC_UNCONDITIONED_AVAILABILITY_STATUSES
+                }
+                or query_id is None
+                or qualification_id is None
+            ):
+                raise ValueError(
+                    "unavailable CFTC support requires query and qualification"
+                )
+        elif mode is ReconstructionCftcConditioningMode.NOT_EVALUATED:
+            if (
+                not status.startswith("not_evaluated_")
+                or query_id is not None
+                or qualification_id is not None
+            ):
+                raise ValueError("non-evaluated CFTC support contains a query")
+        elif (
+            query_id is None
+            or status == CftcPositioningQueryStatus.READY.value
+            or qualification_id is not None
+        ):
+            raise ValueError("refused CFTC support has an invalid query status")
+        object.__setattr__(self, "query_status", status)
+        object.__setattr__(self, "conditioning_mode", mode)
+        object.__setattr__(self, "query_id", query_id)
+        object.__setattr__(self, "qualification_id", qualification_id)
+        object.__setattr__(self, "reason", _bounded_text(self.reason, 2048))
+        expected = _stable_id(
+            "reconstruction-plan-cftc-support", self.identity_payload()
+        )
+        if self.support_id and self.support_id != expected:
+            raise ValueError("CFTC-support identity differs")
+        object.__setattr__(self, "support_id", expected)
+
+    def identity_payload(self) -> dict[str, JSONValue]:
+        return {
+            "schema_version": self.schema_version,
+            "start_ns": self.start_ns,
+            "end_ns": self.end_ns,
+            "source_support_id": self.source_support_id,
+            "query_status": self.query_status,
+            "conditioning_mode": self.conditioning_mode.value,
+            "reason": self.reason,
+            "query_id": self.query_id,
+            "qualification_id": self.qualification_id,
+            "cftc_imputation": "forbidden",
+        }
+
+    def to_dict(self) -> dict[str, JSONValue]:
+        return {**self.identity_payload(), "support_id": self.support_id}
+
+    @classmethod
+    def from_dict(
+        cls, data: Mapping[str, Any]
+    ) -> ReconstructionPlanCftcSupportV1:
+        _require_schema(data, RECONSTRUCTION_PLAN_CFTC_SUPPORT_SCHEMA_VERSION)
+        _require_derived(data, "cftc_imputation", "forbidden")
+        return cls(
+            start_ns=_strict_int(data.get("start_ns"), "start_ns"),
+            end_ns=_strict_int(data.get("end_ns"), "end_ns"),
+            source_support_id=str(data.get("source_support_id", "")),
+            query_status=str(data.get("query_status", "")),
+            conditioning_mode=ReconstructionCftcConditioningMode(
+                str(data.get("conditioning_mode", ""))
+            ),
+            reason=str(data.get("reason", "")),
+            query_id=_optional_text(data.get("query_id")),
+            qualification_id=_optional_text(data.get("qualification_id")),
+            support_id=str(data.get("support_id", "")),
+            schema_version=str(data.get("schema_version", "")),
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class ReconstructionPlanResourceSummaryV1:
     """Full-plan source, candidate, memory, scratch, output, and graph bounds."""
 
@@ -938,6 +1748,7 @@ class ReconstructionPlanResourceSummaryV1:
     estimated_peak_scratch_bytes: int
     estimated_output_bytes: int
     estimated_partition_count: int
+    empty_window_count: int = 0
     summary_id: str = ""
     schema_version: str = RECONSTRUCTION_PLAN_RESOURCE_SUMMARY_SCHEMA_VERSION
 
@@ -955,6 +1766,7 @@ class ReconstructionPlanResourceSummaryV1:
             "planned_window_count",
             "executable_window_count",
             "refused_window_count",
+            "empty_window_count",
             "ensemble_member_count",
             "retained_member_count",
             "workflow_request_count",
@@ -970,7 +1782,9 @@ class ReconstructionPlanResourceSummaryV1:
                 self, name, _nonnegative_int(getattr(self, name), name)
             )
         if self.planned_window_count != (
-            self.executable_window_count + self.refused_window_count
+            self.executable_window_count
+            + self.refused_window_count
+            + self.empty_window_count
         ):
             raise ValueError("planned window counts do not reconcile")
         if not self.ensemble_member_count:
@@ -978,9 +1792,12 @@ class ReconstructionPlanResourceSummaryV1:
         if not 1 <= self.retained_member_count <= self.ensemble_member_count:
             raise ValueError("retained member count is outside ensemble")
         if self.executable_window_count == 0:
-            if self.refused_window_count != self.planned_window_count:
+            if (
+                self.refused_window_count + self.empty_window_count
+                != self.planned_window_count
+            ):
                 raise ValueError(
-                    "zero-work resource summary requires every window refused"
+                    "zero-work resource summary requires terminal windows"
                 )
             if self.workflow_request_count:
                 raise ValueError(
@@ -1020,7 +1837,7 @@ class ReconstructionPlanResourceSummaryV1:
         )
 
     def identity_payload(self) -> dict[str, JSONValue]:
-        return {
+        payload: dict[str, JSONValue] = {
             "schema_version": self.schema_version,
             "source_event_count": self.source_event_count,
             "source_size_bytes": self.source_size_bytes,
@@ -1041,6 +1858,9 @@ class ReconstructionPlanResourceSummaryV1:
             "scratch_basis": "peak-concurrent-window-scratch-v1",
             "output_basis": "retained-member-compressed-upper-bound-v1",
         }
+        if self.empty_window_count:
+            payload["empty_window_count"] = self.empty_window_count
+        return payload
 
     def to_dict(self) -> dict[str, JSONValue]:
         return {**self.identity_payload(), "summary_id": self.summary_id}
@@ -1073,6 +1893,9 @@ class ReconstructionPlanResourceSummaryV1:
             ),
             refused_window_count=_strict_int(
                 data.get("refused_window_count"), "refused_window_count"
+            ),
+            empty_window_count=_strict_int(
+                data.get("empty_window_count", 0), "empty_window_count"
             ),
             ensemble_member_count=_strict_int(
                 data.get("ensemble_member_count"), "ensemble_member_count"
@@ -1137,6 +1960,7 @@ class ReconstructionPlanExecutionManifestV1:
     planned_window_count: int
     executable_window_count: int
     refusal_ids: tuple[str, ...] = ()
+    empty_window_ids: tuple[str, ...] = ()
     manifest_id: str = ""
     schema_version: str = RECONSTRUCTION_PLAN_EXECUTION_MANIFEST_SCHEMA_VERSION
 
@@ -1187,6 +2011,7 @@ class ReconstructionPlanExecutionManifestV1:
         if self.delivery_mode is ReconstructionDeliveryMode.BROKER_CONDITIONED:
             required.add("broker_delivery")
         allowed = required | {
+            "context_availability_qualification",
             "evidence_policy",
             "cross_series_constraint_policy",
             "proposal_engine_registry",
@@ -1194,6 +2019,8 @@ class ReconstructionPlanExecutionManifestV1:
             "proposal_dataset_resolution",
             "proposal_portfolio_evaluation",
             "powered_qualification_dossier",
+            "source_support_map",
+            "window_sizing_audit",
         }
         allowed.update(
             name
@@ -1252,9 +2079,15 @@ class ReconstructionPlanExecutionManifestV1:
         refusals = tuple(
             sorted({_required_text(value) for value in self.refusal_ids})
         )
-        if len(refusals) != planned - executable:
-            raise ValueError("execution refusal IDs do not reconcile")
+        empty_windows = tuple(
+            sorted({_required_text(value) for value in self.empty_window_ids})
+        )
+        if set(refusals).intersection(empty_windows):
+            raise ValueError("execution terminal window IDs overlap")
+        if len(refusals) + len(empty_windows) != planned - executable:
+            raise ValueError("execution terminal window IDs do not reconcile")
         object.__setattr__(self, "refusal_ids", refusals)
+        object.__setattr__(self, "empty_window_ids", empty_windows)
         expected = _stable_id(
             "reconstruction-plan-execution", self.identity_payload()
         )
@@ -1263,7 +2096,7 @@ class ReconstructionPlanExecutionManifestV1:
         object.__setattr__(self, "manifest_id", expected)
 
     def identity_payload(self) -> dict[str, JSONValue]:
-        return {
+        payload: dict[str, JSONValue] = {
             "schema_version": self.schema_version,
             "run_id": self.run_id,
             "configuration_id": self.configuration_id,
@@ -1284,6 +2117,9 @@ class ReconstructionPlanExecutionManifestV1:
             "refusal_ids": list(self.refusal_ids),
             "large_rows_in_artifacts_only": True,
         }
+        if self.empty_window_ids:
+            payload["empty_window_ids"] = list(self.empty_window_ids)
+        return payload
 
     def to_dict(self) -> dict[str, JSONValue]:
         return {**self.identity_payload(), "manifest_id": self.manifest_id}
@@ -1326,6 +2162,7 @@ class ReconstructionPlanExecutionManifestV1:
                 data.get("executable_window_count"), "executable_window_count"
             ),
             refusal_ids=_string_tuple(data.get("refusal_ids")),
+            empty_window_ids=_string_tuple(data.get("empty_window_ids", ())),
             manifest_id=str(data.get("manifest_id", "")),
             schema_version=str(data.get("schema_version", "")),
         )
@@ -1468,6 +2305,8 @@ class SyntheticInfillPlanV1:
     artifact_graph: Mapping[str, ArtifactRef]
     resources: ReconstructionPlanResourceSummaryV1
     refusals: tuple[ReconstructionPlanRefusalV1, ...] = ()
+    source_support: tuple[ReconstructionPlanSourceSupportV1, ...] = ()
+    cftc_support: tuple[ReconstructionPlanCftcSupportV1, ...] = ()
     plan_id: str = ""
     schema_version: str = SYNTHETIC_INFILL_PLAN_SCHEMA_VERSION
 
@@ -1565,6 +2404,119 @@ class SyntheticInfillPlanV1:
         if len(refusals) != self.resources.refused_window_count:
             raise ValueError("resource refusal count differs")
         object.__setattr__(self, "refusals", refusals)
+        source_support = tuple(
+            sorted(self.source_support, key=lambda item: item.start_ns)
+        )
+        if source_support:
+            if len(source_support) != self.resources.planned_window_count:
+                raise ValueError(
+                    "source-support window count differs from resources"
+                )
+            _require_contiguous_plan_intervals(
+                tuple((item.start_ns, item.end_ns) for item in source_support),
+                requested_start_ns=start,
+                requested_end_ns=end,
+                name="source-support",
+            )
+            empty_count = sum(
+                item.status is ReconstructionPlanSourceSupportStatus.EMPTY
+                for item in source_support
+            )
+            if empty_count != self.resources.empty_window_count:
+                raise ValueError("resource empty-window count differs")
+        elif self.resources.empty_window_count:
+            raise ValueError("empty windows require exact source support")
+        source_by_boundary = {
+            (item.start_ns, item.end_ns): item for item in source_support
+        }
+        if len(source_by_boundary) != len(source_support):
+            raise ValueError("source-support windows are duplicated")
+        task_boundaries = {
+            (item.window.core_start_ns, item.window.core_end_ns)
+            for item in tasks
+        }
+        if len(task_boundaries) != self.resources.executable_window_count:
+            raise ValueError("executable boundary count differs from resources")
+        refusal_boundaries = {(item.start_ns, item.end_ns) for item in refusals}
+        if len(refusal_boundaries) != len(refusals):
+            raise ValueError("refusal windows are duplicated")
+        empty_boundaries = {
+            boundary
+            for boundary, support in source_by_boundary.items()
+            if support.status is ReconstructionPlanSourceSupportStatus.EMPTY
+        }
+        if (
+            task_boundaries.intersection(refusal_boundaries)
+            or task_boundaries.intersection(empty_boundaries)
+            or refusal_boundaries.intersection(empty_boundaries)
+        ):
+            raise ValueError("plan window outcomes overlap")
+        if source_support:
+            complete_boundaries = {
+                boundary
+                for boundary, support in source_by_boundary.items()
+                if support.status
+                is ReconstructionPlanSourceSupportStatus.COMPLETE
+            }
+            incomplete_boundaries = {
+                boundary
+                for boundary, support in source_by_boundary.items()
+                if support.status
+                is ReconstructionPlanSourceSupportStatus.INCOMPLETE
+            }
+            if not task_boundaries.issubset(complete_boundaries):
+                raise ValueError("executable windows lack complete source")
+            if not incomplete_boundaries.issubset(refusal_boundaries):
+                raise ValueError("incomplete source windows are not refused")
+            if task_boundaries | refusal_boundaries | empty_boundaries != set(
+                source_by_boundary
+            ):
+                raise ValueError("source-support outcomes do not reconcile")
+        object.__setattr__(self, "source_support", source_support)
+        cftc_support = tuple(
+            sorted(self.cftc_support, key=lambda item: item.start_ns)
+        )
+        if cftc_support:
+            if not source_support or len(cftc_support) != len(source_support):
+                raise ValueError(
+                    "CFTC-support coverage differs from source-support coverage"
+                )
+            for source_item, cftc_item in zip(
+                source_support, cftc_support, strict=True
+            ):
+                if (
+                    cftc_item.start_ns != source_item.start_ns
+                    or cftc_item.end_ns != source_item.end_ns
+                    or cftc_item.source_support_id != source_item.support_id
+                ):
+                    raise ValueError(
+                        "CFTC-support identity differs from source support"
+                    )
+            unavailable = tuple(
+                item
+                for item in cftc_support
+                if item.conditioning_mode
+                is ReconstructionCftcConditioningMode.UNCONDITIONED_UNAVAILABLE
+            )
+            qualification_ref = graph.get("context_availability_qualification")
+            if unavailable and qualification_ref is None:
+                raise ValueError(
+                    "unavailable-CFTC windows lack context-availability qualification"
+                )
+            if qualification_ref is not None:
+                qualification = (
+                    read_reconstruction_context_availability_qualification(
+                        qualification_ref.path
+                    )
+                )
+                if any(
+                    item.qualification_id != qualification.qualification_id
+                    for item in unavailable
+                ):
+                    raise ValueError(
+                        "unavailable-CFTC support qualification identity differs"
+                    )
+        object.__setattr__(self, "cftc_support", cftc_support)
         expected = _stable_id("synthetic-infill-plan", self.identity_payload())
         if self.plan_id and self.plan_id != expected:
             raise ValueError("synthetic infill plan_id differs")
@@ -1579,10 +2531,13 @@ class SyntheticInfillPlanV1:
 
     @property
     def status(self) -> str:
-        return "ready_with_refusals" if self.refusals else "ready"
+        return _terminal_window_status(
+            refusal_count=len(self.refusals),
+            empty_window_count=self.resources.empty_window_count,
+        )
 
     def identity_payload(self) -> dict[str, JSONValue]:
-        return {
+        payload: dict[str, JSONValue] = {
             "schema_version": self.schema_version,
             "run": self.run.to_dict(),
             "configuration_id": self.configuration_id,
@@ -1603,6 +2558,15 @@ class SyntheticInfillPlanV1:
             "immutable_anchor_policy": IMMUTABLE_ANCHOR_POLICY,
             "input_policy": TICK_ONLY_INPUT_POLICY,
         }
+        if self.source_support:
+            payload["source_support"] = [
+                item.to_dict() for item in self.source_support
+            ]
+        if self.cftc_support:
+            payload["cftc_support"] = [
+                item.to_dict() for item in self.cftc_support
+            ]
+        return payload
 
     def to_dict(self) -> dict[str, JSONValue]:
         return {
@@ -1634,7 +2598,7 @@ class SyntheticInfillPlanV1:
                     ).hexdigest(),
                 }
             )
-        return {
+        payload: dict[str, JSONValue] = {
             "schema_version": self.schema_version,
             "plan_id": self.plan_id,
             "status": self.status,
@@ -1657,6 +2621,15 @@ class SyntheticInfillPlanV1:
             "refusals": [item.to_dict() for item in self.refusals],
             "scientific_nonclaim": SCIENTIFIC_NONCLAIM,
         }
+        if self.source_support:
+            payload["source_support"] = [
+                item.to_dict() for item in self.source_support
+            ]
+        if self.cftc_support:
+            payload["cftc_support"] = [
+                item.to_dict() for item in self.cftc_support
+            ]
+        return payload
 
     def to_dry_run_json(self) -> str:
         return str(canonical_contract_json(self.dry_run_payload()))
@@ -1699,6 +2672,14 @@ class SyntheticInfillPlanV1:
             refusals=tuple(
                 ReconstructionPlanRefusalV1.from_dict(_mapping(value))
                 for value in _sequence(data.get("refusals"))
+            ),
+            source_support=tuple(
+                ReconstructionPlanSourceSupportV1.from_dict(_mapping(value))
+                for value in _sequence(data.get("source_support", ()))
+            ),
+            cftc_support=tuple(
+                ReconstructionPlanCftcSupportV1.from_dict(_mapping(value))
+                for value in _sequence(data.get("cftc_support", ()))
             ),
             plan_id=str(data.get("plan_id", "")),
             schema_version=str(data.get("schema_version", "")),
@@ -2294,6 +3275,57 @@ def build_synthetic_infill_plan(
             "registry_id": proposal_portfolio.registry_id,
         },
     )
+    context_availability_qualification: (
+        ReconstructionContextAvailabilityQualificationV1 | None
+    ) = None
+    context_availability_ref: ArtifactRef | None = None
+    if qualification_dossier is not None and tuple(
+        proposal_portfolio.selected_engine_ids
+    ) == (QUALIFIED_CFTC_UNAVAILABLE_ENGINE_ID,):
+        decision = qualification_dossier.decision(
+            QUALIFIED_CFTC_UNAVAILABLE_ENGINE_ID
+        )
+        if not decision.reconstruction_eligible:
+            raise ReconstructionPlanCompatibilityError(
+                "unavailable-CFTC mode requires a reconstruction-eligible engine"
+            )
+        cftc_condition_policies = tuple(
+            policy
+            for policy in selected_carving.condition_policies
+            if any(
+                str(tag).lower().startswith("cftc_positioning:")
+                for tag in policy.match_tags
+            )
+        )
+        if cftc_condition_policies:
+            raise ReconstructionPlanCompatibilityError(
+                "unavailable-CFTC mode conflicts with CFTC-specific carving policies"
+            )
+        context_availability_qualification = (
+            ReconstructionContextAvailabilityQualificationV1(
+                proposal_portfolio_id=proposal_portfolio.portfolio_id,
+                powered_qualification_dossier_id=(
+                    qualification_dossier.dossier_id
+                ),
+                powered_engine_decision_id=decision.decision_id,
+                carving_constraint_set_id=selected_carving.constraint_set_id,
+                selected_engine_ids=tuple(
+                    proposal_portfolio.selected_engine_ids
+                ),
+            )
+        )
+        context_availability_ref = _write_contract_artifact(
+            context_availability_qualification,
+            artifacts_dir,
+            prefix="reconstruction-context-availability-qualification",
+            kind=CONTEXT_AVAILABILITY_QUALIFICATION_ARTIFACT_KIND,
+            metadata={
+                "qualification_id": (
+                    context_availability_qualification.qualification_id
+                ),
+                "status": "qualified",
+            },
+        )
     configuration = ReconstructionPlanConfigurationV2(
         base_configuration=base_configuration,
         proposal_portfolio=proposal_portfolio,
@@ -2326,6 +3358,10 @@ def build_synthetic_infill_plan(
             configuration_ref=configuration_ref,
             proposal_registry_ref=proposal_registry_ref,
             proposal_portfolio_ref=proposal_portfolio_ref,
+            context_availability_qualification=(
+                context_availability_qualification
+            ),
+            context_availability_ref=context_availability_ref,
         ),
         evidence_policy_ids=(
             selected_evidence_policy.policy_id,
@@ -2425,7 +3461,11 @@ def build_synthetic_infill_plan(
     }
     ensemble_plan = plan_reconstruction_ensemble(
         symbols=selected_symbols,
-        source_artifact_hashes={inventory.inventory_id: inventory_ref.sha256},
+        source_artifact_hashes={
+            experiment_selection.dataset_version_id: (
+                experiment_selection.resolution.manifest_sha256
+            )
+        },
         configuration_artifact_hashes=configuration_hashes,
         base_seed=base_seed,
         config=selected_ensemble,
@@ -2463,16 +3503,79 @@ def build_synthetic_infill_plan(
         raise ReconstructionPlanCompatibilityError(
             "complete synchronized cross-currency coverage could not be planned"
         )
+    boundary_windows = member_window_plans[0].windows
+    source_support = _build_exact_source_support(
+        boundary_windows,
+        inventory=inventory,
+        cross_series_policy=selected_cross_series_policy,
+    )
+    window_sizing_audit: ReconstructionWindowSizingAuditV1 | None = None
+    if len(proposal_portfolio.selected_engine_ids) == 1:
+        selected_engine_id = proposal_portfolio.selected_engine_ids[0]
+        selected_proposal_config = proposal_configs[selected_engine_id]
+        if (
+            isinstance(selected_proposal_config, MarkedHawkesConfigV1)
+            and selected_proposal_config.cardinality_policy
+            == OPERATOR_CONDITIONED_CARDINALITY_POLICY
+        ):
+            member_window_plans, window_sizing_audit = (
+                _adapt_cross_currency_window_plans_for_cardinality(
+                    member_window_plans,
+                    initial_source_support=source_support,
+                    inventory=inventory,
+                    definition=resolved.feed_epoch_definition,
+                    observation_operator=resolved.observation_operator,
+                    information_mode=mode,
+                    proposal_engine_id=selected_engine_id,
+                    proposal_config=selected_proposal_config,
+                    cross_series_policy=selected_cross_series_policy,
+                    requested_max_window_size_ns=configuration.window_size_ns,
+                )
+            )
+            boundary_windows = member_window_plans[0].windows
+            source_support = _build_exact_source_support(
+                boundary_windows,
+                inventory=inventory,
+                cross_series_policy=selected_cross_series_policy,
+            )
+    window_sizing_audit_ref = (
+        _write_contract_artifact(
+            window_sizing_audit,
+            artifacts_dir,
+            prefix="reconstruction-window-sizing-audit",
+            kind=WINDOW_SIZING_AUDIT_ARTIFACT_KIND,
+            metadata={"audit_id": window_sizing_audit.audit_id},
+        )
+        if window_sizing_audit is not None
+        else None
+    )
     planned_windows = tuple(
         window for plan in member_window_plans for window in plan.windows
     )
-    boundary_windows = member_window_plans[0].windows
-    refusals, executable_boundaries = _preflight_window_support(
+    source_support_by_boundary = {
+        (item.start_ns, item.end_ns): item for item in source_support
+    }
+    source_support_map = ReconstructionPlanSourceSupportMapV1(
+        source_inventory_id=inventory.inventory_id,
+        cross_series_policy_id=selected_cross_series_policy.policy_id,
+        windows=source_support,
+    )
+    source_support_map_ref = _write_contract_artifact(
+        source_support_map,
+        artifacts_dir,
+        prefix="reconstruction-plan-source-support-map",
+        kind=SOURCE_SUPPORT_MAP_ARTIFACT_KIND,
+        metadata={"support_map_id": source_support_map.support_map_id},
+    )
+    refusals, executable_boundaries, cftc_support = _preflight_window_support(
         boundary_windows,
+        source_support=source_support_by_boundary,
         definition=resolved.feed_epoch_definition,
         context=resolved.market_context,
         positioning=resolved.cftc_positioning,
         mode=mode,
+        observation_operator=resolved.observation_operator,
+        context_availability_qualification=(context_availability_qualification),
     )
     executable_keys = {
         (item.core_start_ns, item.core_end_ns) for item in executable_boundaries
@@ -2514,8 +3617,18 @@ def build_synthetic_infill_plan(
     estimates_by_boundary = {
         (window.core_start_ns, window.core_end_ns): _window_resource_estimate(
             window,
-            inventory=inventory,
+            source_support=source_support_by_boundary[
+                (window.core_start_ns, window.core_end_ns)
+            ],
             configuration=configuration,
+            proposal_config=(
+                proposal_configs[proposal_portfolio.selected_engine_ids[0]]
+                if len(proposal_portfolio.selected_engine_ids) == 1
+                else None
+            ),
+            definition=resolved.feed_epoch_definition,
+            observation_operator=resolved.observation_operator,
+            information_mode=mode,
         )
         for window in executable_boundaries
     }
@@ -2525,6 +3638,14 @@ def build_synthetic_infill_plan(
     input_events_per_member = sum(
         item.input_event_count for item in estimates_by_boundary.values()
     )
+    logical_output_events_per_member = sum(
+        sum(source_support_by_boundary[boundary].core_event_counts.values())
+        + estimate.candidate_event_count
+        for boundary, estimate in estimates_by_boundary.items()
+    )
+    physical_output_events_per_member = sum(
+        item.candidate_event_count for item in estimates_by_boundary.values()
+    )
     retained_ids = tuple(
         item.member_id
         for item in ensemble_plan.members[
@@ -2533,16 +3654,24 @@ def build_synthetic_infill_plan(
     )
     estimated_partition_count = (
         len(executable_boundaries) * len(retained_ids) * len(selected_symbols)
-        if candidate_events_per_member
+        if physical_output_events_per_member
         else 0
     )
     retention_plan = estimate_reconstruction_retention(
         run_id=ensemble_plan.run.run_id,
         primary_member_id=retained_ids[0],
         retained_member_event_counts={
-            member_id: candidate_events_per_member for member_id in retained_ids
+            member_id: logical_output_events_per_member
+            for member_id in retained_ids
+        },
+        retained_member_physical_event_counts={
+            member_id: physical_output_events_per_member
+            for member_id in retained_ids
         },
         estimated_partition_count=estimated_partition_count,
+        estimated_product_count=(
+            len(executable_boundaries) * len(retained_ids)
+        ),
         storage_policy=selected_storage,
         estimated_bytes_per_event=selected_ensemble.estimated_bytes_per_event,
     )
@@ -2560,6 +3689,7 @@ def build_synthetic_infill_plan(
         "dataset_resolution": experiment_selection.resolution_ref,
         "experiment_manifest": experiment_ref,
         "source_inventory": inventory_ref,
+        "source_support_map": source_support_map_ref,
         "configuration": configuration_ref,
         "evidence_policy": evidence_policy_ref,
         "cross_series_constraint_policy": cross_series_policy_ref,
@@ -2588,6 +3718,10 @@ def build_synthetic_infill_plan(
             for role, ref in sorted(refs.items())
         },
     }
+    if context_availability_ref is not None:
+        graph["context_availability_qualification"] = context_availability_ref
+    if window_sizing_audit_ref is not None:
+        graph["window_sizing_audit"] = window_sizing_audit_ref
     if qualification_ref is not None:
         graph["powered_qualification_dossier"] = qualification_ref
     if qualification_evaluation_ref is not None:
@@ -2610,6 +3744,11 @@ def build_synthetic_infill_plan(
         planned_window_count=len(boundary_windows),
         executable_window_count=len(executable_boundaries),
         refusal_ids=tuple(item.refusal_id for item in refusals),
+        empty_window_ids=tuple(
+            item.support_id
+            for item in source_support
+            if item.status is ReconstructionPlanSourceSupportStatus.EMPTY
+        ),
     )
     execution_ref = _write_contract_artifact(
         execution_manifest,
@@ -2646,6 +3785,10 @@ def build_synthetic_infill_plan(
         planned_window_count=len(boundary_windows),
         executable_window_count=len(executable_boundaries),
         refused_window_count=len(refusals),
+        empty_window_count=sum(
+            item.status is ReconstructionPlanSourceSupportStatus.EMPTY
+            for item in source_support
+        ),
         ensemble_member_count=len(ensemble_plan.members),
         retained_member_count=len(retained_ids),
         workflow_request_count=len(workflows),
@@ -2683,6 +3826,8 @@ def build_synthetic_infill_plan(
         artifact_graph=graph,
         resources=resources,
         refusals=refusals,
+        source_support=source_support,
+        cftc_support=cftc_support,
     )
     validate_synthetic_infill_plan_for_execution(plan, verify_artifacts=False)
     return plan
@@ -2736,6 +3881,24 @@ def validate_synthetic_infill_plan_for_execution(
     if execution.manifest_id != plan.execution_manifest_id:
         raise ReconstructionPlanCompatibilityError(
             "plan execution manifest identity differs"
+        )
+    expected_empty_ids = tuple(
+        sorted(
+            item.support_id
+            for item in plan.source_support
+            if item.status is ReconstructionPlanSourceSupportStatus.EMPTY
+        )
+    )
+    if (
+        execution.planned_window_count != plan.resources.planned_window_count
+        or execution.executable_window_count
+        != plan.resources.executable_window_count
+        or execution.refusal_ids
+        != tuple(sorted(item.refusal_id for item in plan.refusals))
+        or execution.empty_window_ids != expected_empty_ids
+    ):
+        raise ReconstructionPlanCompatibilityError(
+            "plan execution terminal window outcomes differ"
         )
     if configuration.configuration_id != plan.configuration_id:
         raise ReconstructionPlanCompatibilityError(
@@ -2816,6 +3979,39 @@ def validate_synthetic_infill_plan_for_execution(
             raise ReconstructionPlanCompatibilityError(
                 "unbound proposal qualification artifact is present"
             )
+        context_availability_ref = plan.artifact_graph.get(
+            "context_availability_qualification"
+        )
+        if context_availability_ref is not None:
+            context_qualification = (
+                read_reconstruction_context_availability_qualification(
+                    context_availability_ref.path
+                )
+            )
+            if (
+                portfolio.qualification_dossier_id is None
+                or context_qualification.proposal_portfolio_id
+                != portfolio.portfolio_id
+                or context_qualification.powered_qualification_dossier_id
+                != portfolio.qualification_dossier_id
+                or context_qualification.selected_engine_ids
+                != tuple(portfolio.selected_engine_ids)
+                or context_qualification.carving_constraint_set_id
+                != configuration.carving_constraints.constraint_set_id
+            ):
+                raise ReconstructionPlanCompatibilityError(
+                    "context-availability qualification binding differs"
+                )
+            expected_decision_id = portfolio.qualification_decision_ids.get(
+                QUALIFIED_CFTC_UNAVAILABLE_ENGINE_ID
+            )
+            if (
+                context_qualification.powered_engine_decision_id
+                != expected_decision_id
+            ):
+                raise ReconstructionPlanCompatibilityError(
+                    "context-availability engine decision differs"
+                )
         graph_values = {
             canonical_contract_json(ref.to_dict())
             for ref in plan.artifact_graph.values()
@@ -2951,10 +4147,29 @@ def validate_synthetic_infill_plan_for_execution(
                 raise ReconstructionPlanCompatibilityError(
                     "proposal engine binding reference is absent from plan graph"
                 )
-    if inventory.inventory_id != plan.run.source_version_ids[0]:
+    if plan.run.source_version_ids != (selection.dataset_version_id,):
         raise ReconstructionPlanCompatibilityError(
-            "plan source inventory is not run-bound"
+            "plan run is not bound to the frozen provider-neutral dataset version"
         )
+    source_support_map_ref = plan.artifact_graph.get("source_support_map")
+    if source_support_map_ref is not None:
+        source_support_map = read_reconstruction_plan_source_support_map(
+            source_support_map_ref.path
+        )
+        cross_series_policy = read_cross_series_constraint_policy(
+            plan.artifact_graph["cross_series_constraint_policy"].path
+        )
+        if (
+            source_support_map.source_inventory_id != inventory.inventory_id
+            or source_support_map.cross_series_policy_id
+            != cross_series_policy.policy_id
+            or source_support_map.windows != plan.source_support
+            or source_support_map_ref.metadata.get("support_map_id")
+            != source_support_map.support_map_id
+        ):
+            raise ReconstructionPlanCompatibilityError(
+                "runtime source-support map differs from the top-level plan"
+            )
     if execution.artifacts != {
         name: ref
         for name, ref in plan.artifact_graph.items()
@@ -3013,6 +4228,15 @@ def read_reconstruction_source_inventory(
     return ReconstructionSourceInventoryV1.from_dict(payload)
 
 
+def read_reconstruction_plan_source_support_map(
+    path: str | Path,
+) -> ReconstructionPlanSourceSupportMapV1:
+    payload = _read_content_addressed_json(
+        path, "reconstruction-plan-source-support-map"
+    )
+    return ReconstructionPlanSourceSupportMapV1.from_dict(payload)
+
+
 def read_reconstruction_plan_configuration(
     path: str | Path,
 ) -> ReconstructionPlanConfiguration:
@@ -3034,6 +4258,15 @@ def read_reconstruction_plan_execution_manifest(
         path, "reconstruction-plan-execution"
     )
     return ReconstructionPlanExecutionManifestV1.from_dict(payload)
+
+
+def read_reconstruction_context_availability_qualification(
+    path: str | Path,
+) -> ReconstructionContextAvailabilityQualificationV1:
+    payload = _read_content_addressed_json(
+        path, "reconstruction-context-availability-qualification"
+    )
+    return ReconstructionContextAvailabilityQualificationV1.from_dict(payload)
 
 
 def load_reconstruction_stage_plan(
@@ -3490,6 +4723,10 @@ def _experiment_artifact_bindings(
     configuration_ref: ArtifactRef,
     proposal_registry_ref: ArtifactRef,
     proposal_portfolio_ref: ArtifactRef,
+    context_availability_qualification: (
+        ReconstructionContextAvailabilityQualificationV1 | None
+    ),
+    context_availability_ref: ArtifactRef | None,
 ) -> tuple[ReconstructionExperimentArtifactBindingV1, ...]:
     """Bind verified authoritative artifacts without duplicating their payloads."""
     roles = (
@@ -3617,6 +4854,21 @@ def _experiment_artifact_bindings(
             "portfolio_id",
             PROPOSAL_ENGINE_PORTFOLIO_SCHEMA_VERSION,
         ),
+        *(
+            ()
+            if context_availability_qualification is None
+            or context_availability_ref is None
+            else (
+                (
+                    "context-availability-qualification",
+                    "gate",
+                    context_availability_ref,
+                    context_availability_qualification.qualification_id,
+                    "qualification_id",
+                    context_availability_qualification.schema_version,
+                ),
+            )
+        ),
     )
     return tuple(
         ReconstructionExperimentArtifactBindingV1(
@@ -3703,6 +4955,7 @@ def _build_source_inventory(
                 size_bytes=path.stat().st_size,
                 sha256=actual_hash,
                 metadata={
+                    **provider_partition.artifact.metadata,
                     "symbol": symbol,
                     "period": period,
                     "row_count": rows,
@@ -3739,21 +4992,91 @@ def _build_source_inventory(
 def _preflight_window_support(
     windows: Sequence[ReconstructionWindowV1],
     *,
+    source_support: Mapping[tuple[int, int], ReconstructionPlanSourceSupportV1],
     definition: Any,
     context: MarketContextCorpusV1,
     positioning: CftcPositioningCorpusV1,
     mode: InformationMode,
+    observation_operator: Any | None = None,
+    context_availability_qualification: (
+        ReconstructionContextAvailabilityQualificationV1 | None
+    ),
 ) -> tuple[
-    tuple[ReconstructionPlanRefusalV1, ...], tuple[ReconstructionWindowV1, ...]
+    tuple[ReconstructionPlanRefusalV1, ...],
+    tuple[ReconstructionWindowV1, ...],
+    tuple[ReconstructionPlanCftcSupportV1, ...],
 ]:
     refusals: list[ReconstructionPlanRefusalV1] = []
     executable: list[ReconstructionWindowV1] = []
+    cftc_support: list[ReconstructionPlanCftcSupportV1] = []
     required_context = (
         ("EUR", MarketContextKind.POLICY_RATE_CHANGE),
         ("GBP", MarketContextKind.POLICY_RATE_CHANGE),
         ("USD", MarketContextKind.CENTRAL_BANK_DECISION),
     )
     for window in windows:
+        boundary = (window.core_start_ns, window.core_end_ns)
+        support = source_support.get(boundary)
+        if support is None:
+            raise ReconstructionPlanCompatibilityError(
+                "window lacks exact source-support evidence"
+            )
+        if support.status is ReconstructionPlanSourceSupportStatus.EMPTY:
+            cftc_support.append(
+                _not_evaluated_cftc_support(
+                    support, reason="source window is empty"
+                )
+            )
+            continue
+        if support.status is ReconstructionPlanSourceSupportStatus.INCOMPLETE:
+            cftc_support.append(
+                _not_evaluated_cftc_support(
+                    support, reason="source triangle is incomplete"
+                )
+            )
+            refusals.append(
+                ReconstructionPlanRefusalV1(
+                    start_ns=window.core_start_ns,
+                    end_ns=window.core_end_ns,
+                    code=(
+                        ReconstructionPlanRefusalCode.SOURCE_TRIANGLE_INCOMPLETE
+                    ),
+                    reason=support.reason,
+                )
+            )
+            continue
+        synchronized = (
+            support.selected_cross_series_alignment
+            in {
+                CrossSeriesAlignmentPolicy.EXACT_EVENT_SEQUENCE.value,
+                CrossSeriesAlignmentPolicy.NEAREST_PRIOR_BOUNDED.value,
+            }
+            if support.cross_series_policy_id
+            else support.common_exact_core_timestamp_count > 0
+        )
+        if not synchronized:
+            cftc_support.append(
+                _not_evaluated_cftc_support(
+                    support,
+                    reason=("bounded cross-series evidence is unsupported"),
+                )
+            )
+            refusals.append(
+                ReconstructionPlanRefusalV1(
+                    start_ns=window.core_start_ns,
+                    end_ns=window.core_end_ns,
+                    code=(
+                        ReconstructionPlanRefusalCode.CROSS_SERIES_UNSUPPORTED
+                    ),
+                    reason=(
+                        "complete per-symbol source anchors have neither the "
+                        "minimum exact-event sequence nor bounded nearest-prior "
+                        "core support required by the qualified cross-series "
+                        "policy; no forward fill is authorized"
+                    ),
+                )
+            )
+            continue
         midpoint_ms = (
             (window.core_start_ns + window.core_end_ns) // 2
         ) // 1_000_000
@@ -3762,6 +5085,11 @@ def _preflight_window_support(
             for symbol in window.symbols
         ]
         if any(item.assignment_kind == "out_of_scope" for item in assignments):
+            cftc_support.append(
+                _not_evaluated_cftc_support(
+                    support, reason="feed epoch is unsupported"
+                )
+            )
             refusals.append(
                 ReconstructionPlanRefusalV1(
                     start_ns=window.core_start_ns,
@@ -3771,6 +5099,57 @@ def _preflight_window_support(
                 )
             )
             continue
+        if isinstance(observation_operator, ObservationOperatorV1):
+            assignment_labels = {str(item.label) for item in assignments}
+            if len(assignment_labels) != 1:
+                cftc_support.append(
+                    _not_evaluated_cftc_support(
+                        support, reason="feed epoch differs across triangle"
+                    )
+                )
+                refusals.append(
+                    ReconstructionPlanRefusalV1(
+                        start_ns=window.core_start_ns,
+                        end_ns=window.core_end_ns,
+                        code=(
+                            ReconstructionPlanRefusalCode.FEED_EPOCH_UNSUPPORTED
+                        ),
+                        reason=(
+                            "triangle symbols do not share one feed epoch label"
+                        ),
+                    )
+                )
+                continue
+            try:
+                historical_product_observation_conditioning(
+                    observation_operator,
+                    feed_epoch_label=next(iter(assignment_labels)),
+                    symbols=window.symbols,
+                    information_mode=mode,
+                    used_at_ns=(window.core_start_ns + window.core_end_ns) // 2,
+                    feed_epoch_definition=definition,
+                )
+            except (TypeError, ValueError) as err:
+                cftc_support.append(
+                    _not_evaluated_cftc_support(
+                        support,
+                        reason="historical cardinality conditioning is unsupported",
+                    )
+                )
+                refusals.append(
+                    ReconstructionPlanRefusalV1(
+                        start_ns=window.core_start_ns,
+                        end_ns=window.core_end_ns,
+                        code=(
+                            ReconstructionPlanRefusalCode.FEED_EPOCH_UNSUPPORTED
+                        ),
+                        reason=(
+                            "historical cardinality conditioning is unsupported: "
+                            + str(err)
+                        ),
+                    )
+                )
+                continue
         context_reasons: list[str] = []
         for currency, kind in required_context:
             decision = preflight_market_context_corpus(
@@ -3782,6 +5161,11 @@ def _preflight_window_support(
             )
             context_reasons.extend(decision.reasons)
         if context_reasons:
+            cftc_support.append(
+                _not_evaluated_cftc_support(
+                    support, reason="market context is unsupported"
+                )
+            )
             refusals.append(
                 ReconstructionPlanRefusalV1(
                     start_ns=window.core_start_ns,
@@ -3791,7 +5175,7 @@ def _preflight_window_support(
                 )
             )
             continue
-        positioning_decision = preflight_cftc_positioning_corpus(
+        positioning_query = query_cftc_positioning_corpus(
             positioning,
             start_ns=window.core_start_ns,
             end_ns=window.core_end_ns,
@@ -3805,18 +5189,783 @@ def _preflight_window_support(
             report_families=(CftcReportFamily.LEGACY,),
             report_scopes=(CftcReportScope.FUTURES_ONLY,),
         )
-        if not positioning_decision.ready:
-            refusals.append(
-                ReconstructionPlanRefusalV1(
+        if positioning_query.status is CftcPositioningQueryStatus.READY:
+            cftc_support.append(
+                ReconstructionPlanCftcSupportV1(
                     start_ns=window.core_start_ns,
                     end_ns=window.core_end_ns,
-                    code=ReconstructionPlanRefusalCode.CFTC_POSITIONING_UNSUPPORTED,
-                    reason="; ".join(positioning_decision.reasons),
+                    source_support_id=support.support_id,
+                    query_status=positioning_query.status.value,
+                    conditioning_mode=(
+                        ReconstructionCftcConditioningMode.CONDITIONED
+                    ),
+                    reason="ready weekly CFTC state is retained as conditioning",
+                    query_id=positioning_query.query_id,
                 )
             )
+            executable.append(window)
             continue
-        executable.append(window)
-    return tuple(refusals), tuple(executable)
+        if (
+            positioning_query.status in CFTC_UNCONDITIONED_AVAILABILITY_STATUSES
+            and context_availability_qualification is not None
+        ):
+            cftc_support.append(
+                ReconstructionPlanCftcSupportV1(
+                    start_ns=window.core_start_ns,
+                    end_ns=window.core_end_ns,
+                    source_support_id=support.support_id,
+                    query_status=positioning_query.status.value,
+                    conditioning_mode=(
+                        ReconstructionCftcConditioningMode.UNCONDITIONED_UNAVAILABLE
+                    ),
+                    reason=(
+                        positioning_query.reason
+                        + "; no CFTC value is imputed or used by the "
+                        "qualified runtime"
+                    ),
+                    query_id=positioning_query.query_id,
+                    qualification_id=(
+                        context_availability_qualification.qualification_id
+                    ),
+                )
+            )
+            executable.append(window)
+            continue
+        cftc_support.append(
+            ReconstructionPlanCftcSupportV1(
+                start_ns=window.core_start_ns,
+                end_ns=window.core_end_ns,
+                source_support_id=support.support_id,
+                query_status=positioning_query.status.value,
+                conditioning_mode=ReconstructionCftcConditioningMode.REFUSED,
+                reason=(
+                    positioning_query.reason
+                    + (
+                        "; unavailable-CFTC unconditioned mode lacks qualification"
+                        if positioning_query.status
+                        in CFTC_UNCONDITIONED_AVAILABILITY_STATUSES
+                        else ""
+                    )
+                ),
+                query_id=positioning_query.query_id,
+            )
+        )
+        refusals.append(
+            ReconstructionPlanRefusalV1(
+                start_ns=window.core_start_ns,
+                end_ns=window.core_end_ns,
+                code=ReconstructionPlanRefusalCode.CFTC_POSITIONING_UNSUPPORTED,
+                reason=cftc_support[-1].reason,
+            )
+        )
+    return tuple(refusals), tuple(executable), tuple(cftc_support)
+
+
+def _not_evaluated_cftc_support(
+    source_support: ReconstructionPlanSourceSupportV1,
+    *,
+    reason: str,
+) -> ReconstructionPlanCftcSupportV1:
+    return ReconstructionPlanCftcSupportV1(
+        start_ns=source_support.start_ns,
+        end_ns=source_support.end_ns,
+        source_support_id=source_support.support_id,
+        query_status="not_evaluated_" + source_support.status.value,
+        conditioning_mode=ReconstructionCftcConditioningMode.NOT_EVALUATED,
+        reason=reason,
+    )
+
+
+def _adapt_cross_currency_window_plans_for_cardinality(
+    member_window_plans: Sequence[CrossCurrencyWindowPlanV1],
+    *,
+    initial_source_support: Sequence[ReconstructionPlanSourceSupportV1],
+    inventory: ReconstructionSourceInventoryV1,
+    definition: Any,
+    observation_operator: ObservationOperatorV1,
+    information_mode: InformationMode,
+    proposal_engine_id: str,
+    proposal_config: MarkedHawkesConfigV1,
+    requested_max_window_size_ns: int,
+    cross_series_policy: CrossSeriesConstraintPolicyV1 | None = None,
+) -> tuple[
+    tuple[CrossCurrencyWindowPlanV1, ...],
+    ReconstructionWindowSizingAuditV1,
+]:
+    """Recursively fit qualified windows below the Hawkes count ceiling."""
+    if not member_window_plans or any(
+        plan.status is not CrossCurrencyWindowPlanStatus.PLANNED
+        for plan in member_window_plans
+    ):
+        raise ReconstructionPlanCompatibilityError(
+            "adaptive window sizing requires planned common coverage"
+        )
+    initial_windows = member_window_plans[0].windows
+    support_by_boundary = {
+        (item.start_ns, item.end_ns): item for item in initial_source_support
+    }
+    if len(support_by_boundary) != len(initial_windows):
+        raise ReconstructionPlanCompatibilityError(
+            "adaptive window sizing lacks initial source support"
+        )
+    if any(window.right_lookahead_ns for window in initial_windows):
+        raise ReconstructionPlanCompatibilityError(
+            "adaptive cardinality sizing does not permit future lookahead"
+        )
+    if cross_series_policy is not None and not isinstance(
+        cross_series_policy, CrossSeriesConstraintPolicyV1
+    ):
+        raise TypeError("adaptive sizing requires a cross-series policy")
+    runtime_limit = proposal_config.limits.max_generated_events_per_window
+    modeled_limit = math.floor(
+        runtime_limit * _ADAPTIVE_CARDINALITY_SAFETY_FRACTION
+    )
+    if modeled_limit < 1:
+        raise ReconstructionPlanCompatibilityError(
+            "proposal runtime limit cannot provide cardinality headroom"
+        )
+    try:
+        import numpy as np  # pylint: disable=import-outside-toplevel
+        import pyarrow as pa  # pylint: disable=import-outside-toplevel
+        from pyarrow import ipc  # pylint: disable=import-outside-toplevel
+    except ImportError as err:
+        raise RuntimeError(
+            "adaptive reconstruction planning requires pyarrow"
+        ) from err
+
+    timestamp_cache: OrderedDict[str, Any] = OrderedDict()
+
+    def partition_timestamps(partition: ReconstructionSourcePartitionV1) -> Any:
+        cached = timestamp_cache.get(partition.partition_id)
+        if cached is not None:
+            timestamp_cache.move_to_end(partition.partition_id)
+            return cached
+        chunks: list[Any] = []
+        path = Path(partition.artifact.path)
+        with pa.memory_map(str(path), "r") as source:
+            reader = ipc.open_file(source)
+            datetime_index = reader.schema.get_field_index("datetime")
+            if datetime_index < 0:
+                raise ReconstructionPlanCompatibilityError(
+                    f"adaptive source partition lacks datetime: {path}"
+                )
+            for batch_index in range(reader.num_record_batches):
+                values = (
+                    reader.get_batch(batch_index)
+                    .column(datetime_index)
+                    .to_numpy(zero_copy_only=False)
+                )
+                if len(values):
+                    chunks.append(values.copy())
+        values = (
+            np.concatenate(chunks)
+            if len(chunks) > 1
+            else (chunks[0] if chunks else np.asarray([], dtype=np.int64))
+        )
+        if _strict_int(
+            partition.artifact.metadata.get("timestamp_regression_count", 0),
+            "timestamp_regression_count",
+        ):
+            values = np.sort(values, kind="stable")
+        timestamp_cache[partition.partition_id] = values
+        while len(timestamp_cache) > _MAX_ADAPTIVE_TIMESTAMP_CACHE_PARTITIONS:
+            timestamp_cache.popitem(last=False)
+        return values
+
+    intervals: list[tuple[int, int]] = []
+    width_counts: Counter[str] = Counter()
+    subdivided = 0
+    maximum_modeled = 0.0
+
+    def modeled_for_counts(
+        start_ns: int,
+        end_ns: int,
+        counts: Mapping[str, int],
+        *,
+        symbols: Sequence[str],
+    ) -> float:
+        if not all(counts.values()):
+            return 0.0
+        assignments = tuple(
+            definition.assign(
+                symbol=symbol,
+                timestamp_utc_ms=(start_ns + end_ns) // 2_000_000,
+            )
+            for symbol in symbols
+        )
+        labels = {str(item.label) for item in assignments}
+        if (
+            any(item.assignment_kind == "out_of_scope" for item in assignments)
+            or len(labels) != 1
+        ):
+            raise ReconstructionPlanCompatibilityError(
+                "adaptive window lacks one qualified feed epoch"
+            )
+        retention = historical_product_retention_probability(
+            observation_operator,
+            feed_epoch_label=next(iter(labels)),
+            information_mode=information_mode,
+            used_at_ns=(start_ns + end_ns) // 2,
+            feed_epoch_definition=definition,
+        )
+        return sum(counts.values()) * (1.0 - retention) / retention
+
+    for initial_window in initial_windows:
+        boundary = (initial_window.core_start_ns, initial_window.core_end_ns)
+        support = support_by_boundary[boundary]
+        if support.status is not ReconstructionPlanSourceSupportStatus.COMPLETE:
+            intervals.append(boundary)
+            width_counts[str(boundary[1] - boundary[0])] += 1
+            continue
+        window_symbols = initial_window.symbols
+        initial_modeled = modeled_for_counts(
+            *boundary,
+            support.core_event_counts,
+            symbols=window_symbols,
+        )
+        if initial_modeled <= modeled_limit:
+            intervals.append(boundary)
+            width_counts[str(boundary[1] - boundary[0])] += 1
+            maximum_modeled = max(maximum_modeled, initial_modeled)
+            continue
+        grouped: dict[str, list[Any]] = {
+            symbol: [] for symbol in window_symbols
+        }
+        for partition in inventory.partitions_for_window(initial_window):
+            grouped[partition.symbol].append(partition_timestamps(partition))
+        values_by_symbol = {
+            symbol: tuple(grouped[symbol]) for symbol in window_symbols
+        }
+
+        def event_counts(
+            start_ns: int,
+            end_ns: int,
+            *,
+            arrays: Mapping[str, tuple[Any, ...]] = values_by_symbol,
+            symbols: tuple[str, ...] = window_symbols,
+        ) -> dict[str, int]:
+            start_ms = _ceil_ns_to_ms(start_ns)
+            end_ms = _ceil_ns_to_ms(end_ns)
+            return {
+                symbol: sum(
+                    int(np.searchsorted(values, end_ms, side="left"))
+                    - int(np.searchsorted(values, start_ms, side="left"))
+                    for values in arrays[symbol]
+                )
+                for symbol in symbols
+            }
+
+        if event_counts(*boundary) != dict(support.core_event_counts):
+            raise ReconstructionPlanCompatibilityError(
+                "adaptive source counts differ from exact initial support"
+            )
+        before = len(intervals)
+        pending = [boundary]
+        selected: list[tuple[int, int]] = []
+        while pending:
+            start_ns, end_ns = pending.pop()
+            counts = event_counts(start_ns, end_ns)
+            if not all(counts.values()):
+                selected.append((start_ns, end_ns))
+                continue
+            modeled = modeled_for_counts(
+                start_ns,
+                end_ns,
+                counts,
+                symbols=window_symbols,
+            )
+            if modeled <= modeled_limit:
+                selected.append((start_ns, end_ns))
+                maximum_modeled = max(maximum_modeled, modeled)
+                continue
+            if end_ns - start_ns <= 1_000_000:
+                raise ReconstructionPlanCompatibilityError(
+                    "one immutable millisecond exceeds qualified cardinality "
+                    f"headroom: start_ns={start_ns}, end_ns={end_ns}, "
+                    f"modeled_missing_events={modeled:.6f}"
+                )
+            midpoint = ((start_ns + end_ns) // 2 // 1_000_000) * 1_000_000
+            if midpoint <= start_ns:
+                midpoint = start_ns + 1_000_000
+            if midpoint >= end_ns:
+                midpoint = end_ns - 1_000_000
+            pending.append((midpoint, end_ns))
+            pending.append((start_ns, midpoint))
+        for start_ns, end_ns in sorted(selected):
+            intervals.append((start_ns, end_ns))
+            width_counts[str(end_ns - start_ns)] += 1
+        if len(intervals) - before > 1:
+            subdivided += 1
+
+    adapted: list[CrossCurrencyWindowPlanV1] = []
+    for plan in member_window_plans:
+        windows = tuple(
+            ReconstructionWindowV1(
+                run_id=plan.run_id,
+                ensemble_member_id=plan.ensemble_member_id,
+                symbols=plan.symbols,
+                core_start_ns=start_ns,
+                core_end_ns=end_ns,
+                left_halo_ns=initial_windows[0].left_halo_ns,
+                right_lookahead_ns=initial_windows[0].right_lookahead_ns,
+            )
+            for start_ns, end_ns in intervals
+        )
+        adapted.append(
+            CrossCurrencyWindowPlanV1(
+                run_id=plan.run_id,
+                ensemble_member_id=plan.ensemble_member_id,
+                symbols=plan.symbols,
+                requested_start_ns=plan.requested_start_ns,
+                requested_end_ns=plan.requested_end_ns,
+                coverages=plan.coverages,
+                excluded_spans=plan.excluded_spans,
+                windows=windows,
+                status=plan.status,
+                missing_symbols=plan.missing_symbols,
+            )
+        )
+    audit = ReconstructionWindowSizingAuditV1(
+        proposal_engine_id=proposal_engine_id,
+        proposal_config_id=proposal_config.config_id,
+        requested_max_window_size_ns=requested_max_window_size_ns,
+        minimum_window_size_ns=min(end - start for start, end in intervals),
+        runtime_generated_event_limit=runtime_limit,
+        modeled_missing_event_limit=modeled_limit,
+        initial_window_count=len(initial_windows),
+        final_window_count=len(intervals),
+        subdivided_window_count=subdivided,
+        maximum_modeled_missing_events=maximum_modeled,
+        width_counts=width_counts,
+    )
+    return tuple(adapted), audit
+
+
+def _build_exact_source_support(
+    windows: Sequence[ReconstructionWindowV1],
+    *,
+    inventory: ReconstructionSourceInventoryV1,
+    cross_series_policy: CrossSeriesConstraintPolicyV1 | None = None,
+) -> tuple[ReconstructionPlanSourceSupportV1, ...]:
+    """Count immutable per-symbol and synchronized anchors exactly."""
+    try:
+        import numpy as np  # pylint: disable=import-outside-toplevel
+        import pyarrow as pa  # pylint: disable=import-outside-toplevel
+        from pyarrow import ipc  # pylint: disable=import-outside-toplevel
+    except ImportError as err:
+        raise RuntimeError("reconstruction planning requires pyarrow") from err
+    ordered = tuple(sorted(windows, key=lambda item: item.core_start_ns))
+    if not ordered:
+        raise ReconstructionPlanCompatibilityError(
+            "source-support planning requires windows"
+        )
+    symbols = inventory.symbols
+    counts: dict[tuple[int, int], dict[str, list[int]]] = {
+        (window.core_start_ns, window.core_end_ns): {
+            symbol: [0, 0] for symbol in symbols
+        }
+        for window in ordered
+    }
+    core_timestamp_chunks: dict[
+        tuple[int, int], dict[str, dict[str, list[Any]]]
+    ] = {
+        (window.core_start_ns, window.core_end_ns): {
+            period: {symbol: [] for symbol in symbols}
+            for period in inventory.periods
+        }
+        for window in ordered
+    }
+
+    def accumulate_partition_values(
+        values: Any,
+        *,
+        symbol: str,
+        period: str,
+        relevant_windows: Sequence[ReconstructionWindowV1],
+    ) -> None:
+        for window in relevant_windows:
+            boundary = (window.core_start_ns, window.core_end_ns)
+            core_start_ms = _ceil_ns_to_ms(window.core_start_ns)
+            core_end_ms = _ceil_ns_to_ms(window.core_end_ns)
+            input_start_ms = _ceil_ns_to_ms(window.input_start_ns)
+            input_end_ms = _ceil_ns_to_ms(window.input_end_ns)
+            core_left = bisect_left(values, core_start_ms)
+            core_right = bisect_left(values, core_end_ms)
+            input_count = bisect_left(values, input_end_ms) - bisect_left(
+                values, input_start_ms
+            )
+            core_count = core_right - core_left
+            counts[boundary][symbol][0] += core_count
+            counts[boundary][symbol][1] += input_count
+            if core_count:
+                core_timestamp_chunks[boundary][period][symbol].append(
+                    values[core_left:core_right].copy()
+                )
+
+    for partition in inventory.partitions:
+        path = Path(partition.artifact.path)
+        relevant = tuple(
+            window
+            for window in ordered
+            if window.input_end_ns > partition.first_timestamp_ms * 1_000_000
+            and window.input_start_ns
+            < (partition.last_timestamp_ms + 1) * 1_000_000
+        )
+        observed_rows = 0
+        observed_first: int | None = None
+        observed_last: int | None = None
+        observed_regression_count = 0
+        observed_maximum_regression_ms = 0
+        expected_regression_count = _strict_int(
+            partition.artifact.metadata.get("timestamp_regression_count", 0),
+            "timestamp_regression_count",
+        )
+        expected_maximum_regression_ms = _strict_int(
+            partition.artifact.metadata.get(
+                "maximum_timestamp_regression_ms", 0
+            ),
+            "maximum_timestamp_regression_ms",
+        )
+        if (
+            expected_regression_count < 0
+            or expected_maximum_regression_ms < 0
+            or expected_regression_count
+            > MAX_HISTDATA_SOURCE_ORDER_REGRESSIONS_PER_PARTITION
+            or expected_maximum_regression_ms
+            > MAX_HISTDATA_SOURCE_ORDER_REGRESSION_MS
+            or (expected_regression_count == 0)
+            != (expected_maximum_regression_ms == 0)
+        ):
+            raise ReconstructionPlanCompatibilityError(
+                f"source partition regression evidence is invalid: {path}"
+            )
+        if (
+            expected_regression_count
+            and partition.artifact.metadata.get("timestamp_order_policy")
+            != "source-order-preserved-bounded-regressions-v1"
+        ):
+            raise ReconstructionPlanCompatibilityError(
+                f"source partition lacks bounded ordering policy: {path}"
+            )
+        regression_timestamp_chunks: list[Any] = []
+        try:
+            with pa.memory_map(str(path), "r") as source:
+                reader = ipc.open_file(source)
+                datetime_index = reader.schema.get_field_index("datetime")
+                if datetime_index < 0:
+                    raise ReconstructionPlanCompatibilityError(
+                        f"source partition lacks datetime: {path}"
+                    )
+                field = reader.schema.field(datetime_index)
+                if not pa.types.is_integer(field.type):
+                    raise ReconstructionPlanCompatibilityError(
+                        f"source partition datetime is not integer milliseconds: {path}"
+                    )
+                previous_ms: int | None = None
+                for batch_index in range(reader.num_record_batches):
+                    values = (
+                        reader.get_batch(batch_index)
+                        .column(datetime_index)
+                        .to_numpy(zero_copy_only=False)
+                    )
+                    if not len(values):
+                        continue
+                    first_ms = int(values[0])
+                    last_ms = int(values[-1])
+                    batch_min_ms = int(np.min(values))
+                    batch_max_ms = int(np.max(values))
+                    if previous_ms is not None and first_ms < previous_ms:
+                        observed_regression_count += 1
+                        observed_maximum_regression_ms = max(
+                            observed_maximum_regression_ms,
+                            previous_ms - first_ms,
+                        )
+                    if len(values) > 1:
+                        regression_positions = np.flatnonzero(
+                            values[1:] < values[:-1]
+                        )
+                        observed_regression_count += len(regression_positions)
+                        if len(regression_positions):
+                            observed_maximum_regression_ms = max(
+                                observed_maximum_regression_ms,
+                                int(
+                                    np.max(
+                                        values[regression_positions]
+                                        - values[regression_positions + 1]
+                                    )
+                                ),
+                            )
+                    observed_first = (
+                        batch_min_ms
+                        if observed_first is None
+                        else min(observed_first, batch_min_ms)
+                    )
+                    observed_last = (
+                        batch_max_ms
+                        if observed_last is None
+                        else max(observed_last, batch_max_ms)
+                    )
+                    previous_ms = last_ms
+                    observed_rows += len(values)
+                    if expected_regression_count:
+                        regression_timestamp_chunks.append(values.copy())
+                    else:
+                        accumulate_partition_values(
+                            values,
+                            symbol=partition.symbol,
+                            period=partition.period,
+                            relevant_windows=relevant,
+                        )
+        except ReconstructionPlanCompatibilityError:
+            raise
+        except Exception as err:
+            raise ReconstructionPlanCompatibilityError(
+                f"source partition cannot provide exact window counts: {path}"
+            ) from err
+        if (
+            observed_rows != partition.row_count
+            or observed_first != partition.first_timestamp_ms
+            or observed_last != partition.last_timestamp_ms
+            or observed_regression_count != expected_regression_count
+            or observed_maximum_regression_ms != expected_maximum_regression_ms
+        ):
+            raise ReconstructionPlanCompatibilityError(
+                f"source partition changed during exact support scan: {path}"
+            )
+        if regression_timestamp_chunks:
+            projected_values = np.sort(
+                np.concatenate(regression_timestamp_chunks), kind="stable"
+            )
+            accumulate_partition_values(
+                projected_values,
+                symbol=partition.symbol,
+                period=partition.period,
+                relevant_windows=relevant,
+            )
+    result: list[ReconstructionPlanSourceSupportV1] = []
+    for window in ordered:
+        boundary = (window.core_start_ns, window.core_end_ns)
+        core = {symbol: counts[boundary][symbol][0] for symbol in symbols}
+        inputs = {symbol: counts[boundary][symbol][1] for symbol in symbols}
+        common_exact_core_timestamp_count = 0
+        nearest_count = 0
+        nearest_stale_count = 0
+        nearest_maximum_age_ns = 0
+        nearest_p95_age_ns = 0
+        selected_alignment = CrossSeriesAlignmentPolicy.UNAVAILABLE
+        recommended_alignment_time_ns: int | None = None
+        alignment_candidates: list[tuple[int, int, str, int, str]] = []
+        all_nearest_ages_ms: list[Any] = []
+        for period in inventory.periods:
+            core_timestamps_by_symbol: dict[str, Any] = {}
+            for symbol in symbols:
+                chunks = core_timestamp_chunks[boundary][period][symbol]
+                values = (
+                    np.asarray([], dtype=np.int64)
+                    if not chunks
+                    else (
+                        chunks[0]
+                        if len(chunks) == 1
+                        else np.concatenate(chunks)
+                    )
+                )
+                core_timestamps_by_symbol[symbol] = np.sort(
+                    values, kind="stable"
+                )
+            unique_core_timestamps = [
+                np.unique(core_timestamps_by_symbol[symbol])
+                for symbol in symbols
+            ]
+            common_timestamps = unique_core_timestamps[0]
+            for values in unique_core_timestamps[1:]:
+                common_timestamps = np.intersect1d(
+                    common_timestamps,
+                    values,
+                    assume_unique=True,
+                )
+                if not len(common_timestamps):
+                    break
+            common_exact_core_timestamp_count += len(common_timestamps)
+            exact_alignment_times = np.asarray([], dtype=np.int64)
+            if len(common_timestamps):
+                exact_cardinality = np.minimum.reduce(
+                    [
+                        np.searchsorted(
+                            core_timestamps_by_symbol[symbol],
+                            common_timestamps,
+                            side="right",
+                        )
+                        - np.searchsorted(
+                            core_timestamps_by_symbol[symbol],
+                            common_timestamps,
+                            side="left",
+                        )
+                        for symbol in symbols
+                    ]
+                )
+                exact_alignment_times = np.repeat(
+                    common_timestamps, exact_cardinality
+                )
+            if cross_series_policy is None or not all(
+                len(core_timestamps_by_symbol[symbol]) for symbol in symbols
+            ):
+                continue
+            maximum_age_ms = (
+                cross_series_policy.nearest_prior_max_age_ns // 1_000_000
+            )
+            probe_candidates: list[tuple[int, int, str, Any, Any, Any]] = []
+            for probe_symbol in symbols:
+                probes = core_timestamps_by_symbol[probe_symbol]
+                supported = np.ones(len(probes), dtype=bool)
+                maximum_ages_ms = np.zeros(len(probes), dtype=np.int64)
+                for symbol in symbols:
+                    values = core_timestamps_by_symbol[symbol]
+                    indexes = np.searchsorted(values, probes, side="right") - 1
+                    valid = indexes >= 0
+                    ages_ms = np.zeros(len(probes), dtype=np.int64)
+                    if np.any(valid):
+                        ages_ms[valid] = probes[valid] - values[indexes[valid]]
+                    supported &= valid & (ages_ms <= maximum_age_ms)
+                    maximum_ages_ms = np.maximum(maximum_ages_ms, ages_ms)
+                probe_candidates.append(
+                    (
+                        -int(np.count_nonzero(supported)),
+                        len(probes),
+                        probe_symbol,
+                        probes,
+                        supported,
+                        maximum_ages_ms,
+                    )
+                )
+            (
+                _,
+                _,
+                _,
+                probes,
+                supported,
+                maximum_ages_ms,
+            ) = min(probe_candidates, key=lambda item: item[:3])
+            supported_times = probes[supported]
+            supported_ages_ms = maximum_ages_ms[supported]
+            period_nearest_count = len(supported_times)
+            nearest_count += period_nearest_count
+            nearest_stale_count += int(np.count_nonzero(supported_ages_ms))
+            if period_nearest_count:
+                all_nearest_ages_ms.append(supported_ages_ms)
+            if (
+                len(exact_alignment_times)
+                >= cross_series_policy.minimum_alignment_support
+            ):
+                recommended = (
+                    int(exact_alignment_times[len(exact_alignment_times) // 2])
+                    * 1_000_000
+                )
+                alignment_candidates.append(
+                    (
+                        0,
+                        abs(
+                            2 * recommended
+                            - (window.core_start_ns + window.core_end_ns)
+                        ),
+                        period,
+                        recommended,
+                        CrossSeriesAlignmentPolicy.EXACT_EVENT_SEQUENCE.value,
+                    )
+                )
+            elif (
+                period_nearest_count
+                >= cross_series_policy.minimum_alignment_support
+            ):
+                recommended = (
+                    int(supported_times[period_nearest_count // 2]) * 1_000_000
+                )
+                alignment_candidates.append(
+                    (
+                        1,
+                        abs(
+                            2 * recommended
+                            - (window.core_start_ns + window.core_end_ns)
+                        ),
+                        period,
+                        recommended,
+                        CrossSeriesAlignmentPolicy.NEAREST_PRIOR_BOUNDED.value,
+                    )
+                )
+        if all_nearest_ages_ms:
+            nearest_ages_ms = np.concatenate(all_nearest_ages_ms)
+            nearest_maximum_age_ns = int(np.max(nearest_ages_ms)) * 1_000_000
+            nearest_p95_age_ns = (
+                int(
+                    np.sort(nearest_ages_ms)[
+                        max(0, math.ceil(len(nearest_ages_ms) * 0.95) - 1)
+                    ]
+                )
+                * 1_000_000
+            )
+        if alignment_candidates:
+            selected = min(alignment_candidates)
+            selected_alignment = CrossSeriesAlignmentPolicy(selected[4])
+            recommended_alignment_time_ns = selected[3]
+        complete = all(
+            core[symbol] > 0 and inputs[symbol] >= 2 for symbol in symbols
+        )
+        empty = all(core[symbol] == 0 for symbol in symbols)
+        if complete:
+            status = ReconstructionPlanSourceSupportStatus.COMPLETE
+            reason = (
+                "complete triangle has per-symbol core/input anchors and "
+                f"selected_cross_series_alignment={selected_alignment.value}"
+            )
+        elif empty:
+            status = ReconstructionPlanSourceSupportStatus.EMPTY
+            reason = (
+                "source-empty triangle: every symbol has zero immutable core "
+                "events; no synthetic liquidity is authorized"
+            )
+        else:
+            status = ReconstructionPlanSourceSupportStatus.INCOMPLETE
+            missing_core = tuple(
+                symbol for symbol in symbols if core[symbol] == 0
+            )
+            insufficient_input = tuple(
+                symbol for symbol in symbols if inputs[symbol] < 2
+            )
+            reason = (
+                "incomplete immutable source triangle: "
+                f"missing_core={','.join(missing_core) or 'none'}; "
+                "fewer_than_two_input_anchors="
+                f"{','.join(insufficient_input) or 'none'}"
+            )
+        result.append(
+            ReconstructionPlanSourceSupportV1(
+                start_ns=window.core_start_ns,
+                end_ns=window.core_end_ns,
+                symbols=window.symbols,
+                core_event_counts=core,
+                input_event_counts=inputs,
+                common_exact_core_timestamp_count=(
+                    common_exact_core_timestamp_count
+                ),
+                bounded_nearest_core_timestamp_count=nearest_count,
+                bounded_nearest_core_stale_timestamp_count=(
+                    nearest_stale_count
+                ),
+                bounded_nearest_core_maximum_age_ns=nearest_maximum_age_ns,
+                bounded_nearest_core_p95_age_ns=nearest_p95_age_ns,
+                selected_cross_series_alignment=selected_alignment.value,
+                recommended_cross_series_event_time_ns=(
+                    recommended_alignment_time_ns
+                ),
+                cross_series_policy_id=(
+                    cross_series_policy.policy_id
+                    if cross_series_policy is not None
+                    else ""
+                ),
+                status=status,
+                reason=reason,
+            )
+        )
+    return tuple(result)
 
 
 def _build_information_evidence(
@@ -3948,14 +6097,24 @@ def _build_information_evidence(
 def _window_resource_estimate(
     window: ReconstructionWindowV1,
     *,
-    inventory: ReconstructionSourceInventoryV1,
+    source_support: ReconstructionPlanSourceSupportV1,
     configuration: ReconstructionPlanConfiguration,
+    proposal_config: Any | None = None,
+    definition: Any | None = None,
+    observation_operator: ObservationOperatorV1 | None = None,
+    information_mode: InformationMode | None = None,
 ) -> ReconstructionResourceEstimateV1:
-    partitions = inventory.partitions_for_window(window)
-    input_count = sum(
-        _estimated_window_partition_rows(window, item) for item in partitions
-    )
-    interval_count = max(0, input_count - len(inventory.symbols))
+    if (
+        source_support.start_ns != window.core_start_ns
+        or source_support.end_ns != window.core_end_ns
+        or source_support.status
+        is not ReconstructionPlanSourceSupportStatus.COMPLETE
+    ):
+        raise ReconstructionPlanCompatibilityError(
+            "resource estimate requires exact complete source support"
+        )
+    input_count = sum(source_support.input_event_counts.values())
+    interval_count = max(0, input_count - len(source_support.symbols))
     generator_limit = (
         configuration.generator_config.max_events_per_interval * interval_count
     )
@@ -3963,6 +6122,48 @@ def _window_resource_estimate(
         input_count * configuration.storage_policy.max_candidate_amplification
     )
     candidates = min(generator_limit, amplification_limit)
+    if isinstance(proposal_config, MarkedHawkesConfigV1):
+        if (
+            proposal_config.cardinality_policy
+            != OPERATOR_CONDITIONED_CARDINALITY_POLICY
+            or definition is None
+            or observation_operator is None
+            or information_mode is None
+        ):
+            raise ReconstructionPlanCompatibilityError(
+                "marked Hawkes resource planning lacks cardinality conditioning"
+            )
+        assignments = tuple(
+            definition.assign(
+                symbol=symbol,
+                timestamp_utc_ms=(window.core_start_ns + window.core_end_ns)
+                // 2_000_000,
+            )
+            for symbol in window.symbols
+        )
+        labels = {str(item.label) for item in assignments}
+        if (
+            any(item.assignment_kind == "out_of_scope" for item in assignments)
+            or len(labels) != 1
+        ):
+            raise ReconstructionPlanCompatibilityError(
+                "marked Hawkes resource window lacks one feed epoch"
+            )
+        retention = historical_product_retention_probability(
+            observation_operator,
+            feed_epoch_label=next(iter(labels)),
+            information_mode=information_mode,
+            used_at_ns=(window.core_start_ns + window.core_end_ns) // 2,
+            feed_epoch_definition=definition,
+        )
+        candidates = (
+            0
+            if retention == 1.0
+            else min(
+                candidates,
+                proposal_config.limits.max_generated_events_per_window,
+            )
+        )
     batch_limit = configuration.storage_policy.max_events_per_batch
     batch_count = interval_count
     inflight = min(
@@ -3984,33 +6185,13 @@ def _window_resource_estimate(
         peak_events_per_batch=peak,
         estimated_memory_bytes=estimated_memory,
         estimated_scratch_bytes=(candidates * bytes_per_event) + ledger_bytes,
-        estimated_output_bytes=candidates * bytes_per_event,
+        estimated_output_bytes=(
+            candidates * bytes_per_event + DEFAULT_MANIFEST_BYTES_PER_PRODUCT
+        ),
         estimated_batch_count=batch_count,
     )
     configuration.storage_policy.preflight(estimate)
     return estimate
-
-
-def _estimated_window_partition_rows(
-    window: ReconstructionWindowV1,
-    partition: ReconstructionSourcePartitionV1,
-) -> int:
-    """Conservatively scale monthly rows to a bounded execution window."""
-    first_ns = partition.first_timestamp_ms * 1_000_000
-    last_exclusive_ns = (partition.last_timestamp_ms + 1) * 1_000_000
-    overlap_start = max(window.input_start_ns, first_ns)
-    overlap_end = min(window.input_end_ns, last_exclusive_ns)
-    if overlap_end <= overlap_start:
-        return 0
-    observed_span = max(1, last_exclusive_ns - first_ns)
-    overlap_span = overlap_end - overlap_start
-    proportional = math.ceil(partition.row_count * overlap_span / observed_span)
-    return int(
-        min(
-            partition.row_count,
-            max(2, proportional * _SOURCE_ROW_DENSITY_SAFETY_FACTOR),
-        )
-    )
 
 
 def _build_workflow_requests(
@@ -4118,6 +6299,11 @@ def _stage_commands(
         graph["observation_operator"],
         graph["market_context"],
         graph["cftc_positioning"],
+        *(
+            (graph["context_availability_qualification"],)
+            if "context_availability_qualification" in graph
+            else ()
+        ),
     )
     stage_inputs: Mapping[ReconstructionStage, tuple[ArtifactRef, ...]] = {
         ReconstructionStage.SOURCE_ENRICHMENT: source_inputs,
@@ -4655,6 +6841,13 @@ def _required_text(value: Any) -> str:
     return normalized
 
 
+def _optional_text(value: Any) -> str | None:
+    if value is None:
+        return None
+    normalized = str(value).strip()
+    return normalized or None
+
+
 def _bounded_text(value: Any, maximum: int) -> str:
     normalized = _required_text(value)
     if len(normalized) > maximum:
@@ -4687,6 +6880,54 @@ def _int64(value: Any, name: str) -> int:
     if not -(2**63) <= result <= 2**63 - 1:
         raise ValueError(f"{name} is outside signed int64")
     return result
+
+
+def _ceil_ns_to_ms(value: int) -> int:
+    return -(-_int64(value, "nanosecond timestamp") // 1_000_000)
+
+
+def _source_count_mapping(
+    value: Mapping[str, int],
+    *,
+    symbols: tuple[str, ...],
+    name: str,
+) -> dict[str, int]:
+    normalized = {
+        _symbol(key): _nonnegative_int(item, f"{name}[{key}]")
+        for key, item in value.items()
+    }
+    if set(normalized) != set(symbols):
+        raise ValueError(f"{name} does not cover the complete triangle")
+    return {symbol: normalized[symbol] for symbol in symbols}
+
+
+def _require_contiguous_plan_intervals(
+    intervals: Sequence[tuple[int, int]],
+    *,
+    requested_start_ns: int,
+    requested_end_ns: int,
+    name: str,
+) -> None:
+    if (
+        not intervals
+        or intervals[0][0] != requested_start_ns
+        or intervals[-1][1] != requested_end_ns
+    ):
+        raise ValueError(f"{name} intervals differ from requested bounds")
+    if any(left[1] != right[0] for left, right in pairwise(intervals)):
+        raise ValueError(f"{name} intervals are not exactly contiguous")
+
+
+def _terminal_window_status(
+    *, refusal_count: int, empty_window_count: int
+) -> str:
+    if refusal_count and empty_window_count:
+        return "ready_with_refusals_and_empty_windows"
+    if refusal_count:
+        return "ready_with_refusals"
+    if empty_window_count:
+        return "ready_with_empty_windows"
+    return "ready"
 
 
 def _mapping(value: Any) -> Mapping[str, Any]:
@@ -4743,6 +6984,9 @@ def _require_derived(data: Mapping[str, Any], key: str, expected: Any) -> None:
 
 __all__ = [
     "ASCII_TICK_SOURCE_KIND",
+    "CFTC_READY_CONDITIONING_MODE",
+    "CFTC_UNAVAILABLE_CONDITIONING_MODE",
+    "CONTEXT_AVAILABILITY_QUALIFICATION_ARTIFACT_KIND",
     "DEFAULT_RECONSTRUCTION_BASE_SEED",
     "DEFAULT_RECONSTRUCTION_MAX_PARALLEL_WINDOWS",
     "DEFAULT_RECONSTRUCTION_REQUEST_WINDOW_LIMIT",
@@ -4751,32 +6995,45 @@ __all__ = [
     "IMMUTABLE_ANCHOR_POLICY",
     "PLAN_CONFIGURATION_ARTIFACT_KIND",
     "PLAN_EXECUTION_MANIFEST_ARTIFACT_KIND",
+    "RECONSTRUCTION_CONTEXT_AVAILABILITY_QUALIFICATION_SCHEMA_VERSION",
+    "RECONSTRUCTION_PLAN_CFTC_SUPPORT_SCHEMA_VERSION",
     "RECONSTRUCTION_PLAN_CONFIGURATION_SCHEMA_VERSION",
     "RECONSTRUCTION_PLAN_EXECUTION_MANIFEST_SCHEMA_VERSION",
     "RECONSTRUCTION_PLAN_REFUSAL_SCHEMA_VERSION",
     "RECONSTRUCTION_PLAN_RESOURCE_SUMMARY_SCHEMA_VERSION",
+    "RECONSTRUCTION_PLAN_SOURCE_SUPPORT_MAP_SCHEMA_VERSION",
+    "RECONSTRUCTION_PLAN_SOURCE_SUPPORT_SCHEMA_VERSION",
     "RECONSTRUCTION_SOURCE_INVENTORY_SCHEMA_VERSION",
     "RECONSTRUCTION_SOURCE_PARTITION_SCHEMA_VERSION",
     "SCIENTIFIC_NONCLAIM",
     "SOURCE_INVENTORY_ARTIFACT_KIND",
+    "SOURCE_SUPPORT_MAP_ARTIFACT_KIND",
     "SYNTHETIC_INFILL_PLAN_ARTIFACT_KIND",
     "SYNTHETIC_INFILL_PLAN_SCHEMA_VERSION",
     "TICK_ONLY_INPUT_POLICY",
+    "ReconstructionCftcConditioningMode",
+    "ReconstructionContextAvailabilityQualificationV1",
     "ReconstructionDeliveryMode",
+    "ReconstructionPlanCftcSupportV1",
     "ReconstructionPlanCompatibilityError",
     "ReconstructionPlanConfigurationV1",
     "ReconstructionPlanExecutionManifestV1",
     "ReconstructionPlanRefusalCode",
     "ReconstructionPlanRefusalV1",
     "ReconstructionPlanResourceSummaryV1",
+    "ReconstructionPlanSourceSupportMapV1",
+    "ReconstructionPlanSourceSupportStatus",
+    "ReconstructionPlanSourceSupportV1",
     "ReconstructionSourceInventoryV1",
     "ReconstructionSourcePartitionV1",
     "ReconstructionStagePlanV1",
     "SyntheticInfillPlanV1",
     "build_synthetic_infill_plan",
     "load_reconstruction_stage_plan",
+    "read_reconstruction_context_availability_qualification",
     "read_reconstruction_plan_configuration",
     "read_reconstruction_plan_execution_manifest",
+    "read_reconstruction_plan_source_support_map",
     "read_reconstruction_source_inventory",
     "read_synthetic_infill_plan",
     "validate_synthetic_infill_plan_for_execution",

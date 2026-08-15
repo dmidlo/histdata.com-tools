@@ -7,14 +7,14 @@ objects stay bounded and safe to serialize through CLI and workflow surfaces.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
-from enum import Enum
 import hashlib
 import json
 import math
-from pathlib import Path
 import re
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
+from enum import Enum
+from pathlib import Path
 from typing import Any
 
 from histdatacom.runtime_contracts import ArtifactRef, JSONValue
@@ -41,6 +41,9 @@ MAX_PARTITIONS_PER_VERSION = 4096
 MAX_QUALIFICATION_EVIDENCE = 64
 
 _IDENTIFIER_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,127}$")
+_DELIVERY_PROFILE_ID_RE = re.compile(
+    r"^[a-z0-9][a-z0-9._-]{0,127}" r"(?::[a-z0-9][a-z0-9._-]{0,127}){1,4}$"
+)
 _SEMVER_RE = re.compile(
     r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)"
     r"(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$"
@@ -742,9 +745,9 @@ class DatasetVersionManifestV1:
         if origin is DatasetOrigin.OBSERVED and delivery is not None:
             # Delivery is permitted but remains orthogonal and explicit; it is
             # never used to derive provider identity.
-            delivery = _identifier(delivery, "delivery_profile_id")
+            delivery = _delivery_profile_id(delivery)
         elif delivery is not None:
-            delivery = _identifier(delivery, "delivery_profile_id")
+            delivery = _delivery_profile_id(delivery)
         object.__setattr__(self, "dataset_id", dataset_id)
         object.__setattr__(self, "origin", origin)
         object.__setattr__(
@@ -1304,7 +1307,7 @@ class DatasetEventLineageV2:
         object.__setattr__(self, "parent_dataset_version_ids", parents)
         delivery = _optional_text(self.delivery_profile_id)
         if delivery is not None:
-            delivery = _identifier(delivery, "delivery_profile_id")
+            delivery = _delivery_profile_id(delivery)
         object.__setattr__(self, "delivery_profile_id", delivery)
         if origin is DatasetOrigin.OBSERVED:
             if self.source_provider_id is None:
@@ -1700,6 +1703,18 @@ def _identifier(value: str, name: str) -> str:
     if _IDENTIFIER_RE.fullmatch(normalized) is None:
         raise ValueError(
             f"{name} must use normalized lowercase identifier syntax"
+        )
+    return normalized
+
+
+def _delivery_profile_id(value: str) -> str:
+    """Accept a named profile or an exact bounded content-addressed profile."""
+    normalized = str(value).strip().lower()
+    if ":" not in normalized:
+        return _identifier(normalized, "delivery_profile_id")
+    if _DELIVERY_PROFILE_ID_RE.fullmatch(normalized) is None:
+        raise ValueError(
+            "delivery_profile_id must use bounded lowercase content-ID syntax"
         )
     return normalized
 

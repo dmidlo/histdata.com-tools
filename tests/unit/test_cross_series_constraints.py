@@ -152,6 +152,30 @@ def test_asynchronous_support_is_bounded_and_never_forward_filled() -> None:
     assert _compile(reordered, reverse_bindings=True) == bundle
 
 
+def test_nearest_prior_probe_selection_maximizes_valid_bounded_support() -> (
+    None
+):
+    events = _triangle_events(
+        {
+            "eurgbp": ((0, 0.8), (10_000, 0.8)),
+            "eurusd": ((1_000, 1.2), (11_000, 1.2)),
+            "gbpusd": ((2_000, 1.5), (12_000, 1.5)),
+        }
+    )
+
+    triangle = _window(_compile(events), CrossSeriesRelationKind.TRIANGLE)
+
+    assert triangle.status is CrossSeriesConstraintStatus.LIMITED
+    assert (
+        triangle.alignment.policy
+        is CrossSeriesAlignmentPolicy.NEAREST_PRIOR_BOUNDED
+    )
+    assert triangle.alignment.support_count == 2
+    assert triangle.alignment.recommended_event_time_ns == (
+        _START + 12_000_000_000
+    )
+
+
 def test_partial_group_is_anomaly_eligible_but_refuses_production_stages() -> (
     None
 ):

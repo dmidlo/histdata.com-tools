@@ -2,17 +2,22 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
+import shutil
 from dataclasses import replace
 from pathlib import Path
 
 import duckdb
 import polars as pl
+import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
+from pyarrow import ipc
 
 from histdatacom.broker_capture import fit_broker_delivery_fingerprint
 from histdatacom.reconstruction import ReconstructionClient
+from histdatacom.runtime_contracts import ArtifactRef
 from histdatacom.synthetic import (
     RECONSTRUCTION_PRODUCT_DIRECTORY,
     BrokerTransferConfigV1,
@@ -21,6 +26,7 @@ from histdatacom.synthetic import (
     ReconstructionPersistenceError,
     ReconstructionProductManifestV1,
     ReconstructionProductManifestV2,
+    ReconstructionProductManifestV3,
     ReconstructionStoragePolicyV1,
     ReconstructionStoragePreflightError,
     SyntheticEventOrigin,
@@ -42,12 +48,13 @@ from histdatacom.synthetic import (
     verify_reconstruction_publication,
 )
 from histdatacom.synthetic.contracts import SYNTHETIC_EVENT_ARROW_COLUMNS
-from histdatacom.synthetic.cross_currency import CrossCurrencyValidationStage
-from tests.unit.test_broker_delivery_fingerprints import (
-    BASE_WALL_NS,
-    _capture,
+from histdatacom.synthetic.cross_currency import (
+    CrossCurrencyValidationStage,
+    reconcile_cross_currency_window,
 )
+from tests.unit.test_broker_delivery_fingerprints import BASE_WALL_NS, _capture
 from tests.unit.test_synthetic_broker_transfer import _group_with_constraints
+from tests.unit.test_synthetic_cross_currency import _condition
 
 
 def test_publish_exact_narrow_schema_reconciles_anchors_and_replays(
@@ -263,6 +270,221 @@ def test_generic_delivery_commit_recovers_after_atomic_rename(
     )
 
 
+def test_synthetic_delta_product_reuses_exact_arrow_anchor_ranges(
+    tmp_path: Path,
+) -> None:
+    """V3 stores generated rows once and rehydrates immutable source anchors."""
+    run, window, original_group, _constraints = _group_with_constraints()
+    adjusted_streams = {}
+    for stream in original_group.streams:
+        observed = tuple(
+            event
+            for event in stream.events
+            if event.origin is SyntheticEventOrigin.OBSERVED
+        )
+        left = observed[0]
+        old_right = observed[-1]
+        right = replace(
+            old_right,
+            event_time_ns=old_right.event_time_ns // 1_000_000 * 1_000_000,
+            event_id="",
+        )
+        events = []
+        for event in stream.events:
+            if event.event_id == old_right.event_id:
+                events.append(right)
+            elif event.origin is SyntheticEventOrigin.SYNTHETIC:
+                events.append(
+                    type(event).generated(
+                        symbol=event.symbol,
+                        event_time_ns=event.event_time_ns,
+                        event_sequence=event.event_sequence,
+                        bid=event.bid,
+                        ask=event.ask,
+                        run_id=event.run_id,
+                        ensemble_member_id=event.ensemble_member_id,
+                        source_version_id=event.source_version_id,
+                        left_anchor_event_id=left.event_id,
+                        right_anchor_event_id=right.event_id,
+                        generator_id=event.generator_id or "",
+                        generator_version=event.generator_version or "",
+                        generator_config_id=event.generator_config_id or "",
+                        constraint_set_id=event.constraint_set_id or "",
+                        confidence=event.confidence,
+                        reference_id=event.reference_id,
+                        motif_id=event.motif_id,
+                        feed_epoch_id=event.feed_epoch_id,
+                        broker_profile_id=event.broker_profile_id,
+                    )
+                )
+            else:
+                events.append(event)
+        adjusted_streams[stream.symbol] = type(stream)(
+            run_id=stream.run_id,
+            ensemble_member_id=stream.ensemble_member_id,
+            symbol=stream.symbol,
+            events=tuple(events),
+            source_version_ids=stream.source_version_ids,
+        )
+    group = reconcile_cross_currency_window(
+        run=run,
+        window=window,
+        streams=adjusted_streams,
+        config=original_group.config,
+        conditions=(_condition(),),
+    )
+    anchors = tuple(
+        event
+        for stream in group.streams
+        for event in stream.events
+        if event.origin is SyntheticEventOrigin.OBSERVED
+    )
+    validation = validate_cross_currency_output(
+        run=run,
+        window=window,
+        streams={stream.symbol: stream for stream in group.streams},
+        config=group.config,
+        stage=CrossCurrencyValidationStage.POST_BROKER,
+        observed_anchors=anchors,
+    )
+    delivered = project_modern_reference_delivery(
+        group, delivery_profile_id="modern-reference:synthetic-delta-fixture"
+    )
+    retention = estimate_reconstruction_retention(
+        run_id=run.run_id,
+        primary_member_id=window.ensemble_member_id,
+        retained_member_event_counts={
+            window.ensemble_member_id: sum(
+                len(stream.events) for stream in delivered.streams
+            )
+        },
+        estimated_partition_count=len(delivered.streams),
+        storage_policy=run.storage_policy,
+    )
+    source_artifacts = _write_anchor_source_artifacts(
+        tmp_path / "source", anchors
+    )
+    staged = stage_delivery_reconstruction_publication(
+        tmp_path / "archive",
+        delivered,
+        final_validation=validation,
+        benchmark_artifact_ids=("benchmark:fixture",),
+        benchmark_evidence={"gate": "passed"},
+        immutable_source_anchors=anchors,
+        immutable_source_artifacts=source_artifacts,
+        symbol_group_id=window.synchronization_unit_id,
+        retention_plan=retention,
+        storage_policy=run.storage_policy,
+        staging_root=tmp_path / "scratch",
+        row_group_size=2,
+    )
+    committed = commit_delivery_reconstruction_publication(staged)
+
+    assert isinstance(committed.manifest, ReconstructionProductManifestV3)
+    assert committed.manifest.source.observed_values_verified_exactly
+    assert committed.manifest.replay.canonicalized_metadata_exclusions == (
+        "anchor_interval_id",
+        "event_id",
+        "left_anchor_event_id",
+        "right_anchor_event_id",
+    )
+    for partition_path in reconstruction_parquet_paths(committed.manifest_path):
+        physical_columns = set(pq.ParquetFile(partition_path).schema.names)
+        assert "event_id" not in physical_columns
+        assert "anchor_interval_id" not in physical_columns
+        assert "left_anchor_event_id" not in physical_columns
+        assert "right_anchor_event_id" not in physical_columns
+        assert {
+            "left_anchor_ordinal",
+            "reference_id",
+            "right_anchor_ordinal",
+        }.issubset(physical_columns)
+    assert all(
+        partition.observed_event_count == 0
+        for partition in committed.manifest.partitions
+    )
+    assert (
+        sum(partition.row_count for partition in committed.manifest.partitions)
+        == committed.manifest.synthetic_event_count
+    )
+    assert (
+        committed.manifest.physical_event_count
+        == committed.manifest.synthetic_event_count
+    )
+    assert (
+        sum(
+            segment.row_count
+            for segment in committed.manifest.observed_anchor_segments
+        )
+        == committed.manifest.observed_event_count
+    )
+    assert read_reconstruction_streams(committed.manifest_path) == (
+        delivered.streams
+    )
+    assert (
+        sum(
+            batch.num_rows
+            for batch in iter_reconstruction_event_batches(
+                committed.manifest_path
+            )
+        )
+        == committed.manifest.event_count
+    )
+    selected = next(
+        event
+        for stream in delivered.streams
+        for event in stream.events
+        if event.symbol == "eurusd"
+    )
+    bounded_batches = tuple(
+        iter_reconstruction_event_batches(
+            committed.manifest_path,
+            columns=("symbol", "event_time_ns"),
+            symbols=("eurusd",),
+            start_ns=selected.event_time_ns,
+            end_ns=selected.event_time_ns + 1,
+        )
+    )
+    assert sum(batch.num_rows for batch in bounded_batches) == 1
+    assert (
+        scan_reconstruction_events_polars(
+            committed.manifest_path,
+            columns=("symbol", "event_time_ns"),
+            symbols=("eurusd",),
+            start_ns=selected.event_time_ns,
+            end_ns=selected.event_time_ns + 1,
+        )
+        .collect()
+        .height
+        == 1
+    )
+    with pytest.raises(ValueError, match="end_ns must be greater"):
+        tuple(
+            iter_reconstruction_event_batches(
+                committed.manifest_path,
+                start_ns=selected.event_time_ns,
+                end_ns=selected.event_time_ns,
+            )
+        )
+    with pytest.raises(ValueError, match="end_ns must be greater"):
+        scan_reconstruction_events_polars(
+            committed.manifest_path,
+            start_ns=selected.event_time_ns,
+            end_ns=selected.event_time_ns,
+        )
+    assert all(
+        not Path(segment.source_artifact.path).is_absolute()
+        for segment in committed.manifest.observed_anchor_segments
+    )
+    shutil.rmtree(tmp_path / "source")
+    moved_root = tmp_path / "moved-archive"
+    shutil.copytree(tmp_path / "archive", moved_root)
+    moved_manifest = moved_root / committed.manifest_path.relative_to(
+        tmp_path / "archive"
+    )
+    assert read_reconstruction_streams(moved_manifest) == delivered.streams
+
+
 def test_idempotent_publish_retry_revalidates_committed_partitions(
     tmp_path: Path,
 ) -> None:
@@ -421,6 +643,27 @@ def test_retention_preflight_estimates_primary_and_all_retained_members() -> (
         plan.estimated_retained_bytes + plan.estimated_manifest_bytes
     )
     assert plan.storage_policy_id == policy.policy_id
+
+    delta_plan = estimate_reconstruction_retention(
+        run_id="run:delta-fixture",
+        primary_member_id="member-000",
+        retained_member_event_counts={"member-000": 10_000},
+        retained_member_physical_event_counts={"member-000": 250},
+        estimated_partition_count=3,
+        estimated_product_count=1,
+        storage_policy=policy,
+        estimated_bytes_per_event=200,
+        estimated_compression_ratio=0.5,
+    )
+    assert delta_plan.estimated_primary_bytes == 25_000
+    assert delta_plan.estimated_retained_bytes == 25_000
+    assert delta_plan.estimated_manifest_bytes == 3 * 4_096 + 32_768
+    assert delta_plan.member_event_counts == {"member-000": 10_000}
+    assert delta_plan.member_physical_event_counts == {"member-000": 250}
+    assert delta_plan.estimated_product_count == 1
+    assert delta_plan.to_dict()["physical_storage_layout"] == (
+        "synthetic-delta-with-referenced-observed-anchors-v1"
+    )
 
     limited = ReconstructionStoragePolicyV1(
         max_output_bytes=100,
@@ -668,6 +911,64 @@ def test_discovery_filters_member_run_broker_and_group_axes(
         == ()
     )
     assert RECONSTRUCTION_PRODUCT_DIRECTORY in str(published.manifest_path)
+
+
+def _write_anchor_source_artifacts(
+    root: Path, anchors: tuple
+) -> dict[str, ArtifactRef]:
+    root.mkdir(parents=True, exist_ok=True)
+    grouped = {}
+    for event in anchors:
+        grouped.setdefault(event.source_series_id, []).append(event)
+    refs = {}
+    for series_id, events in grouped.items():
+        assert series_id is not None
+        symbol = events[0].symbol
+        period = events[0].source_period
+        assert period is not None
+        rows_by_id = {event.source_row_id: event for event in events}
+        maximum = max(row_id for row_id in rows_by_id if row_id is not None)
+        rows = []
+        for row_id in range(1, maximum + 1):
+            event = rows_by_id.get(row_id)
+            if event is None:
+                event = events[0]
+            rows.append(
+                {
+                    "datetime": event.event_time_ns // 1_000_000,
+                    "bid": event.bid,
+                    "ask": event.ask,
+                }
+            )
+        table = pa.Table.from_pylist(
+            rows,
+            schema=pa.schema(
+                [
+                    pa.field("datetime", pa.int64(), nullable=False),
+                    pa.field("bid", pa.float64(), nullable=False),
+                    pa.field("ask", pa.float64(), nullable=False),
+                ]
+            ),
+        )
+        path = root / f"{symbol}-{period}.arrow"
+        with (
+            path.open("wb") as sink,
+            ipc.new_file(sink, table.schema) as writer,
+        ):
+            writer.write_table(table)
+        payload = path.read_bytes()
+        refs[series_id] = ArtifactRef(
+            kind="provider_ascii_tick_partition_v2",
+            path=str(path.resolve()),
+            size_bytes=len(payload),
+            sha256=hashlib.sha256(payload).hexdigest(),
+            metadata={
+                "symbol": symbol,
+                "period": period,
+                "quote_order_projection_policy": "identity-refuse-negative-spread-v1",
+            },
+        )
+    return refs
 
 
 def _publication_inputs(tmp_path: Path):

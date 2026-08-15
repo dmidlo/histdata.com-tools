@@ -30,11 +30,11 @@ from histdatacom.market_context.positioning import (
     CME_FX_QUOTE_URI,
     CftcAvailabilityConfidence,
     CftcMappingKind,
+    CftcPositioningBenchmarkSmokeV1,
     CftcPositioningConsumer,
     CftcPositioningConsumerBindingV1,
     CftcPositioningCorpusBuildV1,
     CftcPositioningFetchProfileV1,
-    CftcPositioningBenchmarkSmokeV1,
     CftcPositioningPreflightV1,
     CftcPositioningQueryStatus,
     CftcPositioningQueryV1,
@@ -499,6 +499,22 @@ def test_ex_post_query_and_pre_2014_eurgbp_leg_mapping(
     corpus_build: CftcPositioningCorpusBuildV1,
 ) -> None:
     corpus = corpus_build.corpus
+    precoverage_start = _window_ns("2000-01-03")
+    precoverage = query_cftc_positioning_corpus(
+        corpus,
+        start_ns=precoverage_start,
+        end_ns=precoverage_start + 3_600_000_000_000,
+        information_mode=InformationMode.EX_POST_RECONSTRUCTION,
+        symbols=("EURUSD",),
+        report_families=(CftcReportFamily.LEGACY,),
+        report_scopes=(CftcReportScope.FUTURES_ONLY,),
+    )
+    assert precoverage.status is CftcPositioningQueryStatus.PRE_COVERAGE
+    assert "predates corpus coverage" in precoverage.reason
+    assert (
+        CftcPositioningQueryV1.from_dict(precoverage.to_dict()) == precoverage
+    )
+
     start = _window_ns("2025-10-08")
     query = query_cftc_positioning_corpus(
         corpus,

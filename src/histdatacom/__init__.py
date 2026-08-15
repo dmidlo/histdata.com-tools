@@ -20,20 +20,23 @@ if TYPE_CHECKING:
     from pyarrow import Table
 
 __all__ = [
-    "Options",
-    "Pairs",
-    "Timeframe",
-    "Format",
+    "CrossSeriesConstraintBundleV1",
+    "CrossSeriesConstraintPolicyV1",
+    "CrossSeriesConstraintUseV1",
+    "CrossSeriesConstraintWindowV1",
     "DatasetCatalog",
     "DatasetQueryScopeV1",
     "DatasetResolutionV1",
     "DatasetVersionManifestV1",
     "FixtureProviderAdapter",
+    "Format",
     "HistDataProviderAdapter",
-    "CrossSeriesConstraintBundleV1",
-    "CrossSeriesConstraintPolicyV1",
-    "CrossSeriesConstraintUseV1",
-    "CrossSeriesConstraintWindowV1",
+    "Options",
+    "Pairs",
+    "ReconstructionCampaignDatasetPublicationV1",
+    "ReconstructionCampaignProductEntryV1",
+    "ReconstructionCampaignProductIndexV1",
+    "ReconstructionCampaignProductShardV1",
     "ReconstructionClient",
     "ReconstructionExecutionRequestV1",
     "ReconstructionExitCode",
@@ -43,10 +46,17 @@ __all__ = [
     "ReconstructionExperimentVerificationV1",
     "ReconstructionOperationReceiptV1",
     "ReconstructionPlanSetPreflightV1",
+    "ReconstructionPlanSetExecutionRequestV1",
+    "ReconstructionPlanSetReceiptIndexV1",
     "ReconstructionPlanSetV1",
     "ReconstructionPlanShardV1",
     "ReconstructionPlanSpecV1",
+    "ReconstructionPlanSpecV2",
+    "ReconstructionPlanSupportMapIndexV2",
+    "ReconstructionPlanSupportMapV1",
+    "ReconstructionPlanSupportWindowV1",
     "ReconstructionPreflightV1",
+    "Timeframe",
 ]
 
 
@@ -56,13 +66,23 @@ __author__ = "David Midlo"
 _RECONSTRUCTION_EXPORTS = frozenset(
     {
         "ReconstructionClient",
+        "ReconstructionCampaignDatasetPublicationV1",
+        "ReconstructionCampaignProductEntryV1",
+        "ReconstructionCampaignProductIndexV1",
+        "ReconstructionCampaignProductShardV1",
         "ReconstructionExecutionRequestV1",
         "ReconstructionExitCode",
         "ReconstructionOperationReceiptV1",
         "ReconstructionPlanSetPreflightV1",
+        "ReconstructionPlanSetExecutionRequestV1",
+        "ReconstructionPlanSetReceiptIndexV1",
         "ReconstructionPlanSetV1",
         "ReconstructionPlanShardV1",
         "ReconstructionPlanSpecV1",
+        "ReconstructionPlanSpecV2",
+        "ReconstructionPlanSupportMapIndexV2",
+        "ReconstructionPlanSupportMapV1",
+        "ReconstructionPlanSupportWindowV1",
         "ReconstructionPreflightV1",
     }
 )
@@ -133,7 +153,7 @@ class APICaller(sys.modules[__name__].__class__):  # type: ignore # noqa:H601
 
     def __call__(  # noqa:BLK001
         self, options: Options
-    ) -> "list" | "PolarsDataFrame" | "DataFrame" | "Table":
+    ) -> list | PolarsDataFrame | DataFrame | Table:
         """Run histdatacom -h for help.
 
         Args:

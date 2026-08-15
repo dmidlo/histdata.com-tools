@@ -2,18 +2,20 @@
 
 This module turns individually carved symbol streams into one synchronized
 generation unit.  It never forward-fills quotes.  Relationships are evaluated
-only at exact event times, duplicate timestamps are paired by deterministic
-event order, and immutable observations are never projected.
+at exact event times or, when explicitly authorized, by a bounded nearest-prior
+join.  Duplicate timestamps retain deterministic identity and immutable
+observations are never projected.
 """
 
 from __future__ import annotations
 
+import hashlib
+import math
+from bisect import bisect_right
 from collections import Counter, defaultdict
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from enum import Enum
-import hashlib
-import math
 from typing import Any, cast
 
 from histdatacom.data_quality.contracts import QualityReport
@@ -39,7 +41,9 @@ from histdatacom.synthetic.streaming import (
 )
 
 CROSS_CURRENCY_ENGINE_ID = "histdatacom.cross-currency-reconciliation"
-CROSS_CURRENCY_ENGINE_VERSION = "1.0.1"
+CROSS_CURRENCY_ENGINE_VERSION = "1.2.0"
+SUPPORTED_CROSS_CURRENCY_ENGINE_VERSIONS = ("1.0.1", "1.1.0", "1.2.0")
+OBSERVED_ONLY_NONBLOCKING_ENGINE_VERSIONS = ("1.2.0",)
 CROSS_CURRENCY_SYMBOL_COVERAGE_SCHEMA_VERSION = (
     "histdatacom.cross-currency-symbol-coverage.v1"
 )
@@ -135,6 +139,15 @@ class CrossCurrencyGroupStatus(str, Enum):
     REFUSED = "refused"
 
 
+class CrossCurrencyJoinPolicy(str, Enum):
+    """Authorized relationship alignment for one output validation."""
+
+    EXACT_EVENT_TIME_NO_FORWARD_FILL = "exact_event_time_no_forward_fill"
+    NEAREST_PRIOR_BOUNDED_NO_FORWARD_FILL = (
+        "nearest_prior_bounded_no_forward_fill"
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class CrossCurrencySymbolCoverageV1:
     """Half-open source coverage for one member of a synchronized group."""
@@ -172,7 +185,7 @@ class CrossCurrencySymbolCoverageV1:
         object.__setattr__(self, "end_ns", end)
 
     @classmethod
-    def missing(cls, symbol: str) -> "CrossCurrencySymbolCoverageV1":
+    def missing(cls, symbol: str) -> CrossCurrencySymbolCoverageV1:
         """Return explicit missing-symbol coverage."""
         return cls(symbol=symbol, status=CrossCurrencyCoverageStatus.MISSING)
 
@@ -189,7 +202,7 @@ class CrossCurrencySymbolCoverageV1:
     @classmethod
     def from_dict(
         cls, data: Mapping[str, Any]
-    ) -> "CrossCurrencySymbolCoverageV1":
+    ) -> CrossCurrencySymbolCoverageV1:
         return cls(
             symbol=str(data.get("symbol", "")),
             start_ns=cast(int | None, data.get("start_ns")),
@@ -240,9 +253,7 @@ class CrossCurrencyExcludedSpanV1:
         }
 
     @classmethod
-    def from_dict(
-        cls, data: Mapping[str, Any]
-    ) -> "CrossCurrencyExcludedSpanV1":
+    def from_dict(cls, data: Mapping[str, Any]) -> CrossCurrencyExcludedSpanV1:
         return cls(
             symbol=str(data.get("symbol", "")),
             start_ns=_strict_int(data.get("start_ns"), "start_ns"),
@@ -368,7 +379,7 @@ class CrossCurrencyWindowPlanV1:
         return str(canonical_contract_json(self.to_dict()))
 
     @classmethod
-    def from_dict(cls, data: Mapping[str, Any]) -> "CrossCurrencyWindowPlanV1":
+    def from_dict(cls, data: Mapping[str, Any]) -> CrossCurrencyWindowPlanV1:
         return cls(
             run_id=str(data.get("run_id", "")),
             ensemble_member_id=str(data.get("ensemble_member_id", "")),
@@ -398,7 +409,7 @@ class CrossCurrencyWindowPlanV1:
         )
 
     @classmethod
-    def from_json(cls, text: str) -> "CrossCurrencyWindowPlanV1":
+    def from_json(cls, text: str) -> CrossCurrencyWindowPlanV1:
         return cls.from_dict(_json_mapping(text))
 
 
@@ -591,7 +602,7 @@ class CrossCurrencyRelationshipV1:
         numerator: str,
         denominator: str,
         projection_priority: Sequence[str] | None = None,
-    ) -> "CrossCurrencyRelationshipV1":
+    ) -> CrossCurrencyRelationshipV1:
         symbols = (direct, numerator, denominator)
         return cls(
             kind=CrossCurrencyRelationshipKind.TRIANGLE,
@@ -606,7 +617,7 @@ class CrossCurrencyRelationshipV1:
         left: str,
         right: str,
         projection_priority: Sequence[str] | None = None,
-    ) -> "CrossCurrencyRelationshipV1":
+    ) -> CrossCurrencyRelationshipV1:
         symbols = (left, right)
         return cls(
             kind=CrossCurrencyRelationshipKind.INVERSE,
@@ -626,9 +637,7 @@ class CrossCurrencyRelationshipV1:
         return {**self.payload(), "relationship_id": self.relationship_id}
 
     @classmethod
-    def from_dict(
-        cls, data: Mapping[str, Any]
-    ) -> "CrossCurrencyRelationshipV1":
+    def from_dict(cls, data: Mapping[str, Any]) -> CrossCurrencyRelationshipV1:
         return cls(
             kind=CrossCurrencyRelationshipKind(str(data.get("kind", ""))),
             symbols=_string_tuple(data.get("symbols")),
@@ -651,6 +660,7 @@ class CrossCurrencyReconciliationConfigV1:
         DEFAULT_CROSS_CURRENCY_SPREAD_TOLERANCE_MULTIPLIER
     )
     rounding_digits: int = DEFAULT_CROSS_CURRENCY_ROUNDING_DIGITS
+    engine_version: str = CROSS_CURRENCY_ENGINE_VERSION
     config_id: str = ""
     schema_version: str = CROSS_CURRENCY_CONFIG_SCHEMA_VERSION
 
@@ -685,6 +695,10 @@ class CrossCurrencyReconciliationConfigV1:
             or not 6 <= self.rounding_digits <= 15
         ):
             raise ValueError("rounding_digits must be between 6 and 15")
+        engine_version = _required_text(self.engine_version)
+        if engine_version not in SUPPORTED_CROSS_CURRENCY_ENGINE_VERSIONS:
+            raise ValueError("unsupported cross-currency engine version")
+        object.__setattr__(self, "engine_version", engine_version)
         expected = _stable_id("cross-currency-config", self.payload())
         supplied = _optional_text(self.config_id)
         if supplied is not None and supplied != expected:
@@ -707,7 +721,7 @@ class CrossCurrencyReconciliationConfigV1:
         return {
             "schema_version": self.schema_version,
             "engine_id": CROSS_CURRENCY_ENGINE_ID,
-            "engine_version": CROSS_CURRENCY_ENGINE_VERSION,
+            "engine_version": self.engine_version,
             "relationships": [item.to_dict() for item in self.relationships],
             "max_projection_relative": self.max_projection_relative,
             "residual_tolerance": self.residual_tolerance,
@@ -722,7 +736,11 @@ class CrossCurrencyReconciliationConfigV1:
     @classmethod
     def from_dict(
         cls, data: Mapping[str, Any]
-    ) -> "CrossCurrencyReconciliationConfigV1":
+    ) -> CrossCurrencyReconciliationConfigV1:
+        if data.get("engine_id") != CROSS_CURRENCY_ENGINE_ID:
+            raise ValueError("unsupported cross-currency engine")
+        if data.get("join_policy") != "exact_event_time_no_forward_fill":
+            raise ValueError("unsupported base cross-currency join policy")
         return cls(
             relationships=tuple(
                 CrossCurrencyRelationshipV1.from_dict(item)
@@ -738,6 +756,7 @@ class CrossCurrencyReconciliationConfigV1:
             rounding_digits=_strict_int(
                 data.get("rounding_digits"), "rounding_digits"
             ),
+            engine_version=str(data.get("engine_version", "")),
             config_id=str(data.get("config_id", "")),
             schema_version=str(data.get("schema_version", "")),
         )
@@ -810,7 +829,7 @@ class CrossCurrencyConditionV1:
         return {**self.payload(), "condition_id": self.condition_id}
 
     @classmethod
-    def from_dict(cls, data: Mapping[str, Any]) -> "CrossCurrencyConditionV1":
+    def from_dict(cls, data: Mapping[str, Any]) -> CrossCurrencyConditionV1:
         return cls(
             start_ns=_strict_int(data.get("start_ns"), "start_ns"),
             end_ns=_strict_int(data.get("end_ns"), "end_ns"),
@@ -921,7 +940,7 @@ class CrossCurrencyProjectionLineageV1:
     @classmethod
     def from_dict(
         cls, data: Mapping[str, Any]
-    ) -> "CrossCurrencyProjectionLineageV1":
+    ) -> CrossCurrencyProjectionLineageV1:
         return cls(
             relationship_id=str(data.get("relationship_id", "")),
             symbol=str(data.get("symbol", "")),
@@ -962,6 +981,7 @@ class CrossCurrencyRelationshipSupportV1:
     post_residual_max: float
     post_residual_mean: float
     allowed_residual_max: float
+    observed_only_residual_exceedance_count: int = 0
     schema_version: str = CROSS_CURRENCY_RELATIONSHIP_SUPPORT_SCHEMA_VERSION
 
     def __post_init__(self) -> None:
@@ -973,13 +993,25 @@ class CrossCurrencyRelationshipSupportV1:
         object.__setattr__(
             self, "relationship_id", _required_text(self.relationship_id)
         )
-        for name in ("support_count", "projected_count", "infeasible_count"):
+        for name in (
+            "support_count",
+            "projected_count",
+            "infeasible_count",
+            "observed_only_residual_exceedance_count",
+        ):
             value = _nonnegative_int(getattr(self, name), name)
             object.__setattr__(self, name, value)
         if self.projected_count > self.support_count:
             raise ValueError("projected_count exceeds relationship support")
         if self.infeasible_count > self.support_count:
             raise ValueError("infeasible_count exceeds relationship support")
+        if (
+            self.infeasible_count + self.observed_only_residual_exceedance_count
+            > self.support_count
+        ):
+            raise ValueError(
+                "classified residual counts exceed relationship support"
+            )
         for name in (
             "pre_residual_max",
             "pre_residual_mean",
@@ -992,7 +1024,7 @@ class CrossCurrencyRelationshipSupportV1:
             )
 
     def to_dict(self) -> dict[str, JSONValue]:
-        return {
+        payload: dict[str, JSONValue] = {
             "schema_version": self.schema_version,
             "relationship_id": self.relationship_id,
             "support_count": self.support_count,
@@ -1004,11 +1036,16 @@ class CrossCurrencyRelationshipSupportV1:
             "post_residual_mean": self.post_residual_mean,
             "allowed_residual_max": self.allowed_residual_max,
         }
+        if self.observed_only_residual_exceedance_count:
+            payload["observed_only_residual_exceedance_count"] = (
+                self.observed_only_residual_exceedance_count
+            )
+        return payload
 
     @classmethod
     def from_dict(
         cls, data: Mapping[str, Any]
-    ) -> "CrossCurrencyRelationshipSupportV1":
+    ) -> CrossCurrencyRelationshipSupportV1:
         return cls(
             relationship_id=str(data.get("relationship_id", "")),
             support_count=_strict_int(
@@ -1025,6 +1062,10 @@ class CrossCurrencyRelationshipSupportV1:
             post_residual_max=float(data.get("post_residual_max", 0.0)),
             post_residual_mean=float(data.get("post_residual_mean", 0.0)),
             allowed_residual_max=float(data.get("allowed_residual_max", 0.0)),
+            observed_only_residual_exceedance_count=_strict_int(
+                data.get("observed_only_residual_exceedance_count", 0),
+                "observed_only_residual_exceedance_count",
+            ),
             schema_version=str(data.get("schema_version", "")),
         )
 
@@ -1041,6 +1082,7 @@ class CrossCurrencyResidualSliceV1:
     infeasible_count: int
     pre_residual_max: float
     post_residual_max: float
+    observed_only_residual_exceedance_count: int = 0
     schema_version: str = CROSS_CURRENCY_RESIDUAL_SLICE_SCHEMA_VERSION
 
     def __post_init__(self) -> None:
@@ -1055,17 +1097,27 @@ class CrossCurrencyResidualSliceV1:
         if self.dimension not in {"session", "event", "feed_epoch"}:
             raise ValueError("unsupported residual slice dimension")
         object.__setattr__(self, "key", _normalized_key(self.key, "key"))
-        for name in ("support_count", "projected_count", "infeasible_count"):
+        for name in (
+            "support_count",
+            "projected_count",
+            "infeasible_count",
+            "observed_only_residual_exceedance_count",
+        ):
             object.__setattr__(
                 self, name, _nonnegative_int(getattr(self, name), name)
             )
+        if (
+            self.infeasible_count + self.observed_only_residual_exceedance_count
+            > self.support_count
+        ):
+            raise ValueError("classified residual counts exceed slice support")
         for name in ("pre_residual_max", "post_residual_max"):
             object.__setattr__(
                 self, name, _nonnegative_finite_float(getattr(self, name), name)
             )
 
     def to_dict(self) -> dict[str, JSONValue]:
-        return {
+        payload: dict[str, JSONValue] = {
             "schema_version": self.schema_version,
             "relationship_id": self.relationship_id,
             "dimension": self.dimension,
@@ -1076,11 +1128,14 @@ class CrossCurrencyResidualSliceV1:
             "pre_residual_max": self.pre_residual_max,
             "post_residual_max": self.post_residual_max,
         }
+        if self.observed_only_residual_exceedance_count:
+            payload["observed_only_residual_exceedance_count"] = (
+                self.observed_only_residual_exceedance_count
+            )
+        return payload
 
     @classmethod
-    def from_dict(
-        cls, data: Mapping[str, Any]
-    ) -> "CrossCurrencyResidualSliceV1":
+    def from_dict(cls, data: Mapping[str, Any]) -> CrossCurrencyResidualSliceV1:
         return cls(
             relationship_id=str(data.get("relationship_id", "")),
             dimension=str(data.get("dimension", "")),
@@ -1096,6 +1151,10 @@ class CrossCurrencyResidualSliceV1:
             ),
             pre_residual_max=float(data.get("pre_residual_max", 0.0)),
             post_residual_max=float(data.get("post_residual_max", 0.0)),
+            observed_only_residual_exceedance_count=_strict_int(
+                data.get("observed_only_residual_exceedance_count", 0),
+                "observed_only_residual_exceedance_count",
+            ),
             schema_version=str(data.get("schema_version", "")),
         )
 
@@ -1122,6 +1181,10 @@ class CrossCurrencyValidationReportV1:
     observed_event_count: int
     anchor_preserved: bool
     output_content_sha256: str
+    join_policy: CrossCurrencyJoinPolicy = (
+        CrossCurrencyJoinPolicy.EXACT_EVENT_TIME_NO_FORWARD_FILL
+    )
+    nearest_prior_max_age_ns: int = 0
     failure_reasons: tuple[str, ...] = ()
     validation_id: str = ""
     schema_version: str = CROSS_CURRENCY_VALIDATION_SCHEMA_VERSION
@@ -1148,6 +1211,25 @@ class CrossCurrencyValidationReportV1:
         object.__setattr__(
             self, "status", CrossCurrencyValidationStatus(self.status)
         )
+        join_policy = CrossCurrencyJoinPolicy(self.join_policy)
+        object.__setattr__(self, "join_policy", join_policy)
+        maximum_age = _nonnegative_int(
+            self.nearest_prior_max_age_ns,
+            "nearest_prior_max_age_ns",
+        )
+        if (
+            join_policy
+            is CrossCurrencyJoinPolicy.EXACT_EVENT_TIME_NO_FORWARD_FILL
+            and maximum_age
+        ):
+            raise ValueError("exact join cannot declare nearest-prior age")
+        if (
+            join_policy
+            is CrossCurrencyJoinPolicy.NEAREST_PRIOR_BOUNDED_NO_FORWARD_FILL
+            and maximum_age == 0
+        ):
+            raise ValueError("bounded nearest-prior join requires maximum age")
+        object.__setattr__(self, "nearest_prior_max_age_ns", maximum_age)
         supports = tuple(
             sorted(
                 self.relationship_support, key=lambda item: item.relationship_id
@@ -1199,7 +1281,7 @@ class CrossCurrencyValidationReportV1:
         return self.status is CrossCurrencyValidationStatus.PASSED
 
     def payload(self) -> dict[str, JSONValue]:
-        return {
+        payload: dict[str, JSONValue] = {
             "schema_version": self.schema_version,
             "run_id": self.run_id,
             "window_id": self.window_id,
@@ -1226,8 +1308,14 @@ class CrossCurrencyValidationReportV1:
             "anchor_preserved": self.anchor_preserved,
             "output_content_sha256": self.output_content_sha256,
             "failure_reasons": list(self.failure_reasons),
-            "join_policy": "exact_event_time_no_forward_fill",
+            "join_policy": self.join_policy.value,
         }
+        if (
+            self.join_policy
+            is CrossCurrencyJoinPolicy.NEAREST_PRIOR_BOUNDED_NO_FORWARD_FILL
+        ):
+            payload["nearest_prior_max_age_ns"] = self.nearest_prior_max_age_ns
+        return payload
 
     def to_dict(self) -> dict[str, JSONValue]:
         return {**self.payload(), "validation_id": self.validation_id}
@@ -1235,7 +1323,7 @@ class CrossCurrencyValidationReportV1:
     @classmethod
     def from_dict(
         cls, data: Mapping[str, Any]
-    ) -> "CrossCurrencyValidationReportV1":
+    ) -> CrossCurrencyValidationReportV1:
         return cls(
             run_id=str(data.get("run_id", "")),
             window_id=str(data.get("window_id", "")),
@@ -1277,6 +1365,18 @@ class CrossCurrencyValidationReportV1:
             ),
             anchor_preserved=bool(data.get("anchor_preserved")),
             output_content_sha256=str(data.get("output_content_sha256", "")),
+            join_policy=CrossCurrencyJoinPolicy(
+                str(
+                    data.get(
+                        "join_policy",
+                        CrossCurrencyJoinPolicy.EXACT_EVENT_TIME_NO_FORWARD_FILL.value,
+                    )
+                )
+            ),
+            nearest_prior_max_age_ns=_strict_int(
+                data.get("nearest_prior_max_age_ns", 0),
+                "nearest_prior_max_age_ns",
+            ),
             failure_reasons=_string_tuple(data.get("failure_reasons")),
             validation_id=str(data.get("validation_id", "")),
             schema_version=str(data.get("schema_version", "")),
@@ -1348,7 +1448,7 @@ class CrossCurrencyReconciledGroupV1:
             self, "input_stream_ids", dict(sorted(input_ids.items()))
         )
         if not isinstance(self.config, CrossCurrencyReconciliationConfigV1):
-            raise ValueError("reconciled group requires a v1 config")
+            raise TypeError("reconciled group requires a v1 config")
         object.__setattr__(
             self, "condition_ids", _normalized_text_tuple(self.condition_ids)
         )
@@ -1463,7 +1563,7 @@ class CrossCurrencyReconciledGroupV1:
     @classmethod
     def from_dict(
         cls, data: Mapping[str, Any]
-    ) -> "CrossCurrencyReconciledGroupV1":
+    ) -> CrossCurrencyReconciledGroupV1:
         return cls(
             run_id=str(data.get("run_id", "")),
             window_id=str(data.get("window_id", "")),
@@ -1498,7 +1598,7 @@ class CrossCurrencyReconciledGroupV1:
         )
 
     @classmethod
-    def from_json(cls, text: str) -> "CrossCurrencyReconciledGroupV1":
+    def from_json(cls, text: str) -> CrossCurrencyReconciledGroupV1:
         return cls.from_dict(_json_mapping(text))
 
     def validate_atomic_manifest(
@@ -1508,6 +1608,15 @@ class CrossCurrencyReconciledGroupV1:
         post_broker_validation: CrossCurrencyValidationReportV1,
     ) -> None:
         """Require a complete final validation before any group commit."""
+        if (
+            post_broker_validation.join_policy
+            is not self.generation_validation.join_policy
+            or post_broker_validation.nearest_prior_max_age_ns
+            != self.generation_validation.nearest_prior_max_age_ns
+        ):
+            raise ValueError(
+                "post-broker join contract differs from generation"
+            )
         validate_cross_currency_atomic_manifest(
             window_scope=(
                 self.run_id,
@@ -1529,6 +1638,15 @@ class _ResidualAccumulator:
     allowed: list[float] = field(default_factory=list)
     projected_count: int = 0
     infeasible_count: int = 0
+    observed_only_residual_exceedance_count: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class _RelationshipMatch:
+    """One deterministic exact or bounded-nearest relationship probe."""
+
+    probe_time_ns: int
+    event_ids: tuple[str, ...]
 
 
 def reconcile_cross_currency_window(
@@ -1538,9 +1656,17 @@ def reconcile_cross_currency_window(
     streams: Mapping[str, SyntheticEventStreamV1 | None],
     config: CrossCurrencyReconciliationConfigV1,
     conditions: Iterable[CrossCurrencyConditionV1] = (),
+    join_policy: CrossCurrencyJoinPolicy = (
+        CrossCurrencyJoinPolicy.EXACT_EVENT_TIME_NO_FORWARD_FILL
+    ),
+    nearest_prior_max_age_ns: int = 0,
 ) -> CrossCurrencyReconciledGroupV1:
-    """Reconcile one complete event-time group with no forward-filled joins."""
+    """Reconcile one complete group under an explicit no-forward-fill join."""
     _validate_run_window_config(run, window, config)
+    join_policy, nearest_prior_max_age_ns = _normalized_join_contract(
+        join_policy,
+        nearest_prior_max_age_ns,
+    )
     condition_tuple = _normalized_conditions(conditions)
     available, missing = _normalized_stream_inputs(run, window, streams)
     input_stream_ids = {
@@ -1555,6 +1681,8 @@ def reconcile_cross_currency_window(
             streams=tuple(available.values()),
             reasons=tuple(f"missing_symbol:{symbol}" for symbol in missing),
             anchor_preserved=True,
+            join_policy=join_policy,
+            nearest_prior_max_age_ns=nearest_prior_max_age_ns,
         )
         return CrossCurrencyReconciledGroupV1(
             run_id=run.run_id,
@@ -1591,24 +1719,44 @@ def reconcile_cross_currency_window(
             available,
             events,
             window,
+            join_policy=join_policy,
+            nearest_prior_max_age_ns=nearest_prior_max_age_ns,
         )
         if not matches:
-            failures.append(
-                f"relationship_no_exact_event_time_support:"
-                f"{relationship.relationship_id}"
+            unsupported = (
+                "relationship_no_exact_event_time_support"
+                if join_policy
+                is CrossCurrencyJoinPolicy.EXACT_EVENT_TIME_NO_FORWARD_FILL
+                else "relationship_no_bounded_nearest_event_time_support"
             )
+            failures.append(f"{unsupported}:{relationship.relationship_id}")
             continue
-        for matched in matches:
+        for match in matches:
+            matched = tuple(
+                events[symbol][event_id]
+                for symbol, event_id in zip(
+                    relationship.symbols,
+                    match.event_ids,
+                    strict=True,
+                )
+            )
             pre = _relationship_residual(relationship, matched)
             allowed = _allowed_residual(relationship, matched, config)
             projected = False
             infeasible = False
+            observed_only_exceeded = False
             post = pre
             if pre > config.residual_tolerance:
                 target_symbols = _projection_symbols(relationship, matched)
                 if not target_symbols:
                     if pre > allowed:
-                        infeasible = True
+                        if (
+                            config.engine_version
+                            in OBSERVED_ONLY_NONBLOCKING_ENGINE_VERSIONS
+                        ):
+                            observed_only_exceeded = True
+                        else:
+                            infeasible = True
                 else:
                     for target_symbol in target_symbols:
                         target_index = relationship.symbols.index(target_symbol)
@@ -1643,7 +1791,9 @@ def reconcile_cross_currency_window(
                         )
                         if candidate_post > post_allowed:
                             continue
-                        events[target_symbol][original.event_id] = replacement
+                        events[target_symbol][
+                            match.event_ids[target_index]
+                        ] = replacement
                         matched = projected_tuple
                         post = candidate_post
                         allowed = post_allowed
@@ -1651,7 +1801,7 @@ def reconcile_cross_currency_window(
                         condition_ids = tuple(
                             item.condition_id
                             for item in condition_tuple
-                            if item.covers(original.event_time_ns)
+                            if item.covers(match.probe_time_ns)
                         )
                         lineage.append(
                             CrossCurrencyProjectionLineageV1(
@@ -1685,16 +1835,18 @@ def reconcile_cross_currency_window(
                 failures.append(
                     f"infeasible_relationship_point:"
                     f"{relationship.relationship_id}:"
-                    f"{matched[0].event_time_ns}"
+                    f"{match.probe_time_ns}"
                 )
                 accumulator.infeasible_count += 1
             if projected:
                 accumulator.projected_count += 1
+            if observed_only_exceeded:
+                accumulator.observed_only_residual_exceedance_count += 1
             accumulator.pre.append(pre)
             accumulator.post.append(post)
             accumulator.allowed.append(allowed)
             for dimension, key in _condition_keys(
-                matched[0].event_time_ns,
+                match.probe_time_ns,
                 matched,
                 condition_tuple,
             ).items():
@@ -1706,6 +1858,9 @@ def reconcile_cross_currency_window(
                 slice_acc.allowed.append(allowed)
                 slice_acc.projected_count += int(projected)
                 slice_acc.infeasible_count += int(infeasible)
+                slice_acc.observed_only_residual_exceedance_count += int(
+                    observed_only_exceeded
+                )
 
     output_streams = tuple(
         SyntheticEventStreamV1(
@@ -1730,6 +1885,8 @@ def reconcile_cross_currency_window(
         slices=slices,
         anchor_preserved=anchor_preserved,
         failures=failures,
+        join_policy=join_policy,
+        nearest_prior_max_age_ns=nearest_prior_max_age_ns,
     )
     status = (
         CrossCurrencyGroupStatus.RECONCILED
@@ -1762,9 +1919,17 @@ def validate_cross_currency_output(
     stage: CrossCurrencyValidationStage,
     observed_anchors: Iterable[SyntheticEventV1],
     conditions: Iterable[CrossCurrencyConditionV1] = (),
+    join_policy: CrossCurrencyJoinPolicy = (
+        CrossCurrencyJoinPolicy.EXACT_EVENT_TIME_NO_FORWARD_FILL
+    ),
+    nearest_prior_max_age_ns: int = 0,
 ) -> CrossCurrencyValidationReportV1:
     """Validate generation output or the mandatory post-broker output."""
     _validate_run_window_config(run, window, config)
+    join_policy, nearest_prior_max_age_ns = _normalized_join_contract(
+        join_policy,
+        nearest_prior_max_age_ns,
+    )
     condition_tuple = _normalized_conditions(conditions)
     available, missing = _normalized_stream_inputs(run, window, streams)
     failures = [f"missing_symbol:{symbol}" for symbol in missing]
@@ -1793,29 +1958,54 @@ def validate_cross_currency_output(
                 available,
                 event_maps,
                 window,
+                join_policy=join_policy,
+                nearest_prior_max_age_ns=nearest_prior_max_age_ns,
             )
             if not matches:
-                failures.append(
-                    f"relationship_no_exact_event_time_support:"
-                    f"{relationship.relationship_id}"
+                unsupported = (
+                    "relationship_no_exact_event_time_support"
+                    if join_policy
+                    is CrossCurrencyJoinPolicy.EXACT_EVENT_TIME_NO_FORWARD_FILL
+                    else "relationship_no_bounded_nearest_event_time_support"
                 )
+                failures.append(f"{unsupported}:{relationship.relationship_id}")
                 continue
-            for matched in matches:
+            for match in matches:
+                matched = tuple(
+                    event_maps[symbol][event_id]
+                    for symbol, event_id in zip(
+                        relationship.symbols,
+                        match.event_ids,
+                        strict=True,
+                    )
+                )
                 residual = _relationship_residual(relationship, matched)
                 allowed = _allowed_residual(relationship, matched, config)
                 infeasible = residual > allowed
-                if infeasible:
+                observed_only_exceeded = (
+                    infeasible
+                    and all(
+                        item.origin is SyntheticEventOrigin.OBSERVED
+                        for item in matched
+                    )
+                    and config.engine_version
+                    in OBSERVED_ONLY_NONBLOCKING_ENGINE_VERSIONS
+                )
+                if observed_only_exceeded:
+                    infeasible = False
+                    accumulator.observed_only_residual_exceedance_count += 1
+                elif infeasible:
                     failures.append(
                         f"relationship_residual_exceeded:"
                         f"{relationship.relationship_id}:"
-                        f"{matched[0].event_time_ns}"
+                        f"{match.probe_time_ns}"
                     )
                     accumulator.infeasible_count += 1
                 accumulator.pre.append(residual)
                 accumulator.post.append(residual)
                 accumulator.allowed.append(allowed)
                 for dimension, key in _condition_keys(
-                    matched[0].event_time_ns,
+                    match.probe_time_ns,
                     matched,
                     condition_tuple,
                 ).items():
@@ -1826,6 +2016,9 @@ def validate_cross_currency_output(
                     slice_acc.post.append(residual)
                     slice_acc.allowed.append(allowed)
                     slice_acc.infeasible_count += int(infeasible)
+                    slice_acc.observed_only_residual_exceedance_count += int(
+                        observed_only_exceeded
+                    )
     return _validation_report(
         run=run,
         window=window,
@@ -1836,6 +2029,8 @@ def validate_cross_currency_output(
         slices=slices,
         anchor_preserved=anchor_preserved,
         failures=failures,
+        join_policy=join_policy,
+        nearest_prior_max_age_ns=nearest_prior_max_age_ns,
     )
 
 
@@ -1955,6 +2150,8 @@ def _validation_report(
     slices: Mapping[tuple[str, str, str], _ResidualAccumulator],
     anchor_preserved: bool,
     failures: Iterable[str],
+    join_policy: CrossCurrencyJoinPolicy,
+    nearest_prior_max_age_ns: int,
 ) -> CrossCurrencyValidationReportV1:
     topology = _event_time_topology(streams, window)
     reasons = _bounded_failure_reasons(failures)
@@ -1972,6 +2169,9 @@ def _validation_report(
             infeasible_count=accumulator.infeasible_count,
             pre_residual_max=max(accumulator.pre, default=0.0),
             post_residual_max=max(accumulator.post, default=0.0),
+            observed_only_residual_exceedance_count=(
+                accumulator.observed_only_residual_exceedance_count
+            ),
         )
         for (relationship_id, dimension, key), accumulator in sorted(
             slices.items()
@@ -2002,6 +2202,8 @@ def _validation_report(
         ),
         anchor_preserved=anchor_preserved,
         output_content_sha256=_streams_content_sha256(streams),
+        join_policy=join_policy,
+        nearest_prior_max_age_ns=nearest_prior_max_age_ns,
         failure_reasons=reasons,
     )
 
@@ -2031,6 +2233,8 @@ def _failed_validation(
     streams: tuple[SyntheticEventStreamV1, ...],
     reasons: tuple[str, ...],
     anchor_preserved: bool,
+    join_policy: CrossCurrencyJoinPolicy,
+    nearest_prior_max_age_ns: int,
 ) -> CrossCurrencyValidationReportV1:
     return _validation_report(
         run=run,
@@ -2042,6 +2246,8 @@ def _failed_validation(
         slices={},
         anchor_preserved=anchor_preserved,
         failures=reasons,
+        join_policy=join_policy,
+        nearest_prior_max_age_ns=nearest_prior_max_age_ns,
     )
 
 
@@ -2059,6 +2265,9 @@ def _relationship_support(
         post_residual_max=max(accumulator.post, default=0.0),
         post_residual_mean=_mean(accumulator.post),
         allowed_residual_max=max(accumulator.allowed, default=0.0),
+        observed_only_residual_exceedance_count=(
+            accumulator.observed_only_residual_exceedance_count
+        ),
     )
 
 
@@ -2112,7 +2321,7 @@ def _normalized_conditions(
 ) -> tuple[CrossCurrencyConditionV1, ...]:
     normalized = tuple(
         sorted(
-            tuple(conditions),
+            conditions,
             key=lambda item: (item.start_ns, item.end_ns, item.condition_id),
         )
     )
@@ -2128,33 +2337,140 @@ def _relationship_matches(
     streams: Mapping[str, SyntheticEventStreamV1],
     current: Mapping[str, Mapping[str, SyntheticEventV1]],
     window: ReconstructionWindowV1,
-) -> tuple[tuple[SyntheticEventV1, ...], ...]:
-    indexed: dict[str, dict[int, list[SyntheticEventV1]]] = {}
+    *,
+    join_policy: CrossCurrencyJoinPolicy,
+    nearest_prior_max_age_ns: int,
+) -> tuple[_RelationshipMatch, ...]:
+    indexed: dict[str, dict[int, list[str]]] = {}
+    ordered: dict[str, tuple[tuple[int, int, str], ...]] = {}
     for symbol in relationship.symbols:
-        by_time: dict[int, list[SyntheticEventV1]] = defaultdict(list)
+        by_time: dict[int, list[str]] = defaultdict(list)
+        rows: list[tuple[int, int, str]] = []
         for original in streams[symbol].events:
             event = current[symbol][original.event_id]
             if window.owns_event_time(event.event_time_ns):
-                by_time[event.event_time_ns].append(event)
+                by_time[event.event_time_ns].append(original.event_id)
+                rows.append(
+                    (
+                        event.event_time_ns,
+                        event.event_sequence,
+                        original.event_id,
+                    )
+                )
         for values in by_time.values():
-            values.sort(key=lambda item: (item.event_sequence, item.event_id))
+            values.sort(
+                key=lambda event_id: (
+                    current[symbol][event_id].event_sequence,
+                    event_id,
+                )
+            )
         indexed[symbol] = by_time
+        ordered[symbol] = tuple(sorted(rows))
+    if (
+        join_policy
+        is CrossCurrencyJoinPolicy.NEAREST_PRIOR_BOUNDED_NO_FORWARD_FILL
+    ):
+        return _bounded_nearest_relationship_matches(
+            relationship,
+            ordered,
+            nearest_prior_max_age_ns=nearest_prior_max_age_ns,
+        )
     common_times = set.intersection(
         *(set(indexed[symbol]) for symbol in relationship.symbols)
     )
-    matches: list[tuple[SyntheticEventV1, ...]] = []
+    matches: list[_RelationshipMatch] = []
     for timestamp in sorted(common_times):
         count = min(
             len(indexed[symbol][timestamp]) for symbol in relationship.symbols
         )
         for ordinal in range(count):
             matches.append(
-                tuple(
-                    indexed[symbol][timestamp][ordinal]
-                    for symbol in relationship.symbols
+                _RelationshipMatch(
+                    probe_time_ns=timestamp,
+                    event_ids=tuple(
+                        indexed[symbol][timestamp][ordinal]
+                        for symbol in relationship.symbols
+                    ),
                 )
             )
     return tuple(matches)
+
+
+def _bounded_nearest_relationship_matches(
+    relationship: CrossCurrencyRelationshipV1,
+    ordered: Mapping[str, tuple[tuple[int, int, str], ...]],
+    *,
+    nearest_prior_max_age_ns: int,
+) -> tuple[_RelationshipMatch, ...]:
+    """Select the maximum-support probe leg and bounded prior events."""
+    times = {
+        symbol: tuple(item[0] for item in rows)
+        for symbol, rows in ordered.items()
+    }
+
+    def supported_probe_count(symbol: str) -> int:
+        support = 0
+        for probe_time, _sequence, _event_id in ordered[symbol]:
+            if all(
+                (index := bisect_right(times[member], probe_time) - 1) >= 0
+                and probe_time - times[member][index]
+                <= nearest_prior_max_age_ns
+                for member in relationship.symbols
+            ):
+                support += 1
+        return support
+
+    probe_symbol = min(
+        relationship.symbols,
+        key=lambda symbol: (
+            -supported_probe_count(symbol),
+            len(ordered[symbol]),
+            symbol,
+        ),
+    )
+    matches: list[_RelationshipMatch] = []
+    for probe_time, _sequence, _event_id in ordered[probe_symbol]:
+        selected: list[str] = []
+        for symbol in relationship.symbols:
+            index = bisect_right(times[symbol], probe_time) - 1
+            if index < 0:
+                break
+            selected_time, _selected_sequence, selected_event_id = ordered[
+                symbol
+            ][index]
+            if probe_time - selected_time > nearest_prior_max_age_ns:
+                break
+            selected.append(selected_event_id)
+        if len(selected) == len(relationship.symbols):
+            matches.append(
+                _RelationshipMatch(
+                    probe_time_ns=probe_time,
+                    event_ids=tuple(selected),
+                )
+            )
+    return tuple(matches)
+
+
+def _normalized_join_contract(
+    join_policy: CrossCurrencyJoinPolicy,
+    nearest_prior_max_age_ns: int,
+) -> tuple[CrossCurrencyJoinPolicy, int]:
+    policy = CrossCurrencyJoinPolicy(join_policy)
+    maximum_age = _nonnegative_int(
+        nearest_prior_max_age_ns,
+        "nearest_prior_max_age_ns",
+    )
+    if (
+        policy is CrossCurrencyJoinPolicy.EXACT_EVENT_TIME_NO_FORWARD_FILL
+        and maximum_age
+    ):
+        raise ValueError("exact join cannot declare nearest-prior age")
+    if (
+        policy is CrossCurrencyJoinPolicy.NEAREST_PRIOR_BOUNDED_NO_FORWARD_FILL
+        and maximum_age == 0
+    ):
+        raise ValueError("bounded nearest-prior join requires maximum age")
+    return policy, maximum_age
 
 
 def _relationship_residual(
@@ -2453,7 +2769,7 @@ def _optional_text(value: str | None) -> str | None:
 
 def _int64(value: int, name: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int):
-        raise ValueError(f"{name} must be an integer")
+        raise TypeError(f"{name} must be an integer")
     if not -(2**63) <= value <= (2**63 - 1):
         raise ValueError(f"{name} exceeds int64 bounds")
     return value
@@ -2461,7 +2777,7 @@ def _int64(value: int, name: str) -> int:
 
 def _strict_int(value: object, name: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int):
-        raise ValueError(f"{name} must be an integer")
+        raise TypeError(f"{name} must be an integer")
     return value
 
 
@@ -2488,13 +2804,13 @@ def _string_tuple(value: object) -> tuple[str, ...]:
     if value is None:
         return ()
     if isinstance(value, (str, bytes)) or not isinstance(value, Sequence):
-        raise ValueError("expected a sequence of strings")
+        raise TypeError("expected a sequence of strings")
     return tuple(str(item) for item in value)
 
 
 def _mapping(value: object) -> Mapping[str, Any]:
     if not isinstance(value, Mapping):
-        raise ValueError("expected a mapping")
+        raise TypeError("expected a mapping")
     return cast(Mapping[str, Any], value)
 
 
@@ -2505,7 +2821,7 @@ def _mapping_sequence(
     if value is None:
         return ()
     if isinstance(value, (str, bytes)) or not isinstance(value, Sequence):
-        raise ValueError(f"{name} must be a sequence")
+        raise TypeError(f"{name} must be a sequence")
     return tuple(_mapping(item) for item in value)
 
 

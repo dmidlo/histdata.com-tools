@@ -21,13 +21,15 @@ import math
 import os
 import re
 import statistics
-import time
 import tempfile
+import time
 import zipfile
 from collections import Counter, defaultdict
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
-from datetime import date, datetime, time as datetime_time, timedelta, timezone
+from datetime import date, datetime
+from datetime import time as datetime_time
+from datetime import timedelta, timezone
 from enum import Enum
 from pathlib import Path
 from typing import Any, Protocol, cast
@@ -236,6 +238,7 @@ class CftcPositioningQueryStatus(str, Enum):
     """Fail-closed latest-known-state query outcome."""
 
     READY = "ready"
+    PRE_COVERAGE = "pre_coverage"
     MISSING = "missing"
     STALE = "stale"
     NOT_AVAILABLE = "not_available_as_of"
@@ -2718,6 +2721,7 @@ def query_cftc_positioning_corpus(
     mapping_kinds: dict[str, str] = {}
     ages: dict[str, int] = {}
     missing: list[str] = []
+    precoverage: list[str] = []
     unavailable: list[str] = []
     restatement_incomplete: list[str] = []
     stale: list[str] = []
@@ -2732,21 +2736,30 @@ def query_cftc_positioning_corpus(
                 continue
             for scope in scopes:
                 for code in codes:
+                    all_matching = tuple(
+                        item
+                        for item in corpus.snapshots
+                        if item.report_family is family
+                        and item.report_scope is scope
+                        and item.contract_code == code
+                    )
                     candidates = sorted(
                         (
                             item
-                            for item in corpus.snapshots
-                            if item.report_family is family
-                            and item.report_scope is scope
-                            and item.contract_code == code
-                            and item.measurement_start_ns <= start_ns
+                            for item in all_matching
+                            if item.measurement_start_ns <= start_ns
                         ),
                         key=lambda item: item.measurement_start_ns,
                         reverse=True,
                     )
                     seam = f"{symbol}/{family.value}/{scope.value}/{code}"
                     if not candidates:
-                        missing.append(seam)
+                        if all_matching and start_ns < min(
+                            item.measurement_start_ns for item in all_matching
+                        ):
+                            precoverage.append(seam)
+                        else:
+                            missing.append(seam)
                         continue
                     if mode is InformationMode.EX_ANTE_SIMULATION:
                         time_eligible = [
@@ -2804,9 +2817,16 @@ def query_cftc_positioning_corpus(
         reason = "positioning state exceeds staleness limit: " + ", ".join(
             sorted(stale)
         )
-    elif missing or not complete_symbols:
+    elif precoverage and not missing and not complete_symbols:
+        status = CftcPositioningQueryStatus.PRE_COVERAGE
+        reason = "positioning state predates corpus coverage: " + ", ".join(
+            sorted(precoverage)
+        )
+    elif missing or precoverage or not complete_symbols:
         status = CftcPositioningQueryStatus.MISSING
-        reason = "positioning state missing: " + ", ".join(sorted(missing))
+        reason = "positioning state missing: " + ", ".join(
+            sorted((*missing, *precoverage))
+        )
     else:
         status = CftcPositioningQueryStatus.READY
         reason = "ready"
@@ -3549,7 +3569,7 @@ def _archive_rows(content: bytes) -> Iterable[Mapping[str, str]]:
 
 
 def _peak_memory_bytes() -> int:
-    return peak_rss_bytes()
+    return int(peak_rss_bytes())
 
 
 def _derive_query_values(

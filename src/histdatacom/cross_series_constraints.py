@@ -1618,6 +1618,16 @@ def cross_series_constraint_use(
     )
     has_relevant = bool(relevant)
     eligible = has_relevant and not bool(critical)
+    selected_triangle_alignments = tuple(
+        item.alignment.policy.value
+        for item in relevant
+        if item.relation_kind is CrossSeriesRelationKind.TRIANGLE
+        and item.status
+        in {
+            CrossSeriesConstraintStatus.READY,
+            CrossSeriesConstraintStatus.LIMITED,
+        }
+    )
     effects: dict[str, JSONScalar] = {
         "normal_training_eligible": eligible,
         "anomaly_label_eligible": bool(critical) or limited_count > 0,
@@ -1626,7 +1636,17 @@ def cross_series_constraint_use(
         "reconciliation_eligible": eligible,
         "validation_eligible": eligible,
         "synchronized_proposal_required": True,
-        "exact_event_time_reconciliation_required": True,
+        "exact_event_time_reconciliation_required": bool(
+            selected_triangle_alignments
+        )
+        and all(
+            value == CrossSeriesAlignmentPolicy.EXACT_EVENT_SEQUENCE.value
+            for value in selected_triangle_alignments
+        ),
+        "bounded_nearest_prior_reconciliation_applied": any(
+            value == CrossSeriesAlignmentPolicy.NEAREST_PRIOR_BOUNDED.value
+            for value in selected_triangle_alignments
+        ),
         "max_staleness_ns": selected.max_staleness_ns,
         "contradictory_window_count": contradiction_count,
         "limited_window_count": limited_count,
@@ -2122,14 +2142,33 @@ def _nearest_prior_alignment(
         symbol: tuple(sorted(events, key=_event_order_key))
         for symbol, events in events_by_symbol.items()
     }
-    probe_symbol = min(
-        ordered, key=lambda symbol: (len(ordered[symbol]), symbol)
-    )
-    probes = ordered[probe_symbol]
     times = {
         symbol: tuple(_event_time_ns(item) for item in events)
         for symbol, events in ordered.items()
     }
+
+    def supported_probe_count(symbol: str) -> int:
+        support = 0
+        for probe in ordered[symbol]:
+            probe_time = _event_time_ns(probe)
+            if all(
+                (index := bisect_right(times[member], probe_time) - 1) >= 0
+                and probe_time - times[member][index]
+                <= policy.nearest_prior_max_age_ns
+                for member in sorted(ordered)
+            ):
+                support += 1
+        return support
+
+    probe_symbol = min(
+        ordered,
+        key=lambda symbol: (
+            -supported_probe_count(symbol),
+            len(ordered[symbol]),
+            symbol,
+        ),
+    )
+    probes = ordered[probe_symbol]
     digest = hashlib.sha256()
     sample_ids: list[str] = []
     ages: list[int] = []
@@ -2311,7 +2350,7 @@ def _triangle_status(
     if nearest.support_count >= policy.minimum_alignment_support:
         return CrossSeriesConstraintStatus.LIMITED, (
             "exact_triangle_support_sparse",
-            "bounded_nearest_prior_support_is_diagnostic_only",
+            "bounded_nearest_prior_alignment_selected",
         )
     return CrossSeriesConstraintStatus.INSUFFICIENT, (
         "triangle_alignment_support_below_policy",

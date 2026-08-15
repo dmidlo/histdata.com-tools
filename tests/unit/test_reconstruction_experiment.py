@@ -56,6 +56,7 @@ def test_implementation_identity_covers_plan_runtime_api_and_science() -> None:
         "histdatacom.reconstruction",
         "histdatacom.reconstruction_schema",
         "histdatacom.synthetic.benchmark_corpus",
+        "histdatacom.synthetic.cross_currency",
         "histdatacom.synthetic.marked_hawkes",
         "histdatacom.synthetic.qualification",
         "histdatacom.synthetic.reconstruction_handlers",

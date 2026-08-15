@@ -45,7 +45,11 @@ inverse:  left * right ~= 1
 Each relationship declares a deterministic projection priority. The EURUSD
 triangle projects EURGBP first, then EURUSD, then GBPUSD. Only synthetic events
 are eligible. If every event at a supported point is observed, the quotes stay
-unchanged even when the relationship is infeasible.
+unchanged even when the relationship is infeasible. Beginning with engine 1.2,
+that inherited source residual is counted explicitly as
+`observed_only_residual_exceedance_count`; it is not misclassified as a
+synthetic-output failure. This preserves source defects as evidence while
+preventing reconstruction from claiming it repaired them.
 
 Projection changes the complete executable bid/ask envelope, not just the
 midpoint. Triangle bid uses `numerator.bid / denominator.ask`; triangle ask uses
@@ -62,15 +66,25 @@ rounding precision are versioned in
 `CrossCurrencyReconciliationConfigV1`. A required midpoint move beyond the hard
 limit refuses the group. It is never clipped to a more convenient value.
 
-## Exact event-time support
+## Explicit event-time support
 
-Reconciliation does not forward-fill, backward-fill, or interpolate another
-instrument merely to manufacture simultaneous support.
+Exact event time remains the default and the only policy used by legacy 1.0.1
+configuration artifacts. Events are compared only when every leg has the exact
+same nanosecond event time. Multiple events at one timestamp are paired by
+`(event_sequence, event_id)` ordinal.
 
-Events are compared only when every leg has the exact same nanosecond event
-time. Multiple events at one timestamp are paired by `(event_sequence,
-event_id)` ordinal. Excess duplicates and asynchronous timestamps remain in
-their original symbol streams and are counted in topology evidence.
+The 1.1 and later runtimes can additionally consume the planner's content-bound
+`nearest_prior_bounded` decision. It deterministically chooses the probe leg
+with maximum valid support, then selects only events at or before each probe
+whose age does not exceed the declared limit. The current HistData triangle
+limit is five seconds. Future observations are never used, the bound cannot be
+silently widened, and a window with no bounded match refuses.
+
+The output validation report records `join_policy` and
+`nearest_prior_max_age_ns`. Generation and final validation must use the same
+contract. Excess duplicates and asynchronous timestamps remain in their
+original symbol streams and are counted in topology evidence; alignment does
+not manufacture or retimestamp events.
 
 The validation report includes union/common/asynchronous timestamp counts,
 duplicate-event counts, and stale-forward-fill risk runs. The risk metric
@@ -86,14 +100,19 @@ source lineage must match byte-for-byte at the contract level.
 The group refuses when:
 
 - a required symbol stream is missing;
-- a relationship has no exact event-time support;
-- an observed-only residual exceeds its spread-aware tolerance;
+- a relationship has no support under its exact or explicitly bounded join;
+- a residual involving at least one synthetic event still exceeds its
+  spread-aware tolerance after permitted projection;
 - the required synthetic projection exceeds its configured hard limit;
 - a projected quote would be invalid; or
 - post-projection validation or anchor preservation fails.
 
 Refused results retain the available unchanged streams and bounded failure
 reasons. They cannot be presented as partially successful triangle products.
+Observed-only residual exceedances remain immutable, nonblocking source-quality
+evidence in the relationship and conditioned-slice summaries. They never
+authorize an observed quote mutation, and they do not excuse an incoherent
+synthetic quote.
 
 ## Conditioned residual evidence
 
@@ -102,8 +121,9 @@ event, and feed-epoch keys. Every supported relationship point contributes to
 all three dimensions. If no external condition exists, the event's own
 feed-epoch IDs are used and other dimensions are marked `unclassified`.
 
-`CrossCurrencyResidualSliceV1` reports support, projections, infeasibility, and
-pre/post maximum residuals for each relationship/dimension/key. This keeps
+`CrossCurrencyResidualSliceV1` reports support, projections, synthetic-output
+infeasibility, observed-only exceedances, and pre/post maximum residuals for
+each relationship/dimension/key. This keeps
 coherence evidence stratified instead of hiding weak regimes behind one global
 average.
 
@@ -114,8 +134,8 @@ average.
 `CrossCurrencyReconciledGroupV1` is eligible to proceed to ensemble and broker
 conditioning, but it is not sufficient for publication.
 
-`validate_cross_currency_output()` uses the same exact-time, spread-aware,
-anchor-preserving rules at either of two explicit stages:
+`validate_cross_currency_output()` uses the same declared event-time,
+spread-aware, anchor-preserving rules at either of two explicit stages:
 
 ```text
 generation
@@ -130,6 +150,7 @@ IDs.
 `validate_cross_currency_atomic_manifest()` requires:
 
 - a passing `post_broker` validation;
+- the same join policy and bounded age used at generation;
 - identical run, window, synchronization-unit, member, and symbol scope;
 - one stream and manifest count for every symbol; and
 - an exact match between final stream content and validation content.
@@ -166,6 +187,7 @@ only the bounded validation and group metadata forward.
 - #447 maps these artifact boundaries onto retryable Temporal activities; see
   [`reconstruction-temporal-orchestration.md`](reconstruction-temporal-orchestration.md).
 
-Changing relationship meaning, projection priority semantics, event-time join
-policy, hard-limit interpretation, validation stages, or atomic gate behavior
-requires a new schema version.
+Removing or changing the meaning of an issued join policy, relationship,
+projection priority, hard-limit interpretation, validation stage, or atomic
+gate requires a new schema version. Additive policies must remain fail-closed
+for older readers and preserve replay of issued configuration identities.

@@ -11,6 +11,7 @@ recovered without referring to a vanished staging path.
 from __future__ import annotations
 
 import asyncio
+import gzip
 import hashlib
 import json
 import math
@@ -22,16 +23,20 @@ from bisect import bisect_left
 from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import replace
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, cast
 
 from histdatacom.cross_series_constraints import (
     CROSS_SERIES_CONSTRAINT_BUNDLE_ARTIFACT_KIND,
     CROSS_SERIES_CONSTRAINT_POLICY_ARTIFACT_KIND,
+    CrossSeriesAlignmentPolicy,
     CrossSeriesConstraintBundleV1,
     CrossSeriesConstraintPolicyV1,
+    CrossSeriesConstraintStatus,
     CrossSeriesConstraintUseStatus,
     CrossSeriesConstraintUseV1,
+    CrossSeriesRelationKind,
     CrossSeriesSourceBindingV1,
     compile_histdata_cross_series_constraints,
     cross_series_constraint_use,
@@ -43,6 +48,7 @@ from histdatacom.cross_series_constraints import (
 from histdatacom.data_analytics.feed_epochs_v2 import (
     read_active_time_feed_epoch_definition,
 )
+from histdatacom.datasets.adapters import HISTDATA_QUOTE_ORDER_PROJECTION_POLICY
 from histdatacom.market_context import (
     CftcPositioningQueryStatus,
     CftcPositioningQueryV1,
@@ -71,6 +77,7 @@ from histdatacom.orchestration.reconstruction import (
 from histdatacom.reconstruction_evidence import (
     HISTDATA_ENRICHED_CACHE_SCHEMA_VERSION,
     HISTDATA_LEGACY_CACHE_SCHEMA_VERSION,
+    HISTDATA_QUOTE_ORDER_PROJECTION_METRIC_ID,
     RECONSTRUCTION_EVIDENCE_PROJECTION_ARTIFACT_KIND,
     PointInTimeEvidenceProjectionV1,
     ReconstructionEvidencePolicyV1,
@@ -107,6 +114,7 @@ from histdatacom.synthetic.contracts import (
 from histdatacom.synthetic.cross_currency import (
     CrossCurrencyConditionV1,
     CrossCurrencyGroupStatus,
+    CrossCurrencyJoinPolicy,
     CrossCurrencyReconciledGroupV1,
     CrossCurrencyValidationStage,
     reconcile_cross_currency_window,
@@ -127,6 +135,9 @@ from histdatacom.synthetic.generation import (
     MotifGenerationDecision,
     MotifGenerationStatus,
     generate_empirical_motif_candidates,
+)
+from histdatacom.synthetic.historical_conditioning import (
+    historical_product_observation_conditioning,
 )
 from histdatacom.synthetic.information import (
     InformationAuditReportV1,
@@ -156,12 +167,18 @@ from histdatacom.synthetic.motifs import (
     reference_motif_condition_from_quotes,
     reference_session_for_ns,
 )
-from histdatacom.synthetic.observation import read_observation_operator_artifact
+from histdatacom.synthetic.observation import (
+    ObservationOperatorV1,
+    read_observation_operator_artifact,
+)
 from histdatacom.synthetic.persistence import (
     PublishedReconstructionV2,
+    PublishedReconstructionV3,
     ReconstructionProductManifestV2,
+    ReconstructionProductManifestV3,
     ReconstructionRetentionPlanV1,
     StagedReconstructionPublicationV2,
+    StagedReconstructionPublicationV3,
     commit_delivery_reconstruction_publication,
     stage_delivery_reconstruction_publication,
     verify_reconstruction_publication,
@@ -173,10 +190,17 @@ from histdatacom.synthetic.proposal_engines import (
     read_proposal_engine_fit_artifact,
 )
 from histdatacom.synthetic.reconstruction_plan import (
+    CFTC_READY_CONDITIONING_MODE,
+    CFTC_UNAVAILABLE_CONDITIONING_MODE,
+    CFTC_UNAVAILABLE_RUNTIME_DEPENDENCY,
+    CFTC_UNCONDITIONED_AVAILABILITY_STATUSES,
     FIRST_PARTY_RECONSTRUCTION_HANDLERS,
     ReconstructionPlanConfigurationV2,
+    ReconstructionPlanSourceSupportV1,
     ReconstructionStagePlanV1,
     load_reconstruction_stage_plan,
+    read_reconstruction_context_availability_qualification,
+    read_reconstruction_plan_source_support_map,
 )
 from histdatacom.synthetic.streaming import (
     CarryStateV1,
@@ -201,15 +225,15 @@ STAGING_DESCRIPTOR_ARTIFACT_KIND = "reconstruction_staging_descriptor_v2"
 _SOURCE_INPUT_STREAM_KIND = "reconstruction_observed_input_stream_v1"
 _SOURCE_CORE_STREAM_KIND = "reconstruction_observed_core_stream_v1"
 _CANDIDATE_STREAM_KIND = "reconstruction_candidate_stream_v1"
-_CANDIDATE_BATCH_LEDGER_KIND = "reconstruction_candidate_batch_ledger_v2"
+_CANDIDATE_BATCH_LEDGER_V2_KIND = "reconstruction_candidate_batch_ledger_v2"
+_CANDIDATE_BATCH_LEDGER_KIND = "reconstruction_candidate_batch_ledger_v3"
 _CARVED_STREAM_KIND = "reconstruction_carved_stream_v1"
-_CARVED_BATCH_LEDGER_KIND = "reconstruction_carved_batch_ledger_v2"
+_CARVED_BATCH_LEDGER_KIND = "reconstruction_carved_batch_ledger_v3"
 _CROSS_STREAM_KIND = "reconstruction_cross_reconciled_stream_v1"
 _DELIVERED_STREAM_KIND = "reconstruction_delivered_stream_v1"
 _MAX_CANDIDATE_BATCH_LEDGER_LINE_BYTES = 1_048_576
 _MAX_CARVED_BATCH_LEDGER_LINE_BYTES = 1_048_576
 _MAX_SYNCHRONIZATION_TIMESTAMP_PROBES = 4_096
-
 _SourceRow = tuple[int, float, float, str, int, str]
 _CachedPartitionEvidence = tuple[str, dict[int, dict[str, JSONScalar]], bool]
 
@@ -316,6 +340,11 @@ def source_enrichment_handler(
             plan,
             core_events,
         )
+        _require_planned_cross_series_support(
+            invocation,
+            plan,
+            cross_bundle,
+        )
         if cross_use.status is CrossSeriesConstraintUseStatus.REFUSED:
             return invocation.refused(
                 "source_cross_series_refused",
@@ -376,6 +405,7 @@ def source_enrichment_handler(
             "core_stream_refs": _refs_dict(core_refs),
             "market_context": context.to_dict(),
             "cftc_positioning": positioning.to_dict(),
+            "cftc_conditioning": _cftc_conditioning_evidence(plan, positioning),
             "observation_operator_id": observation_operator.operator_id,
             "motif_conditions": {
                 symbol: condition.to_dict()
@@ -437,6 +467,7 @@ def proposal_handler(
     """Dispatch the explicitly qualified engine selected by the portfolio."""
     started = time.perf_counter()
     ledger_stream: Any | None = None
+    ledger_raw_stream: Any | None = None
     ledger_temporary: Path | None = None
     try:
         _cancel_if_requested(invocation)
@@ -562,6 +593,8 @@ def proposal_handler(
         )
         index: ReferenceMotifIndexV1 | None = None
         generation_evidence: MarkedHawkesGenerationEvidenceV1 | None = None
+        generation_scenario: BenchmarkScenarioV1 | None = None
+        observation_conditioning: dict[str, JSONValue] | None = None
         if selected_engine_id == EMPIRICAL_MOTIF_GENERATOR_ID:
             if not isinstance(selected_config, EmpiricalMotifGeneratorConfigV1):
                 raise TypeError("motif runtime config type differs")
@@ -591,12 +624,36 @@ def proposal_handler(
             fit = read_proposal_engine_fit_artifact(selected_binding.fit_ref)
             if not isinstance(fit, MarkedHawkesFitResultV1):
                 raise TypeError("marked Hawkes runtime fit type differs")
-            proposal_batches, generation_evidence = (
+            observation_operator = read_observation_operator_artifact(
+                plan.execution_manifest.artifacts["observation_operator"]
+            )
+            if observation_operator.operator_id != str(
+                source["observation_operator_id"]
+            ):
+                raise ValueError(
+                    "source observation operator differs from execution artifact"
+                )
+            observation_conditioning = _historical_product_observation_conditioning(
+                observation_operator,
+                conditions=conditions,
+                feed_epoch_definition=read_active_time_feed_epoch_definition(
+                    plan.execution_manifest.artifacts["feed_epochs"].path
+                ),
+                used_at_ns=(
+                    invocation.task.window.core_start_ns
+                    + invocation.task.window.core_end_ns
+                )
+                // 2,
+                information_mode=(
+                    plan.configuration.information_policy.information_mode
+                ),
+            )
+            proposal_batches, generation_evidence, generation_scenario = (
                 _generate_marked_hawkes_runtime_batches(
                     invocation,
                     streams=streams,
                     conditions=conditions,
-                    observation_operator_id=source["observation_operator_id"],
+                    observation_conditioning=observation_conditioning,
                     config=selected_config,
                     fit=fit,
                 )
@@ -620,7 +677,14 @@ def proposal_handler(
             dir=ledger_directory,
         )
         ledger_temporary = Path(temporary_name)
-        ledger_stream = os.fdopen(descriptor, "wb")
+        ledger_raw_stream = os.fdopen(descriptor, "wb")
+        ledger_stream = gzip.GzipFile(
+            filename="",
+            mode="wb",
+            fileobj=ledger_raw_stream,
+            compresslevel=6,
+            mtime=0,
+        )
         ledger_digest = hashlib.sha256()
         batch_count = 0
         candidate_events: dict[str, list[SyntheticEventV1]] = {
@@ -660,6 +724,10 @@ def proposal_handler(
             candidate_evidence[
                 "cross_series_synchronization_constraint_window_id"
             ] = synchronization_constraint_window_id
+            if observation_conditioning is not None:
+                candidate_evidence["observation_conditioning_id"] = str(
+                    observation_conditioning["conditioning_id"]
+                )
             encoded_evidence = (
                 canonical_contract_json(candidate_evidence).encode("utf-8")
                 + b"\n"
@@ -685,13 +753,16 @@ def proposal_handler(
                     scratch_bytes=_tree_size(invocation.task.scratch_directory),
                     message="qualified proposal-engine dispatch",
                 )
-        ledger_stream.flush()
-        os.fsync(ledger_stream.fileno())
         ledger_stream.close()
         ledger_stream = None
-        ledger_sha256 = ledger_digest.hexdigest()
+        ledger_raw_stream.flush()
+        os.fsync(ledger_raw_stream.fileno())
+        ledger_raw_stream.close()
+        ledger_raw_stream = None
+        ledger_logical_sha256 = ledger_digest.hexdigest()
+        ledger_sha256 = _file_sha256(ledger_temporary)
         ledger_target = ledger_directory / (
-            f"{_CANDIDATE_BATCH_LEDGER_KIND}-{ledger_sha256}.ndjson"
+            f"{_CANDIDATE_BATCH_LEDGER_KIND}-{ledger_sha256}.ndjson.gz"
         )
         if ledger_target.exists():
             if _file_sha256(ledger_target) != ledger_sha256:
@@ -705,7 +776,8 @@ def proposal_handler(
             kind=_CANDIDATE_BATCH_LEDGER_KIND,
             metadata={
                 "batch_count": batch_count,
-                "format": "canonical-json-lines-v1",
+                "format": "canonical-json-lines-gzip-v1",
+                "logical_sha256": ledger_logical_sha256,
                 "large_event_rows_inline": False,
             },
         )
@@ -748,6 +820,14 @@ def proposal_handler(
                 generation_evidence.to_dict()
                 if generation_evidence is not None
                 else None
+            ),
+            "proposal_generation_scenario": (
+                generation_scenario.to_dict()
+                if generation_scenario is not None
+                else None
+            ),
+            "historical_product_observation_conditioning": (
+                observation_conditioning
             ),
             "proposal_fallback_used": False,
             "proposal_member_assignment_policy": (
@@ -836,6 +916,8 @@ def proposal_handler(
     finally:
         if ledger_stream is not None:
             ledger_stream.close()
+        if ledger_raw_stream is not None:
+            ledger_raw_stream.close()
         if ledger_temporary is not None:
             ledger_temporary.unlink(missing_ok=True)
 
@@ -945,12 +1027,13 @@ def _generate_marked_hawkes_runtime_batches(
     *,
     streams: Mapping[str, SyntheticEventStreamV1],
     conditions: Mapping[str, ReferenceMotifConditionV1],
-    observation_operator_id: Any,
+    observation_conditioning: Mapping[str, Any],
     config: MarkedHawkesConfigV1,
     fit: MarkedHawkesFitResultV1,
 ) -> tuple[
     tuple[MarkedHawkesCandidateBatchV1, ...],
     MarkedHawkesGenerationEvidenceV1,
+    BenchmarkScenarioV1,
 ]:
     if fit.information_mode is not InformationMode.EX_POST_RECONSTRUCTION:
         raise ValueError(
@@ -992,14 +1075,37 @@ def _generate_marked_hawkes_runtime_batches(
             )
             observed_events.append(event)
             previous = event
+    conditioning_symbols = _mapping(observation_conditioning.get("symbols"))
+    if set(conditioning_symbols) != {symbol.upper() for symbol in streams}:
+        raise ValueError(
+            "observation conditioning symbols differ from runtime streams"
+        )
+    joint_retention = _mapping(observation_conditioning.get("joint_retention"))
     scenario = BenchmarkScenarioV1(
         split_kind=BenchmarkSplitKind.PRODUCT_INPUT,
         epoch_id=next(iter(epochs)),
-        severity_id="historical-product-input-unknown-missingness",
-        observation_operator_id=str(observation_operator_id),
+        severity_id="historical-product-input-operator-conditioned-missingness",
+        observation_operator_id=str(
+            observation_conditioning["observation_operator_id"]
+        ),
         degradation_parameters={
             "runtime_role": "historical_product_input",
-            "missingness_identified": False,
+            "missingness_identified": True,
+            "cardinality_conditioning_policy": (
+                "synchronized-epoch-point-estimate-with-bounded-uncertainty-v1"
+            ),
+            "observation_conditioning_id": str(
+                observation_conditioning["conditioning_id"]
+            ),
+            "retention_probability": float(
+                joint_retention["retention_probability"]
+            ),
+            "retention_lower_bound": float(
+                joint_retention["retention_lower_bound"]
+            ),
+            "retention_upper_bound": float(
+                joint_retention["retention_upper_bound"]
+            ),
         },
     )
     generator = build_fitted_marked_hawkes_generator(
@@ -1042,6 +1148,33 @@ def _generate_marked_hawkes_runtime_batches(
             ),
         ),
         result.evidence,
+        scenario,
+    )
+
+
+def _historical_product_observation_conditioning(
+    operator: ObservationOperatorV1,
+    *,
+    conditions: Mapping[str, ReferenceMotifConditionV1],
+    feed_epoch_definition: Any | None = None,
+    used_at_ns: int | None = None,
+    information_mode: InformationMode = InformationMode.EX_POST_RECONSTRUCTION,
+) -> dict[str, JSONValue]:
+    """Resolve fitted product cardinality without pretending marks are known."""
+    if not conditions:
+        raise ValueError("historical product conditioning requires symbols")
+    epochs = {item.feed_epoch_id for item in conditions.values()}
+    if len(epochs) != 1:
+        raise ValueError(
+            "historical product conditioning requires one synchronized epoch"
+        )
+    return historical_product_observation_conditioning(
+        operator,
+        feed_epoch_label=next(iter(epochs)),
+        symbols=tuple(conditions),
+        information_mode=information_mode,
+        used_at_ns=used_at_ns,
+        feed_epoch_definition=feed_epoch_definition,
     )
 
 
@@ -1051,6 +1184,7 @@ def carving_handler(
     """Apply historical carving and materialize accepted narrow streams."""
     started = time.perf_counter()
     ledger_stream: Any | None = None
+    ledger_raw_stream: Any | None = None
     ledger_temporary: Path | None = None
     try:
         _cancel_if_requested(invocation)
@@ -1089,7 +1223,14 @@ def carving_handler(
             dir=ledger_directory,
         )
         ledger_temporary = Path(temporary_name)
-        ledger_stream = os.fdopen(descriptor, "wb")
+        ledger_raw_stream = os.fdopen(descriptor, "wb")
+        ledger_stream = gzip.GzipFile(
+            filename="",
+            mode="wb",
+            fileobj=ledger_raw_stream,
+            compresslevel=6,
+            mtime=0,
+        )
         ledger_digest = hashlib.sha256()
         carved_batch_count = 0
         accepted_by_symbol: dict[str, list[SyntheticEventV1]] = {
@@ -1159,13 +1300,16 @@ def carving_handler(
                 )
         if carved_batch_count != batch_count:
             raise ValueError("carved batch count differs from proposal")
-        ledger_stream.flush()
-        os.fsync(ledger_stream.fileno())
         ledger_stream.close()
         ledger_stream = None
-        ledger_sha256 = ledger_digest.hexdigest()
+        ledger_raw_stream.flush()
+        os.fsync(ledger_raw_stream.fileno())
+        ledger_raw_stream.close()
+        ledger_raw_stream = None
+        ledger_logical_sha256 = ledger_digest.hexdigest()
+        ledger_sha256 = _file_sha256(ledger_temporary)
         ledger_target = ledger_directory / (
-            f"{_CARVED_BATCH_LEDGER_KIND}-{ledger_sha256}.ndjson"
+            f"{_CARVED_BATCH_LEDGER_KIND}-{ledger_sha256}.ndjson.gz"
         )
         if ledger_target.exists():
             if _file_sha256(ledger_target) != ledger_sha256:
@@ -1179,7 +1323,8 @@ def carving_handler(
             kind=_CARVED_BATCH_LEDGER_KIND,
             metadata={
                 "batch_count": carved_batch_count,
-                "format": "canonical-json-lines-v1",
+                "format": "canonical-json-lines-gzip-v1",
+                "logical_sha256": ledger_logical_sha256,
                 "large_event_rows_inline": False,
             },
         )
@@ -1294,6 +1439,8 @@ def carving_handler(
     finally:
         if ledger_stream is not None:
             ledger_stream.close()
+        if ledger_raw_stream is not None:
+            ledger_raw_stream.close()
         if ledger_temporary is not None:
             ledger_temporary.unlink(missing_ok=True)
 
@@ -1321,6 +1468,14 @@ def cross_series_reconciliation_handler(
                 "reconciliation_cross_series_refused",
                 message=cross_use.reason,
             )
+        planned_support = _require_planned_cross_series_support(
+            invocation,
+            plan,
+            cross_bundles[0],
+        )
+        join_policy, nearest_prior_max_age_ns = _cross_currency_join_contract(
+            plan, planned_support
+        )
         condition = CrossCurrencyConditionV1.from_dict(
             _mapping(source["cross_condition"])
         )
@@ -1330,6 +1485,8 @@ def cross_series_reconciliation_handler(
             streams=streams,
             config=plan.configuration.cross_currency_config,
             conditions=(condition,),
+            join_policy=join_policy,
+            nearest_prior_max_age_ns=nearest_prior_max_age_ns,
         )
         if group.status is not CrossCurrencyGroupStatus.RECONCILED:
             return invocation.refused(
@@ -1511,11 +1668,16 @@ def validation_handler(
 ) -> ReconstructionStageOutcomeV1:
     """Enforce scientific gates, then stage an atomic v2 publication."""
     started = time.perf_counter()
-    staged: StagedReconstructionPublicationV2 | None = None
+    staged: (
+        StagedReconstructionPublicationV2
+        | StagedReconstructionPublicationV3
+        | None
+    ) = None
     try:
         _cancel_if_requested(invocation)
         plan = load_reconstruction_stage_plan(invocation.command)
         source = _prior_manifest(invocation, SOURCE_STAGE_ARTIFACT_KIND)
+        proposal = _prior_manifest(invocation, PROPOSAL_STAGE_ARTIFACT_KIND)
         delivery = _prior_manifest(invocation, DELIVERY_STAGE_ARTIFACT_KIND)
         delivered = _restore_delivered_group(delivery)
         evidence_by_symbol = _read_source_evidence(source)
@@ -1552,6 +1714,14 @@ def validation_handler(
                 "validation_cross_series_refused",
                 message=cross_validation_use.reason,
             )
+        planned_support = _require_planned_cross_series_support(
+            invocation,
+            plan,
+            cross_bundles[0],
+        )
+        join_policy, nearest_prior_max_age_ns = _cross_currency_join_contract(
+            plan, planned_support
+        )
         core_streams = _read_stream_map(source, "core_stream_refs")
         anchors = tuple(
             event
@@ -1571,6 +1741,8 @@ def validation_handler(
                     _mapping(source["cross_condition"])
                 ),
             ),
+            join_policy=join_policy,
+            nearest_prior_max_age_ns=nearest_prior_max_age_ns,
         )
         if not final_validation.passed:
             return invocation.refused(
@@ -1581,6 +1753,41 @@ def validation_handler(
                 message="final cross-instrument validation failed",
             )
         benchmark_evidence = _validate_scientific_evidence(plan)
+        runtime_proposal_evidence: dict[str, JSONValue] = {
+            "proposal_engine_id": str(proposal["proposal_engine_id"]),
+            "proposal_engine_registry_id": cast(
+                JSONValue, proposal["proposal_engine_registry_id"]
+            ),
+            "proposal_portfolio_id": cast(
+                JSONValue, proposal["proposal_portfolio_id"]
+            ),
+            "proposal_binding_id": cast(
+                JSONValue, proposal["proposal_binding_id"]
+            ),
+            "proposal_eligibility_audit_id": cast(
+                JSONValue, proposal["proposal_eligibility_audit_id"]
+            ),
+            "generator_config_id": str(
+                _mapping(proposal["generator_config"])["config_id"]
+            ),
+            "generation_scenario": cast(
+                JSONValue, proposal["proposal_generation_scenario"]
+            ),
+            "generation_evidence": cast(
+                JSONValue,
+                _scientific_generation_evidence(
+                    proposal["proposal_generation_evidence"]
+                ),
+            ),
+            "historical_product_observation_conditioning": cast(
+                JSONValue,
+                proposal["historical_product_observation_conditioning"],
+            ),
+        }
+        benchmark_evidence = {
+            **benchmark_evidence,
+            "runtime_proposal_evidence": runtime_proposal_evidence,
+        }
         retention_ref = plan.execution_manifest.artifacts["retention_plan"]
         retention = ReconstructionRetentionPlanV1.from_dict(
             _mapping(
@@ -1646,6 +1853,15 @@ def validation_handler(
                 cross_validation_use.decision_id,
             ),
             immutable_source_anchors=anchors,
+            immutable_source_artifacts={
+                (
+                    f"ascii-tick:{partition.symbol}:{partition.period}:"
+                    f"sha256:{partition.artifact.sha256}"
+                ): partition.artifact
+                for partition in plan.source_inventory.partitions_for_window(
+                    invocation.task.window
+                )
+            },
             symbol_group_id=invocation.task.window.synchronization_unit_id,
             retention_plan=retention,
             storage_policy=plan.configuration.storage_policy,
@@ -1757,27 +1973,58 @@ def atomic_commit_handler(
         _require_schema(
             descriptor, RECONSTRUCTION_STAGING_DESCRIPTOR_SCHEMA_VERSION
         )
-        manifest = ReconstructionProductManifestV2.from_dict(
-            _mapping(descriptor["product_manifest"])
+        product_payload = _mapping(descriptor["product_manifest"])
+        staged: (
+            StagedReconstructionPublicationV2
+            | StagedReconstructionPublicationV3
         )
-        staged = StagedReconstructionPublicationV2(
-            root=Path(str(descriptor["root"])).resolve(),
-            staging_directory=Path(
-                str(descriptor["staging_directory"])
-            ).resolve(),
-            committed_directory=Path(
-                str(descriptor["committed_directory"])
-            ).resolve(),
-            manifest=manifest,
-        )
+        if (
+            product_payload.get("schema_version")
+            == "histdatacom.reconstruction-product.v3"
+        ):
+            manifest = ReconstructionProductManifestV3.from_dict(
+                product_payload
+            )
+            staged = StagedReconstructionPublicationV3(
+                root=Path(str(descriptor["root"])).resolve(),
+                staging_directory=Path(
+                    str(descriptor["staging_directory"])
+                ).resolve(),
+                committed_directory=Path(
+                    str(descriptor["committed_directory"])
+                ).resolve(),
+                manifest=manifest,
+            )
+        else:
+            manifest_v2 = ReconstructionProductManifestV2.from_dict(
+                product_payload
+            )
+            staged = StagedReconstructionPublicationV2(
+                root=Path(str(descriptor["root"])).resolve(),
+                staging_directory=Path(
+                    str(descriptor["staging_directory"])
+                ).resolve(),
+                committed_directory=Path(
+                    str(descriptor["committed_directory"])
+                ).resolve(),
+                manifest=manifest_v2,
+            )
         _cancel_if_requested(invocation)
         published = _commit_or_recover(staged)
+        removed_scratch_bytes = _cleanup_committed_window_scratch(
+            invocation,
+            recovery_ref=descriptor_ref,
+        )
         committed_ref = replace(
             published.manifest_ref,
             metadata={
                 **published.manifest_ref.metadata,
                 "commit_phase": "committed",
                 "idempotent_retry": published.idempotent_retry,
+                "removed_scratch_bytes": removed_scratch_bytes,
+                "retained_recovery_bytes": _tree_size(
+                    invocation.task.scratch_directory
+                ),
             },
         )
         return _completed(
@@ -1813,6 +2060,7 @@ def _read_source_events(
     dict[str, _CachedPartitionEvidence],
 ]:
     try:
+        import numpy as np
         import pyarrow as pa
         from pyarrow import ipc
     except ImportError as err:  # pragma: no cover - package dependency
@@ -1827,7 +2075,16 @@ def _read_source_events(
     selected = plan.source_inventory.partitions_for_window(window)
     for partition in selected:
         _cancel_if_requested(invocation)
-        verify_artifact_ref(partition.artifact)
+        _verify_source_artifact_cached(partition.artifact)
+        source_path = Path(partition.artifact.path).expanduser().resolve()
+        source_stat = source_path.stat()
+        batch_index = _source_partition_batch_index(
+            str(source_path),
+            source_stat.st_size,
+            source_stat.st_mtime_ns,
+            source_stat.st_ctime_ns,
+            partition.artifact.sha256,
+        )
         with pa.memory_map(partition.artifact.path, "r") as source:
             reader = ipc.open_file(source)
             dt_index = reader.schema.get_field_index("datetime")
@@ -1863,58 +2120,79 @@ def _read_source_events(
                     "enriched source cache lacks complete issue evidence"
                 )
             cached_rows: dict[int, dict[str, JSONScalar]] = {}
-            ordinal = 0
+            quote_order_projection_policy = partition.artifact.metadata.get(
+                "quote_order_projection_policy"
+            )
             series_id = (
                 f"ascii-tick:{partition.symbol}:{partition.period}:"
                 f"sha256:{partition.artifact.sha256}"
             )
-            for batch_ordinal in range(reader.num_record_batches):
+            input_start_ms = -(-window.input_start_ns // 1_000_000)
+            input_end_ms = -(-window.input_end_ns // 1_000_000)
+            for (
+                batch_ordinal,
+                batch_start_ordinal,
+                row_count,
+                minimum_time_ms,
+                maximum_time_ms,
+            ) in batch_index:
+                if (
+                    maximum_time_ms < input_start_ms
+                    or minimum_time_ms >= input_end_ms
+                ):
+                    continue
                 batch = reader.get_batch(batch_ordinal)
-                times = batch.column(dt_index).to_pylist()
-                bids = batch.column(bid_index).to_pylist()
-                asks = batch.column(ask_index).to_pylist()
-                for batch_row, (
-                    timestamp_ms,
-                    bid_raw,
-                    ask_raw,
-                ) in enumerate(zip(times, bids, asks, strict=True)):
+                timestamp_column = batch.column(dt_index)
+                if timestamp_column.null_count:
+                    raise ValueError("source datetime contains null values")
+                times = timestamp_column.to_numpy(zero_copy_only=False)
+                selected_rows = np.flatnonzero(
+                    (times >= input_start_ms) & (times < input_end_ms)
+                )
+                if not len(selected_rows):
+                    continue
+                bids = batch.column(bid_index).to_numpy(zero_copy_only=False)
+                asks = batch.column(ask_index).to_numpy(zero_copy_only=False)
+                for selected_row in selected_rows:
+                    batch_row = int(selected_row)
+                    timestamp_ms = times[batch_row]
                     timestamp_ns = int(timestamp_ms) * 1_000_000
-                    bid = float(bid_raw)
-                    ask = float(ask_raw)
-                    if (
-                        not math.isfinite(bid)
-                        or not math.isfinite(ask)
-                        or bid <= 0.0
-                        or ask <= 0.0
-                        or ask < bid
-                    ):
-                        raise ValueError(
-                            f"invalid source quote {partition.symbol} "
-                            f"{partition.period} row {ordinal}"
+                    bid, ask, quote_order_projected = (
+                        _canonical_histdata_source_quote(
+                            bids[batch_row],
+                            asks[batch_row],
+                            quote_order_projection_policy=(
+                                quote_order_projection_policy
+                            ),
                         )
-                    if window.reads_event_time(timestamp_ns):
-                        raw[partition.symbol].append(
-                            (
-                                timestamp_ns,
-                                bid,
-                                ask,
-                                partition.period,
-                                ordinal,
-                                series_id,
+                    )
+                    raw_ordinal = batch_start_ordinal + batch_row
+                    raw[partition.symbol].append(
+                        (
+                            timestamp_ns,
+                            bid,
+                            ask,
+                            partition.period,
+                            raw_ordinal,
+                            series_id,
+                        )
+                    )
+                    row_metrics: dict[str, JSONScalar] = {}
+                    if quote_order_projected:
+                        row_metrics[
+                            HISTDATA_QUOTE_ORDER_PROJECTION_METRIC_ID
+                        ] = True
+                    if training_version_index >= 0:
+                        training_version = batch.column(training_version_index)[
+                            batch_row
+                        ].as_py()
+                        if (
+                            training_version
+                            != HISTDATA_ENRICHED_CACHE_SCHEMA_VERSION
+                        ):
+                            raise ValueError(
+                                "source training schema version differs"
                             )
-                        )
-                        if training_version_index >= 0:
-                            training_version = batch.column(
-                                training_version_index
-                            )[batch_row].as_py()
-                            if (
-                                training_version
-                                != HISTDATA_ENRICHED_CACHE_SCHEMA_VERSION
-                            ):
-                                raise ValueError(
-                                    "source training schema version differs"
-                                )
-                        row_metrics: dict[str, JSONScalar] = {}
                         for metric_id, index in issue_indexes.items():
                             value = batch.column(index)[batch_row].as_py()
                             if type(value) is not bool:
@@ -1923,9 +2201,10 @@ def _read_source_events(
                                 )
                             if value:
                                 row_metrics[metric_id] = True
-                        if row_metrics:
-                            cached_rows[ordinal + 1] = row_metrics
-                    ordinal += 1
+                    if quote_order_projected:
+                        row_metrics.pop("negative_spread", None)
+                    if row_metrics:
+                        cached_rows[raw_ordinal + 1] = row_metrics
             cached_by_partition[partition.partition_id] = (
                 cache_schema,
                 cached_rows,
@@ -1958,6 +2237,121 @@ def _read_source_events(
             )
         result[symbol] = tuple(events)
     return result, cached_by_partition
+
+
+def _verify_source_artifact_cached(ref: ArtifactRef) -> None:
+    """Hash one unchanged monthly source partition once per worker process."""
+    path = Path(ref.path).expanduser().resolve()
+    if not path.is_file():
+        verify_artifact_ref(ref)
+        return
+    stat = path.stat()
+    _verify_source_artifact_signature(
+        ref.kind,
+        str(path),
+        ref.size_bytes,
+        ref.sha256,
+        stat.st_size,
+        stat.st_mtime_ns,
+        stat.st_ctime_ns,
+    )
+
+
+@lru_cache(maxsize=2_048)
+def _verify_source_artifact_signature(
+    kind: str,
+    path: str,
+    expected_size: int | None,
+    expected_sha256: str,
+    actual_size: int,
+    modified_ns: int,
+    changed_ns: int,
+) -> None:
+    del actual_size, modified_ns, changed_ns
+    verify_artifact_ref(
+        ArtifactRef(
+            kind=kind,
+            path=path,
+            size_bytes=expected_size,
+            sha256=expected_sha256,
+        )
+    )
+
+
+@lru_cache(maxsize=2_048)
+def _source_partition_batch_index(
+    path: str,
+    size_bytes: int,
+    modified_ns: int,
+    changed_ns: int,
+    artifact_sha256: str,
+) -> tuple[tuple[int, int, int, int, int], ...]:
+    """Cache row offsets and true time bounds for Arrow record batches."""
+    del size_bytes, modified_ns, changed_ns, artifact_sha256
+    try:
+        import numpy as np
+        import pyarrow as pa
+        from pyarrow import ipc
+    except ImportError as err:  # pragma: no cover - package dependency
+        raise RuntimeError(
+            "first-party reconstruction requires pyarrow"
+        ) from err
+    indexed: list[tuple[int, int, int, int, int]] = []
+    ordinal = 0
+    with pa.memory_map(path, "r") as source:
+        reader = ipc.open_file(source)
+        dt_index = reader.schema.get_field_index("datetime")
+        if dt_index < 0:
+            raise ValueError("source partition lacks datetime")
+        for batch_ordinal in range(reader.num_record_batches):
+            batch = reader.get_batch(batch_ordinal)
+            row_count = batch.num_rows
+            batch_start = ordinal
+            ordinal += row_count
+            if not row_count:
+                continue
+            timestamp_column = batch.column(dt_index)
+            if timestamp_column.null_count:
+                raise ValueError("source datetime contains null values")
+            times = timestamp_column.to_numpy(zero_copy_only=False)
+            indexed.append(
+                (
+                    batch_ordinal,
+                    batch_start,
+                    row_count,
+                    int(np.min(times)),
+                    int(np.max(times)),
+                )
+            )
+    return tuple(indexed)
+
+
+def _canonical_histdata_source_quote(
+    bid_raw: object,
+    ask_raw: object,
+    *,
+    quote_order_projection_policy: object,
+) -> tuple[float, float, bool]:
+    """Project known raw quote-order inversions without mutating the anchor."""
+    try:
+        raw_bid = float(cast(Any, bid_raw))
+        raw_ask = float(cast(Any, ask_raw))
+    except (TypeError, ValueError) as err:
+        raise ValueError("source bid/ask are not numeric") from err
+    if (
+        not math.isfinite(raw_bid)
+        or not math.isfinite(raw_ask)
+        or raw_bid <= 0.0
+        or raw_ask <= 0.0
+    ):
+        raise ValueError("source bid/ask are not finite and positive")
+    if raw_ask >= raw_bid:
+        return raw_bid, raw_ask, False
+    if quote_order_projection_policy != HISTDATA_QUOTE_ORDER_PROJECTION_POLICY:
+        raise ValueError(
+            "negative source spread lacks an explicit quote-order projection"
+        )
+    return raw_ask, raw_bid, True
 
 
 def _compile_source_evidence(
@@ -2121,6 +2515,86 @@ def _compile_cross_series_constraints(
         policy=policy,
     )
     return bundle, ref, use
+
+
+def _require_planned_cross_series_support(
+    invocation: ReconstructionStageInvocationV1,
+    plan: ReconstructionStagePlanV1,
+    bundle: CrossSeriesConstraintBundleV1,
+) -> ReconstructionPlanSourceSupportV1 | None:
+    """Bind runtime alignment to the exact preflight support sidecar."""
+    support_ref = plan.execution_manifest.artifacts.get("source_support_map")
+    if support_ref is None:
+        return None
+    verify_artifact_ref(support_ref)
+    support_map = read_reconstruction_plan_source_support_map(support_ref.path)
+    window = invocation.task.window
+    support = next(
+        (
+            item
+            for item in support_map.windows
+            if item.start_ns == window.core_start_ns
+            and item.end_ns == window.core_end_ns
+        ),
+        None,
+    )
+    if support is None:
+        raise ValueError("runtime window is absent from source-support map")
+    policy = _read_cross_series_constraint_policy(plan)
+    if (
+        support_map.source_inventory_id != plan.source_inventory.inventory_id
+        or support_map.cross_series_policy_id != policy.policy_id
+        or support.cross_series_policy_id != policy.policy_id
+    ):
+        raise ValueError("runtime source-support policy binding differs")
+    selected_policy = CrossSeriesAlignmentPolicy(
+        support.selected_cross_series_alignment
+    )
+    recommended = support.recommended_cross_series_event_time_ns
+    matching = tuple(
+        item
+        for item in bundle.windows
+        if item.relation_kind is CrossSeriesRelationKind.TRIANGLE
+        and item.status
+        in {
+            CrossSeriesConstraintStatus.READY,
+            CrossSeriesConstraintStatus.LIMITED,
+        }
+        and item.alignment.policy is selected_policy
+        and item.alignment.recommended_event_time_ns == recommended
+    )
+    if not matching:
+        raise ValueError(
+            "runtime cross-series alignment differs from planned support"
+        )
+    return support
+
+
+def _cross_currency_join_contract(
+    plan: ReconstructionStagePlanV1,
+    support: ReconstructionPlanSourceSupportV1 | None,
+) -> tuple[CrossCurrencyJoinPolicy, int]:
+    """Translate the content-bound source alignment into output validation."""
+    if support is None:
+        return (
+            CrossCurrencyJoinPolicy.EXACT_EVENT_TIME_NO_FORWARD_FILL,
+            0,
+        )
+    alignment = CrossSeriesAlignmentPolicy(
+        support.selected_cross_series_alignment
+    )
+    if alignment is CrossSeriesAlignmentPolicy.EXACT_EVENT_SEQUENCE:
+        return (
+            CrossCurrencyJoinPolicy.EXACT_EVENT_TIME_NO_FORWARD_FILL,
+            0,
+        )
+    if alignment is CrossSeriesAlignmentPolicy.NEAREST_PRIOR_BOUNDED:
+        policy = _read_cross_series_constraint_policy(plan)
+        return (
+            CrossCurrencyJoinPolicy.NEAREST_PRIOR_BOUNDED_NO_FORWARD_FILL,
+            policy.nearest_prior_max_age_ns,
+        )
+    raise ValueError("planned source alignment is not executable")
 
 
 def _read_evidence_policy(
@@ -2415,9 +2889,62 @@ def _window_context(
         report_families=(CftcReportFamily.LEGACY,),
         report_scopes=(CftcReportScope.FUTURES_ONLY,),
     )
-    if positioning.status is not CftcPositioningQueryStatus.READY:
+    if positioning.status not in {
+        CftcPositioningQueryStatus.READY,
+        *CFTC_UNCONDITIONED_AVAILABILITY_STATUSES,
+    }:
         raise ValueError("unsupported CFTC context: " + positioning.reason)
+    _cftc_conditioning_evidence(plan, positioning)
     return context, positioning
+
+
+def _cftc_conditioning_evidence(
+    plan: ReconstructionStagePlanV1,
+    positioning: CftcPositioningQueryV1,
+) -> dict[str, JSONValue]:
+    if positioning.status is CftcPositioningQueryStatus.READY:
+        return {
+            "mode": CFTC_READY_CONDITIONING_MODE,
+            "query_id": positioning.query_id,
+            "query_status": positioning.status.value,
+            "qualification_id": None,
+            "cftc_imputation": "forbidden",
+        }
+    if positioning.status not in CFTC_UNCONDITIONED_AVAILABILITY_STATUSES:
+        raise ValueError("unsupported CFTC context: " + positioning.reason)
+    ref = plan.execution_manifest.artifacts.get(
+        "context_availability_qualification"
+    )
+    if ref is None:
+        raise ValueError(
+            "unavailable CFTC context lacks availability-mode qualification"
+        )
+    qualification = read_reconstruction_context_availability_qualification(
+        ref.path
+    )
+    if not isinstance(plan.configuration, ReconstructionPlanConfigurationV2):
+        raise TypeError(
+            "unavailable CFTC context requires a powered v2 configuration"
+        )
+    if (
+        qualification.proposal_portfolio_id
+        != plan.configuration.proposal_portfolio.portfolio_id
+        or qualification.selected_engine_ids
+        != tuple(plan.configuration.proposal_portfolio.selected_engine_ids)
+        or qualification.carving_constraint_set_id
+        != plan.configuration.carving_constraints.constraint_set_id
+    ):
+        raise ValueError(
+            "unavailable-CFTC qualification differs from runtime plan"
+        )
+    return {
+        "mode": CFTC_UNAVAILABLE_CONDITIONING_MODE,
+        "query_id": positioning.query_id,
+        "query_status": positioning.status.value,
+        "qualification_id": qualification.qualification_id,
+        "runtime_cftc_dependency": CFTC_UNAVAILABLE_RUNTIME_DEPENDENCY,
+        "cftc_imputation": "forbidden",
+    }
 
 
 def _motif_conditions(
@@ -2512,6 +3039,7 @@ def _validate_scientific_evidence(
     )
     contracts = _mapping(qualification.get("real_window_contracts"))
     failures: list[str] = []
+    context_availability_qualification_id: str | None = None
     proposal_portfolio: ProposalEnginePortfolioV1 | None = None
     if isinstance(plan.configuration, ReconstructionPlanConfigurationV2):
         proposal_portfolio = ProposalEnginePortfolioV1.from_dict(
@@ -2536,6 +3064,15 @@ def _validate_scientific_evidence(
             not item.reconstruction_eligible for item in selected_audits
         ):
             failures.append("selected proposal engine failed eligibility audit")
+        context_availability_ref = artifacts.get(
+            "context_availability_qualification"
+        )
+        if context_availability_ref is not None:
+            context_availability_qualification_id = (
+                read_reconstruction_context_availability_qualification(
+                    context_availability_ref.path
+                ).qualification_id
+            )
     motif_selected = bool(
         proposal_portfolio is None
         or EMPIRICAL_MOTIF_GENERATOR_ID
@@ -2582,6 +3119,19 @@ def _validate_scientific_evidence(
         "proposal_portfolio_id": (
             proposal_portfolio.portfolio_id if proposal_portfolio else None
         ),
+        "powered_qualification_dossier_id": (
+            proposal_portfolio.qualification_dossier_id
+            if proposal_portfolio
+            else None
+        ),
+        "powered_qualification_decision_ids": (
+            dict(proposal_portfolio.qualification_decision_ids)
+            if proposal_portfolio
+            else {}
+        ),
+        "context_availability_qualification_id": (
+            context_availability_qualification_id
+        ),
         "selected_proposal_engine_ids": (
             list(proposal_portfolio.selected_engine_ids)
             if proposal_portfolio
@@ -2617,34 +3167,45 @@ def _validate_scientific_evidence(
 
 
 def _commit_or_recover(
-    staged: StagedReconstructionPublicationV2,
-) -> PublishedReconstructionV2:
+    staged: (
+        StagedReconstructionPublicationV2 | StagedReconstructionPublicationV3
+    ),
+) -> PublishedReconstructionV2 | PublishedReconstructionV3:
     if staged.staging_directory.exists():
         return commit_delivery_reconstruction_publication(staged)
     manifest_path = staged.committed_directory / "manifest.json"
     if not manifest_path.exists():
         raise ValueError("neither staged nor committed publication exists")
     manifest = verify_reconstruction_publication(manifest_path)
-    if not isinstance(manifest, ReconstructionProductManifestV2):
-        raise TypeError("recovered publication is not a v2 product")
+    expected_type = type(staged.manifest)
+    if not isinstance(manifest, expected_type):
+        raise TypeError("recovered publication has a different product schema")
     if manifest != staged.manifest:
         raise ValueError("recovered publication differs from staged evidence")
     ref = artifact_ref_for_file(
         manifest_path, kind="reconstruction-product-manifest"
     )
+    manifest_ref = replace(
+        ref,
+        metadata={
+            "schema_version": manifest.schema_version,
+            "publication_id": manifest.publication_id,
+            "manifest_id": manifest.manifest_id,
+            "event_count": manifest.event_count,
+            "logical_content_sha256": manifest.replay.logical_content_sha256,
+        },
+    )
+    if isinstance(manifest, ReconstructionProductManifestV3):
+        return PublishedReconstructionV3(
+            manifest=manifest,
+            manifest_path=manifest_path,
+            manifest_ref=manifest_ref,
+            idempotent_retry=True,
+        )
     return PublishedReconstructionV2(
         manifest=manifest,
         manifest_path=manifest_path,
-        manifest_ref=replace(
-            ref,
-            metadata={
-                "schema_version": manifest.schema_version,
-                "publication_id": manifest.publication_id,
-                "manifest_id": manifest.manifest_id,
-                "event_count": manifest.event_count,
-                "logical_content_sha256": manifest.replay.logical_content_sha256,
-            },
-        ),
+        manifest_ref=manifest_ref,
         idempotent_retry=True,
     )
 
@@ -2742,10 +3303,18 @@ def _restore_candidate_batches(
         if manifest.get("batches_inline") is not False:
             raise ValueError("proposal batch ledger must remain external")
         ledger_ref = ArtifactRef.from_dict(_mapping(ledger_value))
-        if ledger_ref.kind != _CANDIDATE_BATCH_LEDGER_KIND:
+        if ledger_ref.kind not in {
+            _CANDIDATE_BATCH_LEDGER_V2_KIND,
+            _CANDIDATE_BATCH_LEDGER_KIND,
+        }:
             raise ValueError("proposal batch ledger kind differs")
         verify_artifact_ref(ledger_ref)
-        if ledger_ref.metadata.get("format") != "canonical-json-lines-v1":
+        expected_format = (
+            "canonical-json-lines-gzip-v1"
+            if ledger_ref.kind == _CANDIDATE_BATCH_LEDGER_KIND
+            else "canonical-json-lines-v1"
+        )
+        if ledger_ref.metadata.get("format") != expected_format:
             raise ValueError("proposal batch ledger format differs")
         if ledger_ref.metadata.get("batch_count") != expected_batch_count:
             raise ValueError("proposal batch ledger count metadata differs")
@@ -2907,10 +3476,19 @@ def _restore_candidate_batches(
 def _read_candidate_batch_ledger(
     ref: ArtifactRef,
 ) -> Iterable[Mapping[str, Any]]:
-    with Path(ref.path).open("rb") as stream:
-        for line in stream:
+    compressed = ref.kind == _CANDIDATE_BATCH_LEDGER_KIND
+    digest = hashlib.sha256()
+    with (
+        gzip.open(ref.path, "rb") if compressed else Path(ref.path).open("rb")
+    ) as stream:
+        while line := stream.readline(
+            _MAX_CANDIDATE_BATCH_LEDGER_LINE_BYTES + 1
+        ):
             if len(line) > _MAX_CANDIDATE_BATCH_LEDGER_LINE_BYTES:
                 raise ValueError("candidate batch ledger row exceeds limit")
+            if not line.endswith(b"\n"):
+                raise ValueError("candidate batch ledger row is unterminated")
+            digest.update(line)
             try:
                 value = json.loads(line)
             except (UnicodeError, json.JSONDecodeError) as err:
@@ -2918,6 +3496,8 @@ def _read_candidate_batch_ledger(
                     "candidate batch ledger row is invalid"
                 ) from err
             yield _mapping(value)
+    if compressed and ref.metadata.get("logical_sha256") != digest.hexdigest():
+        raise ValueError("candidate batch ledger logical hash differs")
 
 
 def _compact_query_evidence(
@@ -3112,7 +3692,7 @@ def _write_json_artifact(
 
 def _write_product_manifest_mirror(
     invocation: ReconstructionStageInvocationV1,
-    manifest: ReconstructionProductManifestV2,
+    manifest: ReconstructionProductManifestV2 | ReconstructionProductManifestV3,
 ) -> ArtifactRef:
     """Persist byte-identical staged evidence outside the rename source."""
     encoded = manifest.to_json().encode("utf-8")
@@ -3233,6 +3813,32 @@ def _cancel_if_requested(invocation: ReconstructionStageInvocationV1) -> None:
         return
     shutil.rmtree(invocation.task.scratch_directory, ignore_errors=True)
     raise asyncio.CancelledError
+
+
+def _cleanup_committed_window_scratch(
+    invocation: ReconstructionStageInvocationV1,
+    *,
+    recovery_ref: ArtifactRef,
+) -> int:
+    """Remove committed intermediates while retaining atomic retry evidence."""
+    verify_artifact_ref(recovery_ref)
+    root = Path(invocation.task.scratch_directory).expanduser().resolve()
+    recovery_path = Path(recovery_ref.path).expanduser().resolve()
+    if not recovery_path.is_relative_to(root) or recovery_path == root:
+        raise ValueError("atomic recovery descriptor escaped window scratch")
+    preserved_name = recovery_path.relative_to(root).parts[0]
+    before = _tree_size(root)
+    for child in root.iterdir():
+        if child.name == preserved_name:
+            continue
+        if child.is_symlink() or child.is_file():
+            child.unlink()
+        elif child.is_dir():
+            shutil.rmtree(child)
+        else:
+            raise ValueError("window scratch contains an unsupported entry")
+    verify_artifact_ref(recovery_ref)
+    return max(0, before - _tree_size(root))
 
 
 def _stage_directory(
@@ -3361,6 +3967,16 @@ def _mapping(value: Any) -> Mapping[str, Any]:
     if not isinstance(value, Mapping):
         raise TypeError("expected a JSON object")
     return value
+
+
+def _scientific_generation_evidence(value: Any) -> dict[str, JSONValue]:
+    """Exclude host-dependent telemetry from publication identity evidence."""
+    evidence = _mapping(value)
+    return {
+        str(key): cast(JSONValue, item)
+        for key, item in evidence.items()
+        if key not in {"peak_memory_bytes", "wall_time_ms"}
+    }
 
 
 def _sequence(value: Any) -> Sequence[Any]:

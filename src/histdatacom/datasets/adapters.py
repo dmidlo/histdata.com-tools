@@ -40,6 +40,11 @@ FIXTURE_ADAPTER_ID = "fixture-rfc3339-csv"
 
 _SHA256_CHUNK_SIZE = 1024 * 1024
 _MAX_HISTDATA_MONTH_SPILL_NS = 24 * 60 * 60 * 1_000_000_000
+HISTDATA_QUOTE_ORDER_PROJECTION_POLICY = (
+    "rowwise-min-bid-max-ask-preserve-raw-v1"
+)
+HISTDATA_QUOTE_ORDER_IDENTITY_POLICY = "identity-refuse-negative-spread-v1"
+HISTDATA_SYSTEMATIC_QUOTE_INVERSION_MIN_RATE = 0.25
 
 
 @runtime_checkable
@@ -95,7 +100,7 @@ class HistDataProviderAdapter:
     def descriptor(self) -> ProviderAdapterDescriptorV1:
         return ProviderAdapterDescriptorV1(
             adapter_id=HISTDATA_ADAPTER_ID,
-            adapter_version="1.1.0",
+            adapter_version="1.2.0",
             source_provider_id=self.provider.source_provider_id,
             formats=("ascii",),
             granularities=("T",),
@@ -169,6 +174,7 @@ class HistDataProviderAdapter:
             maximum_timestamp_regression_count=(
                 MAX_HISTDATA_SOURCE_ORDER_REGRESSIONS_PER_PARTITION
             ),
+            allow_negative_spread=True,
         )
         month_start = _month_start_ns(normalized_period)
         month_end = _month_start_ns(_next_period(normalized_period))
@@ -185,6 +191,15 @@ class HistDataProviderAdapter:
                 f"HistData cache timestamps exceed monthly spill policy: {path}",
             )
         descriptor = self.descriptor
+        negative_spread_rate = (
+            validation.negative_spread_count / validation.row_count
+        )
+        quote_order_projection_policy = (
+            HISTDATA_QUOTE_ORDER_PROJECTION_POLICY
+            if negative_spread_rate
+            >= HISTDATA_SYSTEMATIC_QUOTE_INVERSION_MIN_RATE
+            else HISTDATA_QUOTE_ORDER_IDENTITY_POLICY
+        )
         return CanonicalObservedPartitionV2(
             source_provider_id=self.provider.source_provider_id,
             adapter_id=descriptor.adapter_id,
@@ -214,6 +229,17 @@ class HistDataProviderAdapter:
                     "maximum_timestamp_regression_ms": (
                         validation.maximum_timestamp_regression_ms
                     ),
+                    "raw_negative_spread_count": (
+                        validation.negative_spread_count
+                    ),
+                    "raw_negative_spread_rate": (negative_spread_rate),
+                    "quote_order_projection_policy": (
+                        quote_order_projection_policy
+                    ),
+                    "systematic_quote_order_inversion": (
+                        quote_order_projection_policy
+                        == HISTDATA_QUOTE_ORDER_PROJECTION_POLICY
+                    ),
                 },
             ),
             source_artifact_sha256=digest,
@@ -242,6 +268,7 @@ class HistDataProviderAdapter:
             maximum_timestamp_regression_count=(
                 MAX_HISTDATA_SOURCE_ORDER_REGRESSIONS_PER_PARTITION
             ),
+            allow_negative_spread=True,
         )
         if validation.row_count != partition.row_count:
             raise DatasetContractError(
@@ -648,6 +675,7 @@ class _CanonicalFrameValidation:
     last_ms: int
     timestamp_regression_count: int
     maximum_timestamp_regression_ms: int
+    negative_spread_count: int
 
 
 def _validate_canonical_frame(
@@ -656,6 +684,7 @@ def _validate_canonical_frame(
     *,
     maximum_timestamp_regression_ms: int = 0,
     maximum_timestamp_regression_count: int = 0,
+    allow_negative_spread: bool = False,
 ) -> _CanonicalFrameValidation:
     columns = set(getattr(frame, "columns", ()))
     if not {"datetime", "bid", "ask"}.issubset(columns):
@@ -682,6 +711,7 @@ def _validate_canonical_frame(
     previous: int | None = None
     regression_count = 0
     maximum_regression = 0
+    negative_spread_count = 0
     for ordinal, (timestamp, bid_value, ask_value) in enumerate(
         zip(timestamps, bids, asks, strict=True), start=1
     ):
@@ -693,11 +723,15 @@ def _validate_canonical_frame(
                 DatasetFailureCode.MALFORMED_QUOTE,
                 f"partition row {ordinal} has non-numeric bid/ask",
             ) from err
+        negative_spread = ask < bid
+        if negative_spread:
+            negative_spread_count += 1
         if (
             not math.isfinite(bid)
             or not math.isfinite(ask)
             or bid <= 0.0
-            or ask < bid
+            or ask <= 0.0
+            or (negative_spread and not allow_negative_spread)
         ):
             raise DatasetContractError(
                 DatasetFailureCode.MALFORMED_QUOTE,
@@ -722,6 +756,7 @@ def _validate_canonical_frame(
         last_ms=max(timestamps),
         timestamp_regression_count=regression_count,
         maximum_timestamp_regression_ms=maximum_regression,
+        negative_spread_count=negative_spread_count,
     )
 
 

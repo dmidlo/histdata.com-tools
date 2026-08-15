@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
+import gzip
 import hashlib
 import json
+from dataclasses import replace
 
 import pytest
 
@@ -18,8 +19,8 @@ from histdatacom.market_context import (
     MarketContextQueryV1,
     MarketContextView,
 )
-from histdatacom.runtime_contracts import ArtifactRef
 from histdatacom.orchestration.reconstruction import artifact_ref_for_file
+from histdatacom.runtime_contracts import ArtifactRef
 from histdatacom.synthetic import (
     CANDIDATE_ONLY_CONSTRAINT_SET_ID,
     EMPIRICAL_MOTIF_GENERATOR_ID,
@@ -45,6 +46,9 @@ from histdatacom.synthetic import (
     InformationMode,
     MotifGenerationDecision,
     MotifGenerationStatus,
+    ReconstructionRunV1,
+    ReconstructionStoragePolicyV1,
+    ReconstructionWindowV1,
     ReferenceMotifConditionV1,
     ReferenceMotifIndexConfigV1,
     ReferenceMotifQueryV1,
@@ -53,9 +57,6 @@ from histdatacom.synthetic import (
     ReferenceMotifSplitKind,
     ReferenceMotifSplitV1,
     ReferenceMotifTransformPolicyV1,
-    ReconstructionRunV1,
-    ReconstructionStoragePolicyV1,
-    ReconstructionWindowV1,
     ReverseDegradationBenchmarkManifestV1,
     ReverseDegradationBenchmarkV1,
     SyntheticEventOrigin,
@@ -541,6 +542,30 @@ def test_proposal_query_evidence_is_compact_and_restores_incrementally(
     assert "query_result" not in evidence
     assert evidence["query_evidence"]["retrieval_rows_inline"] is False
     assert len(json.dumps(evidence["query_evidence"])) < len(result.to_json())
+
+    encoded = (
+        json.dumps(evidence, sort_keys=True, separators=(",", ":")).encode()
+        + b"\n"
+    )
+    compressed_path = tmp_path / "candidate-batches.ndjson.gz"
+    compressed_path.write_bytes(gzip.compress(encoded, mtime=0))
+    compressed_ref = artifact_ref_for_file(
+        compressed_path,
+        kind="reconstruction_candidate_batch_ledger_v3",
+        metadata={
+            "batch_count": 1,
+            "format": "canonical-json-lines-gzip-v1",
+            "logical_sha256": hashlib.sha256(encoded).hexdigest(),
+        },
+    )
+    compressed_manifest = {
+        **manifest,
+        "batch_ledger_ref": compressed_ref.to_dict(),
+    }
+
+    assert tuple(
+        _restore_candidate_batches(compressed_manifest, index=index)
+    ) == (batch,)
 
 
 def test_source_duplicate_order_uses_partition_row_not_quote_value() -> None:

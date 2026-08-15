@@ -6,6 +6,7 @@ import hashlib
 import math
 import random
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -24,6 +25,7 @@ from histdatacom.synthetic.qualification import (
     ProposalPortfolioCalibrationV1,
     QualificationStatus,
     evaluate_point_process_residuals,
+    powered_qualification_verification_scope,
     read_powered_qualification_dossier,
     run_qualification_power_study,
     write_powered_qualification_dossier,
@@ -289,3 +291,23 @@ def test_dossier_round_trip_is_content_addressed_and_row_free(
     tampered.write_bytes(Path(artifact.path).read_bytes())
     with pytest.raises(ValueError, match="content hash differs"):
         read_powered_qualification_dossier(tampered)
+
+
+def test_qualification_verification_cache_is_bounded_to_one_operation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[object] = []
+    dossier = SimpleNamespace(dossier_id="powered-qualification-dossier:test")
+    monkeypatch.setattr(
+        qualification_module,
+        "_verify_powered_qualification_dossier_uncached",
+        lambda supplied: calls.append(supplied),
+    )
+
+    qualification_module.verify_powered_qualification_dossier(dossier)
+    with powered_qualification_verification_scope():
+        qualification_module.verify_powered_qualification_dossier(dossier)
+        qualification_module.verify_powered_qualification_dossier(dossier)
+    qualification_module.verify_powered_qualification_dossier(dossier)
+
+    assert calls == [dossier, dossier, dossier]

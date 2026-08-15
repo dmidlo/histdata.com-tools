@@ -1862,6 +1862,9 @@ def _default_module_paths() -> dict[str, Path]:
         "histdatacom.synthetic.benchmark_corpus": (
             root / "synthetic" / "benchmark_corpus.py"
         ),
+        "histdatacom.synthetic.cross_currency": (
+            root / "synthetic" / "cross_currency.py"
+        ),
         "histdatacom.synthetic.marked_hawkes": (
             root / "synthetic" / "marked_hawkes.py"
         ),

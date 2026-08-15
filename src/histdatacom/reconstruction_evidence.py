@@ -50,6 +50,7 @@ CURRENT_EVIDENCE_SOURCE_PROVIDER_ID = "histdata.com"
 HISTDATA_LEGACY_CACHE_SCHEMA_VERSION = (
     "histdatacom.histdata-ascii-tick-cache.legacy"
 )
+HISTDATA_QUOTE_ORDER_PROJECTION_METRIC_ID = "quote_order_projected"
 HISTDATA_ENRICHED_CACHE_SCHEMA_VERSION = (
     "histdatacom.ascii-tick-training-features.v1"
 )
@@ -83,6 +84,7 @@ _CACHED_ROW_METRICS = frozenset(
         "precision_warning",
         "cache_float_precision",
         "fingerprint_unready",
+        HISTDATA_QUOTE_ORDER_PROJECTION_METRIC_ID,
     }
 )
 
@@ -989,7 +991,15 @@ def compile_histdata_point_in_time_evidence(
     if set(cached) - row_ids:
         raise ValueError("cached row evidence refers outside supplied events")
     if cached and cache_schema != HISTDATA_ENRICHED_CACHE_SCHEMA_VERSION:
-        raise ValueError("legacy cache cannot supply enriched row evidence")
+        legacy_projection_metrics = {
+            metric_id for metrics in cached.values() for metric_id in metrics
+        }
+        if legacy_projection_metrics != {
+            HISTDATA_QUOTE_ORDER_PROJECTION_METRIC_ID
+        }:
+            raise ValueError(
+                "legacy cache can supply only explicit source projection evidence"
+            )
     if (
         cache_evidence_complete
         and cache_schema != HISTDATA_ENRICHED_CACHE_SCHEMA_VERSION
@@ -1289,21 +1299,38 @@ def compile_histdata_point_in_time_evidence(
                 "non_monotonic_timestamp",
                 "wide_spread",
                 "zero_spread",
+                HISTDATA_QUOTE_ORDER_PROJECTION_METRIC_ID,
             }:
                 counts[metric_id] += 1
+            quote_order_projection = (
+                metric_id == HISTDATA_QUOTE_ORDER_PROJECTION_METRIC_ID
+            )
             append_row(
                 _record(
                     kind=ReconstructionEvidenceKind.ROW_FACT,
                     metric_id=metric_id,
                     value=True,
-                    rule_id=f"reconstruction_evidence.cached_{metric_id}.v1",
-                    calculation_basis="histdata_enriched_cache_row_flag",
+                    rule_id=(
+                        "reconstruction_evidence."
+                        "histdata_quote_order_projection.v1"
+                        if quote_order_projection
+                        else f"reconstruction_evidence.cached_{metric_id}.v1"
+                    ),
+                    calculation_basis=(
+                        "immutable_histdata_quote_order_projection"
+                        if quote_order_projection
+                        else "histdata_enriched_cache_row_flag"
+                    ),
                     source_grain=ReconstructionEvidenceGrain.ROW,
                     target_grain=ReconstructionEvidenceGrain.ROW,
                     support_start_ns=timestamp,
                     support_end_ns=timestamp,
                     available_at_ns=timestamp,
-                    projection_method="exact_cached_row_identity",
+                    projection_method=(
+                        "raw_anchor_row_to_canonical_quote_order"
+                        if quote_order_projection
+                        else "exact_cached_row_identity"
+                    ),
                     readiness=ReconstructionEvidenceReadiness.READY,
                     confidence=1.0,
                     source_row_id=row_id,
@@ -1359,6 +1386,11 @@ def compile_histdata_point_in_time_evidence(
             "row_facts",
         ),
         ("negative_spread_count", counts["negative_spread"], "row_facts"),
+        (
+            "quote_order_projected_count",
+            counts[HISTDATA_QUOTE_ORDER_PROJECTION_METRIC_ID],
+            "immutable_histdata_quote_order_projection",
+        ),
         (
             "non_monotonic_timestamp_count",
             counts["non_monotonic_timestamp"],
@@ -2125,6 +2157,7 @@ __all__ = [
     "DEFAULT_EVIDENCE_SUSPICIOUS_GAP_MS",
     "HISTDATA_ENRICHED_CACHE_SCHEMA_VERSION",
     "HISTDATA_LEGACY_CACHE_SCHEMA_VERSION",
+    "HISTDATA_QUOTE_ORDER_PROJECTION_METRIC_ID",
     "RECONSTRUCTION_EVIDENCE_POLICY_ARTIFACT_KIND",
     "RECONSTRUCTION_EVIDENCE_POLICY_SCHEMA_VERSION",
     "RECONSTRUCTION_EVIDENCE_PROJECTION_ARTIFACT_KIND",
