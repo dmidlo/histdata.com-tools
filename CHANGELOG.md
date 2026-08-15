@@ -2,6 +2,20 @@
 
 ### Added
 
+- **reconstruction**: materialize the complete HistData triangle campaign
+  surface with adaptive resource-safe v2 plan shards, exact gap-free support
+  maps, durable request/receipt sets, first-party Temporal status/cancel/resume,
+  reconciled campaign product indexes, provider-neutral dataset publication,
+  and installed bounded inspection commands (#498).
+- **reconstruction**: add qualified historical cardinality conditioning,
+  exact-or-bounded-prior asynchronous triangle support, explicit CFTC-
+  unavailable conditioning, source-support/runtime agreement, and v3
+  synthetic-delta products that retain immutable observed-anchor evidence
+  without duplicating source rows (#498).
+- **reconstruction**: document the end-to-end complete-campaign operator path,
+  including mounted-storage qualification, full-intersection planning,
+  refusal review, Temporal execution, forced crash/resume, product replay, and
+  final dataset publication (#498).
 - **datasets**: add provider-neutral HistData and explicit-UTC fixture adapters,
   immutable observed/derived dataset manifests, qualified aliases, exact
   resolution/replay receipts, query-bound cursors, strong verification,
@@ -46,6 +60,10 @@
 
 ### Fixed
 
+- **reconstruction**: preserve each operator-supplied artifact, output,
+  checkpoint, and scratch base across adaptive plan-set shards so a campaign
+  cannot silently redirect product and staging data into the local artifact
+  tree instead of its qualified storage volume (#498).
 - **reconstruction**: preserve and revalidate the exact content identity of
   retained v1 plan sets written before additive dataset, evidence, and
   cross-series source-spec defaults, without accepting changed shards,

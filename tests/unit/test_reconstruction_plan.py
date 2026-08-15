@@ -1676,6 +1676,23 @@ def test_public_plan_set_shards_and_revalidates_bounded_full_range(
     assert all(item.end_period == _PERIOD for item in plan_set.shards)
     assert plan_set.resource_summary["plan_shard_count"] == 4
     assert plan_set.resource_summary["planned_window_count"] == 31
+    artifact_root = Path(spec.artifact_root).resolve()
+    output_root = Path(spec.output_root).resolve()
+    checkpoint_root = Path(spec.checkpoint_root).resolve()
+    scratch_root = Path(spec.scratch_root).resolve()
+    for shard in plan_set.shards:
+        shard_plan_path = Path(shard.plan_ref.path).resolve()
+        assert shard_plan_path.is_relative_to(artifact_root)
+        shard_plan = read_synthetic_infill_plan(shard_plan_path)
+        execution = read_reconstruction_plan_execution_manifest(
+            shard_plan.artifact_graph["execution_manifest"].path
+        )
+        assert Path(execution.output_root).is_relative_to(output_root)
+        assert Path(execution.checkpoint_root).is_relative_to(checkpoint_root)
+        assert Path(execution.scratch_root).is_relative_to(scratch_root)
+        assert not Path(execution.output_root).is_relative_to(artifact_root)
+        assert not Path(execution.checkpoint_root).is_relative_to(artifact_root)
+        assert not Path(execution.scratch_root).is_relative_to(artifact_root)
     first_plan = read_synthetic_infill_plan(plan_set.shards[0].plan_ref.path)
     first_inventory = read_reconstruction_source_inventory(
         first_plan.artifact_graph["source_inventory"].path

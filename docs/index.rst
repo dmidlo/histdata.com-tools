@@ -66,6 +66,7 @@ Persistence, projections, and validation
    reconstruction-certification-contracts
    reconstruction-temporal-orchestration
    reconstruction-public-interfaces
+   reconstruction-campaign-runbook
 
 Data quality
 ------------

@@ -3434,6 +3434,16 @@ supported window is retained as a refusal-only shard with zero workflows and
 zero output estimates; acknowledging refusals makes that no-op safe to skip,
 but never turns the unsupported span into reconstructed output.
 
+Plan-set shards preserve every operator-supplied storage base. Control
+artifacts remain under `artifact_root`; committed products, checkpoints, and
+disposable scratch use stable shard children under `output_root`,
+`checkpoint_root`, and `scratch_root` respectively. Output and scratch must be
+on the same mounted filesystem for atomic publication. The
+[complete campaign runbook](docs/reconstruction-campaign-runbook.md) covers
+mount qualification, gap-free support proof, first-party Temporal execution,
+forced crash/resume evidence, product reconciliation, and provider-neutral
+dataset publication.
+
 Schema discovery and compatibility admission are also first-party:
 
 ```sh

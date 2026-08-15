@@ -9,7 +9,7 @@ large analytical frames in flags or workflow control metadata.
 
 ## Supported input and scientific acknowledgement
 
-The current v2.4 compatibility boundary accepts only:
+The current v2.5 compatibility boundary accepts only:
 
 - HistData ASCII tick caches below an `ASCII/T` source root;
 - the complete `EURGBP`, `EURUSD`, `GBPUSD` synchronized triangle;
@@ -80,11 +80,10 @@ data rows remain in their source artifacts.
   "requested_end_ns": null,
   "window_size_ns": 86400000000000,
   "proposal_engine_ids": [
-    "histdatacom.empirical-motif-resampling",
-    "histdatacom.event-clock.nhpp"
+    "histdatacom.marked-hawkes.diagonal_self_excitation"
   ],
   "selected_proposal_engine_ids": [
-    "histdatacom.empirical-motif-resampling"
+    "histdatacom.marked-hawkes.diagonal_self_excitation"
   ],
   "proposal_evaluation_paths": [
     "artifacts/reverse-degradation-scorecard-<sha256>.json"
@@ -94,12 +93,11 @@ data rows remain in their source artifacts.
 ```
 
 Portfolio order is not scientific rank. A powered dossier can only reduce the
-eligibility granted by retained campaign evidence. The current real dossier
-finds every executable HistData engine underpowered, so its honest product
-result is no decision: a specification that requests motif is refused during
-planning. The selection above illustrates the shape of a plan only and is
-executable only with a dossier that independently grants motif reconstruction
-eligibility. Inspect resolved audits and evidence with:
+eligibility granted by retained campaign evidence. The expanded qualified
+HistData campaign admits only the diagonal self-excitation marked-Hawkes
+variant. Failed, underpowered, and refused engines remain inspectable, but they
+cannot enter a committed product and never become a silent fallback. Inspect
+resolved audits and evidence with:
 
 ```sh
 histdatacom reconstruction --json portfolio \
@@ -239,6 +237,12 @@ overlapping, or gapped content. Construction and preflight retain only compact
 resource summaries and partition identities after each full shard is handled.
 Large qualified context corpora are resolved once per unchanged device, inode,
 size, modification-time, and change-time identity set during the operation.
+Each shard preserves the four operator-supplied storage bases: plan artifacts
+remain below `artifact_root`, while output, checkpoints, and scratch use stable
+shard children below their respective roots. Output and scratch must be on the
+same filesystem for atomic publication; see the
+[complete campaign runbook](reconstruction-campaign-runbook.md) for mount,
+storage, execution, crash/restart, product-index, and dataset-publication gates.
 
 Preflight hash-verifies the plan and its declared artifacts, validates that the
 operator information mode matches the immutable plan, and emits the bounded

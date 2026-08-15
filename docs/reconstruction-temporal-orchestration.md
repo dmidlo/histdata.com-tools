@@ -54,7 +54,7 @@ idempotently registers the versioned handlers emitted by the first-party plan:
 | cross-series reconciliation | Rechecks constraint readiness and reconciles the complete EURUSD/GBPUSD/EURGBP group using exact nanosecond event-time support without forward filling. |
 | delivery projection | Applies explicit modern-reference identity delivery; it never invents a broker fingerprint. |
 | validation | Rechecks cross-instrument output, synchronized constraint use, benchmark qualification, motif leakage, information safety, immutable anchors, retention, and storage before staging and durable lineage binding. |
-| atomic commit | Promotes or recovers the complete v2 Parquet transaction. |
+| atomic commit | Promotes or recovers the complete v3 synthetic-delta Parquet transaction while preserving immutable observed-anchor references. |
 
 Applications do not register these handlers themselves. A deliberately custom
 worker may still register a different, separately versioned adapter before

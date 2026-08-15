@@ -3652,20 +3652,19 @@ class ReconstructionClient:
         shards: list[ReconstructionPlanShardV1] = []
         resource_summaries: list[ReconstructionPlanResourceSummaryV1] = []
         source_partitions: dict[str, tuple[str, str, int, int]] = {}
-        root = Path(spec.artifact_root).expanduser().resolve()
+        artifact_root = Path(spec.artifact_root).expanduser().resolve()
+        output_root = Path(spec.output_root).expanduser().resolve()
+        checkpoint_root = Path(spec.checkpoint_root).expanduser().resolve()
+        scratch_root = Path(spec.scratch_root).expanduser().resolve()
 
         def construct_interval(
             requested_start_ns: int, requested_end_ns: int
         ) -> None:
             start_period = _period_for_ns(requested_start_ns)
             end_period = _period_for_ns(requested_end_ns - 1)
-            shard_root = (
-                root
-                / "shards"
-                / (
-                    f"{start_period}-{end_period}-"
-                    f"{requested_start_ns}-{requested_end_ns}"
-                )
+            shard_key = (
+                f"{start_period}-{end_period}-"
+                f"{requested_start_ns}-{requested_end_ns}"
             )
             shard_spec = replace(
                 spec,
@@ -3673,10 +3672,12 @@ class ReconstructionClient:
                 end_period=end_period,
                 requested_start_ns=requested_start_ns,
                 requested_end_ns=requested_end_ns,
-                artifact_root=str(shard_root / "artifacts"),
-                output_root=str(shard_root / "output"),
-                checkpoint_root=str(shard_root / "checkpoints"),
-                scratch_root=str(shard_root / "scratch"),
+                artifact_root=str(
+                    artifact_root / "shards" / shard_key / "artifacts"
+                ),
+                output_root=str(output_root / "shards" / shard_key),
+                checkpoint_root=str(checkpoint_root / "shards" / shard_key),
+                scratch_root=str(scratch_root / "shards" / shard_key),
             )
             try:
                 plan = self._construct_plan_model(shard_spec)
@@ -3778,7 +3779,7 @@ class ReconstructionClient:
             resource_summary=resources,
             status=status,
         )
-        return write_reconstruction_plan_set(plan_set, root)
+        return write_reconstruction_plan_set(plan_set, artifact_root)
 
     def preflight_plan_set(
         self, plan_set_path: str | Path

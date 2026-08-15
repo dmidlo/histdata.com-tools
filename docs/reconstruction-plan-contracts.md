@@ -1,12 +1,12 @@
 # First-party reconstruction plan
 
-`SyntheticInfillPlanV1` is the public planning boundary for the v2.4 tick
+`SyntheticInfillPlanV1` is the public planning boundary for the v2.5 tick
 reconstruction product. It resolves installed scientific artifacts, inventories
 immutable ASCII tick partitions, performs compatibility and information-safety
 preflight, estimates resources, and emits bounded
 `ReconstructionWorkflowRequestV1` batches. It does not generate reconstructed
-ticks; the resulting requests are the input to the execution work tracked by
-#466.
+ticks; the resulting requests are consumed by the installed first-party
+Temporal runtime and stage handlers.
 
 The current executable source is only HistData.com ASCII/T. Provider-neutral
 dataset, evidence, and cross-series contracts preserve future adapter seams,
@@ -55,7 +55,7 @@ Requests are split by ensemble member and bounded window chunks because
 different members share window boundaries and therefore cannot coexist in one
 request whose task cores must not overlap.
 
-Modern-reference delivery is the v2.4 public mode. The orchestration stage
+Modern-reference delivery is the v2.5 public mode. The orchestration stage
 named `broker_transfer` becomes a deterministic identity delivery projection
 with no broker input. Broker-conditioned/OANDA selection is rejected by public
 compatibility and remains a later feed-qualified milestone.
