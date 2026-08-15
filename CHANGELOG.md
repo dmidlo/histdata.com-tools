@@ -16,6 +16,10 @@
   including mounted-storage qualification, full-intersection planning,
   refusal review, Temporal execution, forced crash/resume, product replay, and
   final dataset publication (#498).
+- **certification**: advance the broker-neutral policy to v2.5.0 with explicit
+  gap-free support, valid-data refusal, full Temporal campaign, complete
+  retained-product rectangle, no-fabricated-liquidity, product-index, dataset,
+  mounted-storage integrity, and disconnect/resume evidence gates (#498).
 - **datasets**: add provider-neutral HistData and explicit-UTC fixture adapters,
   immutable observed/derived dataset manifests, qualified aliases, exact
   resolution/replay receipts, query-bound cursors, strong verification,

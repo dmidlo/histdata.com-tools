@@ -1,6 +1,6 @@
 # Powered reconstruction qualification
 
-The v2.4 qualification layer turns one exact HistData reverse-degradation
+The v2.5 qualification layer turns one exact HistData reverse-degradation
 campaign into a bounded, content-addressed scientific decision dossier. It is
 a stricter permission layer over the proposal-engine campaign: it may reduce
 benchmark, reconstruction, or ensemble eligibility, but it can never promote
@@ -194,16 +194,17 @@ experiment covers 54 source partitions and freezes all assignments before
 candidate results. The final holdout is evaluated once after validation-only
 portfolio fitting.
 
-The powered comparison retains three marked-Hawkes ablations. Diagonal
-self-excitation passes all ten hard gate families and is the sole
-reconstruction- and ensemble-eligible variant. Full self/cross excitation
-fails time-uniformity; zero excitation fails time-uniformity and path/tail
-behavior. Nonpassing variants remain in the evidence graph but cannot enter
-the selected product. This is an eligibility decision, not an automatic
-winner, historical-truth claim, broker claim, or investment recommendation.
-The content-addressed v2.4 identities are published with the final #491
-certification so implementation or release-version changes cannot reuse a
-stale dossier.
+The powered comparison retains three marked-Hawkes ablations. Under the
+current qualification implementation, diagonal self-excitation and full
+self/cross excitation pass all ten hard gate families and are reconstruction-
+and ensemble-eligible; zero excitation fails time-uniformity. The frozen
+final-v2 product portfolio separately selects only diagonal self-excitation.
+Nonpassing and eligible-but-unselected variants remain in the evidence graph
+but cannot enter that product. This is an eligibility decision and an explicit
+product selection, not an automatic winner, historical-truth claim, broker
+claim, or investment recommendation. Content-addressed experiment and dossier
+identities ensure implementation or release-version changes cannot reuse stale
+qualification.
 
 ## Scientific interpretation
 

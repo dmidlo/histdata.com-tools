@@ -7,7 +7,7 @@ contracts without reading or publishing tick rows.
 
 ## Current executable boundary
 
-The v2.4 executable data boundary is deliberately narrow:
+The v2.5 executable data boundary is deliberately narrow:
 
 - provider: `histdata.com`;
 - source representation: local HistData ASCII cache data;

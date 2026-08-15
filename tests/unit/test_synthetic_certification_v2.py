@@ -133,10 +133,13 @@ def test_policy_covers_all_live_issue_seams_without_broker_evidence() -> None:
 
     assert policy.delivery_mode == MODERN_REFERENCE_DELIVERY_MODE
     assert policy.delivery_claim == MODERN_REFERENCE_DELIVERY_CLAIM
-    assert policy.product_version == "2.4.0"
+    assert policy.product_version == "2.5.0"
     assert all("broker" not in value for value in checks | kinds)
     assert {
         "source_inventory_reconciled",
+        "support_map_gap_or_overlap_count",
+        "valid_common_data_refusal_count",
+        "unclassified_terminal_outcome_count",
         "market_context_corpus_valid",
         "cftc_positioning_corpus_valid",
         "feed_epoch_artifact_valid",
@@ -147,6 +150,13 @@ def test_policy_covers_all_live_issue_seams_without_broker_evidence() -> None:
         "diagnostic_publication_valid",
         "representative_window_class_missing_count",
         "substantial_multi_period_run_passed",
+        "full_campaign_execution_passed",
+        "executable_retained_product_missing_count",
+        "fabricated_liquidity_terminal_outcome_count",
+        "campaign_product_index_valid",
+        "campaign_dataset_publication_valid",
+        "storage_disconnect_resume_passed",
+        "mounted_storage_integrity_passed",
         "cancellation_publishable_partial_count",
         "invalid_information_mode_refused",
         "quota_overflow_refused",
@@ -156,6 +166,10 @@ def test_policy_covers_all_live_issue_seams_without_broker_evidence() -> None:
     assert "motif-qualification" not in kinds
     assert "powered-qualification-dossier" in kinds
     assert "diagnostic-publication-manifest" in kinds
+    assert "reconstruction-plan-support-map" in kinds
+    assert "reconstruction-campaign-product-index" in kinds
+    assert "reconstruction-campaign-dataset-publication" in kinds
+    assert "storage-qualification-report" in kinds
     assert (
         ReconstructionCertificationPolicyV2.from_dict(policy.to_dict())
         == policy

@@ -2755,7 +2755,7 @@ dense and holdout event rows remain process-local.
 
 #### Qualified Proposal-Engine Bank
 
-The v2.4 proposal layer registers empirical motif, four event clocks, three
+The v2.5 proposal layer registers empirical motif, four event clocks, three
 marked Hawkes variants, two regime-Hawkes variants, RMTPP, Add-Thin, and the
 constrained Schrödinger bridge as one first-party model bank. Engine identity,
 campaign role, and product eligibility are independent. “Challenger” in older
@@ -2767,12 +2767,15 @@ evidence artifacts, and names the reconstruction selection. Powered
 qualification can only reduce legacy eligibility. July's 18-window pilot
 correctly returned no decision; the expanded campaign freezes 96 synchronized
 windows across separate calibration, validation, and final-holdout periods.
-Of the three powered marked-Hawkes variants, only diagonal self-excitation
-passes all ten hard gates and is eligible for reconstruction and ensemble use.
-The other registered engines retain their failed, underpowered, refused, or
-research-only decisions and cannot enter the product. There is no silent motif
-fallback and no automatic winner. Legacy plans without a powered dossier
-retain their explicit single-qualified-engine compatibility behavior. See
+Of the three powered marked-Hawkes variants, diagonal self-excitation and full
+self/cross excitation pass all ten hard gates and are eligible for
+reconstruction and ensemble use; zero excitation fails time-uniformity. The
+final v2 HistData product selection is deliberately narrower and names only
+diagonal self-excitation. The other registered engines retain their failed,
+underpowered, refused, research-only, or eligible-but-unselected decisions and
+cannot silently enter the product. There is no motif fallback and no automatic
+winner. Legacy plans without a powered dossier retain their explicit
+single-qualified-engine compatibility behavior. See
 [`docs/proposal-engine-portfolios.md`](docs/proposal-engine-portfolios.md).
 
 #### Classical Event-Clock Proposal Engines
@@ -3079,7 +3082,7 @@ for calibration, confidence, diversity, retention, and replay semantics.
 
 > **Later milestone:** no live broker or OANDA feed is selected for the current
 > HistData-only reconstruction path. The contracts below preserve a future
-> capture seam; they do not qualify a v2.4 execution dataset.
+> capture seam; they do not qualify a v2.5 execution dataset.
 
 `histdatacom.broker_capture` records a broker feed as versioned measurement
 evidence rather than guessing modern delivery style from historical vendor
@@ -3106,7 +3109,7 @@ clock, security, storage, replay, fixture, and fingerprint eligibility gates.
 
 > **Later milestone:** broker/OANDA feed adaptation is not part of the current
 > HistData-only executable path. These contracts preserve the future seam, but
-> no broker dataset or profile is admitted by v2.4 compatibility.
+> no broker dataset or profile is admitted by v2.5 compatibility.
 
 Qualified broker captures are converted into compact immutable delivery
 profiles with `fit_broker_delivery_fingerprint()`. Fitting verifies capture
@@ -3133,7 +3136,7 @@ semantics.
 #### Broker-Conditioned Reconstruction
 
 > **Later milestone:** this research implementation remains non-executable in
-> the current public planner until a qualified broker feed exists. The v2.4
+> the current public planner until a qualified broker feed exists. The v2.5
 > path accepts only HistData.com ASCII/T data and `modern_reference` delivery.
 
 `condition_broker_proposal()` applies a versioned, bounded broker-delivery
@@ -3315,7 +3318,7 @@ stratification, restoration, terminal states, and resource bounds.
 #### EURUSD Triangle Reconstruction Certification
 
 `modern_reference_triangle_certification_policy()` predeclares the current
-v2.4.0 scientific, operational, reporting, repository, and release contract for
+v2.5.0 scientific, operational, reporting, repository, and release contract for
 the EURGBP/EURUSD/GBPUSD product over common support beginning at `200203`. It
 fixes `modern_reference` delivery with the `unconditioned_reference` claim and
 explicitly excludes broker adaptation. The common end month, source-readiness
@@ -3323,8 +3326,9 @@ contracts, scientific thresholds, and peak-memory/scratch/runtime/storage and
 candidate-amplification budgets participate in the deterministic policy
 identity. The older broker-bound `eurusd_triangle_certification_policy()` and
 V1 dossiers remain readable for evidence replay but are not the #449 release
-path; the current factory additionally binds #491's powered portfolio,
-information-mode, and coherent diagnostic evidence.
+path; the current factory additionally binds #491's powered portfolio and
+#498's gap-free support map, complete product/dataset publication,
+mounted-storage qualification, and recovery evidence.
 
 Certification consumes compact, verified report artifacts bound to that exact
 policy identity, so evidence cannot be reused after scope or threshold drift.
@@ -3480,8 +3484,9 @@ histdatacom reconstruction --json portfolio \
 Failed and underpowered engines stay inspectable; they cannot enter a committed
 product. Qualification binds the exact experiment, evaluation, row-free metric
 trace, power study, engine decisions, and validation-fitted portfolio weights.
-The current expanded campaign admits only the diagonal self-excitation
-marked-Hawkes variant; every nonpassing engine remains inspectable but is
+The current powered dossier admits diagonal and full self/cross excitation;
+the frozen product portfolio selects only diagonal self-excitation. Every
+nonpassing or eligible-but-unselected engine remains inspectable and is
 excluded from execution. There is no silent fallback or automatic winner. See
 [`docs/powered-reconstruction-qualification.md`](docs/powered-reconstruction-qualification.md).
 

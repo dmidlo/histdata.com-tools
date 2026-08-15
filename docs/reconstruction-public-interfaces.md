@@ -93,11 +93,12 @@ data rows remain in their source artifacts.
 ```
 
 Portfolio order is not scientific rank. A powered dossier can only reduce the
-eligibility granted by retained campaign evidence. The expanded qualified
-HistData campaign admits only the diagonal self-excitation marked-Hawkes
-variant. Failed, underpowered, and refused engines remain inspectable, but they
-cannot enter a committed product and never become a silent fallback. Inspect
-resolved audits and evidence with:
+eligibility granted by retained campaign evidence. The current powered dossier
+makes diagonal and full self/cross excitation eligible; the frozen HistData
+product portfolio deliberately selects only diagonal self-excitation. Failed,
+underpowered, refused, and eligible-but-unselected engines remain inspectable,
+but they cannot enter a committed product and never become a silent fallback.
+Inspect resolved audits and evidence with:
 
 ```sh
 histdatacom reconstruction --json portfolio \

@@ -1634,13 +1634,13 @@ def modern_reference_triangle_certification_policy(
     storage_budget_bytes: int,
     candidate_amplification_budget: float,
 ) -> ReconstructionCertificationPolicyV2:
-    """Return the complete broker-neutral v2.4.0 certification policy.
+    """Return the complete broker-neutral v2.5.0 certification policy.
 
-    The policy extends the retained #449 vertical-slice evidence with #491's
-    qualified proposal portfolio, distinct information-mode audits, coherent
-    diagnostics, product/operations, and release-discipline evidence. Broker
-    capture, fingerprints, clocks, and transfer checks are deliberately absent
-    because they are separately qualified optional extensions.
+    The policy extends the retained #449/#491 qualification evidence with
+    #498's complete support, campaign product, dataset, mounted-storage, and
+    recovery evidence. Broker capture, fingerprints, clocks, and transfer
+    checks remain deliberately absent because they are separately qualified
+    optional extensions.
     """
     requirements = (
         _requirement(
@@ -1682,6 +1682,30 @@ def modern_reference_triangle_certification_policy(
             0,
             ("reconstruction-product-manifest",),
             "Every synthetic event carries deterministic identity and lineage.",
+        ),
+        _requirement(
+            CertificationGate.IDENTITY_AND_ANCHORS,
+            "support_map_gap_or_overlap_count",
+            CertificationComparator.ZERO,
+            0,
+            ("reconstruction-plan-support-map",),
+            "Every common planning window appears exactly once in order.",
+        ),
+        _requirement(
+            CertificationGate.IDENTITY_AND_ANCHORS,
+            "valid_common_data_refusal_count",
+            CertificationComparator.ZERO,
+            0,
+            ("reconstruction-plan-support-map", "raw-source-inventory"),
+            "No refusal covers otherwise valid common triangle evidence.",
+        ),
+        _requirement(
+            CertificationGate.IDENTITY_AND_ANCHORS,
+            "unclassified_terminal_outcome_count",
+            CertificationComparator.ZERO,
+            0,
+            ("reconstruction-plan-support-map",),
+            "Every common window has an executable, empty, closed, or justified refusal outcome.",
         ),
         _requirement(
             CertificationGate.INFORMATION_SAFETY,
@@ -1850,6 +1874,58 @@ def modern_reference_triangle_certification_policy(
         ),
         _requirement(
             CertificationGate.PRODUCT_RECONCILIATION,
+            "full_campaign_execution_passed",
+            CertificationComparator.TRUE,
+            True,
+            (
+                "reconstruction-run-report",
+                "reconstruction-plan-support-map",
+            ),
+            "Every executable shard reaches a terminal first-party Temporal outcome.",
+        ),
+        _requirement(
+            CertificationGate.PRODUCT_RECONCILIATION,
+            "executable_retained_product_missing_count",
+            CertificationComparator.ZERO,
+            0,
+            (
+                "reconstruction-campaign-product-index",
+                "reconstruction-plan-support-map",
+            ),
+            "Every executable window contains the complete retained-member product rectangle.",
+        ),
+        _requirement(
+            CertificationGate.PRODUCT_RECONCILIATION,
+            "fabricated_liquidity_terminal_outcome_count",
+            CertificationComparator.ZERO,
+            0,
+            (
+                "reconstruction-campaign-product-index",
+                "reconstruction-plan-support-map",
+            ),
+            "Empty, closed, and unsupported windows publish no invented liquidity.",
+        ),
+        _requirement(
+            CertificationGate.PRODUCT_RECONCILIATION,
+            "campaign_product_index_valid",
+            CertificationComparator.TRUE,
+            True,
+            ("reconstruction-campaign-product-index",),
+            "The content-addressed campaign index fully verifies every product and terminal outcome.",
+        ),
+        _requirement(
+            CertificationGate.PRODUCT_RECONCILIATION,
+            "campaign_dataset_publication_valid",
+            CertificationComparator.TRUE,
+            True,
+            (
+                "reconstruction-campaign-dataset-publication",
+                "reconstruction-campaign-product-index",
+            ),
+            "The provider-neutral synthetic dataset version binds the complete campaign index.",
+        ),
+        _requirement(
+            CertificationGate.PRODUCT_RECONCILIATION,
             "representative_window_class_missing_count",
             CertificationComparator.ZERO,
             0,
@@ -1879,6 +1955,14 @@ def modern_reference_triangle_certification_policy(
             0,
             ("reconstruction-run-report", "failure-injection-report"),
             "A mid-run worker/server failure resumes without duplicate or missing partitions.",
+        ),
+        _requirement(
+            CertificationGate.FAILURE_RESUME,
+            "storage_disconnect_resume_passed",
+            CertificationComparator.TRUE,
+            True,
+            ("failure-injection-report", "storage-qualification-report"),
+            "A qualified storage disconnect fails closed and resumes idempotently after remount.",
         ),
         _requirement(
             CertificationGate.FAILURE_RESUME,
@@ -1938,6 +2022,14 @@ def modern_reference_triangle_certification_policy(
             _positive_int(storage_budget_bytes, "storage_budget_bytes"),
             ("resource-report",),
             "Actual final storage remains inside its predeclared budget.",
+        ),
+        _requirement(
+            CertificationGate.RESOURCES,
+            "mounted_storage_integrity_passed",
+            CertificationComparator.TRUE,
+            True,
+            ("storage-qualification-report",),
+            "Sustained write/read/hash, remount, device, and no-fallback checks pass on campaign storage.",
         ),
         _requirement(
             CertificationGate.RESOURCES,
@@ -2056,7 +2148,7 @@ def modern_reference_triangle_certification_policy(
         ),
     )
     return ReconstructionCertificationPolicyV2(
-        product_version="2.4.0",
+        product_version="2.5.0",
         symbols=EURUSD_TRIANGLE_SYMBOLS,
         common_start_period=EURUSD_TRIANGLE_COMMON_START_PERIOD,
         common_end_period=common_end_period,

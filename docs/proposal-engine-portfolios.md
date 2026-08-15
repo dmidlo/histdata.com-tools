@@ -1,6 +1,6 @@
 # Proposal-engine registry and qualified portfolios
 
-The v2.4 proposal layer is a first-party model bank, not an empirical-motif
+The v2.5 proposal layer is a first-party model bank, not an empirical-motif
 pipeline with optional post-certification side projects. Engine identity,
 benchmark role, and product eligibility are separate:
 
@@ -67,15 +67,17 @@ were `insufficient_evidence` at 18-window support, while the deferred
 broker-target bridge was `refused`. That retained dossier still fails closed
 instead of silently falling back to motif.
 
-The expanded #491 campaign freezes 96 synchronized HistData windows: 32 each
-for calibration, validation, and final holdout across 2024 and 2025. The
-diagonal self-excitation marked-Hawkes variant passes all ten powered hard
-gates. The full self/cross variant fails time-uniformity; the zero-excitation
-control fails time-uniformity and path/tail behavior. Only the diagonal variant
-is reconstruction- and ensemble-eligible. Other registered variants preserve
-their retained nonpassing decisions and cannot enter the selected product.
-Validation-fitted weights and selected engine IDs are separate declarations;
-the final holdout is evaluated once and never chooses a winner.
+The expanded campaign freezes 96 synchronized HistData windows: 32 each for
+calibration, validation, and final holdout across 2024 and 2025. Under the
+current qualification implementation, the diagonal self-excitation and full
+self/cross marked-Hawkes variants pass all ten powered hard gates and are
+reconstruction- and ensemble-eligible; the zero-excitation control fails
+time-uniformity. Eligibility is not product selection: the frozen final-v2
+portfolio selects only diagonal self-excitation. Other registered variants
+preserve their retained nonpassing or eligible-but-unselected decisions and
+cannot enter the selected product. Validation-fitted weights and selected
+engine IDs are separate declarations; the final holdout is evaluated once and
+never chooses a winner.
 
 Plans without a powered dossier retain the legacy v2.4 compatibility behavior
 and describe motif as a `single-qualified-engine`; they do not claim that

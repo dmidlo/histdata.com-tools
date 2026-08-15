@@ -8,10 +8,10 @@ or rejected events and it does not certify output because it looks plausible.
 ## Current and legacy policy versions
 
 `ReconstructionCertificationPolicyV2` is the modern-reference policy schema.
-The current factory predeclares the issue #491 release contract. It
+The current factory predeclares the issue #498 release contract. It
 fixes:
 
-- product version `2.4.0` (while embedded earlier V2 policies remain readable);
+- product version `2.5.0` (while embedded earlier V2 policies remain readable);
 - the exact EURGBP/EURUSD/GBPUSD instrument set and ASCII tick scope;
 - common source support beginning at `200203` and an execution-time end month;
 - delivery mode `modern_reference` and claim `unconditioned_reference`;
@@ -35,20 +35,20 @@ would silently change the meaning of old policy identities.
 ## Gate mapping
 
 The V2 factory `modern_reference_triangle_certification_policy()` binds every
-live #491 seam while retaining #449 as predecessor evidence:
+live #498 seam while retaining #449/#491 as predecessor evidence:
 
 | Gate group | Required evidence and outcome |
 | --- | --- |
-| `identity-and-anchors` | Inventory readability, dimensions and hashes reconcile; no duplicate dimension, raw-hash mismatch, observed-anchor change, or missing synthetic lineage exists. |
+| `identity-and-anchors` | Inventory readability, dimensions and hashes reconcile; the support map is gap-free; no duplicate dimension, raw-hash mismatch, observed-anchor change, missing synthetic lineage, valid-common-data refusal, or unclassified terminal outcome exists. |
 | `information-safety` | Market-context and CFTC corpora are valid; ex-post and ex-ante uses have distinct zero-violation point-in-time audits. |
 | `reverse-degradation` | The benchmark corpus predates candidate results, thresholds are predeclared, blocked holdouts pass, and negative controls fail as expected. |
 | `conditioned-scorecards` | Feed epochs and observation operators are valid; selected engines and frozen weights come from the powered qualification dossier; all required strata exist and product/benchmark tolerances pass. |
 | `cross-currency` | Triangle, inverse, synchronization, and stale-alignment checks pass before and after identity delivery. |
 | `ensemble-evidence` | Calibration, diversity, refusal, unsupported-region, between-seed, and between-window uncertainty are reported. |
-| `product-reconciliation` | Final ticks, activity, and bars reconcile; the nonclaim is published; full-range preflight, representative windows, a substantial multi-period run, and CLI/API evidence-chain parity pass. |
-| `failure-resume` | Mid-run failure resumes with no missing/duplicate partition and cancellation publishes no partial partition. |
+| `product-reconciliation` | Final ticks, activity, and bars reconcile; the nonclaim is published; full-range preflight and execution pass; every executable retained-member product exists; empty/closed/unsupported windows contain no invented liquidity; the complete product index and provider-neutral dataset publication verify; representative windows and CLI/API evidence-chain parity pass. |
+| `failure-resume` | Mid-run failure and qualified storage disconnect resume with no missing/duplicate partition; cancellation publishes no partial partition. |
 | `replay` | Logical product hashes agree across clean replay and supported concurrency. |
-| `resources` | Peak memory, scratch, runtime, candidate amplification, storage, and final-row evidence meet frozen bounds. |
+| `resources` | Peak memory, scratch, runtime, candidate amplification, storage, final-row evidence, and mounted-storage write/read/hash/remount/no-fallback qualification meet frozen bounds. |
 | `negative-tests` | Corruption, stale artifacts, missing context, invalid information mode, quota overflow, and partial groups fail closed. |
 | `strategy-sensitivity` | Uncertainty is reported and no automatic winner is selected. |
 | `dossier-publication` | Human methodology/limitations, the machine evidence manifest, and all twelve coherent diagnostic families are published. |
