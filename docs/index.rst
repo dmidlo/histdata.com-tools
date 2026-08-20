@@ -37,6 +37,7 @@ Empirical reconstruction pipeline
    modern-reference-motif-library
    empirical-motif-generation-contracts
    proposal-engine-portfolios
+   hawkes-product-selection
    classical-event-clock-challengers
    marked-hawkes-challenger
    regime-switching-hawkes-challenger

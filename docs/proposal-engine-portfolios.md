@@ -79,6 +79,12 @@ cannot enter the selected product. Validation-fitted weights and selected
 engine IDs are separate declarations; the final holdout is evaluated once and
 never chooses a winner.
 
+That diagonal choice is not a caller preference. The
+[marked-Hawkes product-selection dossier](hawkes-product-selection.md) freezes
+the paired validation surface, uncertainty and power statements, exact
+projection-burden definition, Pareto/resource/complexity rule, exclusion
+rationale, and plan/certification binding before a fresh release holdout.
+
 Plans without a powered dossier retain the legacy v2.4 compatibility behavior
 and describe motif as a `single-qualified-engine`; they do not claim that
 ensemble-member variation is cross-model diversity. New qualification-aware

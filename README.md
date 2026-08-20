@@ -3372,7 +3372,8 @@ candidate-amplification budgets participate in the deterministic policy
 identity. The older broker-bound `eurusd_triangle_certification_policy()` and
 V1 dossiers remain readable for evidence replay but are not the #449 release
 path; the current factory additionally binds #491's powered portfolio and
-#498's gap-free support map, complete product/dataset publication,
+#508's validation-only marked-Hawkes product selection alongside #498's
+gap-free support map, complete product/dataset publication,
 mounted-storage qualification, and recovery evidence.
 
 The information-safety gate also binds the exact passing reconstruction
@@ -3527,6 +3528,11 @@ histdatacom reconstruction --json qualify \
   --evaluation work/proposal-evaluation/proposal-portfolio-evaluation-<sha256>.json \
   --experiment work/experiment/reconstruction-experiment-<sha256>.json \
   --output-directory work/qualification
+histdatacom reconstruction --json hawkes-select \
+  --policy work/selection/hawkes-product-selection-policy-<sha256>.json \
+  --comparison work/selection/hawkes-validation-comparison-<sha256>.json \
+  --qualification work/qualification/powered-qualification-dossier-<sha256>.json \
+  --output-directory work/selection
 histdatacom reconstruction --json portfolio \
   --plan work/plan-artifacts/synthetic-infill-plan-<sha256>.json
 ```
@@ -3537,8 +3543,12 @@ trace, power study, engine decisions, and validation-fitted portfolio weights.
 The current powered dossier admits diagonal and full self/cross excitation;
 the frozen product portfolio selects only diagonal self-excitation. Every
 nonpassing or eligible-but-unselected engine remains inspectable and is
-excluded from execution. There is no silent fallback or automatic winner. See
-[`docs/powered-reconstruction-qualification.md`](docs/powered-reconstruction-qualification.md).
+excluded from execution. The product choice is replayed from paired,
+validation-only evidence with frozen projection-burden, uncertainty, power,
+Pareto, resource, and complexity rules; final-holdout results cannot change it.
+There is no silent fallback or automatic winner. See
+[`docs/powered-reconstruction-qualification.md`](docs/powered-reconstruction-qualification.md)
+and [`docs/hawkes-product-selection.md`](docs/hawkes-product-selection.md).
 
 Only HistData.com ASCII/T and the complete EURGBP/EURUSD/GBPUSD triangle are
 accepted. M1, bar, partial-triangle, alternate-provider, OANDA, and broker

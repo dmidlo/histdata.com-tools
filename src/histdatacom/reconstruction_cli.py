@@ -122,6 +122,17 @@ def build_parser() -> argparse.ArgumentParser:
     qualify.add_argument("--experiment", required=True, metavar="PATH")
     qualify.add_argument("--output-directory", required=True, metavar="PATH")
 
+    hawkes_select = subparsers.add_parser(
+        "hawkes-select",
+        help="freeze a validation-only diagonal-versus-full Hawkes choice",
+    )
+    hawkes_select.add_argument("--policy", required=True, metavar="PATH")
+    hawkes_select.add_argument("--comparison", required=True, metavar="PATH")
+    hawkes_select.add_argument("--qualification", required=True, metavar="PATH")
+    hawkes_select.add_argument(
+        "--output-directory", required=True, metavar="PATH"
+    )
+
     diagnostic_build = subparsers.add_parser(
         "diagnostic-build",
         help="build verified chart data and optional deterministic static figures",
@@ -484,6 +495,14 @@ def _run_command(
             output_directory=args.output_directory,
         )
         return qualification.to_dict(), ReconstructionExitCode.SUCCESS
+    if command == "hawkes-select":
+        selection = client.select_hawkes_product(
+            args.policy,
+            args.comparison,
+            args.qualification,
+            output_directory=args.output_directory,
+        )
+        return selection.to_dict(), ReconstructionExitCode.SUCCESS
     if command == "diagnostic-build":
         publication = client.publish_diagnostics(
             args.spec, output_directory=args.output_directory

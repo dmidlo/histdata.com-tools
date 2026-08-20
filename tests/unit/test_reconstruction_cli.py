@@ -63,6 +63,7 @@ def test_installed_help_lists_complete_reconstruction_family(
         "portfolio",
         "engine-evaluate",
         "qualify",
+        "hawkes-select",
         "diagnostic-build",
         "diagnostic-list",
         "compatibility",
@@ -167,6 +168,27 @@ def test_cli_exposes_engine_discovery_portfolio_and_selected_evaluation(
             )
             return Result("histdatacom.powered-qualification-dossier.v1")
 
+        def select_hawkes_product(
+            self,
+            policy,
+            comparison,
+            qualification,
+            *,
+            output_directory,
+        ):
+            calls.append(
+                (
+                    "hawkes-select",
+                    (
+                        policy,
+                        comparison,
+                        qualification,
+                        output_directory,
+                    ),
+                )
+            )
+            return Result("histdatacom.hawkes-product-selection-dossier.v1")
+
         def publish_diagnostics(self, spec, *, output_directory):
             calls.append(("diagnostic-build", (spec, output_directory)))
             return Result(
@@ -238,6 +260,26 @@ def test_cli_exposes_engine_discovery_portfolio_and_selected_evaluation(
         reconstruction_cli.main(
             [
                 "--json",
+                "hawkes-select",
+                "--policy",
+                "policy.json",
+                "--comparison",
+                "comparison.json",
+                "--qualification",
+                "qualification.json",
+                "--output-directory",
+                "selection",
+            ]
+        )
+        == 0
+    )
+    assert json.loads(capsys.readouterr().out)["schema_version"].endswith(
+        "selection-dossier.v1"
+    )
+    assert (
+        reconstruction_cli.main(
+            [
+                "--json",
                 "diagnostic-build",
                 "--spec",
                 "diagnostics.json",
@@ -277,6 +319,15 @@ def test_cli_exposes_engine_discovery_portfolio_and_selected_evaluation(
         (
             "qualify",
             ("evaluation.json", "experiment.json", "qualification"),
+        ),
+        (
+            "hawkes-select",
+            (
+                "policy.json",
+                "comparison.json",
+                "qualification.json",
+                "selection",
+            ),
         ),
         (
             "diagnostic-build",

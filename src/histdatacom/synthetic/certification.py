@@ -1845,8 +1845,11 @@ def modern_reference_triangle_certification_policy(
             "qualified_portfolio_artifact_valid",
             CertificationComparator.TRUE,
             True,
-            ("powered-qualification-dossier",),
-            "Every selected engine and frozen portfolio weight comes from the powered qualification dossier.",
+            (
+                "powered-qualification-dossier",
+                "hawkes-product-selection-dossier",
+            ),
+            "Every selected engine and frozen portfolio weight comes from powered qualification and the validation-only product-selection dossier.",
         ),
         _requirement(
             CertificationGate.CONDITIONED_SCORECARDS,

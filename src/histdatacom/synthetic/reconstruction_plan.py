@@ -122,6 +122,13 @@ from histdatacom.synthetic.generation import (
     EMPIRICAL_MOTIF_GENERATOR_ID,
     EmpiricalMotifGeneratorConfigV1,
 )
+from histdatacom.synthetic.hawkes_selection import (
+    HAWKES_PRODUCT_SELECTION_DOSSIER_ARTIFACT_KIND,
+    HAWKES_SELECTION_ENGINE_IDS,
+    HawkesProductSelectionDossierV1,
+    read_hawkes_product_selection_dossier,
+    verify_hawkes_product_selection_dossier,
+)
 from histdatacom.synthetic.historical_conditioning import (
     historical_product_observation_conditioning,
     historical_product_retention_probability,
@@ -2024,6 +2031,7 @@ class ReconstructionPlanExecutionManifestV1:
             "proposal_dataset_resolution",
             "proposal_portfolio_evaluation",
             "powered_qualification_dossier",
+            "hawkes_product_selection_dossier",
             "source_support_map",
             "window_sizing_audit",
         }
@@ -2756,6 +2764,7 @@ def build_synthetic_infill_plan(
     selected_proposal_engine_ids: Iterable[str] = (),
     proposal_evaluation_paths: Iterable[str | Path] = (),
     qualification_dossier_path: str | Path | None = None,
+    hawkes_product_selection_dossier_path: str | Path | None = None,
 ) -> SyntheticInfillPlanV1:
     """Resolve real artifacts and build one executable first-party plan."""
     selected_symbols = _symbols(tuple(symbols))
@@ -3112,6 +3121,8 @@ def build_synthetic_infill_plan(
     qualification_dossier: PoweredQualificationDossierV1 | None = None
     qualification_ref: ArtifactRef | None = None
     qualification_evaluation_ref: ArtifactRef | None = None
+    hawkes_selection_dossier: HawkesProductSelectionDossierV1 | None = None
+    hawkes_selection_ref: ArtifactRef | None = None
     proposal_model_refs: dict[str, Mapping[str, ArtifactRef]] = {}
     if qualification_dossier_path is not None:
         qualification_dossier = read_powered_qualification_dossier(
@@ -3211,6 +3222,36 @@ def build_synthetic_infill_plan(
     ):
         raise ReconstructionPlanCompatibilityError(
             "legacy proposal evaluation corpus differs from planned benchmark"
+        )
+    if hawkes_product_selection_dossier_path is not None:
+        hawkes_selection_dossier = read_hawkes_product_selection_dossier(
+            hawkes_product_selection_dossier_path
+        )
+        verify_hawkes_product_selection_dossier(hawkes_selection_dossier)
+        if qualification_dossier is None:
+            raise ReconstructionPlanCompatibilityError(
+                "Hawkes product selection requires powered qualification"
+            )
+        if (
+            hawkes_selection_dossier.qualification_dossier_id
+            != qualification_dossier.dossier_id
+        ):
+            raise ReconstructionPlanCompatibilityError(
+                "Hawkes product selection qualification differs"
+            )
+        if selected_engine_ids != (
+            hawkes_selection_dossier.selected_engine_id,
+        ):
+            raise ReconstructionPlanCompatibilityError(
+                "proposal selection differs from frozen Hawkes dossier"
+            )
+        hawkes_selection_ref = artifact_ref_for_file(
+            hawkes_product_selection_dossier_path,
+            kind=HAWKES_PRODUCT_SELECTION_DOSSIER_ARTIFACT_KIND,
+        )
+    elif set(selected_engine_ids) & set(HAWKES_SELECTION_ENGINE_IDS):
+        raise ReconstructionPlanCompatibilityError(
+            "marked-Hawkes product selection requires its validation-only dossier"
         )
     common_context_refs = (
         scientific_ledger_ref,
@@ -3382,6 +3423,8 @@ def build_synthetic_infill_plan(
                 context_availability_qualification
             ),
             context_availability_ref=context_availability_ref,
+            hawkes_selection_dossier=hawkes_selection_dossier,
+            hawkes_selection_ref=hawkes_selection_ref,
         ),
         evidence_policy_ids=(
             selected_evidence_policy.policy_id,
@@ -3753,6 +3796,8 @@ def build_synthetic_infill_plan(
         graph["powered_qualification_dossier"] = qualification_ref
     if qualification_evaluation_ref is not None:
         graph["proposal_portfolio_evaluation"] = qualification_evaluation_ref
+    if hawkes_selection_ref is not None:
+        graph["hawkes_product_selection_dossier"] = hawkes_selection_ref
     if broker_ref is not None:
         graph["broker_delivery"] = broker_ref
     execution_manifest = ReconstructionPlanExecutionManifestV1(
@@ -4049,6 +4094,42 @@ def validate_synthetic_infill_plan_for_execution(
         elif "powered_qualification_dossier" in plan.artifact_graph:
             raise ReconstructionPlanCompatibilityError(
                 "unbound proposal qualification artifact is present"
+            )
+        hawkes_selection_ref = plan.artifact_graph.get(
+            "hawkes_product_selection_dossier"
+        )
+        hawkes_product_selected = bool(
+            set(portfolio.selected_engine_ids)
+            & set(HAWKES_SELECTION_ENGINE_IDS)
+        )
+        if hawkes_product_selected:
+            if hawkes_selection_ref is None:
+                raise ReconstructionPlanCompatibilityError(
+                    "marked-Hawkes portfolio lacks its selection dossier"
+                )
+            if (
+                hawkes_selection_ref.kind
+                != HAWKES_PRODUCT_SELECTION_DOSSIER_ARTIFACT_KIND
+            ):
+                raise ReconstructionPlanCompatibilityError(
+                    "Hawkes selection artifact kind differs"
+                )
+            hawkes_selection = read_hawkes_product_selection_dossier(
+                hawkes_selection_ref.path
+            )
+            verify_hawkes_product_selection_dossier(hawkes_selection)
+            if (
+                portfolio.qualification_dossier_id
+                != hawkes_selection.qualification_dossier_id
+                or tuple(portfolio.selected_engine_ids)
+                != (hawkes_selection.selected_engine_id,)
+            ):
+                raise ReconstructionPlanCompatibilityError(
+                    "proposal portfolio differs from frozen Hawkes selection"
+                )
+        elif hawkes_selection_ref is not None:
+            raise ReconstructionPlanCompatibilityError(
+                "unbound Hawkes product selection artifact is present"
             )
         context_availability_ref = plan.artifact_graph.get(
             "context_availability_qualification"
@@ -4800,6 +4881,8 @@ def _experiment_artifact_bindings(
         ReconstructionContextAvailabilityQualificationV1 | None
     ),
     context_availability_ref: ArtifactRef | None,
+    hawkes_selection_dossier: HawkesProductSelectionDossierV1 | None,
+    hawkes_selection_ref: ArtifactRef | None,
 ) -> tuple[ReconstructionExperimentArtifactBindingV1, ...]:
     """Bind verified authoritative artifacts without duplicating their payloads."""
     roles = (
@@ -4947,6 +5030,20 @@ def _experiment_artifact_bindings(
                     context_availability_qualification.qualification_id,
                     "qualification_id",
                     context_availability_qualification.schema_version,
+                ),
+            )
+        ),
+        *(
+            ()
+            if hawkes_selection_dossier is None or hawkes_selection_ref is None
+            else (
+                (
+                    "hawkes-product-selection",
+                    "gate",
+                    hawkes_selection_ref,
+                    hawkes_selection_dossier.dossier_id,
+                    "dossier_id",
+                    hawkes_selection_dossier.schema_version,
                 ),
             )
         ),

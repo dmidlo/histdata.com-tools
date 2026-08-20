@@ -1151,8 +1151,8 @@ def test_non_motif_portfolio_does_not_require_motif_generator_promotion(
     )
 
     with pytest.raises(
-        ValueError,
-        match="selected proposal engines are not reconstruction eligible",
+        ReconstructionPlanCompatibilityError,
+        match="marked-Hawkes product selection requires",
     ):
         build_synthetic_infill_plan(
             source_root,

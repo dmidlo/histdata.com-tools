@@ -460,6 +460,41 @@ def test_portfolio_plan_refuses_unqualified_product_selection(
     }
 
 
+def test_marked_hawkes_plan_requires_frozen_product_selection(
+    tmp_path: Path,
+) -> None:
+    plan = _plan(tmp_path, _legacy_source(tmp_path))
+    engine_id = "histdatacom.marked-hawkes.diagonal_self_excitation"
+    plan.update(
+        {
+            "schema_version": PORTFOLIO_PLAN_SCHEMA_VERSION,
+            "proposal_engine_ids": [engine_id],
+            "selected_proposal_engine_ids": [engine_id],
+            "proposal_evaluation_paths": ["retained-scorecard.json"],
+            "qualification_dossier_path": "qualification.json",
+        }
+    )
+
+    missing = evaluate_reconstruction_compatibility(
+        plan,
+        inspect_source=False,
+        inspect_artifacts=False,
+    )
+    assert missing.status is ReconstructionCompatibilityStatus.INVALID
+    assert "missing_hawkes_product_selection_dossier" in {
+        item.code for item in missing.findings
+    }
+
+    plan["hawkes_product_selection_dossier_path"] = "selection.json"
+    complete = evaluate_reconstruction_compatibility(
+        plan,
+        inspect_source=False,
+        inspect_artifacts=False,
+    )
+    assert complete.executable
+    assert complete.status is ReconstructionCompatibilityStatus.EXACT
+
+
 def test_unversioned_and_mismatched_artifacts_fail_closed(
     tmp_path: Path,
 ) -> None:

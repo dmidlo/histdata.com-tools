@@ -102,7 +102,8 @@ data rows remain in their source artifacts.
   "proposal_evaluation_paths": [
     "artifacts/reverse-degradation-scorecard-<sha256>.json"
   ],
-  "qualification_dossier_path": "artifacts/powered-qualification-dossier-<sha256>.json"
+  "qualification_dossier_path": "artifacts/powered-qualification-dossier-<sha256>.json",
+  "hawkes_product_selection_dossier_path": "artifacts/hawkes-product-selection-dossier-<sha256>.json"
 }
 ```
 
@@ -143,7 +144,27 @@ dossier = ReconstructionClient().qualify_proposal_portfolio(
 The CLI and API call the same verifier and writer and therefore reproduce the
 same content identity. See
 [`powered-reconstruction-qualification.md`](powered-reconstruction-qualification.md)
-for residual, score, power, holdout, and no-decision semantics.
+for residual, score, power, holdout, and no-decision semantics, and
+[`hawkes-product-selection.md`](hawkes-product-selection.md) for the separate
+validation-only product choice. Freeze that choice through either installed
+surface:
+
+```sh
+histdatacom reconstruction --json hawkes-select \
+  --policy work/selection/hawkes-product-selection-policy-<sha256>.json \
+  --comparison work/selection/hawkes-validation-comparison-<sha256>.json \
+  --qualification work/qualification/powered-qualification-dossier-<sha256>.json \
+  --output-directory work/selection
+```
+
+```python
+selection = ReconstructionClient().select_hawkes_product(
+    "work/selection/hawkes-product-selection-policy-<sha256>.json",
+    "work/selection/hawkes-validation-comparison-<sha256>.json",
+    "work/qualification/powered-qualification-dossier-<sha256>.json",
+    output_directory="work/selection",
+)
+```
 
 Retained evidence diagnostics use the same public boundary:
 

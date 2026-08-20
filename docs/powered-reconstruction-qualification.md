@@ -212,7 +212,9 @@ but cannot enter that product. This is an eligibility decision and an explicit
 product selection, not an automatic winner, historical-truth claim, broker
 claim, or investment recommendation. Content-addressed experiment and dossier
 identities ensure implementation or release-version changes cannot reuse stale
-qualification.
+qualification. The separate [marked-Hawkes product-selection dossier](hawkes-product-selection.md)
+replays that product choice from paired validation evidence and refuses final-
+holdout, manual, repository-order, or stale inputs.
 
 ## Scientific interpretation
 

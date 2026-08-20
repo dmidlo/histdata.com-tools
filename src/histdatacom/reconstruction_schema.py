@@ -389,6 +389,7 @@ _AUDITED_MODULES = (
     "histdatacom.synthetic.reconstruction_plan",
     "histdatacom.synthetic.proposal_engines",
     "histdatacom.synthetic.qualification",
+    "histdatacom.synthetic.hawkes_selection",
     "histdatacom.synthetic.diagnostics",
     "histdatacom.synthetic.reconstruction_handlers",
     "histdatacom.synthetic.certification",
@@ -452,6 +453,9 @@ _REQUIRED_SCHEMA_TOKENS = (
     "predictive-score-report",
     "qualification-power-study",
     "powered-qualification-dossier",
+    "hawkes-product-selection-policy",
+    "hawkes-validation-comparison",
+    "hawkes-product-selection-dossier",
     "reconstruction-diagnostic-chart-bundle",
     "reconstruction-diagnostic-publication",
     "reconstruction-diagnostic-publication-spec",
@@ -546,6 +550,7 @@ _PLAN_FIELDS = frozenset(
         "selected_proposal_engine_ids",
         "proposal_evaluation_paths",
         "qualification_dossier_path",
+        "hawkes_product_selection_dossier_path",
     }
 )
 
@@ -1055,6 +1060,24 @@ def _check_current_scope(
                 "selected_proposal_engine_ids",
                 "Only empirical motif is reconstruction-eligible in retained v2.4 evidence.",
                 "Select empirical motif for product execution; evaluate other engines separately.",
+            )
+        hawkes_ids = {
+            "histdatacom.marked-hawkes.diagonal_self_excitation",
+            "histdatacom.marked-hawkes.full_self_cross_excitation",
+        }
+        if (
+            set(selected_ids) & hawkes_ids
+            and not str(
+                payload.get("hawkes_product_selection_dossier_path", "")
+            ).strip()
+        ):
+            _finding(
+                findings,
+                "missing_hawkes_product_selection_dossier",
+                ReconstructionCompatibilityStatus.INVALID,
+                "hawkes_product_selection_dossier_path",
+                "A marked-Hawkes product choice lacks its validation-only selection dossier.",
+                "Freeze and bind the predeclared diagonal-versus-full selection dossier.",
             )
     provider = (
         str(
@@ -1689,6 +1712,40 @@ def _inspect_artifacts(
                         "qualification_dossier_path",
                         "Qualification evidence is not a HistData-only no-winner dossier.",
                         "Regenerate it with the installed reconstruction qualify command.",
+                    )
+        hawkes_selection_path = str(
+            payload.get("hawkes_product_selection_dossier_path", "")
+        ).strip()
+        if hawkes_selection_path:
+            path = Path(hawkes_selection_path).expanduser()
+            try:
+                selection = _read_artifact_mapping(path)
+            except (OSError, TypeError, ValueError) as err:
+                _finding(
+                    findings,
+                    "invalid_hawkes_product_selection_dossier",
+                    ReconstructionCompatibilityStatus.INVALID,
+                    "hawkes_product_selection_dossier_path",
+                    str(err),
+                    "Supply a bounded content-addressed Hawkes selection dossier.",
+                )
+            else:
+                if (
+                    selection.get("schema_version")
+                    != "histdatacom.hawkes-product-selection-dossier.v1"
+                    or selection.get("validation_only") is not True
+                    or selection.get("final_holdout_used_for_selection")
+                    is not False
+                    or selection.get("manual_preference_used") is not False
+                    or selection.get("repository_order_used") is not False
+                ):
+                    _finding(
+                        findings,
+                        "hawkes_product_selection_scope_mismatch",
+                        ReconstructionCompatibilityStatus.INVALID,
+                        "hawkes_product_selection_dossier_path",
+                        "Hawkes selection is not a validation-only frozen decision.",
+                        "Regenerate it with the installed reconstruction hawkes-select command.",
                     )
 
 

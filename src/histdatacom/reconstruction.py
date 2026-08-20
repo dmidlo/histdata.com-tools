@@ -90,6 +90,11 @@ from histdatacom.synthetic.diagnostics import (
     diagnostic_publication_listing,
     publish_reconstruction_diagnostics,
 )
+from histdatacom.synthetic.hawkes_selection import (
+    HAWKES_SELECTION_ENGINE_IDS,
+    HawkesProductSelectionDossierV1,
+    build_hawkes_product_selection_dossier,
+)
 from histdatacom.synthetic.information import InformationMode
 from histdatacom.synthetic.persistence import (
     RECONSTRUCTION_MANIFEST_ARTIFACT_KIND,
@@ -293,6 +298,7 @@ class ReconstructionPlanSpecV1:
     selected_proposal_engine_ids: tuple[str, ...] = ()
     proposal_evaluation_paths: tuple[str, ...] = ()
     qualification_dossier_path: str | None = None
+    hawkes_product_selection_dossier_path: str | None = None
     schema_version: str = RECONSTRUCTION_PLAN_SPEC_SCHEMA_VERSION
 
     def __post_init__(self) -> None:
@@ -416,11 +422,19 @@ class ReconstructionPlanSpecV1:
         qualification_path = _optional_text(self.qualification_dossier_path)
         if qualification_path is not None:
             qualification_path = str(Path(qualification_path).expanduser())
+        hawkes_selection_path = _optional_text(
+            self.hawkes_product_selection_dossier_path
+        )
+        if hawkes_selection_path is not None:
+            hawkes_selection_path = str(
+                Path(hawkes_selection_path).expanduser()
+            )
         if self.schema_version == RECONSTRUCTION_PLAN_SPEC_SCHEMA_VERSION and (
             proposal_engine_ids
             or selected_engine_ids
             or evaluation_paths
             or qualification_path is not None
+            or hawkes_selection_path is not None
         ):
             raise ReconstructionUnsupportedError(
                 "v1 plan translation cannot declare proposal portfolio fields"
@@ -432,6 +446,11 @@ class ReconstructionPlanSpecV1:
         object.__setattr__(self, "proposal_evaluation_paths", evaluation_paths)
         object.__setattr__(
             self, "qualification_dossier_path", qualification_path
+        )
+        object.__setattr__(
+            self,
+            "hawkes_product_selection_dossier_path",
+            hawkes_selection_path,
         )
         requested_start = self.requested_start_ns
         requested_end = self.requested_end_ns
@@ -526,6 +545,9 @@ class ReconstructionPlanSpecV1:
             )
             payload["qualification_dossier_path"] = (
                 self.qualification_dossier_path
+            )
+            payload["hawkes_product_selection_dossier_path"] = (
+                self.hawkes_product_selection_dossier_path
             )
         return payload
 
@@ -643,6 +665,9 @@ class ReconstructionPlanSpecV1:
             qualification_dossier_path=_optional_text(
                 data.get("qualification_dossier_path")
             ),
+            hawkes_product_selection_dossier_path=_optional_text(
+                data.get("hawkes_product_selection_dossier_path")
+            ),
             schema_version=str(data.get("schema_version", "")),
         )
 
@@ -672,6 +697,14 @@ class ReconstructionPlanSpecV2(ReconstructionPlanSpecV1):
         if not self.proposal_evaluation_paths:
             raise ReconstructionUnsupportedError(
                 "v2 plan requires retained proposal evaluation evidence"
+            )
+        if (
+            set(self.selected_proposal_engine_ids)
+            & set(HAWKES_SELECTION_ENGINE_IDS)
+            and self.hawkes_product_selection_dossier_path is None
+        ):
+            raise ReconstructionUnsupportedError(
+                "v2 marked-Hawkes selection requires its frozen dossier"
             )
 
 
@@ -3459,6 +3492,25 @@ class ReconstructionClient:
         except (OSError, TypeError, ValueError, RuntimeError) as err:
             raise ReconstructionValidationError(str(err)) from err
 
+    def select_hawkes_product(
+        self,
+        policy_path: str | Path,
+        comparison_path: str | Path,
+        qualification_path: str | Path,
+        *,
+        output_directory: str | Path,
+    ) -> HawkesProductSelectionDossierV1:
+        """Freeze the validation-only diagonal-versus-full product choice."""
+        try:
+            return build_hawkes_product_selection_dossier(
+                policy_path,
+                comparison_path,
+                qualification_path,
+                output_directory=output_directory,
+            )
+        except (OSError, TypeError, ValueError, RuntimeError) as err:
+            raise ReconstructionValidationError(str(err)) from err
+
     def publish_diagnostics(
         self,
         spec: DiagnosticPublicationSpecV1 | str | Path,
@@ -3607,6 +3659,9 @@ class ReconstructionClient:
                 ),
                 proposal_evaluation_paths=spec.proposal_evaluation_paths,
                 qualification_dossier_path=spec.qualification_dossier_path,
+                hawkes_product_selection_dossier_path=(
+                    spec.hawkes_product_selection_dossier_path
+                ),
             )
             validate_synthetic_infill_plan_for_execution(plan)
             return plan
