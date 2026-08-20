@@ -1,25 +1,25 @@
 # Runtime and build dependency lock for the default container image.
 # Keep this compatible with pyproject.toml and update it through reviewed
 # dependency changes before rebuilding a release tag.
-certifi==2026.6.17
-charset-normalizer==3.4.9
+certifi==2026.7.22
+charset-normalizer==3.5.0
 idna==3.18
 markdown-it-py==4.2.0
 mdurl==0.1.2
 nexus-rpc==1.4.0
-packaging==26.2
-polars==1.42.1
-polars-runtime-32==1.42.1
+packaging==26.3
+polars==1.43.2
+polars-runtime-32==1.43.2
 protobuf==7.35.1
 Pygments==2.20.0
-pytz==2026.2
+pytz==2026.3.post1
 PyYAML==6.0.3
 requests==2.34.2
 rich==15.0.0
 Rx==3.2.0
-setuptools==83.0.0
-temporalio==1.30.0
+setuptools==84.0.0
+temporalio==1.31.0
 types-protobuf==7.34.1.20260518
 typing-extensions==4.16.0
 urllib3==2.7.0
-wheel==0.47.0
+wheel==0.48.0
