@@ -1717,6 +1717,14 @@ def modern_reference_triangle_certification_policy(
         ),
         _requirement(
             CertificationGate.INFORMATION_SAFETY,
+            "math_verification_report_valid",
+            CertificationComparator.TRUE,
+            True,
+            ("reconstruction-math-verification-report",),
+            "The exact versioned reconstruction formulas pass independent deterministic verification.",
+        ),
+        _requirement(
+            CertificationGate.INFORMATION_SAFETY,
             "scientific_lineage_binding_valid",
             CertificationComparator.TRUE,
             True,

@@ -41,6 +41,7 @@ def test_exposed_classes() -> None:
         "ReconstructionExperimentRole",
         "ReconstructionExperimentSelectionV1",
         "ReconstructionExperimentVerificationV1",
+        "ReconstructionMathVerificationReportV1",
         "ReconstructionOperationReceiptV1",
         "ReconstructionPlanSetPreflightV1",
         "ReconstructionPlanSetExecutionRequestV1",
@@ -55,6 +56,8 @@ def test_exposed_classes() -> None:
         "ReconstructionPreflightV1",
         "ReconstructionScientificLedgerV1",
         "current_histdata_reconstruction_scientific_ledger",
+        "current_reconstruction_math_verification_report",
+        "read_reconstruction_math_verification_report",
         "read_reconstruction_scientific_ledger",
     }
 

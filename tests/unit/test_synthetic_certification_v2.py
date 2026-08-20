@@ -141,6 +141,7 @@ def test_policy_covers_all_live_issue_seams_without_broker_evidence() -> None:
         "valid_common_data_refusal_count",
         "unclassified_terminal_outcome_count",
         "scientific_ledger_valid",
+        "math_verification_report_valid",
         "scientific_lineage_binding_valid",
         "conditioning_input_missing_state_count",
         "generated_origin_misclassification_count",
@@ -173,6 +174,7 @@ def test_policy_covers_all_live_issue_seams_without_broker_evidence() -> None:
     assert "diagnostic-publication-manifest" in kinds
     assert "reconstruction-plan-support-map" in kinds
     assert "reconstruction-scientific-ledger" in kinds
+    assert "reconstruction-math-verification-report" in kinds
     assert "reconstruction-campaign-product-index" in kinds
     assert "reconstruction-campaign-dataset-publication" in kinds
     assert "storage-qualification-report" in kinds

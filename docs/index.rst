@@ -21,6 +21,7 @@ Data and reconstruction foundations
    cftc-positioning-contracts
    provider-neutral-dataset-catalog
    reconstruction-scientific-ledger
+   reconstruction-math-verification
    reconstruction-experiment-contracts
    reconstruction-schema-compatibility
    reconstruction-evidence-contracts

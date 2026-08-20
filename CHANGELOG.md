@@ -2,6 +2,10 @@
 
 ### Added
 
+- **scientific validation**: add an installed, content-addressed reconstruction
+  math harness with independent negative-binomial, Hawkes stability,
+  time-rescaling, proper-score, projection, triangle-envelope, quote-age, and
+  no-future-use checks, plus a certification-bound machine report (#507).
 - **research**: freeze a content-addressed reconstruction estimand and
   assumption ledger, explicit market-context/CFTC missingness states,
   generated-row claim constraints, v2.4 legacy-unbound replay policy, and

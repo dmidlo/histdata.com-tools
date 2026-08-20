@@ -17,6 +17,7 @@ fixes:
 - delivery mode `modern_reference` and claim `unconditioned_reference`;
 - source-readiness, scientific, operational, reporting, repository, and release
   checks;
+- the exact passing reconstruction math-verification report identity;
 - explicit resource and candidate-amplification ceilings; and
 - coverage exactly once at the `dev`-to-`main` promotion boundary.
 
@@ -40,7 +41,7 @@ live #498 seam while retaining #449/#491 as predecessor evidence:
 | Gate group | Required evidence and outcome |
 | --- | --- |
 | `identity-and-anchors` | Inventory readability, dimensions and hashes reconcile; the support map is gap-free; no duplicate dimension, raw-hash mismatch, observed-anchor change, missing synthetic lineage, valid-common-data refusal, or unclassified terminal outcome exists. |
-| `information-safety` | The current scientific ledger and plan/product/dataset lineage binding are valid; every market-context and CFTC input has an explicit completeness/information-mode state; generated origin is not misclassified; every ex-post product retains `invalid-for-backtest`; and ex-post/ex-ante uses have distinct zero-violation point-in-time audits. |
+| `information-safety` | The current scientific ledger, passing math-verification report, and plan/product/dataset lineage binding are valid; every market-context and CFTC input has an explicit completeness/information-mode state; generated origin is not misclassified; every ex-post product retains `invalid-for-backtest`; and ex-post/ex-ante uses have distinct zero-violation point-in-time audits. |
 | `reverse-degradation` | The benchmark corpus predates candidate results, thresholds are predeclared, blocked holdouts pass, and negative controls fail as expected. |
 | `conditioned-scorecards` | Feed epochs and observation operators are valid; selected engines and frozen weights come from the powered qualification dossier; all required strata exist and product/benchmark tolerances pass. |
 | `cross-currency` | Triangle, inverse, synchronization, and stale-alignment checks pass before and after identity delivery. |

@@ -55,6 +55,7 @@ Works on macOS, Linux, and Windows.
     - [Empirical Reference-Motif Index](#empirical-reference-motif-index)
     - [Real Modern Reference-Motif Library](#real-modern-reference-motif-library)
     - [Reconstruction Scientific Target](#reconstruction-scientific-target)
+    - [Reconstruction Math Verification](#reconstruction-math-verification)
     - [Point-in-Time Reconstruction Evidence](#point-in-time-reconstruction-evidence)
     - [Synchronized Cross-Series Constraints](#synchronized-cross-series-constraints)
     - [Empirical Motif Candidate Generation](#empirical-motif-candidate-generation)
@@ -2967,6 +2968,24 @@ alternate providers, live feeds, and broker conditioning remain later
 milestones. See
 [`docs/reconstruction-scientific-ledger.md`](docs/reconstruction-scientific-ledger.md).
 
+#### Reconstruction Math Verification
+
+`current_reconstruction_math_verification_report()` runs the installed v1.0.0
+scientific-math harness. Its 23 deterministic checks independently verify the
+negative-binomial failures parameterization, strict Hawkes stability,
+time-rescaling compensators and inverses, energy and variogram estimators,
+dimensionless projection burden, exact FX triangle bid/ask sides, bounded quote
+age, and no-future-use semantics. The content-addressed report contains neither
+events nor samples and rejects changed formulas, nested checks, and derived
+summaries during replay.
+
+The v2.5 certification policy requires the exact passing report as
+`reconstruction-math-verification-report`; a campaign extracts
+`/summary/passed` only after verifying the report schema, subject identity, and
+file hash. This verifies formula implementation, not campaign fitness or
+historical truth. See
+[`docs/reconstruction-math-verification.md`](docs/reconstruction-math-verification.md).
+
 #### Point-in-Time Reconstruction Evidence
 
 The reconstruction plan now hash-binds a versioned evidence policy and the
@@ -3355,6 +3374,10 @@ V1 dossiers remain readable for evidence replay but are not the #449 release
 path; the current factory additionally binds #491's powered portfolio and
 #498's gap-free support map, complete product/dataset publication,
 mounted-storage qualification, and recovery evidence.
+
+The information-safety gate also binds the exact passing reconstruction
+math-verification report, so release-critical parameterizations cannot drift
+independently of certification evidence.
 
 Certification consumes compact, verified report artifacts bound to that exact
 policy identity, so evidence cannot be reused after scope or threshold drift.

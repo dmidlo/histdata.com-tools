@@ -44,6 +44,7 @@ __all__ = [
     "ReconstructionExperimentRole",
     "ReconstructionExperimentSelectionV1",
     "ReconstructionExperimentVerificationV1",
+    "ReconstructionMathVerificationReportV1",
     "ReconstructionOperationReceiptV1",
     "ReconstructionPlanSetPreflightV1",
     "ReconstructionPlanSetExecutionRequestV1",
@@ -59,6 +60,8 @@ __all__ = [
     "ReconstructionScientificLedgerV1",
     "Timeframe",
     "current_histdata_reconstruction_scientific_ledger",
+    "current_reconstruction_math_verification_report",
+    "read_reconstruction_math_verification_report",
     "read_reconstruction_scientific_ledger",
 ]
 
@@ -127,6 +130,14 @@ _SCIENCE_EXPORTS = frozenset(
     }
 )
 
+_MATH_EXPORTS = frozenset(
+    {
+        "ReconstructionMathVerificationReportV1",
+        "current_reconstruction_math_verification_report",
+        "read_reconstruction_math_verification_report",
+    }
+)
+
 
 def __getattr__(name: str) -> Any:
     """Lazily expose the typed reconstruction facade without import cycles."""
@@ -136,6 +147,7 @@ def __getattr__(name: str) -> Any:
         | _DATASET_EXPORTS
         | _CROSS_SERIES_EXPORTS
         | _SCIENCE_EXPORTS
+        | _MATH_EXPORTS
     ):
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
     from importlib import import_module
@@ -148,6 +160,8 @@ def __getattr__(name: str) -> Any:
         module_name = "histdatacom.datasets"
     elif name in _SCIENCE_EXPORTS:
         module_name = "histdatacom.reconstruction_science"
+    elif name in _MATH_EXPORTS:
+        module_name = "histdatacom.reconstruction_math"
     else:
         module_name = "histdatacom.cross_series_constraints"
     value = getattr(import_module(module_name), name)

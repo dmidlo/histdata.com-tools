@@ -78,6 +78,14 @@ strategy utility, or historical truth.
 
 ## Scores and hard gates
 
+The estimator formulas and numerical parameterizations are independently
+verified by the installed
+[`reconstruction-math-verification`](reconstruction-math-verification.md)
+harness. Its report checks fixed energy/variogram goldens, permutation,
+scaling, missing-cell refusal, analytic time-rescaling, and Hawkes stability;
+certification binds the exact passing report identity. Campaign scorecards
+still supply empirical evidence and cannot be replaced by the formula report.
+
 Each engine and the dense, linear-interpolation, and negative controls receive
 validation and final-holdout reports with:
 
