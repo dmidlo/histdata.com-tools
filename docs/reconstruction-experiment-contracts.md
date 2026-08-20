@@ -9,7 +9,7 @@ artifacts joined by strong references.
 
 ## Current executable boundary
 
-Version 2.4 executes only qualified, observed `histdata.com` ASCII/T cache
+Version 2.5 executes only qualified, observed `histdata.com` ASCII/T cache
 partitions for the complete EURGBP/EURUSD/GBPUSD triangle. Provider, dataset,
 dataset version, origin, delivery profile, experiment role, and local
 materialization are separate fields. The provider-neutral fields are durable
@@ -33,8 +33,8 @@ One experiment binds:
 - indivisible split units, selected/label fields, timestamp masking, retained
   row-identity policy, and a recomputable leakage audit;
 - strong references to the authoritative feed-epoch, observation, context,
-  CFTC, benchmark, motif, evidence-policy, cross-series-policy, configuration,
-  and later engine-specific manifests;
+  CFTC, benchmark, motif, scientific-ledger, evidence-policy,
+  cross-series-policy, configuration, and later engine-specific manifests;
 - preprocessing, feature-schema, benchmark-gate, package, dependency, Python,
   and module-source identities; and
 - limitations and requested Arrow/Parquet export metadata. Canonical cache
@@ -67,17 +67,28 @@ selection.
 `ReconstructionPlanSpecV1` accepts `dataset_catalog_path` plus
 `dataset_reference`. The planner resolves that reference to immutable
 partitions before run or plan identity is computed. Every execution manifest
-and relevant stage command carries three explicit artifacts:
+and relevant stage command carries four explicit artifacts:
 
 - `dataset_catalog`;
 - `dataset_resolution`; and
-- `experiment_manifest`.
+- `experiment_manifest`; and
+- `scientific_ledger`.
 
 Stage loading verifies those artifacts, the catalog-to-inventory equality,
 the leakage audit, specialized bindings, and current implementation identity.
 The experiment ID participates in run configuration identity. A committed v2
 product retains the same ID at `source.experiment_id`, completing the plan-to-
-product lineage.
+product lineage. The scientific ledger is also bound as the experiment's
+`scientific-target`, participates in plan/run identity, and is repeated in
+product quality evidence and the published dataset version's direct
+qualification evidence.
+
+The ledger freezes the estimand, assumption set, context-missingness semantics,
+generated-row claims, and `invalid-for-backtest` ex-post boundary. See
+[`reconstruction-scientific-ledger.md`](reconstruction-scientific-ledger.md).
+Retained v2.4 experiments and plans remain readable as `legacy-unbound`, but
+current execution requires replanning and never synthesizes a binding into an
+old identity.
 
 The v2.3 input remains a documented translation rather than an unaudited path:
 when only `source_root` is supplied, the planner first verifies feed-epoch

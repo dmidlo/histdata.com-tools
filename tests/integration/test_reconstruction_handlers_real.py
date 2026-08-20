@@ -47,6 +47,10 @@ from histdatacom.reconstruction_evidence import (
     read_point_in_time_evidence_projection,
 )
 from histdatacom.reconstruction_experiment import read_reconstruction_experiment
+from histdatacom.reconstruction_science import (
+    RECONSTRUCTION_INVALID_FOR_BACKTEST_LABEL,
+    read_reconstruction_scientific_ledger,
+)
 from histdatacom.runtime_contracts import ArtifactRef
 from histdatacom.synthetic.contracts import canonical_contract_json
 from histdatacom.synthetic.persistence import (
@@ -192,6 +196,44 @@ def test_real_triangle_is_deterministic_and_recovers_post_rename_crash(
     )
     source_manifest = json.loads(
         Path(source_ref.path).read_text(encoding="utf-8")
+    )
+    scientific_ledger_ref = first.plan.artifact_graph["scientific_ledger"]
+    scientific_ledger = read_reconstruction_scientific_ledger(
+        scientific_ledger_ref.path
+    )
+    conditioning = source_manifest["scientific_conditioning"]
+    assert conditioning["scientific_ledger_id"] == scientific_ledger.ledger_id
+    assert conditioning["estimand_id"] == scientific_ledger.estimand.estimand_id
+    assert set(conditioning["conditioning_states"]) == {
+        "market_context",
+        "cftc_positioning",
+    }
+    assert set(conditioning["conditioning_state_ids"]) == {
+        "market_context",
+        "cftc_positioning",
+    }
+    assert all(
+        state["scientific_ledger_id"] == scientific_ledger.ledger_id
+        and state["information_mode"] == "ex_post_reconstruction"
+        and state["invalid_for_backtest_reason"]
+        == RECONSTRUCTION_INVALID_FOR_BACKTEST_LABEL
+        for state in conditioning["conditioning_states"].values()
+    )
+    assert (
+        first_manifest.quality.benchmark_evidence["scientific_ledger_id"]
+        == scientific_ledger.ledger_id
+    )
+    assert (
+        first_manifest.quality.benchmark_evidence["conditioning_state_ids"]
+        == conditioning["conditioning_state_ids"]
+    )
+    assert (
+        first_manifest.quality.benchmark_evidence["invalid_for_backtest_reason"]
+        == RECONSTRUCTION_INVALID_FOR_BACKTEST_LABEL
+    )
+    assert (
+        scientific_ledger_ref.sha256
+        in first_manifest.quality.benchmark_artifact_ids
     )
     assert source_manifest["point_in_time_evidence_projection_ids"]
     assert set(source_manifest["point_in_time_evidence_use"]) == {

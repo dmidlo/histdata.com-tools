@@ -2,6 +2,11 @@
 
 ### Added
 
+- **research**: freeze a content-addressed reconstruction estimand and
+  assumption ledger, explicit market-context/CFTC missingness states,
+  generated-row claim constraints, v2.4 legacy-unbound replay policy, and
+  experiment-to-certification lineage for the HistData-only v2.5 product
+  (#506).
 - **reconstruction**: materialize the complete HistData triangle campaign
   surface with adaptive resource-safe v2 plan shards, exact gap-free support
   maps, durable request/receipt sets, first-party Temporal status/cancel/resume,

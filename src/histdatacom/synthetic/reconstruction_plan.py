@@ -87,6 +87,13 @@ from histdatacom.reconstruction_experiment import (
     read_reconstruction_experiment,
     verify_reconstruction_experiment,
 )
+from histdatacom.reconstruction_science import (
+    RECONSTRUCTION_SCIENTIFIC_LEDGER_ARTIFACT_KIND,
+    RECONSTRUCTION_SCIENTIFIC_NONCLAIM,
+    ReconstructionScientificLedgerV1,
+    current_histdata_reconstruction_scientific_ledger,
+    read_reconstruction_scientific_ledger,
+)
 from histdatacom.runtime_contracts import ArtifactRef, JSONValue
 from histdatacom.synthetic.benchmark_corpus import (
     PREDECLARED_GATE_COMMIT,
@@ -248,10 +255,7 @@ MAX_RECONSTRUCTION_PLAN_REFUSALS = 4096
 MAX_RECONSTRUCTION_PLAN_REQUESTS = 4096
 MAX_SYNTHETIC_INFILL_PLAN_BYTES = 64 * 1024 * 1024
 
-SCIENTIFIC_NONCLAIM = (
-    "Output is a plausible counterfactual ensemble conditioned on declared "
-    "artifacts and constraints; it is not recovered historical truth."
-)
+SCIENTIFIC_NONCLAIM = RECONSTRUCTION_SCIENTIFIC_NONCLAIM
 IMMUTABLE_ANCHOR_POLICY = (
     "Every observed ASCII tick keeps its original bid, ask, timestamp, "
     "partition, and zero-based Arrow row ordinal; synthetic events are added "
@@ -2014,6 +2018,7 @@ class ReconstructionPlanExecutionManifestV1:
             "context_availability_qualification",
             "evidence_policy",
             "cross_series_constraint_policy",
+            "scientific_ledger",
             "proposal_engine_registry",
             "proposal_engine_portfolio",
             "proposal_dataset_resolution",
@@ -2936,6 +2941,18 @@ def build_synthetic_infill_plan(
         )
     _reconcile_catalog_inventory(catalog, exact_resolution, inventory)
     artifacts_dir = roots["artifact"]
+    scientific_ledger = current_histdata_reconstruction_scientific_ledger()
+    scientific_ledger_ref = _write_contract_artifact(
+        scientific_ledger,
+        artifacts_dir,
+        prefix="reconstruction-scientific-ledger",
+        kind=RECONSTRUCTION_SCIENTIFIC_LEDGER_ARTIFACT_KIND,
+        metadata={
+            "ledger_id": scientific_ledger.ledger_id,
+            "estimand_id": scientific_ledger.estimand.estimand_id,
+            "scope": scientific_ledger.scope,
+        },
+    )
     inventory_ref = _write_contract_artifact(
         inventory,
         artifacts_dir,
@@ -3196,6 +3213,7 @@ def build_synthetic_infill_plan(
             "legacy proposal evaluation corpus differs from planned benchmark"
         )
     common_context_refs = (
+        scientific_ledger_ref,
         resolved.artifacts["benchmark_manifest"],
         resolved.artifacts["feed_epochs"],
         resolved.artifacts["market_context"],
@@ -3350,6 +3368,8 @@ def build_synthetic_infill_plan(
         output_directory=artifacts_dir,
         artifact_bindings=_experiment_artifact_bindings(
             resolved=resolved,
+            scientific_ledger=scientific_ledger,
+            scientific_ledger_ref=scientific_ledger_ref,
             evidence_policy=selected_evidence_policy,
             evidence_policy_ref=evidence_policy_ref,
             cross_series_policy=selected_cross_series_policy,
@@ -3387,7 +3407,11 @@ def build_synthetic_infill_plan(
             str(resolved.motif_manifest["library_id"]),
         ),
         limitations=(
-            "v2.4 executes only local HistData.com ASCII/T observed partitions.",
+            "v2.5 executes only local HistData.com ASCII/T observed partitions.",
+            (
+                "The scientific target, assumptions, missingness semantics, and "
+                "invalid-for-backtest boundary are ledger-bound."
+            ),
             (
                 "Provider-neutral fields are identity seams; alternate providers, "
                 "brokers, and OANDA are deferred milestones."
@@ -3406,6 +3430,7 @@ def build_synthetic_infill_plan(
     )
 
     configuration_hashes = {
+        scientific_ledger.ledger_id: scientific_ledger_ref.sha256,
         configuration.configuration_id: configuration_ref.sha256,
         base_configuration.configuration_id: _contract_sha256(
             base_configuration
@@ -3587,6 +3612,7 @@ def build_synthetic_infill_plan(
         windows=planned_windows,
         artifacts={
             **resolved.artifacts,
+            "scientific_ledger": scientific_ledger_ref,
             "source_inventory": inventory_ref,
             "configuration": configuration_ref,
             "evidence_policy": evidence_policy_ref,
@@ -3685,6 +3711,7 @@ def build_synthetic_infill_plan(
 
     graph: dict[str, ArtifactRef] = {
         **resolved.artifacts,
+        "scientific_ledger": scientific_ledger_ref,
         "dataset_catalog": experiment_selection.catalog_ref,
         "dataset_resolution": experiment_selection.resolution_ref,
         "experiment_manifest": experiment_ref,
@@ -3872,6 +3899,50 @@ def validate_synthetic_infill_plan_for_execution(
         raise ReconstructionPlanCompatibilityError(
             "plan experiment manifest failed deterministic verification: "
             + ", ".join(experiment_verification.finding_codes)
+        )
+    scientific_ledger_ref = plan.artifact_graph.get("scientific_ledger")
+    if scientific_ledger_ref is None:
+        raise ReconstructionPlanCompatibilityError(
+            "legacy plan is readable but scientific-ledger-unbound; regenerate "
+            "the plan from its original inputs before execution"
+        )
+    if (
+        scientific_ledger_ref.kind
+        != RECONSTRUCTION_SCIENTIFIC_LEDGER_ARTIFACT_KIND
+    ):
+        raise ReconstructionPlanCompatibilityError(
+            "plan scientific ledger artifact kind differs"
+        )
+    scientific_ledger = read_reconstruction_scientific_ledger(
+        scientific_ledger_ref.path
+    )
+    if (
+        scientific_ledger_ref.metadata.get("ledger_id")
+        != scientific_ledger.ledger_id
+        or scientific_ledger
+        != current_histdata_reconstruction_scientific_ledger()
+    ):
+        raise ReconstructionPlanCompatibilityError(
+            "plan scientific ledger differs from the installed frozen target"
+        )
+    scientific_binding = next(
+        (
+            item
+            for item in experiment.artifact_bindings
+            if item.name == "scientific-ledger"
+        ),
+        None,
+    )
+    if (
+        scientific_binding is None
+        or scientific_binding.artifact != scientific_ledger_ref
+        or scientific_binding.artifact_id != scientific_ledger.ledger_id
+        or scientific_binding.artifact_identity_field != "ledger_id"
+        or scientific_ledger.schema_version
+        not in scientific_binding.schema_versions
+    ):
+        raise ReconstructionPlanCompatibilityError(
+            "plan experiment does not bind its exact scientific ledger"
         )
     catalog = DatasetCatalog.read(plan.artifact_graph["dataset_catalog"].path)
     selection = experiment.selection_for_role(
@@ -4715,6 +4786,8 @@ def _reconcile_catalog_inventory(
 def _experiment_artifact_bindings(
     *,
     resolved: _ResolvedPlanInputs,
+    scientific_ledger: ReconstructionScientificLedgerV1,
+    scientific_ledger_ref: ArtifactRef,
     evidence_policy: ReconstructionEvidencePolicyV1,
     evidence_policy_ref: ArtifactRef,
     cross_series_policy: CrossSeriesConstraintPolicyV1,
@@ -4734,6 +4807,14 @@ def _experiment_artifact_bindings(
         ReconstructionExperimentRole.PRODUCT_INPUT,
     )
     specifications = (
+        (
+            "scientific-ledger",
+            "scientific-target",
+            scientific_ledger_ref,
+            scientific_ledger.ledger_id,
+            "ledger_id",
+            scientific_ledger.schema_version,
+        ),
         (
             "feed-epochs",
             "evidence",
@@ -5408,7 +5489,9 @@ def _adapt_cross_currency_window_plans_for_cardinality(
             used_at_ns=(start_ns + end_ns) // 2,
             feed_epoch_definition=definition,
         )
-        return sum(counts.values()) * (1.0 - retention) / retention
+        return (  # type: ignore[no-any-return]
+            sum(counts.values()) * (1.0 - retention) / retention
+        )
 
     for initial_window in initial_windows:
         boundary = (initial_window.core_start_ns, initial_window.core_end_ns)
@@ -5988,6 +6071,13 @@ def _build_information_evidence(
     inputs: list[ReconstructionInformationInputV1] = []
     declarations = (
         (
+            "scientific_ledger",
+            InformationStage.SOURCE,
+            InformationScope.POINT_IN_TIME,
+            requested_start_ns,
+            None,
+        ),
+        (
             "source_inventory",
             InformationStage.SOURCE,
             InformationScope.POINT_IN_TIME,
@@ -6292,6 +6382,7 @@ def _stage_commands(
     source_inputs = tuple(
         item.artifact for item in inventory.partitions_for_window(window)
     ) + (
+        graph["scientific_ledger"],
         graph["dataset_catalog"],
         graph["dataset_resolution"],
         graph["experiment_manifest"],
@@ -6344,6 +6435,7 @@ def _stage_commands(
             else ()
         ),
         ReconstructionStage.VALIDATION: (
+            graph["scientific_ledger"],
             graph["benchmark_manifest"],
             graph["motif_qualification"],
             graph["motif_leakage_audit"],
@@ -6384,6 +6476,7 @@ def _validate_stage_inputs(
     required: Mapping[ReconstructionStage, set[str]] = {
         ReconstructionStage.SOURCE_ENRICHMENT: {
             ASCII_TICK_SOURCE_KIND,
+            RECONSTRUCTION_SCIENTIFIC_LEDGER_ARTIFACT_KIND,
             RECONSTRUCTION_EXPERIMENT_CATALOG_ARTIFACT_KIND,
             RECONSTRUCTION_EXPERIMENT_RESOLUTION_ARTIFACT_KIND,
             RECONSTRUCTION_EXPERIMENT_ARTIFACT_KIND,
@@ -6407,6 +6500,7 @@ def _validate_stage_inputs(
             else set()
         ),
         ReconstructionStage.VALIDATION: {
+            RECONSTRUCTION_SCIENTIFIC_LEDGER_ARTIFACT_KIND,
             "reverse_degradation_manifest_v1",
             "modern_reference_motif_qualification_v1",
             "modern_reference_motif_leakage_audit_v1",
@@ -7003,6 +7097,7 @@ __all__ = [
     "RECONSTRUCTION_PLAN_RESOURCE_SUMMARY_SCHEMA_VERSION",
     "RECONSTRUCTION_PLAN_SOURCE_SUPPORT_MAP_SCHEMA_VERSION",
     "RECONSTRUCTION_PLAN_SOURCE_SUPPORT_SCHEMA_VERSION",
+    "RECONSTRUCTION_SCIENTIFIC_LEDGER_ARTIFACT_KIND",
     "RECONSTRUCTION_SOURCE_INVENTORY_SCHEMA_VERSION",
     "RECONSTRUCTION_SOURCE_PARTITION_SCHEMA_VERSION",
     "SCIENTIFIC_NONCLAIM",

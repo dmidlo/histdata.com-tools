@@ -53,6 +53,9 @@ def test_exposed_classes() -> None:
         "ReconstructionPlanSupportMapV1",
         "ReconstructionPlanSupportWindowV1",
         "ReconstructionPreflightV1",
+        "ReconstructionScientificLedgerV1",
+        "current_histdata_reconstruction_scientific_ledger",
+        "read_reconstruction_scientific_ledger",
     }
 
 

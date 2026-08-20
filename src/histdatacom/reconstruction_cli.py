@@ -72,6 +72,15 @@ def build_parser() -> argparse.ArgumentParser:
         "--json", action="store_true", default=argparse.SUPPRESS
     )
 
+    science = subparsers.add_parser(
+        "science",
+        help="inspect the current or one retained reconstruction science ledger",
+    )
+    science.add_argument("--ledger", metavar="PATH")
+    science.add_argument(
+        "--json", action="store_true", default=argparse.SUPPRESS
+    )
+
     engines = subparsers.add_parser(
         "engines",
         help="discover concrete proposal engines and their executable scope",
@@ -445,6 +454,11 @@ def _run_command(
     command = args.reconstruction_command
     if command == "schemas":
         return client.schemas().to_dict(), ReconstructionExitCode.SUCCESS
+    if command == "science":
+        return (
+            client.scientific_ledger(args.ledger).to_dict(),
+            ReconstructionExitCode.SUCCESS,
+        )
     if command == "engines":
         return (
             client.proposal_engines().to_dict(),
@@ -740,6 +754,25 @@ def _write_result(result: Mapping[str, Any], *, as_json: bool) -> None:
                 f"{key}={counts[key]}" for key in sorted(counts)
             )
             print(f"contract status: {summary}")
+        return
+    if schema_version == "histdatacom.reconstruction-scientific-ledger.v1":
+        estimand = result.get("estimand", {})
+        estimand_id = (
+            estimand.get("estimand_id", "")
+            if isinstance(estimand, Mapping)
+            else ""
+        )
+        print(
+            "Reconstruction science "
+            f"({result.get('ledger_id', '')}): {result.get('scope', '')}"
+        )
+        print(f"estimand: {estimand_id}")
+        print(
+            "assumptions/context states: "
+            f"{len(result.get('assumptions', ()))} / "
+            f"{len(result.get('context_missingness', ()))}"
+        )
+        print("broker/OANDA: later milestone")
         return
     if schema_version == "histdatacom.reconstruction-compatibility-report.v1":
         print(

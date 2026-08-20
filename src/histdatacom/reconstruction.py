@@ -67,6 +67,12 @@ from histdatacom.reconstruction_schema import (
     read_compatibility_plan,
     reconstruction_schema_registry,
 )
+from histdatacom.reconstruction_science import (
+    RECONSTRUCTION_SCIENTIFIC_LEDGER_ARTIFACT_KIND,
+    ReconstructionScientificLedgerV1,
+    current_histdata_reconstruction_scientific_ledger,
+    read_reconstruction_scientific_ledger,
+)
 from histdatacom.runtime_contracts import ArtifactRef, JSONValue
 from histdatacom.synthetic.certification import (
     ReconstructionCertificationDossierV2,
@@ -3389,6 +3395,16 @@ class ReconstructionClient:
         """Return the installed deterministic reconstruction schema registry."""
         return reconstruction_schema_registry()
 
+    def scientific_ledger(
+        self, path: str | Path | None = None
+    ) -> ReconstructionScientificLedgerV1:
+        """Return the current or one retained identity-checked science ledger."""
+        return (
+            current_histdata_reconstruction_scientific_ledger()
+            if path is None
+            else read_reconstruction_scientific_ledger(path)
+        )
+
     def proposal_engines(self) -> ProposalEngineRegistryV1:
         """Return every installed concrete proposal-engine descriptor."""
         return proposal_engine_registry()
@@ -4451,6 +4467,7 @@ class ReconstructionClient:
                     "information",
                     "policy",
                     "qualification",
+                    "scientific",
                     "validation",
                 )
             )
@@ -6101,6 +6118,10 @@ def _build_reconstruction_campaign_product_index(
     run_ids: set[str] = set()
     source_version_ids: set[str] = set()
     delivery_profile_ids: set[str] = set()
+    scientific_ledger_ids: set[str] = set()
+    scientific_lineage_by_run: dict[
+        str, tuple[ReconstructionScientificLedgerV1, ArtifactRef, str]
+    ] = {}
     for shard in plan_set.shards:
         plan = read_synthetic_infill_plan(shard.plan_ref.path)
         if plan.plan_id != shard.plan_id:
@@ -6119,9 +6140,32 @@ def _build_reconstruction_campaign_product_index(
             )
         source_version_ids.add(plan.run.source_version_ids[0])
         delivery_profile_ids.add("modern-reference:" + plan.configuration_id)
-    if len(source_version_ids) != 1 or len(delivery_profile_ids) != 1:
+        ledger_ref = plan.artifact_graph.get("scientific_ledger")
+        if (
+            ledger_ref is None
+            or ledger_ref.kind != RECONSTRUCTION_SCIENTIFIC_LEDGER_ARTIFACT_KIND
+        ):
+            raise ReconstructionPlanError(
+                "campaign plan is scientific-ledger-unbound"
+            )
+        verify_artifact_ref(ledger_ref)
+        ledger = read_reconstruction_scientific_ledger(ledger_ref.path)
+        experiment = read_reconstruction_experiment(
+            plan.artifact_graph["experiment_manifest"].path
+        )
+        scientific_ledger_ids.add(ledger.ledger_id)
+        scientific_lineage_by_run[plan.run.run_id] = (
+            ledger,
+            ledger_ref,
+            experiment.experiment_id,
+        )
+    if (
+        len(source_version_ids) != 1
+        or len(delivery_profile_ids) != 1
+        or len(scientific_ledger_ids) != 1
+    ):
         raise ReconstructionPlanError(
-            "campaign plan shards differ in dataset or delivery identity"
+            "campaign plan shards differ in dataset, delivery, or scientific identity"
         )
     observed_dataset_version_id = next(iter(source_version_ids))
     if not observed_dataset_version_id.startswith("dataset-version:sha256:"):
@@ -6213,6 +6257,9 @@ def _build_reconstruction_campaign_product_index(
                         )
                         continue
                     manifest, manifest_path = product
+                    scientific_ledger, ledger_ref, experiment_id = (
+                        scientific_lineage_by_run[manifest.run_id]
+                    )
                     if (
                         manifest.delivery_profile_id != delivery_profile_id
                         or manifest.source.source_version_ids
@@ -6221,6 +6268,13 @@ def _build_reconstruction_campaign_product_index(
                         or manifest.quality.final_validation_status != "passed"
                         or manifest.quality.cross_instrument_quality_status
                         != "passed"
+                        or manifest.source.experiment_id != experiment_id
+                        or manifest.quality.benchmark_evidence.get(
+                            "scientific_ledger_id"
+                        )
+                        != scientific_ledger.ledger_id
+                        or ledger_ref.sha256
+                        not in manifest.quality.benchmark_artifact_ids
                     ):
                         raise ReconstructionPlanError(
                             "committed campaign product lineage or validation differs"
@@ -6348,6 +6402,30 @@ def _publish_reconstruction_campaign_dataset(
     )
     plan_set = read_reconstruction_plan_set(index.plan_set_ref.path)
     first_plan = read_synthetic_infill_plan(plan_set.shards[0].plan_ref.path)
+    scientific_ledger_ref = first_plan.artifact_graph.get("scientific_ledger")
+    if scientific_ledger_ref is None:
+        raise ReconstructionPlanError(
+            "campaign dataset cannot publish a scientific-ledger-unbound plan"
+        )
+    verify_artifact_ref(scientific_ledger_ref)
+    scientific_ledger = read_reconstruction_scientific_ledger(
+        scientific_ledger_ref.path
+    )
+    if scientific_ledger != current_histdata_reconstruction_scientific_ledger():
+        raise ReconstructionPlanError(
+            "campaign dataset scientific ledger differs from installed target"
+        )
+    for shard in plan_set.shards[1:]:
+        shard_plan = read_synthetic_infill_plan(shard.plan_ref.path)
+        shard_ledger_ref = shard_plan.artifact_graph.get("scientific_ledger")
+        if (
+            shard_ledger_ref is None
+            or shard_ledger_ref.sha256 != scientific_ledger_ref.sha256
+        ):
+            raise ReconstructionPlanError(
+                "campaign dataset plan shards differ in scientific identity"
+            )
+        verify_artifact_ref(shard_ledger_ref)
     source_catalog_ref = first_plan.artifact_graph["dataset_catalog"]
     verify_artifact_ref(source_catalog_ref)
     source_catalog = DatasetCatalog.read(source_catalog_ref.path)
@@ -6398,6 +6476,7 @@ def _publish_reconstruction_campaign_dataset(
             ),
         ),
         qualification_evidence=(
+            scientific_ledger_ref,
             product_index_ref,
             index.plan_set_ref,
             index.support_map_ref,
@@ -6421,6 +6500,7 @@ def _publish_reconstruction_campaign_dataset(
             "qualification_status": version.qualification_status.value,
             "parent_dataset_version_id": parent.dataset_version_id,
             "product_index_id": index.product_index_id,
+            "scientific_ledger_id": scientific_ledger.ledger_id,
         },
     )
     existing_version = next(
@@ -6695,25 +6775,25 @@ def _optional_text(value: Any) -> str | None:
 __all__ = [
     "DEFAULT_PLAN_SET_PERIODS_PER_SHARD",
     "DEFAULT_PREVIEW_LIMIT",
+    "MAX_MONOLITHIC_RECONSTRUCTION_PLAN_SUPPORT_WINDOWS",
     "MAX_PREVIEW_LIMIT",
     "MAX_RECONSTRUCTION_PLAN_SHARDS",
-    "MAX_MONOLITHIC_RECONSTRUCTION_PLAN_SUPPORT_WINDOWS",
     "MAX_RECONSTRUCTION_PLAN_SUPPORT_MAP_BYTES",
     "MAX_RECONSTRUCTION_PLAN_SUPPORT_WINDOWS",
-    "RECONSTRUCTION_EXECUTION_REQUEST_SCHEMA_VERSION",
     "RECONSTRUCTION_CAMPAIGN_DATASET_PUBLICATION_SCHEMA_VERSION",
     "RECONSTRUCTION_CAMPAIGN_PRODUCT_ENTRY_SCHEMA_VERSION",
     "RECONSTRUCTION_CAMPAIGN_PRODUCT_INDEX_SCHEMA_VERSION",
     "RECONSTRUCTION_CAMPAIGN_PRODUCT_SHARD_SCHEMA_VERSION",
+    "RECONSTRUCTION_EXECUTION_REQUEST_SCHEMA_VERSION",
     "RECONSTRUCTION_PLAN_SET_EXECUTION_REQUEST_SCHEMA_VERSION",
-    "RECONSTRUCTION_PLAN_SET_RECEIPT_INDEX_SCHEMA_VERSION",
     "RECONSTRUCTION_PLAN_SET_PREFLIGHT_SCHEMA_VERSION",
+    "RECONSTRUCTION_PLAN_SET_RECEIPT_INDEX_SCHEMA_VERSION",
     "RECONSTRUCTION_PLAN_SET_SCHEMA_VERSION",
     "RECONSTRUCTION_PLAN_SHARD_SCHEMA_VERSION",
     "RECONSTRUCTION_PLAN_SPEC_SCHEMA_VERSION",
     "RECONSTRUCTION_PLAN_SPEC_V2_SCHEMA_VERSION",
-    "RECONSTRUCTION_PLAN_SUPPORT_MAP_SCHEMA_VERSION",
     "RECONSTRUCTION_PLAN_SUPPORT_MAP_INDEX_SCHEMA_VERSION",
+    "RECONSTRUCTION_PLAN_SUPPORT_MAP_SCHEMA_VERSION",
     "RECONSTRUCTION_PLAN_SUPPORT_WINDOW_SCHEMA_VERSION",
     "RECONSTRUCTION_PREVIEW_SCHEMA_VERSION",
     "RECONSTRUCTION_RECEIPT_SCHEMA_VERSION",
@@ -6727,11 +6807,11 @@ __all__ = [
     "InformationMode",
     "ModernReferenceCertificationCampaignResultV1",
     "ModernReferenceCertificationCampaignSpecV1",
-    "ReconstructionCertificationDossierV2",
     "ReconstructionCampaignDatasetPublicationV1",
     "ReconstructionCampaignProductEntryV1",
     "ReconstructionCampaignProductIndexV1",
     "ReconstructionCampaignProductShardV1",
+    "ReconstructionCertificationDossierV2",
     "ReconstructionClient",
     "ReconstructionCompatibilityReportV1",
     "ReconstructionCompatibilityStatus",
@@ -6740,8 +6820,8 @@ __all__ = [
     "ReconstructionExitCode",
     "ReconstructionOperationReceiptV1",
     "ReconstructionPlanError",
-    "ReconstructionPlanSetPreflightV1",
     "ReconstructionPlanSetExecutionRequestV1",
+    "ReconstructionPlanSetPreflightV1",
     "ReconstructionPlanSetReceiptIndexV1",
     "ReconstructionPlanSetV1",
     "ReconstructionPlanShardV1",
@@ -6754,28 +6834,31 @@ __all__ = [
     "ReconstructionPublicError",
     "ReconstructionRefusedError",
     "ReconstructionSchemaRegistryV1",
+    "ReconstructionScientificLedgerV1",
     "ReconstructionUnsupportedError",
     "ReconstructionValidationError",
+    "current_histdata_reconstruction_scientific_ledger",
+    "iter_reconstruction_plan_support_maps",
     "read_execution_request",
-    "read_reconstruction_campaign_dataset_publication",
-    "read_reconstruction_campaign_product_index",
-    "read_reconstruction_campaign_product_shard",
     "read_modern_reference_certification_campaign_spec",
     "read_operation_receipt",
     "read_plan_spec",
+    "read_reconstruction_campaign_dataset_publication",
+    "read_reconstruction_campaign_product_index",
+    "read_reconstruction_campaign_product_shard",
     "read_reconstruction_plan_set",
     "read_reconstruction_plan_set_execution_request",
     "read_reconstruction_plan_set_receipt_index",
     "read_reconstruction_plan_support_map",
     "read_reconstruction_plan_support_map_index",
-    "iter_reconstruction_plan_support_maps",
+    "read_reconstruction_scientific_ledger",
     "reconstruction_exit_code",
     "run_modern_reference_certification_campaign",
     "write_execution_request",
+    "write_operation_receipt",
     "write_reconstruction_campaign_dataset_publication",
     "write_reconstruction_campaign_product_index",
     "write_reconstruction_campaign_product_shard",
-    "write_operation_receipt",
     "write_reconstruction_plan_set",
     "write_reconstruction_plan_set_execution_request",
     "write_reconstruction_plan_set_receipt_index",

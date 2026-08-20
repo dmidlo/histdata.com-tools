@@ -30,6 +30,7 @@ are downstream projections from committed final ticks.
 | --- | --- |
 | `ReconstructionSourcePartitionV1` | Strong hash, monthly ownership, Arrow row count, timestamp bounds, feed-epoch evidence, and immutable row-identity policy for one ASCII/T cache. |
 | `ReconstructionSourceInventoryV1` | Complete Cartesian inventory of the synchronized EURUSD/GBPUSD/EURGBP triangle over the selected common periods. |
+| `ReconstructionScientificLedgerV1` | Content-addressed estimand, assumptions, context-missingness taxonomy, generated-row constraints, validity label, and legacy replay policy. |
 | `ReconstructionExperimentManifestV1` | Catalog revision, immutable partitions, roles, split/leakage policy, authoritative domain bindings, implementation identity, and limitations shared by the plan and product. |
 | `ReconstructionPlanConfigurationV1` | Information, generation, carving, cross-currency, ensemble, storage, delivery, window, and handler policies. |
 | `CrossSeriesConstraintPolicyV1` | Hash-bound alignment, tolerance, readiness, refusal, and artifact-size policy for synchronized source evidence; current admission is the complete HistData triangle only. |
@@ -48,9 +49,12 @@ row, or process-private configuration object is placed in Temporal history.
 Artifact, output, checkpoint, and scratch roots must be non-overlapping and
 must remain outside the immutable ASCII/T source tree. Execution manifests also
 reject durable input artifacts placed beneath scratch, so cleanup cannot cross
-an ownership boundary. The manifest contains strong references to both the
-point-in-time evidence policy and cross-series constraint policy, and both
-policy IDs participate in run configuration identity.
+an ownership boundary. The manifest contains strong references to the
+scientific ledger, point-in-time evidence policy, and cross-series constraint
+policy, and all three IDs participate in run configuration identity. Source
+enrichment classifies every bounded market-context and CFTC query against the
+ledger taxonomy. Validation re-derives those states before product publication
+rather than trusting a carried label.
 Requests are split by ensemble member and bounded window chunks because
 different members share window boundaries and therefore cannot coexist in one
 request whose task cores must not overlap.
@@ -132,6 +136,7 @@ first_command = plan.workflow_requests[0].tasks[0].commands[0]
 stage_plan = load_reconstruction_stage_plan(first_command)
 assert stage_plan.configuration.configuration_id == plan.configuration_id
 assert "experiment_manifest" in stage_plan.execution_manifest.artifacts
+assert "scientific_ledger" in stage_plan.execution_manifest.artifacts
 ```
 
 Supplying `source_root` uses the documented v2.3 translation: feed-epoch hashes
@@ -146,6 +151,13 @@ the same IDs. Source file paths are retained for execution, while scientific
 source identity is based on catalog/version/revision, digest, size, row count,
 role, split, evidence, and period semantics. See
 [`reconstruction-experiment-contracts.md`](reconstruction-experiment-contracts.md).
+The authoritative estimand and migration rules are in
+[`reconstruction-scientific-ledger.md`](reconstruction-scientific-ledger.md).
+
+Retained v2.4 plans remain readable and identity-verifiable, but are
+`legacy-unbound`. Current execution refuses them until they are replanned from
+their original inputs, producing new experiment, run, plan, and scientific
+ledger bindings without rewriting the retained identity.
 
 ## Ex-ante construction and fail-closed behavior
 

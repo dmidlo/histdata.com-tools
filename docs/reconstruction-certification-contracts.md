@@ -40,7 +40,7 @@ live #498 seam while retaining #449/#491 as predecessor evidence:
 | Gate group | Required evidence and outcome |
 | --- | --- |
 | `identity-and-anchors` | Inventory readability, dimensions and hashes reconcile; the support map is gap-free; no duplicate dimension, raw-hash mismatch, observed-anchor change, missing synthetic lineage, valid-common-data refusal, or unclassified terminal outcome exists. |
-| `information-safety` | Market-context and CFTC corpora are valid; ex-post and ex-ante uses have distinct zero-violation point-in-time audits. |
+| `information-safety` | The current scientific ledger and plan/product/dataset lineage binding are valid; every market-context and CFTC input has an explicit completeness/information-mode state; generated origin is not misclassified; every ex-post product retains `invalid-for-backtest`; and ex-post/ex-ante uses have distinct zero-violation point-in-time audits. |
 | `reverse-degradation` | The benchmark corpus predates candidate results, thresholds are predeclared, blocked holdouts pass, and negative controls fail as expected. |
 | `conditioned-scorecards` | Feed epochs and observation operators are valid; selected engines and frozen weights come from the powered qualification dossier; all required strata exist and product/benchmark tolerances pass. |
 | `cross-currency` | Triangle, inverse, synchronization, and stale-alignment checks pass before and after identity delivery. |
@@ -57,6 +57,11 @@ live #498 seam while retaining #449/#491 as predecessor evidence:
 
 Changing the source range, evidence contract, threshold, or resource budget
 changes the deterministic V2 policy ID.
+
+The methodology and limitations are not free-floating dossier prose. The
+campaign declares the same strong `reconstruction_scientific_ledger_v1`
+artifact carried by the experiment, plan, product, and published dataset. See
+[`reconstruction-scientific-ledger.md`](reconstruction-scientific-ledger.md).
 
 ## Evidence contracts
 

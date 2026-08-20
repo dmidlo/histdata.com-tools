@@ -54,6 +54,7 @@ Works on macOS, Linux, and Windows.
     - [Marked Add-Thin Sequence Engine](#marked-add-thin-sequence-engine)
     - [Empirical Reference-Motif Index](#empirical-reference-motif-index)
     - [Real Modern Reference-Motif Library](#real-modern-reference-motif-library)
+    - [Reconstruction Scientific Target](#reconstruction-scientific-target)
     - [Point-in-Time Reconstruction Evidence](#point-in-time-reconstruction-evidence)
     - [Synchronized Cross-Series Constraints](#synchronized-cross-series-constraints)
     - [Empirical Motif Candidate Generation](#empirical-motif-candidate-generation)
@@ -2941,6 +2942,31 @@ enter those files. See
 for the source profile, feature schema, corrected event-clock/transition
 semantics, qualification gates, CLI, and nonclaims.
 
+#### Reconstruction Scientific Target
+
+The v2.5 pipeline has one content-addressed scientific ledger for its estimand,
+assumptions, context-missingness taxonomy, generated-row constraints, and
+validity boundary. It formalizes the output as a plausible conditional
+counterfactual ensemble after carving and reconciliation—not recovered ticks,
+observed history, or broker history. Ex-post products remain explicitly
+`invalid-for-backtest` as newly observed point-in-time evidence.
+
+The ledger is bound through the experiment, plan/runtime graph, product quality
+evidence, published dataset version, and certification policy. Source and
+validation stages independently classify the completeness and information mode
+of every bounded market-context and CFTC query. Retained v2.4 identities remain
+readable as `legacy-unbound`, but must be replanned before current execution.
+
+```sh
+histdatacom reconstruction --json science
+```
+
+Only the qualified HistData.com ASCII/T EURGBP/EURUSD/GBPUSD intersection is in
+scope. Provider-neutral contracts preserve later adapter seams; OANDA,
+alternate providers, live feeds, and broker conditioning remain later
+milestones. See
+[`docs/reconstruction-scientific-ledger.md`](docs/reconstruction-scientific-ledger.md).
+
 #### Point-in-Time Reconstruction Evidence
 
 The reconstruction plan now hash-binds a versioned evidence policy and the
@@ -3453,6 +3479,7 @@ Schema discovery and compatibility admission are also first-party:
 ```sh
 histdatacom reconstruction schemas --json
 histdatacom reconstruction engines --json
+histdatacom reconstruction --json science
 histdatacom reconstruction compatibility --plan plan-spec.json --json
 histdatacom reconstruction --json experiment-list --root work/plan-artifacts
 ```

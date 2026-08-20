@@ -89,6 +89,14 @@ from histdatacom.reconstruction_evidence import (
     reconstruction_evidence_use,
 )
 from histdatacom.reconstruction_experiment import read_reconstruction_experiment
+from histdatacom.reconstruction_science import (
+    RECONSTRUCTION_INVALID_FOR_BACKTEST_LABEL,
+    ReconstructionConditioningStateV1,
+    classify_cftc_positioning_query,
+    classify_market_context_query,
+    current_histdata_reconstruction_scientific_ledger,
+    read_reconstruction_scientific_ledger,
+)
 from histdatacom.resource_usage import peak_rss_bytes
 from histdatacom.runtime_contracts import ArtifactRef, JSONScalar, JSONValue
 from histdatacom.synthetic.benchmark import (
@@ -399,13 +407,21 @@ def source_enrichment_handler(
                 evidence_projections, key=lambda item: item.projection_id
             )
         ]
+        cftc_conditioning = _cftc_conditioning_evidence(plan, positioning)
+        scientific_conditioning = _source_scientific_conditioning(
+            plan,
+            context=context,
+            positioning=positioning,
+            cftc_conditioning=cftc_conditioning,
+        )
         payload: dict[str, JSONValue] = {
             **_stage_scope(invocation),
             "input_stream_refs": _refs_dict(input_refs),
             "core_stream_refs": _refs_dict(core_refs),
             "market_context": context.to_dict(),
             "cftc_positioning": positioning.to_dict(),
-            "cftc_conditioning": _cftc_conditioning_evidence(plan, positioning),
+            "cftc_conditioning": cftc_conditioning,
+            "scientific_conditioning": scientific_conditioning,
             "observation_operator_id": observation_operator.operator_id,
             "motif_conditions": {
                 symbol: condition.to_dict()
@@ -1168,7 +1184,7 @@ def _historical_product_observation_conditioning(
         raise ValueError(
             "historical product conditioning requires one synchronized epoch"
         )
-    return historical_product_observation_conditioning(
+    return historical_product_observation_conditioning(  # type: ignore[no-any-return]
         operator,
         feed_epoch_label=next(iter(epochs)),
         symbols=tuple(conditions),
@@ -1752,7 +1768,25 @@ def validation_handler(
                 ),
                 message="final cross-instrument validation failed",
             )
-        benchmark_evidence = _validate_scientific_evidence(plan)
+        source_scientific_evidence = _validated_source_scientific_conditioning(
+            plan, source
+        )
+        benchmark_evidence = {
+            **_validate_scientific_evidence(plan),
+            "scientific_ledger_id": source_scientific_evidence[
+                "scientific_ledger_id"
+            ],
+            "estimand_id": source_scientific_evidence["estimand_id"],
+            "conditioning_state_ids": source_scientific_evidence[
+                "conditioning_state_ids"
+            ],
+            "invalid_for_backtest": source_scientific_evidence[
+                "invalid_for_backtest"
+            ],
+            "invalid_for_backtest_reason": source_scientific_evidence[
+                "invalid_for_backtest_reason"
+            ],
+        }
         runtime_proposal_evidence: dict[str, JSONValue] = {
             "proposal_engine_id": str(proposal["proposal_engine_id"]),
             "proposal_engine_registry_id": cast(
@@ -1807,6 +1841,7 @@ def validation_handler(
                 if name
                 in {
                     "benchmark_manifest",
+                    "scientific_ledger",
                     "motif_qualification",
                     "motif_leakage_audit",
                     "information_audit",
@@ -2947,6 +2982,84 @@ def _cftc_conditioning_evidence(
     }
 
 
+def _source_scientific_conditioning(
+    plan: ReconstructionStagePlanV1,
+    *,
+    context: MarketContextQueryV1,
+    positioning: CftcPositioningQueryV1,
+    cftc_conditioning: Mapping[str, Any],
+) -> dict[str, JSONValue]:
+    """Bind every context query to explicit ledger missingness semantics."""
+    ledger_ref = plan.execution_manifest.artifacts["scientific_ledger"]
+    ledger = read_reconstruction_scientific_ledger(ledger_ref.path)
+    if (
+        ledger_ref.metadata.get("ledger_id") != ledger.ledger_id
+        or ledger != current_histdata_reconstruction_scientific_ledger()
+    ):
+        raise ValueError(
+            "runtime scientific ledger differs from installed target"
+        )
+    qualified_unconditioned = (
+        cftc_conditioning.get("mode") == CFTC_UNAVAILABLE_CONDITIONING_MODE
+    )
+    market_state = classify_market_context_query(context, ledger=ledger)
+    cftc_state = classify_cftc_positioning_query(
+        positioning,
+        qualified_unconditioned=qualified_unconditioned,
+        ledger=ledger,
+    )
+    states = {
+        "market_context": market_state,
+        "cftc_positioning": cftc_state,
+    }
+    invalid = (
+        plan.configuration.information_policy.information_mode
+        is InformationMode.EX_POST_RECONSTRUCTION
+    )
+    return {
+        "scientific_ledger_id": ledger.ledger_id,
+        "estimand_id": ledger.estimand.estimand_id,
+        "conditioning_states": {
+            name: state.to_dict() for name, state in sorted(states.items())
+        },
+        "conditioning_state_ids": {
+            name: state.state_id for name, state in sorted(states.items())
+        },
+        "invalid_for_backtest": invalid,
+        "invalid_for_backtest_reason": (
+            RECONSTRUCTION_INVALID_FOR_BACKTEST_LABEL if invalid else None
+        ),
+    }
+
+
+def _validated_source_scientific_conditioning(
+    plan: ReconstructionStagePlanV1,
+    source: Mapping[str, Any],
+) -> dict[str, JSONValue]:
+    """Re-derive source context states before product publication."""
+    context = MarketContextQueryV1.from_dict(_mapping(source["market_context"]))
+    positioning = CftcPositioningQueryV1.from_dict(
+        _mapping(source["cftc_positioning"])
+    )
+    expected = _source_scientific_conditioning(
+        plan,
+        context=context,
+        positioning=positioning,
+        cftc_conditioning=_mapping(source["cftc_conditioning"]),
+    )
+    retained = _mapping(source["scientific_conditioning"])
+    if retained != expected:
+        raise ValueError("source scientific conditioning evidence differs")
+    states = _mapping(retained["conditioning_states"])
+    restored = {
+        str(name): ReconstructionConditioningStateV1.from_dict(_mapping(value))
+        for name, value in states.items()
+    }
+    if set(restored) != {"market_context", "cftc_positioning"}:
+        raise ValueError("source conditioning-state set differs")
+    return dict(expected)
+
+
 def _motif_conditions(
     plan: ReconstructionStagePlanV1,
     invocation: ReconstructionStageInvocationV1,
@@ -3025,6 +3138,12 @@ def _validate_scientific_evidence(
     plan: ReconstructionStagePlanV1,
 ) -> dict[str, JSONValue]:
     artifacts = plan.execution_manifest.artifacts
+    scientific_ledger = read_reconstruction_scientific_ledger(
+        artifacts["scientific_ledger"].path
+    )
+    experiment = read_reconstruction_experiment(
+        artifacts["experiment_manifest"].path
+    )
     benchmark = read_reverse_degradation_benchmark_corpus(
         artifacts["benchmark_manifest"].path
     )
@@ -3039,6 +3158,21 @@ def _validate_scientific_evidence(
     )
     contracts = _mapping(qualification.get("real_window_contracts"))
     failures: list[str] = []
+    scientific_binding = next(
+        (
+            item
+            for item in experiment.artifact_bindings
+            if item.name == "scientific-ledger"
+        ),
+        None,
+    )
+    if (
+        scientific_ledger != current_histdata_reconstruction_scientific_ledger()
+        or scientific_binding is None
+        or scientific_binding.artifact != artifacts["scientific_ledger"]
+        or scientific_binding.artifact_id != scientific_ledger.ledger_id
+    ):
+        failures.append("scientific ledger or experiment binding differs")
     context_availability_qualification_id: str | None = None
     proposal_portfolio: ProposalEnginePortfolioV1 | None = None
     if isinstance(plan.configuration, ReconstructionPlanConfigurationV2):
@@ -3103,6 +3237,9 @@ def _validate_scientific_evidence(
     if failures:
         raise ValueError("; ".join(failures))
     return {
+        "scientific_ledger_id": scientific_ledger.ledger_id,
+        "estimand_id": scientific_ledger.estimand.estimand_id,
+        "scientific_nonclaim": scientific_ledger.estimand.nonclaim,
         "benchmark_corpus_id": benchmark.corpus_id,
         "motif_library_id": str(qualification.get("library_id", "")),
         "motif_candidate_report_id": str(

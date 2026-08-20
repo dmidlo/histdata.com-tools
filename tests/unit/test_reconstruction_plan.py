@@ -27,6 +27,7 @@ from histdatacom.data_analytics.feed_epochs_v2 import (
 from histdatacom.data_quality.training_features import (
     enrich_tick_cache_with_training_features,
 )
+from histdatacom.datasets import DatasetVersionManifestV1
 from histdatacom.manifest_store import ManifestStatusStore
 from histdatacom.orchestration.queues import build_orchestration_worker_config
 from histdatacom.orchestration.reconstruction import (
@@ -75,6 +76,10 @@ from histdatacom.reconstruction_evidence import (
 from histdatacom.reconstruction_experiment import (
     ReconstructionExperimentRole,
     read_reconstruction_experiment,
+)
+from histdatacom.reconstruction_science import (
+    RECONSTRUCTION_SCIENTIFIC_LEDGER_ARTIFACT_KIND,
+    read_reconstruction_scientific_ledger,
 )
 from histdatacom.synthetic import (
     ASCII_TICK_SOURCE_KIND,
@@ -409,6 +414,13 @@ def test_public_builder_is_deterministic_bounded_and_stage_consumable(
     assert first.artifact_graph["cross_series_constraint_policy"].kind == (
         "cross_series_constraint_policy_v1"
     )
+    scientific_ledger = read_reconstruction_scientific_ledger(
+        first.artifact_graph["scientific_ledger"].path
+    )
+    assert first.artifact_graph["scientific_ledger"].kind == (
+        RECONSTRUCTION_SCIENTIFIC_LEDGER_ARTIFACT_KIND
+    )
+    assert ReconstructionClient().scientific_ledger() == scientific_ledger
     source_support_map = read_reconstruction_plan_source_support_map(
         first.artifact_graph["source_support_map"].path
     )
@@ -425,6 +437,15 @@ def test_public_builder_is_deterministic_bounded_and_stage_consumable(
         execution_manifest.source_inventory_id
     )
     assert first.run.source_version_ids == (product_input.dataset_version_id,)
+    scientific_binding = next(
+        item
+        for item in experiment.artifact_bindings
+        if item.name == "scientific-ledger"
+    )
+    assert (
+        scientific_binding.artifact == first.artifact_graph["scientific_ledger"]
+    )
+    assert scientific_binding.artifact_id == scientific_ledger.ledger_id
     assert source_support_map.windows == first.source_support
     assert all(
         item.selected_cross_series_alignment == "exact_event_sequence"
@@ -442,6 +463,25 @@ def test_public_builder_is_deterministic_bounded_and_stage_consumable(
     assert len(ReconstructionClient().proposal_engines().descriptors) == 13
 
     validate_synthetic_infill_plan_for_execution(restored)
+    legacy_unbound = replace(
+        restored,
+        artifact_graph={
+            name: ref
+            for name, ref in restored.artifact_graph.items()
+            if name != "scientific_ledger"
+        },
+        plan_id="",
+    )
+    assert SyntheticInfillPlanV1.from_json(legacy_unbound.to_json()) == (
+        legacy_unbound
+    )
+    with pytest.raises(
+        ReconstructionPlanCompatibilityError,
+        match="scientific-ledger-unbound.*regenerate",
+    ):
+        validate_synthetic_infill_plan_for_execution(
+            legacy_unbound, verify_artifacts=False
+        )
     task = restored.workflow_requests[0].tasks[0]
     assert tuple(command.stage for command in task.commands) == (
         RECONSTRUCTION_STAGE_ORDER
@@ -465,6 +505,7 @@ def test_public_builder_is_deterministic_bounded_and_stage_consumable(
             in loaded.execution_manifest.artifacts
         )
         assert "source_support_map" in loaded.execution_manifest.artifacts
+        assert "scientific_ledger" in loaded.execution_manifest.artifacts
 
     source_command = task.commands[0]
     source_invocation = ReconstructionStageInvocationV1(
@@ -2280,6 +2321,13 @@ def test_public_plan_spec_supports_exact_paired_window_bounds(
         pass
 
     fake_products: dict[Path, Any] = {}
+    scientific_ledger_ref = selected_plan.artifact_graph["scientific_ledger"]
+    scientific_ledger = read_reconstruction_scientific_ledger(
+        scientific_ledger_ref.path
+    )
+    experiment = read_reconstruction_experiment(
+        selected_plan.artifact_graph["experiment_manifest"].path
+    )
     for ordinal, window in enumerate(task_windows, start=1):
         path = source_root / f"fake-product-{ordinal}.json"
         path.write_text("{}", encoding="utf-8")
@@ -2291,12 +2339,17 @@ def test_public_plan_spec_supports_exact_paired_window_bounds(
             "modern-reference:" + selected_plan.configuration_id
         )
         product.source = SimpleNamespace(
-            source_version_ids=selected_plan.run.source_version_ids
+            source_version_ids=selected_plan.run.source_version_ids,
+            experiment_id=experiment.experiment_id,
         )
         product.symbols = _SYMBOLS
         product.quality = SimpleNamespace(
             final_validation_status="passed",
             cross_instrument_quality_status="passed",
+            benchmark_evidence={
+                "scientific_ledger_id": scientific_ledger.ledger_id
+            },
+            benchmark_artifact_ids=(scientific_ledger_ref.sha256,),
         )
         product.manifest_id = f"reconstruction-manifest-v3:fake-{ordinal}"
         product.publication_id = f"reconstruction-publication-v3:fake-{ordinal}"
@@ -2364,6 +2417,15 @@ def test_public_plan_spec_supports_exact_paired_window_bounds(
     )
     assert publication.synthetic_dataset_version_id.startswith(
         "dataset-version:sha256:"
+    )
+    dataset_version = DatasetVersionManifestV1.from_dict(
+        json.loads(
+            Path(publication.dataset_version_ref.path).read_text("utf-8")
+        )
+    )
+    assert scientific_ledger_ref in dataset_version.qualification_evidence
+    assert publication.dataset_version_ref.metadata["scientific_ledger_id"] == (
+        scientific_ledger.ledger_id
     )
 
     missing_path = next(iter(fake_products))

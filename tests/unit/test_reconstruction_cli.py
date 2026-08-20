@@ -58,6 +58,7 @@ def test_installed_help_lists_complete_reconstruction_family(
     output = capsys.readouterr().out
     for command in (
         "schemas",
+        "science",
         "engines",
         "portfolio",
         "engine-evaluate",
@@ -92,6 +93,25 @@ def test_installed_help_lists_complete_reconstruction_family(
         assert command in output
     assert "not recovered historical truth" in output
     assert "M1/bar inputs" in output
+
+
+def test_cli_exposes_current_scientific_ledger(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    assert reconstruction_cli.main(["--json", "science"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+
+    assert payload["schema_version"] == (
+        "histdatacom.reconstruction-scientific-ledger.v1"
+    )
+    assert payload["scope"] == "histdata.com/ascii/tick/eurusd-triangle"
+    assert len(payload["assumptions"]) == 7
+    assert len(payload["context_missingness"]) == 8
+
+    assert reconstruction_cli.main(["science"]) == 0
+    output = capsys.readouterr().out
+    assert "Reconstruction science" in output
+    assert "broker/OANDA: later milestone" in output
 
 
 def test_cli_exposes_engine_discovery_portfolio_and_selected_evaluation(

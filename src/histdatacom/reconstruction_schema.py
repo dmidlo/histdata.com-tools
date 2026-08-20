@@ -365,6 +365,7 @@ _AUDITED_MODULES = (
     "histdatacom.orchestration.reconstruction",
     "histdatacom.reconstruction",
     "histdatacom.reconstruction_experiment",
+    "histdatacom.reconstruction_science",
     "histdatacom.cross_series_constraints",
     "histdatacom.reconstruction_evidence",
     "histdatacom.synthetic.contracts",
@@ -457,6 +458,12 @@ _REQUIRED_SCHEMA_TOKENS = (
     "reconstruction-experiment-selection",
     "reconstruction-experiment-split-policy",
     "reconstruction-experiment-leakage-audit",
+    "reconstruction-estimand",
+    "reconstruction-assumption",
+    "reconstruction-context-missingness-definition",
+    "reconstruction-legacy-scientific-replay-policy",
+    "reconstruction-scientific-ledger",
+    "reconstruction-conditioning-state",
     "synthetic-infill-plan",
     "reconstruction-checkpoint",
     "reconstruction-product.v2",
@@ -1769,6 +1776,8 @@ def _contract_status(
 
 
 def _family(module_name: str, version: str) -> str:
+    if "reconstruction_science" in module_name:
+        return "scientific"
     if "cross_series_constraints" in module_name:
         return "cross_series_constraint"
     if "dataset" in module_name or "source-" in version:
@@ -1814,6 +1823,14 @@ def _consumer_stages(family: str) -> tuple[str, ...]:
         "training": ("source_enrichment", "evidence_qualification", "proposal"),
         "feed_epoch": ("evidence_qualification", "proposal", "validation"),
         "context": ("evidence_qualification", "proposal", "validation"),
+        "scientific": (
+            "catalog_selection",
+            "source_enrichment",
+            "proposal",
+            "carving",
+            "validation",
+            "certification",
+        ),
         "evidence": (
             "source_enrichment",
             "evidence_qualification",
@@ -1918,7 +1935,7 @@ def _availability(name: str, family: str) -> str:
         return "point_in_time_explicit"
     if name.endswith(("_start_ns", "_end_ns")):
         return "half_open_interval"
-    if family in {"context", "evidence", "feed_epoch"}:
+    if family in {"context", "evidence", "feed_epoch", "scientific"}:
         return "artifact_as_of_required"
     if name in {"bid", "ask", "datetime", "event_time_ns"}:
         return "source_recorded_or_generated_by_origin"

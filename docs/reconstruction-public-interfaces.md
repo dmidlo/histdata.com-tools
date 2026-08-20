@@ -30,6 +30,20 @@ machine-readable scientific nonclaim and a true acknowledgement:
 The acknowledgement records operator intent. It does not weaken information
 audits, validation, immutable-anchor checks, or certification gates.
 
+Inspect the installed scientific target or verify a retained ledger before
+planning:
+
+```sh
+histdatacom reconstruction --json science
+histdatacom reconstruction science --ledger work/scientific-ledger.json
+```
+
+The equivalent typed call is `ReconstructionClient.scientific_ledger()`. The
+result exposes the ledger/estimand IDs, exact assumptions, context-missingness
+definitions, generated-row constraints, strategy-validity label, current
+HistData-only scope, and v2.4 legacy-unbound migration rule. See
+[`reconstruction-scientific-ledger.md`](reconstruction-scientific-ledger.md).
+
 ## Construct a plan and request
 
 Discover the installed substrate and audit a JSON plan before constructing it:
@@ -359,6 +373,8 @@ from histdatacom.reconstruction import (
 )
 
 client = ReconstructionClient()
+science = client.scientific_ledger()
+assert science["ledger_id"].startswith("reconstruction-scientific-ledger:")
 plan_set_ref = client.construct_plan_set(
     read_plan_spec("full-range-plan-spec.json"), periods_per_shard=12
 )

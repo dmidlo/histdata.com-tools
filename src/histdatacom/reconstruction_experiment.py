@@ -1858,6 +1858,9 @@ def _default_module_paths() -> dict[str, Path]:
         "histdatacom.datasets.projection": root / "datasets" / "projection.py",
         "histdatacom.reconstruction": root / "reconstruction.py",
         "histdatacom.reconstruction_experiment": Path(__file__).resolve(),
+        "histdatacom.reconstruction_science": (
+            root / "reconstruction_science.py"
+        ),
         "histdatacom.reconstruction_schema": root / "reconstruction_schema.py",
         "histdatacom.synthetic.benchmark_corpus": (
             root / "synthetic" / "benchmark_corpus.py"
