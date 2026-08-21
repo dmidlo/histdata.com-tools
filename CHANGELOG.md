@@ -2,6 +2,9 @@
 
 ### Added
 
+- **testing**: add commit-bound per-critical-module branch floors, bounded
+  generated scientific invariants, exact focused/release mutation profiles,
+  retained CI reports, and release-candidate evidence gates (#520).
 - **reconstruction**: add stratified synthetic-delta physical/runtime
   measurement, residual-guarded campaign resource envelopes, exact
   all-member storage/inode/duration forecasts, frozen concurrency/shard and

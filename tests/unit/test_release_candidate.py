@@ -14,7 +14,11 @@ import pytest
 from histdatacom.orchestration.reconstruction import artifact_ref_for_file
 from histdatacom.reconstruction_schema import reconstruction_schema_registry
 from histdatacom.runtime_contracts import ArtifactRef
+from histdatacom.synthetic.reconstruction_plan import (
+    FIRST_PARTY_RECONSTRUCTION_HANDLERS,
+)
 from histdatacom.synthetic.release_candidate import (
+    CRITICAL_PATH_GATE_EVIDENCE_KINDS,
     REQUIRED_RELEASE_CANDIDATE_COMMANDS,
     REQUIRED_RELEASE_CANDIDATE_DEPENDENCIES,
     REQUIRED_RELEASE_CANDIDATE_FORBIDDEN_FALLBACKS,
@@ -35,6 +39,7 @@ from histdatacom.synthetic.release_candidate import (
     inspect_release_candidate_git_identity,
     read_reconstruction_release_candidate,
     read_release_candidate_artifact_binding,
+    verify_reconstruction_release_candidate,
     write_reconstruction_release_candidate,
     write_release_candidate_artifact_binding,
 )
@@ -46,9 +51,6 @@ from histdatacom.synthetic.release_holdout import (
     freeze_release_candidate,
     write_protected_release_holdout_manifest,
     write_release_candidate_freeze,
-)
-from histdatacom.synthetic.reconstruction_plan import (
-    FIRST_PARTY_RECONSTRUCTION_HANDLERS,
 )
 
 _DAY_NS = 24 * 60 * 60 * 1_000_000_000
@@ -76,13 +78,14 @@ def _artifact(
     name: str,
     *,
     metadata: dict[str, object] | None = None,
+    kind: str = "release_candidate_test_evidence",
 ) -> ArtifactRef:
     path = tmp_path / "evidence" / name
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps({"artifact": name}), encoding="utf-8")
     return artifact_ref_for_file(
         path,
-        kind="release_candidate_test_evidence",
+        kind=kind,
         metadata=metadata,
     )
 
@@ -327,6 +330,9 @@ def _gates(tmp_path: Path) -> tuple[ReleaseCandidateValidationGateV1, ...]:
             evidence_ref=_artifact(
                 tmp_path,
                 f"gate-{gate_name}.json",
+                kind=CRITICAL_PATH_GATE_EVIDENCE_KINDS.get(
+                    gate_name, "release_candidate_test_evidence"
+                ),
                 metadata={
                     "gate_name": gate_name,
                     "git_commit_sha": _COMMIT_SHA,
@@ -464,6 +470,21 @@ def test_incomplete_gates_and_mismatched_commit_fail_closed(
     with pytest.raises(ValueError, match="commit identity differs"):
         replace(gate, git_commit_sha=_sha("another-commit"), gate_id="")
 
+    critical = next(
+        item
+        for item in candidate.validation_gates
+        if item.gate_name == "critical_mutation_testing"
+    )
+    with pytest.raises(ValueError, match="critical-path evidence kind differs"):
+        replace(
+            critical,
+            evidence_ref=replace(
+                critical.evidence_ref,
+                kind="generic_test_evidence",
+            ),
+            gate_id="",
+        )
+
 
 def test_holdout_graph_and_source_cutoff_must_match(tmp_path: Path) -> None:
     candidate = _candidate(tmp_path)
@@ -506,6 +527,19 @@ def test_content_addressed_reader_rejects_tampering(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="not content addressed"):
         read_reconstruction_release_candidate(path)
+
+
+def test_nested_artifact_hash_tampering_fails_verification(
+    tmp_path: Path,
+) -> None:
+    candidate = _candidate(tmp_path)
+    artifact = candidate.build_set.artifacts["wheel"]
+    path = Path(artifact.path)
+    encoded = path.read_bytes()
+    path.write_bytes(bytes([encoded[0] ^ 1]) + encoded[1:])
+
+    with pytest.raises(ValueError, match="artifact hash differs"):
+        verify_reconstruction_release_candidate(candidate)
 
 
 def test_filesystem_roots_must_be_absolute_disjoint_and_qualified(

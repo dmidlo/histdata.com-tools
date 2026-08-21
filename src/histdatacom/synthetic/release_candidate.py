@@ -97,6 +97,8 @@ REQUIRED_RELEASE_CANDIDATE_GATES = frozenset(
         "build_metadata",
         "cli_api_schema_discovery",
         "critical_branch_coverage",
+        "critical_mutation_testing",
+        "critical_property_invariants",
         "docs_warnings_as_errors",
         "full_pre_commit",
         "full_test_suite",
@@ -111,6 +113,11 @@ REQUIRED_RELEASE_CANDIDATE_GATES = frozenset(
         "wheel_sdist_build",
     }
 )
+CRITICAL_PATH_GATE_EVIDENCE_KINDS = {
+    "critical_branch_coverage": "critical_branch_coverage_report_v1",
+    "critical_mutation_testing": "critical_mutation_testing_report_v1",
+    "critical_property_invariants": "critical_property_invariants_report_v1",
+}
 REQUIRED_RELEASE_CANDIDATE_RUNTIME_DEPENDENCIES = frozenset(
     {
         "certifi",
@@ -557,6 +564,14 @@ class ReleaseCandidateValidationGateV1:
             raise ValueError("validation gate commit identity differs")
         if self.evidence_ref.metadata.get("passed") is not True:
             raise ValueError("validation gate passing evidence differs")
+        expected_kind = CRITICAL_PATH_GATE_EVIDENCE_KINDS.get(gate_name)
+        if (
+            expected_kind is not None
+            and self.evidence_ref.kind != expected_kind
+        ):
+            raise ValueError(
+                "release candidate critical-path evidence kind differs"
+            )
         object.__setattr__(
             self, "completed_at_utc", _timestamp(self.completed_at_utc)
         )
@@ -1649,6 +1664,7 @@ def _strict_int(value: Any, name: str) -> int:
 
 
 __all__ = [
+    "CRITICAL_PATH_GATE_EVIDENCE_KINDS",
     "RECONSTRUCTION_RELEASE_CANDIDATE_SCHEMA_VERSION",
     "RELEASE_CANDIDATE_ARTIFACT_BINDING_SCHEMA_VERSION",
     "RELEASE_CANDIDATE_BRANCH_GOVERNANCE_SCHEMA_VERSION",

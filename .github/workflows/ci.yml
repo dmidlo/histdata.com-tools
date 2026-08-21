@@ -140,10 +140,27 @@ jobs:
           python -m pip install -e ".[test]"
 
       - name: Run production coverage
-        run: python -m pytest --cov=histdatacom --cov-report=term-missing:skip-covered --cov-report=xml --cov-report=html
+        run: python -m pytest --cov=histdatacom --cov-report=term-missing:skip-covered --cov-report=json:coverage.json --cov-report=xml --cov-report=html
 
       - name: Enforce coverage threshold
         run: python -m coverage report
+
+      - name: Enforce critical-module branch floors
+        run: |
+          python scripts/critical_path_quality.py coverage \
+            --coverage-json coverage.json \
+            --output critical-branch-coverage.json
+
+      - name: Run critical property invariants
+        run: |
+          python scripts/critical_path_quality.py properties \
+            --output critical-property-invariants.json
+
+      - name: Run focused critical mutations
+        run: |
+          python scripts/critical_path_quality.py mutations \
+            --profile focused \
+            --output critical-mutation-testing.json
 
       - name: Upload production coverage report
         if: always()
@@ -152,7 +169,45 @@ jobs:
           name: production-coverage
           path: |
             coverage.xml
+            coverage.json
             htmlcov/
+            critical-branch-coverage.json
+            critical-property-invariants.json
+            critical-mutation-testing.json
+          if-no-files-found: warn
+
+  release-mutations:
+    name: Release mutation report
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@v7.0.0
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip "setuptools>=77" wheel
+          python -m pip install -e ".[test]"
+
+      - name: Run bounded release mutation set
+        run: |
+          python scripts/critical_path_quality.py mutations \
+            --profile release \
+            --output critical-mutation-testing-release.json
+
+      - name: Upload release mutation report
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: critical-mutation-testing-release
+          path: critical-mutation-testing-release.json
           if-no-files-found: warn
 
   build:

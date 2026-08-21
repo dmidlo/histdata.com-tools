@@ -74,6 +74,7 @@ Persistence, projections, and validation
    projection-burden-diagnostics
    final-adaptive-support-verification
    reconstruction-resource-envelopes
+   critical-path-quality
    reconstruction-diagnostics
    reconstruction-certification-contracts
    reconstruction-temporal-orchestration

@@ -27,6 +27,11 @@ out.gv
 htmlcov/
 docs/_build/
 coverage.xml
+coverage.json
+.critical-coverage*.json
+critical-branch-coverage.json
+critical-property-invariants.json
+critical-mutation-testing*.json
 pip-audit.json
 .coverage
 .coverage.*

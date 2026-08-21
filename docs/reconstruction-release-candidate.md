@@ -73,7 +73,8 @@ The candidate is complete only when it carries passing, commit-bound receipts
 for all of these names:
 
 - `full_pre_commit`, `typing`, and `docs_warnings_as_errors`;
-- `full_test_suite` and `critical_branch_coverage`;
+- `full_test_suite`, `critical_branch_coverage`,
+  `critical_property_invariants`, and `critical_mutation_testing`;
 - `wheel_sdist_build` and `build_metadata`;
 - `isolated_install_linux`, `isolated_install_macos`, and
   `isolated_install_windows`;
@@ -87,6 +88,9 @@ test batteries, Sphinx `-W`, coverage policy, and
 `pypi.sh testpypi_preflight` are the evidence-producing surfaces. A skipped or
 not-applicable claim is not a passing receipt. If a supported platform is
 removed, that is a changed executable scope and therefore a new candidate.
+The three critical-path reports and their measured module floors, generated
+invariants, mutation profiles, and strong artifact kinds are documented in
+[Reconstruction critical-path quality gates](critical-path-quality.md).
 
 Installed schema discovery stays reproducible through both:
 

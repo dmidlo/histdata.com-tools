@@ -393,6 +393,7 @@ _AUDITED_MODULES = (
     "histdatacom.synthetic.hawkes_selection",
     "histdatacom.synthetic.release_holdout",
     "histdatacom.synthetic.release_candidate",
+    "histdatacom.synthetic.critical_path_quality",
     "histdatacom.synthetic.partition_invariance",
     "histdatacom.synthetic.alignment_qualification",
     "histdatacom.synthetic.projection_burden",
@@ -507,6 +508,7 @@ _REQUIRED_SCHEMA_TOKENS = (
     "release-candidate-dependency",
     "reconstruction-release-candidate",
     "release-candidate-artifact-binding",
+    "critical-path-gate-report",
     "adaptive-partition-interval",
     "adaptive-partition-spec",
     "partition-source-ownership-audit",
@@ -2066,6 +2068,8 @@ def _contract_status(
 
 
 def _family(module_name: str, version: str) -> str:
+    if "critical_path_quality" in module_name:
+        return "release"
     if "resource_envelopes" in module_name:
         return "release"
     if "support_verification" in module_name:

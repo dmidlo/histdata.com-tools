@@ -7,6 +7,7 @@ from dataclasses import replace
 
 import pytest
 
+import histdatacom.synthetic.cross_currency as cross_currency_module
 from histdatacom.data_quality import (
     CROSS_INSTRUMENT_METADATA_KEY,
     QualityStatus,
@@ -264,6 +265,33 @@ def test_reconciliation_config_preserves_legacy_engine_identity() -> None:
         CrossCurrencyReconciliationConfigV1.from_dict(bounded_legacy.to_dict())
         == bounded_legacy
     )
+
+
+def test_triangle_residual_uses_independent_executable_bid_ask_sides() -> None:
+    """Reference algebra catches bid/ask-side swaps in triangle validation."""
+    config = eurusd_triangle_reconciliation_config()
+    relationship = config.relationships[0]
+    run = _run(config)
+    streams = _triangle_streams(run, direct_midpoint=0.79)
+    events = tuple(
+        next(
+            event
+            for event in streams[symbol.upper()].events
+            if event.event_time_ns == SYNTHETIC_NS
+        )
+        for symbol in relationship.symbols
+    )
+    direct, numerator, denominator = events
+    implied_bid = numerator.bid / denominator.ask
+    implied_ask = numerator.ask / denominator.bid
+    reference = max(
+        abs(direct.bid - implied_bid) / implied_bid,
+        abs(direct.ask - implied_ask) / implied_ask,
+    )
+
+    assert cross_currency_module._relationship_residual(
+        relationship, events
+    ) == pytest.approx(reference, abs=1e-15)
 
 
 def test_common_window_plan_records_unequal_and_missing_coverage() -> None:
