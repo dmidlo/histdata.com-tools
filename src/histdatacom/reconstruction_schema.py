@@ -65,7 +65,7 @@ SUPPORTED_TIMEFRAME = "T"
 SUPPORTED_SYMBOLS = ("eurgbp", "eurusd", "gbpusd")
 INFORMATION_MODES = ("ex_ante_simulation", "ex_post_reconstruction")
 
-MAX_REGISTRY_CONTRACTS = 512
+MAX_REGISTRY_CONTRACTS = 768
 MAX_FIELDS_PER_CONTRACT = 1024
 MAX_REGISTRY_BYTES = 8 * 1024 * 1024
 MAX_COMPATIBILITY_FINDINGS = 128
@@ -391,6 +391,7 @@ _AUDITED_MODULES = (
     "histdatacom.synthetic.qualification",
     "histdatacom.synthetic.hawkes_residuals",
     "histdatacom.synthetic.hawkes_selection",
+    "histdatacom.synthetic.release_holdout",
     "histdatacom.synthetic.observation_uncertainty",
     "histdatacom.synthetic.diagnostics",
     "histdatacom.synthetic.reconstruction_handlers",
@@ -465,6 +466,17 @@ _REQUIRED_SCHEMA_TOKENS = (
     "hawkes-validation-comparison",
     "hawkes-final-product-residual-report",
     "hawkes-product-selection-dossier",
+    "release-holdout-access-policy",
+    "release-holdout-development-unit",
+    "protected-release-holdout-window",
+    "release-holdout-leakage-audit",
+    "release-holdout-coverage-audit",
+    "protected-release-holdout-manifest",
+    "release-candidate-freeze",
+    "release-holdout-authorization",
+    "release-holdout-evaluation-result",
+    "release-holdout-evaluation-receipt",
+    "release-holdout-retirement-marker",
     "observation-uncertainty-policy",
     "observation-uncertainty-scenario",
     "observation-cardinality-evidence",
@@ -1988,6 +2000,8 @@ def _contract_status(
 
 
 def _family(module_name: str, version: str) -> str:
+    if "release_holdout" in module_name:
+        return "experiment"
     if "reconstruction_science" in module_name:
         return "scientific"
     if "cross_series_constraints" in module_name:

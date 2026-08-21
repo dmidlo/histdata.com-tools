@@ -67,6 +67,7 @@ Persistence, projections, and validation
    reverse-degradation-benchmark-contracts
    reverse-degradation-benchmark-corpus
    powered-reconstruction-qualification
+   release-holdout-governance
    reconstruction-diagnostics
    reconstruction-certification-contracts
    reconstruction-temporal-orchestration
