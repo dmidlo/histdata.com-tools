@@ -28,6 +28,13 @@ rank are absent from member identity. Replaying the same source and config
 hashes produces the same plan, member IDs, and seeds; a hash mismatch fails
 before regeneration.
 
+For a v2.5 marked-Hawkes product, the unchanged member ID and seed are mapped
+to a separate high/central/low observation-operator scenario. Seed dispersion
+therefore remains conditional path uncertainty and is never reported as total
+uncertainty. The operator/path variance decomposition and worst-case
+cardinality admission are specified in
+[`observation-process-uncertainty.md`](observation-process-uncertainty.md).
+
 The configuration freezes member/retention counts, forecast horizons, nominal
 and minimum achieved coverage, minimum fit support, collapse and false-
 diversity tolerances, failure penalty, byte estimates, rounding, sample/slice

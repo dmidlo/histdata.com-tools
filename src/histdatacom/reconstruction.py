@@ -96,6 +96,10 @@ from histdatacom.synthetic.hawkes_selection import (
     build_hawkes_product_selection_dossier,
 )
 from histdatacom.synthetic.information import InformationMode
+from histdatacom.synthetic.observation_uncertainty import (
+    ObservationUncertaintyPolicyV1,
+    write_observation_uncertainty_policy,
+)
 from histdatacom.synthetic.persistence import (
     RECONSTRUCTION_MANIFEST_ARTIFACT_KIND,
     ReconstructionProductManifestV3,
@@ -299,6 +303,7 @@ class ReconstructionPlanSpecV1:
     proposal_evaluation_paths: tuple[str, ...] = ()
     qualification_dossier_path: str | None = None
     hawkes_product_selection_dossier_path: str | None = None
+    observation_uncertainty_policy_path: str | None = None
     schema_version: str = RECONSTRUCTION_PLAN_SPEC_SCHEMA_VERSION
 
     def __post_init__(self) -> None:
@@ -429,12 +434,20 @@ class ReconstructionPlanSpecV1:
             hawkes_selection_path = str(
                 Path(hawkes_selection_path).expanduser()
             )
+        observation_uncertainty_path = _optional_text(
+            self.observation_uncertainty_policy_path
+        )
+        if observation_uncertainty_path is not None:
+            observation_uncertainty_path = str(
+                Path(observation_uncertainty_path).expanduser()
+            )
         if self.schema_version == RECONSTRUCTION_PLAN_SPEC_SCHEMA_VERSION and (
             proposal_engine_ids
             or selected_engine_ids
             or evaluation_paths
             or qualification_path is not None
             or hawkes_selection_path is not None
+            or observation_uncertainty_path is not None
         ):
             raise ReconstructionUnsupportedError(
                 "v1 plan translation cannot declare proposal portfolio fields"
@@ -451,6 +464,11 @@ class ReconstructionPlanSpecV1:
             self,
             "hawkes_product_selection_dossier_path",
             hawkes_selection_path,
+        )
+        object.__setattr__(
+            self,
+            "observation_uncertainty_policy_path",
+            observation_uncertainty_path,
         )
         requested_start = self.requested_start_ns
         requested_end = self.requested_end_ns
@@ -548,6 +566,9 @@ class ReconstructionPlanSpecV1:
             )
             payload["hawkes_product_selection_dossier_path"] = (
                 self.hawkes_product_selection_dossier_path
+            )
+            payload["observation_uncertainty_policy_path"] = (
+                self.observation_uncertainty_policy_path
             )
         return payload
 
@@ -668,6 +689,9 @@ class ReconstructionPlanSpecV1:
             hawkes_product_selection_dossier_path=_optional_text(
                 data.get("hawkes_product_selection_dossier_path")
             ),
+            observation_uncertainty_policy_path=_optional_text(
+                data.get("observation_uncertainty_policy_path")
+            ),
             schema_version=str(data.get("schema_version", "")),
         )
 
@@ -705,6 +729,14 @@ class ReconstructionPlanSpecV2(ReconstructionPlanSpecV1):
         ):
             raise ReconstructionUnsupportedError(
                 "v2 marked-Hawkes selection requires its frozen dossier"
+            )
+        if (
+            set(self.selected_proposal_engine_ids)
+            & set(HAWKES_SELECTION_ENGINE_IDS)
+            and self.observation_uncertainty_policy_path is None
+        ):
+            raise ReconstructionUnsupportedError(
+                "v2 marked-Hawkes selection requires observation uncertainty"
             )
 
 
@@ -2137,6 +2169,10 @@ class ReconstructionCampaignProductEntryV1:
     product_ref: ArtifactRef | None = None
     observed_event_count: int = 0
     synthetic_event_count: int = 0
+    observation_uncertainty_ensemble_id: str | None = None
+    observation_scenario_id: str | None = None
+    observation_scenario_kind: str | None = None
+    observation_path_seed: int | None = None
     reason_code: str | None = None
     entry_id: str = ""
     schema_version: str = RECONSTRUCTION_CAMPAIGN_PRODUCT_ENTRY_SCHEMA_VERSION
@@ -2176,6 +2212,36 @@ class ReconstructionCampaignProductEntryV1:
             )
         object.__setattr__(self, "observed_event_count", observed)
         object.__setattr__(self, "synthetic_event_count", synthetic)
+        uncertainty_id = _optional_text(
+            self.observation_uncertainty_ensemble_id
+        )
+        scenario_id = _optional_text(self.observation_scenario_id)
+        scenario_kind = _optional_text(self.observation_scenario_kind)
+        path_seed = self.observation_path_seed
+        uncertainty_values = (
+            uncertainty_id,
+            scenario_id,
+            scenario_kind,
+            path_seed,
+        )
+        if any(value is not None for value in uncertainty_values) and not all(
+            value is not None for value in uncertainty_values
+        ):
+            raise ReconstructionPlanError(
+                "campaign product observation uncertainty lineage is incomplete"
+            )
+        if path_seed is not None:
+            path_seed = _strict_int(path_seed, "observation_path_seed")
+            if path_seed < 0:
+                raise ReconstructionPlanError(
+                    "campaign product observation path seed is negative"
+                )
+        object.__setattr__(
+            self, "observation_uncertainty_ensemble_id", uncertainty_id
+        )
+        object.__setattr__(self, "observation_scenario_id", scenario_id)
+        object.__setattr__(self, "observation_scenario_kind", scenario_kind)
+        object.__setattr__(self, "observation_path_seed", path_seed)
         if self.status == "verified_product":
             member_id = _required_text(self.ensemble_member_id)
             window_id = _required_text(self.window_id)
@@ -2193,6 +2259,11 @@ class ReconstructionCampaignProductEntryV1:
                 or metadata.get("ensemble_member_id") != member_id
                 or metadata.get("observed_event_count") != observed
                 or metadata.get("synthetic_event_count") != synthetic
+                or metadata.get("observation_uncertainty_ensemble_id")
+                != uncertainty_id
+                or metadata.get("observation_scenario_id") != scenario_id
+                or metadata.get("observation_scenario_kind") != scenario_kind
+                or metadata.get("observation_path_seed") != path_seed
             ):
                 raise ReconstructionPlanError(
                     "campaign product manifest metadata differs from its entry"
@@ -2212,7 +2283,12 @@ class ReconstructionCampaignProductEntryV1:
             object.__setattr__(
                 self, "window_id", _required_text(self.window_id)
             )
-            if self.product_ref is not None or observed or synthetic:
+            if (
+                self.product_ref is not None
+                or observed
+                or synthetic
+                or any(value is not None for value in uncertainty_values)
+            ):
                 raise ReconstructionPlanError(
                     "missing campaign product contains committed evidence"
                 )
@@ -2226,6 +2302,7 @@ class ReconstructionCampaignProductEntryV1:
                 or self.product_ref is not None
                 or observed
                 or synthetic
+                or any(value is not None for value in uncertainty_values)
             ):
                 raise ReconstructionPlanError(
                     "terminal non-product outcome contains product evidence"
@@ -2258,6 +2335,12 @@ class ReconstructionCampaignProductEntryV1:
             ),
             "observed_event_count": self.observed_event_count,
             "synthetic_event_count": self.synthetic_event_count,
+            "observation_uncertainty_ensemble_id": (
+                self.observation_uncertainty_ensemble_id
+            ),
+            "observation_scenario_id": self.observation_scenario_id,
+            "observation_scenario_kind": self.observation_scenario_kind,
+            "observation_path_seed": self.observation_path_seed,
             "reason_code": self.reason_code,
         }
 
@@ -2288,6 +2371,22 @@ class ReconstructionCampaignProductEntryV1:
             ),
             synthetic_event_count=_strict_int(
                 data.get("synthetic_event_count", 0), "synthetic_event_count"
+            ),
+            observation_uncertainty_ensemble_id=_optional_text(
+                data.get("observation_uncertainty_ensemble_id")
+            ),
+            observation_scenario_id=_optional_text(
+                data.get("observation_scenario_id")
+            ),
+            observation_scenario_kind=_optional_text(
+                data.get("observation_scenario_kind")
+            ),
+            observation_path_seed=(
+                None
+                if data.get("observation_path_seed") is None
+                else _strict_int(
+                    data.get("observation_path_seed"), "observation_path_seed"
+                )
             ),
             reason_code=_optional_text(data.get("reason_code")),
             entry_id=str(data.get("entry_id", "")),
@@ -3511,6 +3610,17 @@ class ReconstructionClient:
         except (OSError, TypeError, ValueError, RuntimeError) as err:
             raise ReconstructionValidationError(str(err)) from err
 
+    def create_observation_uncertainty_policy(
+        self, *, output_directory: str | Path
+    ) -> ObservationUncertaintyPolicyV1:
+        """Freeze and publish the default v2.5 observation-scenario policy."""
+        try:
+            policy = ObservationUncertaintyPolicyV1()
+            write_observation_uncertainty_policy(policy, output_directory)
+            return policy
+        except (OSError, TypeError, ValueError, RuntimeError) as err:
+            raise ReconstructionValidationError(str(err)) from err
+
     def publish_diagnostics(
         self,
         spec: DiagnosticPublicationSpecV1 | str | Path,
@@ -3661,6 +3771,9 @@ class ReconstructionClient:
                 qualification_dossier_path=spec.qualification_dossier_path,
                 hawkes_product_selection_dossier_path=(
                     spec.hawkes_product_selection_dossier_path
+                ),
+                observation_uncertainty_policy_path=(
+                    spec.observation_uncertainty_policy_path
                 ),
             )
             validate_synthetic_infill_plan_for_execution(plan)
@@ -6334,6 +6447,37 @@ def _build_reconstruction_campaign_product_index(
                         raise ReconstructionPlanError(
                             "committed campaign product lineage or validation differs"
                         )
+                    runtime_proposal_evidence = (
+                        manifest.quality.benchmark_evidence.get(
+                            "runtime_proposal_evidence"
+                        )
+                    )
+                    runtime_evidence = (
+                        runtime_proposal_evidence
+                        if isinstance(runtime_proposal_evidence, Mapping)
+                        else {}
+                    )
+                    observation_uncertainty_ensemble_id = _optional_text(
+                        runtime_evidence.get(
+                            "observation_uncertainty_ensemble_id"
+                        )
+                    )
+                    observation_scenario_id = _optional_text(
+                        runtime_evidence.get("observation_scenario_id")
+                    )
+                    observation_scenario_kind = _optional_text(
+                        runtime_evidence.get("observation_scenario_kind")
+                    )
+                    raw_observation_path_seed = runtime_evidence.get(
+                        "observation_path_seed"
+                    )
+                    observation_path_seed = (
+                        None
+                        if raw_observation_path_seed is None
+                        else _strict_int(
+                            raw_observation_path_seed, "observation_path_seed"
+                        )
+                    )
                     product_ref = artifact_ref_for_file(
                         manifest_path,
                         kind=RECONSTRUCTION_MANIFEST_ARTIFACT_KIND,
@@ -6346,6 +6490,12 @@ def _build_reconstruction_campaign_product_index(
                             "delivery_profile_id": manifest.delivery_profile_id,
                             "observed_event_count": manifest.observed_event_count,
                             "synthetic_event_count": manifest.synthetic_event_count,
+                            "observation_uncertainty_ensemble_id": (
+                                observation_uncertainty_ensemble_id
+                            ),
+                            "observation_scenario_id": observation_scenario_id,
+                            "observation_scenario_kind": observation_scenario_kind,
+                            "observation_path_seed": observation_path_seed,
                             "logical_content_sha256": (
                                 manifest.replay.logical_content_sha256
                             ),
@@ -6364,6 +6514,12 @@ def _build_reconstruction_campaign_product_index(
                             product_ref=product_ref,
                             observed_event_count=manifest.observed_event_count,
                             synthetic_event_count=manifest.synthetic_event_count,
+                            observation_uncertainty_ensemble_id=(
+                                observation_uncertainty_ensemble_id
+                            ),
+                            observation_scenario_id=observation_scenario_id,
+                            observation_scenario_kind=observation_scenario_kind,
+                            observation_path_seed=observation_path_seed,
                         )
                     )
             else:

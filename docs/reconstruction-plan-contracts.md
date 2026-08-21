@@ -154,6 +154,13 @@ role, split, evidence, and period semantics. See
 The authoritative estimand and migration rules are in
 [`reconstruction-scientific-ledger.md`](reconstruction-scientific-ledger.md).
 
+New v2.5 plans selecting marked Hawkes also bind a content-addressed
+`ObservationUncertaintyPolicyV1`. The planner uses its low-retention endpoint
+and admission quantile for adaptive cardinality and requires three retained
+members so high, central, and low scenarios each have a path. Runtime may not
+replace the admitted scenario with a less demanding one. See
+[`observation-process-uncertainty.md`](observation-process-uncertainty.md).
+
 Retained v2.4 plans remain readable and identity-verifiable, but are
 `legacy-unbound`. Current execution refuses them until they are replanned from
 their original inputs, producing new experiment, run, plan, and scientific

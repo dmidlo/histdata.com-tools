@@ -140,7 +140,9 @@ scorecards. Registry presence alone still grants no eligibility: failed
 engines remain benchmark-only, the broker-target bridge remains research-only,
 and non-motif selection requires powered qualification. A diagonal or full
 marked-Hawkes product additionally binds the validation-only product-selection
-dossier and must equal its replay-derived engine; missing, stale, holdout-
-influenced, or unbound evidence is invalid. See
+dossier and the three-scenario observation-uncertainty policy and must equal
+its replay-derived engine; missing, stale, holdout-influenced, or unbound
+evidence is invalid. See
 [Proposal-engine registry and qualified portfolios](proposal-engine-portfolios.md)
-and [Marked-Hawkes product selection](hawkes-product-selection.md).
+and [Marked-Hawkes product selection](hawkes-product-selection.md), plus
+[Observation-process uncertainty propagation](observation-process-uncertainty.md).

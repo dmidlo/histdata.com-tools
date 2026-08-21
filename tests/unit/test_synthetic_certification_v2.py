@@ -172,6 +172,7 @@ def test_policy_covers_all_live_issue_seams_without_broker_evidence() -> None:
     assert "motif-qualification" not in kinds
     assert "powered-qualification-dossier" in kinds
     assert "hawkes-product-selection-dossier" in kinds
+    assert "observation-uncertainty-report" in kinds
     assert "diagnostic-publication-manifest" in kinds
     assert "reconstruction-plan-support-map" in kinds
     assert "reconstruction-scientific-ledger" in kinds

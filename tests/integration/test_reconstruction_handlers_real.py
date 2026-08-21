@@ -303,6 +303,38 @@ def test_real_triangle_is_deterministic_and_recovers_post_rename_crash(
         assert proposal_manifest["proposal_generation_evidence"]["status"] == (
             "generated"
         )
+        degradation = proposal_manifest["proposal_generation_scenario"][
+            "degradation_parameters"
+        ]
+        if proposal_manifest["observation_uncertainty_ensemble_ref"] is None:
+            assert proposal_manifest["observation_scenario_id"] is None
+            assert degradation["legacy_observation_uncertainty_policy"] == (
+                "v2.4-point-estimate-replay-not-v2.5-scenario-v1"
+            )
+        else:
+            assert proposal_manifest["observation_uncertainty_ensemble_id"]
+            assert proposal_manifest["observation_scenario_id"]
+            assert proposal_manifest["observation_scenario_kind"] in {
+                "high_retention_low_infill",
+                "central_fitted_retention",
+                "low_retention_high_infill",
+            }
+            assert isinstance(proposal_manifest["observation_path_seed"], int)
+            assert degradation["observation_scenario_id"] == (
+                proposal_manifest["observation_scenario_id"]
+            )
+            assert degradation["observation_path_seed"] == (
+                proposal_manifest["observation_path_seed"]
+            )
+            runtime_evidence = first_manifest.quality.benchmark_evidence[
+                "runtime_proposal_evidence"
+            ]
+            assert runtime_evidence["observation_scenario_id"] == (
+                proposal_manifest["observation_scenario_id"]
+            )
+            assert runtime_evidence["observation_path_seed"] == (
+                proposal_manifest["observation_path_seed"]
+            )
     assert proposal_manifest["synchronization_constraint_window_id"] in (
         source_manifest["cross_series_constraint_window_ids"]
     )
@@ -315,6 +347,14 @@ def test_real_triangle_is_deterministic_and_recovers_post_rename_crash(
     with gzip.open(proposal_ledger_ref.path, "rb") as stream:
         proposal_rows = tuple(json.loads(line) for line in stream)
     assert all("cross_series_constraint_use" in row for row in proposal_rows)
+    if proposal_manifest["observation_scenario_id"] is not None:
+        assert all(
+            row["observation_scenario_id"]
+            == proposal_manifest["observation_scenario_id"]
+            and row["observation_path_seed"]
+            == proposal_manifest["observation_path_seed"]
+            for row in proposal_rows
+        )
     assert all(
         row["cross_series_synchronization_constraint_window_id"]
         == proposal_manifest["synchronization_constraint_window_id"]

@@ -2968,6 +2968,19 @@ alternate providers, live feeds, and broker conditioning remain later
 milestones. See
 [`docs/reconstruction-scientific-ledger.md`](docs/reconstruction-scientific-ledger.md).
 
+Marked-Hawkes reconstruction now propagates the qualified observation-operator
+interval through distinct high-retention/low-infill, central, and
+low-retention/high-infill scenarios. Scenario identity is separate from the
+existing ensemble member and path seed. Planning and runtime both admit
+against the low-retention endpoint, publish negative-binomial count moments
+and quantiles, and refuse an unsafe scenario before generation. Validation and
+an untouched final holdout report event-count, cadence, path, spread, triangle,
+and strategy effects plus operator-versus-path variance decomposition. All
+three scenario products are retained by the current release policy; v2.4
+point-estimate artifacts keep their original identity and are never relabeled
+as v2.5 scenario evidence. See
+[`docs/observation-process-uncertainty.md`](docs/observation-process-uncertainty.md).
+
 #### Reconstruction Math Verification
 
 `current_reconstruction_math_verification_report()` runs the installed v1.0.0
@@ -3372,7 +3385,8 @@ candidate-amplification budgets participate in the deterministic policy
 identity. The older broker-bound `eurusd_triangle_certification_policy()` and
 V1 dossiers remain readable for evidence replay but are not the #449 release
 path; the current factory additionally binds #491's powered portfolio and
-#508's validation-only marked-Hawkes product selection alongside #498's
+#508's validation-only marked-Hawkes product selection and #509's
+holdout-calibrated observation-process uncertainty report alongside #498's
 gap-free support map, complete product/dataset publication,
 mounted-storage qualification, and recovery evidence.
 
@@ -3533,6 +3547,8 @@ histdatacom reconstruction --json hawkes-select \
   --comparison work/selection/hawkes-validation-comparison-<sha256>.json \
   --qualification work/qualification/powered-qualification-dossier-<sha256>.json \
   --output-directory work/selection
+histdatacom reconstruction --json observation-uncertainty-policy \
+  --output-directory work/observation-uncertainty
 histdatacom reconstruction --json portfolio \
   --plan work/plan-artifacts/synthetic-infill-plan-<sha256>.json
 ```
@@ -3549,6 +3565,8 @@ Pareto, resource, and complexity rules; final-holdout results cannot change it.
 There is no silent fallback or automatic winner. See
 [`docs/powered-reconstruction-qualification.md`](docs/powered-reconstruction-qualification.md)
 and [`docs/hawkes-product-selection.md`](docs/hawkes-product-selection.md).
+The separate scenario/admission/calibration contract is documented in
+[`docs/observation-process-uncertainty.md`](docs/observation-process-uncertainty.md).
 
 Only HistData.com ASCII/T and the complete EURGBP/EURUSD/GBPUSD triangle are
 accepted. M1, bar, partial-triangle, alternate-provider, OANDA, and broker

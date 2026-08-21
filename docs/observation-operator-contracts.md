@@ -96,6 +96,12 @@ input/output parameters. Every parameter still carries its own:
 - exact evidence IDs; and
 - bounded feature/source provenance.
 
+For marked-Hawkes reconstruction, the supported point estimate and interval
+are consumed as three distinct operator scenarios rather than collapsed into
+seed-only dispersion. See [Observation-process uncertainty
+propagation](observation-process-uncertainty.md) for endpoint identity,
+worst-case admission, holdout calibration, and legacy replay rules.
+
 The implemented
 [`reverse-degradation-benchmark-contracts.md`](reverse-degradation-benchmark-contracts.md)
 layer owns the full experiment, splits, controls, and scorecards. This module

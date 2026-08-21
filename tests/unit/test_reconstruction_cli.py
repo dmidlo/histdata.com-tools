@@ -64,6 +64,7 @@ def test_installed_help_lists_complete_reconstruction_family(
         "engine-evaluate",
         "qualify",
         "hawkes-select",
+        "observation-uncertainty-policy",
         "diagnostic-build",
         "diagnostic-list",
         "compatibility",
@@ -189,6 +190,10 @@ def test_cli_exposes_engine_discovery_portfolio_and_selected_evaluation(
             )
             return Result("histdatacom.hawkes-product-selection-dossier.v1")
 
+        def create_observation_uncertainty_policy(self, *, output_directory):
+            calls.append(("observation-uncertainty-policy", output_directory))
+            return Result("histdatacom.observation-uncertainty-policy.v1")
+
         def publish_diagnostics(self, spec, *, output_directory):
             calls.append(("diagnostic-build", (spec, output_directory)))
             return Result(
@@ -280,6 +285,20 @@ def test_cli_exposes_engine_discovery_portfolio_and_selected_evaluation(
         reconstruction_cli.main(
             [
                 "--json",
+                "observation-uncertainty-policy",
+                "--output-directory",
+                "uncertainty",
+            ]
+        )
+        == 0
+    )
+    assert json.loads(capsys.readouterr().out)["schema_version"].endswith(
+        "uncertainty-policy.v1"
+    )
+    assert (
+        reconstruction_cli.main(
+            [
+                "--json",
                 "diagnostic-build",
                 "--spec",
                 "diagnostics.json",
@@ -329,6 +348,7 @@ def test_cli_exposes_engine_discovery_portfolio_and_selected_evaluation(
                 "selection",
             ),
         ),
+        ("observation-uncertainty-policy", "uncertainty"),
         (
             "diagnostic-build",
             ("diagnostics.json", "publication"),

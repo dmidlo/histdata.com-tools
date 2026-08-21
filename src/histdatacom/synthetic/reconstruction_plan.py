@@ -160,6 +160,12 @@ from histdatacom.synthetic.observation import (
     ObservationOperatorV1,
     read_observation_operator_artifact,
 )
+from histdatacom.synthetic.observation_uncertainty import (
+    OBSERVATION_UNCERTAINTY_POLICY_ARTIFACT_KIND,
+    ObservationUncertaintyPolicyV1,
+    observation_admission_missing_count_bound,
+    read_observation_uncertainty_policy,
+)
 from histdatacom.synthetic.persistence import (
     DEFAULT_MANIFEST_BYTES_PER_PRODUCT,
     estimate_reconstruction_retention,
@@ -2765,6 +2771,7 @@ def build_synthetic_infill_plan(
     proposal_evaluation_paths: Iterable[str | Path] = (),
     qualification_dossier_path: str | Path | None = None,
     hawkes_product_selection_dossier_path: str | Path | None = None,
+    observation_uncertainty_policy_path: str | Path | None = None,
 ) -> SyntheticInfillPlanV1:
     """Resolve real artifacts and build one executable first-party plan."""
     selected_symbols = _symbols(tuple(symbols))
@@ -3007,7 +3014,14 @@ def build_synthetic_infill_plan(
     )
 
     selected_storage = storage_policy or ReconstructionStoragePolicyV1()
-    selected_ensemble = ensemble_config or EnsembleCalibrationConfigV1()
+    selected_ensemble = ensemble_config or EnsembleCalibrationConfigV1(
+        retained_member_count=(
+            3
+            if set(requested_selected_engine_ids)
+            & set(HAWKES_SELECTION_ENGINE_IDS)
+            else 2
+        )
+    )
     selected_generator = generator_config or EmpiricalMotifGeneratorConfigV1()
     selected_cross = (
         cross_currency_config or eurusd_triangle_reconciliation_config()
@@ -3123,6 +3137,8 @@ def build_synthetic_infill_plan(
     qualification_evaluation_ref: ArtifactRef | None = None
     hawkes_selection_dossier: HawkesProductSelectionDossierV1 | None = None
     hawkes_selection_ref: ArtifactRef | None = None
+    observation_uncertainty_policy: ObservationUncertaintyPolicyV1 | None = None
+    observation_uncertainty_ref: ArtifactRef | None = None
     proposal_model_refs: dict[str, Mapping[str, ArtifactRef]] = {}
     if qualification_dossier_path is not None:
         qualification_dossier = read_powered_qualification_dossier(
@@ -3252,6 +3268,39 @@ def build_synthetic_infill_plan(
     elif set(selected_engine_ids) & set(HAWKES_SELECTION_ENGINE_IDS):
         raise ReconstructionPlanCompatibilityError(
             "marked-Hawkes product selection requires its validation-only dossier"
+        )
+    if observation_uncertainty_policy_path is not None:
+        if not set(selected_engine_ids) & set(HAWKES_SELECTION_ENGINE_IDS):
+            raise ReconstructionPlanCompatibilityError(
+                "observation uncertainty policy is unused without marked Hawkes"
+            )
+        observation_uncertainty_policy = read_observation_uncertainty_policy(
+            observation_uncertainty_policy_path
+        )
+        observation_uncertainty_ref = artifact_ref_for_file(
+            observation_uncertainty_policy_path,
+            kind=OBSERVATION_UNCERTAINTY_POLICY_ARTIFACT_KIND,
+            metadata={
+                "policy_id": observation_uncertainty_policy.policy_id,
+                "schema_version": observation_uncertainty_policy.schema_version,
+            },
+        )
+        verify_artifact_ref(observation_uncertainty_ref)
+        required_retained_members = (
+            len(observation_uncertainty_policy.scenario_order)
+            * observation_uncertainty_policy.minimum_path_realizations_per_scenario
+        )
+        if (
+            selected_ensemble.member_count < required_retained_members
+            or selected_ensemble.retained_member_count
+            < required_retained_members
+        ):
+            raise ReconstructionPlanCompatibilityError(
+                "retained ensemble cannot cover every observation scenario"
+            )
+    elif set(selected_engine_ids) & set(HAWKES_SELECTION_ENGINE_IDS):
+        raise ReconstructionPlanCompatibilityError(
+            "marked-Hawkes reconstruction requires observation uncertainty"
         )
     common_context_refs = (
         scientific_ledger_ref,
@@ -3425,6 +3474,8 @@ def build_synthetic_infill_plan(
             context_availability_ref=context_availability_ref,
             hawkes_selection_dossier=hawkes_selection_dossier,
             hawkes_selection_ref=hawkes_selection_ref,
+            observation_uncertainty_policy=observation_uncertainty_policy,
+            observation_uncertainty_ref=observation_uncertainty_ref,
         ),
         evidence_policy_ids=(
             selected_evidence_policy.policy_id,
@@ -3512,6 +3563,16 @@ def build_synthetic_infill_plan(
         resolved.observation_operator.operator_id: resolved.artifacts[
             "observation_operator"
         ].sha256,
+        **(
+            {
+                observation_uncertainty_policy.policy_id: (
+                    observation_uncertainty_ref.sha256
+                )
+            }
+            if observation_uncertainty_policy is not None
+            and observation_uncertainty_ref is not None
+            else {}
+        ),
         resolved.market_context.corpus_id: resolved.artifacts[
             "market_context"
         ].sha256,
@@ -3596,6 +3657,10 @@ def build_synthetic_infill_plan(
                     information_mode=mode,
                     proposal_engine_id=selected_engine_id,
                     proposal_config=selected_proposal_config,
+                    storage_policy=configuration.storage_policy,
+                    observation_uncertainty_policy=(
+                        observation_uncertainty_policy
+                    ),
                     cross_series_policy=selected_cross_series_policy,
                     requested_max_window_size_ns=configuration.window_size_ns,
                 )
@@ -3698,6 +3763,7 @@ def build_synthetic_infill_plan(
             definition=resolved.feed_epoch_definition,
             observation_operator=resolved.observation_operator,
             information_mode=mode,
+            observation_uncertainty_policy=observation_uncertainty_policy,
         )
         for window in executable_boundaries
     }
@@ -3798,6 +3864,8 @@ def build_synthetic_infill_plan(
         graph["proposal_portfolio_evaluation"] = qualification_evaluation_ref
     if hawkes_selection_ref is not None:
         graph["hawkes_product_selection_dossier"] = hawkes_selection_ref
+    if observation_uncertainty_ref is not None:
+        graph["observation_uncertainty_policy"] = observation_uncertainty_ref
     if broker_ref is not None:
         graph["broker_delivery"] = broker_ref
     execution_manifest = ReconstructionPlanExecutionManifestV1(
@@ -4130,6 +4198,31 @@ def validate_synthetic_infill_plan_for_execution(
         elif hawkes_selection_ref is not None:
             raise ReconstructionPlanCompatibilityError(
                 "unbound Hawkes product selection artifact is present"
+            )
+        observation_uncertainty_ref = plan.artifact_graph.get(
+            "observation_uncertainty_policy"
+        )
+        if hawkes_product_selected and observation_uncertainty_ref is not None:
+            if (
+                observation_uncertainty_ref.kind
+                != OBSERVATION_UNCERTAINTY_POLICY_ARTIFACT_KIND
+            ):
+                raise ReconstructionPlanCompatibilityError(
+                    "observation uncertainty artifact kind differs"
+                )
+            observation_uncertainty = read_observation_uncertainty_policy(
+                observation_uncertainty_ref.path
+            )
+            if (
+                observation_uncertainty_ref.metadata.get("policy_id")
+                != observation_uncertainty.policy_id
+            ):
+                raise ReconstructionPlanCompatibilityError(
+                    "observation uncertainty policy binding differs"
+                )
+        elif observation_uncertainty_ref is not None:
+            raise ReconstructionPlanCompatibilityError(
+                "unbound observation uncertainty policy is present"
             )
         context_availability_ref = plan.artifact_graph.get(
             "context_availability_qualification"
@@ -4883,6 +4976,8 @@ def _experiment_artifact_bindings(
     context_availability_ref: ArtifactRef | None,
     hawkes_selection_dossier: HawkesProductSelectionDossierV1 | None,
     hawkes_selection_ref: ArtifactRef | None,
+    observation_uncertainty_policy: ObservationUncertaintyPolicyV1 | None,
+    observation_uncertainty_ref: ArtifactRef | None,
 ) -> tuple[ReconstructionExperimentArtifactBindingV1, ...]:
     """Bind verified authoritative artifacts without duplicating their payloads."""
     roles = (
@@ -5044,6 +5139,21 @@ def _experiment_artifact_bindings(
                     hawkes_selection_dossier.dossier_id,
                     "dossier_id",
                     hawkes_selection_dossier.schema_version,
+                ),
+            )
+        ),
+        *(
+            ()
+            if observation_uncertainty_policy is None
+            or observation_uncertainty_ref is None
+            else (
+                (
+                    "observation-uncertainty-policy",
+                    "preprocessing",
+                    observation_uncertainty_ref,
+                    observation_uncertainty_policy.policy_id,
+                    "policy_id",
+                    observation_uncertainty_policy.schema_version,
                 ),
             )
         ),
@@ -5464,6 +5574,8 @@ def _adapt_cross_currency_window_plans_for_cardinality(
     information_mode: InformationMode,
     proposal_engine_id: str,
     proposal_config: MarkedHawkesConfigV1,
+    storage_policy: ReconstructionStoragePolicyV1,
+    observation_uncertainty_policy: ObservationUncertaintyPolicyV1 | None,
     requested_max_window_size_ns: int,
     cross_series_policy: CrossSeriesConstraintPolicyV1 | None = None,
 ) -> tuple[
@@ -5471,6 +5583,10 @@ def _adapt_cross_currency_window_plans_for_cardinality(
     ReconstructionWindowSizingAuditV1,
 ]:
     """Recursively fit qualified windows below the Hawkes count ceiling."""
+    if observation_uncertainty_policy is None:
+        raise ReconstructionPlanCompatibilityError(
+            "adaptive cardinality sizing lacks observation uncertainty policy"
+        )
     if not member_window_plans or any(
         plan.status is not CrossCurrencyWindowPlanStatus.PLANNED
         for plan in member_window_plans
@@ -5497,6 +5613,10 @@ def _adapt_cross_currency_window_plans_for_cardinality(
     runtime_limit = proposal_config.limits.max_generated_events_per_window
     modeled_limit = math.floor(
         runtime_limit * _ADAPTIVE_CARDINALITY_SAFETY_FRACTION
+    )
+    amplification_limit = min(
+        proposal_config.limits.max_candidate_amplification,
+        storage_policy.max_candidate_amplification,
     )
     if modeled_limit < 1:
         raise ReconstructionPlanCompatibilityError(
@@ -5585,10 +5705,17 @@ def _adapt_cross_currency_window_plans_for_cardinality(
             information_mode=information_mode,
             used_at_ns=(start_ns + end_ns) // 2,
             feed_epoch_definition=definition,
+            retention_endpoint="lower",
         )
-        return (  # type: ignore[no-any-return]
-            sum(counts.values()) * (1.0 - retention) / retention
+        observed = sum(counts.values())
+        modeled = observation_admission_missing_count_bound(
+            observed,
+            retention,
+            observation_uncertainty_policy.admission_quantile,
         )
+        if modeled > math.floor(observed * amplification_limit):
+            return math.inf
+        return float(modeled)
 
     for initial_window in initial_windows:
         boundary = (initial_window.core_start_ns, initial_window.core_end_ns)
@@ -5600,7 +5727,7 @@ def _adapt_cross_currency_window_plans_for_cardinality(
         window_symbols = initial_window.symbols
         initial_modeled = modeled_for_counts(
             *boundary,
-            support.core_event_counts,
+            support.input_event_counts,
             symbols=window_symbols,
         )
         if initial_modeled <= modeled_limit:
@@ -5639,15 +5766,26 @@ def _adapt_cross_currency_window_plans_for_cardinality(
             raise ReconstructionPlanCompatibilityError(
                 "adaptive source counts differ from exact initial support"
             )
+        if event_counts(
+            initial_window.input_start_ns,
+            initial_window.input_end_ns,
+        ) != dict(support.input_event_counts):
+            raise ReconstructionPlanCompatibilityError(
+                "adaptive input counts differ from exact initial support"
+            )
         before = len(intervals)
         pending = [boundary]
         selected: list[tuple[int, int]] = []
         while pending:
             start_ns, end_ns = pending.pop()
-            counts = event_counts(start_ns, end_ns)
-            if not all(counts.values()):
+            core_counts = event_counts(start_ns, end_ns)
+            if not all(core_counts.values()):
                 selected.append((start_ns, end_ns))
                 continue
+            counts = event_counts(
+                start_ns - initial_window.left_halo_ns,
+                end_ns + initial_window.right_lookahead_ns,
+            )
             modeled = modeled_for_counts(
                 start_ns,
                 end_ns,
@@ -5662,7 +5800,8 @@ def _adapt_cross_currency_window_plans_for_cardinality(
                 raise ReconstructionPlanCompatibilityError(
                     "one immutable millisecond exceeds qualified cardinality "
                     f"headroom: start_ns={start_ns}, end_ns={end_ns}, "
-                    f"modeled_missing_events={modeled:.6f}"
+                    f"modeled_missing_events={modeled:.6f}, "
+                    f"maximum_candidate_amplification={amplification_limit:.6f}"
                 )
             midpoint = ((start_ns + end_ns) // 2 // 1_000_000) * 1_000_000
             if midpoint <= start_ns:
@@ -6290,6 +6429,9 @@ def _window_resource_estimate(
     definition: Any | None = None,
     observation_operator: ObservationOperatorV1 | None = None,
     information_mode: InformationMode | None = None,
+    observation_uncertainty_policy: (
+        ObservationUncertaintyPolicyV1 | None
+    ) = None,
 ) -> ReconstructionResourceEstimateV1:
     if (
         source_support.start_ns != window.core_start_ns
@@ -6316,6 +6458,7 @@ def _window_resource_estimate(
             or definition is None
             or observation_operator is None
             or information_mode is None
+            or observation_uncertainty_policy is None
         ):
             raise ReconstructionPlanCompatibilityError(
                 "marked Hawkes resource planning lacks cardinality conditioning"
@@ -6342,15 +6485,24 @@ def _window_resource_estimate(
             information_mode=information_mode,
             used_at_ns=(window.core_start_ns + window.core_end_ns) // 2,
             feed_epoch_definition=definition,
+            retention_endpoint="lower",
         )
-        candidates = (
-            0
-            if retention == 1.0
-            else min(
-                candidates,
-                proposal_config.limits.max_generated_events_per_window,
+        candidates = observation_admission_missing_count_bound(
+            input_count,
+            retention,
+            observation_uncertainty_policy.admission_quantile,
+        )
+        generator_candidate_limit = min(
+            proposal_config.limits.max_generated_events_per_window,
+            math.floor(
+                input_count * proposal_config.limits.max_candidate_amplification
+            ),
+        )
+        if candidates > generator_candidate_limit:
+            raise ReconstructionPlanCompatibilityError(
+                "worst-case observation cardinality exceeds proposal-engine "
+                "resource limits"
             )
-        )
     batch_limit = configuration.storage_policy.max_events_per_batch
     batch_count = interval_count
     inflight = min(

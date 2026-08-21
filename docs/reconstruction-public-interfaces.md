@@ -103,7 +103,8 @@ data rows remain in their source artifacts.
     "artifacts/reverse-degradation-scorecard-<sha256>.json"
   ],
   "qualification_dossier_path": "artifacts/powered-qualification-dossier-<sha256>.json",
-  "hawkes_product_selection_dossier_path": "artifacts/hawkes-product-selection-dossier-<sha256>.json"
+  "hawkes_product_selection_dossier_path": "artifacts/hawkes-product-selection-dossier-<sha256>.json",
+  "observation_uncertainty_policy_path": "artifacts/observation-uncertainty-policy-<sha256>.json"
 }
 ```
 
@@ -165,6 +166,26 @@ selection = ReconstructionClient().select_hawkes_product(
     output_directory="work/selection",
 )
 ```
+
+Freeze the required three-scenario observation policy separately:
+
+```sh
+histdatacom reconstruction --json observation-uncertainty-policy \
+  --output-directory work/observation-uncertainty
+```
+
+```python
+uncertainty_policy = (
+    ReconstructionClient().create_observation_uncertainty_policy(
+        output_directory="work/observation-uncertainty"
+    )
+)
+```
+
+The plan binds both the validation-only engine choice and this policy. Runtime
+and campaign evidence keep the observation scenario ID and path seed as
+separate machine-readable axes. See
+[`observation-process-uncertainty.md`](observation-process-uncertainty.md).
 
 Retained evidence diagnostics use the same public boundary:
 

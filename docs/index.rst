@@ -17,6 +17,7 @@ Data and reconstruction foundations
    reconstruction-information-modes
    feed-epoch-contracts
    observation-operator-contracts
+   observation-process-uncertainty
    market-context-contracts
    cftc-positioning-contracts
    provider-neutral-dataset-catalog

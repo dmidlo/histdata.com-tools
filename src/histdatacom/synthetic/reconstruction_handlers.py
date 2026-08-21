@@ -134,6 +134,7 @@ from histdatacom.synthetic.delivery import (
     ReconstructionDeliveryMode,
     project_modern_reference_delivery,
 )
+from histdatacom.synthetic.ensembles import ReconstructionEnsemblePlanV1
 from histdatacom.synthetic.generation import (
     EMPIRICAL_MOTIF_GENERATOR_ID,
     EmpiricalMotifCandidateBatchV1,
@@ -178,6 +179,14 @@ from histdatacom.synthetic.motifs import (
 from histdatacom.synthetic.observation import (
     ObservationOperatorV1,
     read_observation_operator_artifact,
+)
+from histdatacom.synthetic.observation_uncertainty import (
+    ObservationUncertaintyEnsembleV1,
+    ObservationUncertaintyMemberV1,
+    ObservationUncertaintyScenarioV1,
+    build_observation_uncertainty_ensemble,
+    read_observation_uncertainty_policy,
+    write_observation_uncertainty_ensemble,
 )
 from histdatacom.synthetic.persistence import (
     PublishedReconstructionV2,
@@ -611,6 +620,14 @@ def proposal_handler(
         generation_evidence: MarkedHawkesGenerationEvidenceV1 | None = None
         generation_scenario: BenchmarkScenarioV1 | None = None
         observation_conditioning: dict[str, JSONValue] | None = None
+        observation_uncertainty: ObservationUncertaintyEnsembleV1 | None = None
+        observation_uncertainty_member: (
+            ObservationUncertaintyMemberV1 | None
+        ) = None
+        observation_uncertainty_scenario: (
+            ObservationUncertaintyScenarioV1 | None
+        ) = None
+        observation_uncertainty_ref: ArtifactRef | None = None
         if selected_engine_id == EMPIRICAL_MOTIF_GENERATOR_ID:
             if not isinstance(selected_config, EmpiricalMotifGeneratorConfigV1):
                 raise TypeError("motif runtime config type differs")
@@ -664,12 +681,107 @@ def proposal_handler(
                     plan.configuration.information_policy.information_mode
                 ),
             )
+            uncertainty_policy_ref = plan.execution_manifest.artifacts.get(
+                "observation_uncertainty_policy"
+            )
+            if uncertainty_policy_ref is not None:
+                uncertainty_policy = read_observation_uncertainty_policy(
+                    uncertainty_policy_ref.path
+                )
+                ensemble_plan_ref = plan.execution_manifest.artifacts[
+                    "ensemble_plan"
+                ]
+                ensemble_plan = ReconstructionEnsemblePlanV1.from_json(
+                    Path(ensemble_plan_ref.path).read_text(encoding="utf-8")
+                )
+                input_counts = {
+                    symbol.upper(): len(stream.events)
+                    for symbol, stream in streams.items()
+                }
+                input_counts["GLOBAL"] = sum(input_counts.values())
+                if (
+                    input_counts["GLOBAL"]
+                    != invocation.task.resource_estimate.input_event_count
+                ):
+                    raise ValueError(
+                        "observation uncertainty runtime input count differs "
+                        "from resource preflight"
+                    )
+                sessions = {item.session_state for item in conditions.values()}
+                if len(sessions) != 1:
+                    raise ValueError(
+                        "observation uncertainty requires one synchronized session"
+                    )
+                observation_uncertainty = build_observation_uncertainty_ensemble(
+                    uncertainty_policy,
+                    observation_conditioning,
+                    ensemble_members=tuple(
+                        (member.member_id, member.seed)
+                        for member in ensemble_plan.members
+                    ),
+                    observed_counts=input_counts,
+                    session=next(iter(sessions)),
+                    maximum_missing_event_count=(
+                        selected_config.limits.max_generated_events_per_window
+                    ),
+                    maximum_candidate_amplification=min(
+                        selected_config.limits.max_candidate_amplification,
+                        invocation.run.storage_policy.max_candidate_amplification,
+                    ),
+                )
+                if not observation_uncertainty.admitted:
+                    return invocation.refused(
+                        "observation_uncertainty_resource_refused",
+                        message="; ".join(
+                            observation_uncertainty.refusal_reasons
+                        ),
+                    )
+                worst_global = next(
+                    item
+                    for item in observation_uncertainty.cardinality_evidence
+                    if item.symbol == "GLOBAL"
+                    and item.retention_probability
+                    == min(
+                        scenario.retention_probability
+                        for scenario in observation_uncertainty.scenarios
+                    )
+                )
+                if (
+                    worst_global.admission_missing_count_bound
+                    != invocation.task.resource_estimate.candidate_event_count
+                ):
+                    raise ValueError(
+                        "observation uncertainty runtime admission bound differs "
+                        "from resource preflight"
+                    )
+                observation_uncertainty_member = (
+                    observation_uncertainty.member_for(
+                        invocation.task.window.ensemble_member_id
+                    )
+                )
+                observation_uncertainty_scenario = (
+                    observation_uncertainty.scenario_for(
+                        invocation.task.window.ensemble_member_id
+                    )
+                )
+                observation_uncertainty_ref = (
+                    write_observation_uncertainty_ensemble(
+                        observation_uncertainty,
+                        _stage_directory(invocation, "observation-uncertainty"),
+                    )
+                )
             proposal_batches, generation_evidence, generation_scenario = (
                 _generate_marked_hawkes_runtime_batches(
                     invocation,
                     streams=streams,
                     conditions=conditions,
                     observation_conditioning=observation_conditioning,
+                    observation_uncertainty_member=(
+                        observation_uncertainty_member
+                    ),
+                    observation_uncertainty_scenario=(
+                        observation_uncertainty_scenario
+                    ),
                     config=selected_config,
                     fit=fit,
                 )
@@ -743,6 +855,27 @@ def proposal_handler(
             if observation_conditioning is not None:
                 candidate_evidence["observation_conditioning_id"] = str(
                     observation_conditioning["conditioning_id"]
+                )
+            if (
+                observation_uncertainty is not None
+                and observation_uncertainty_member is not None
+                and observation_uncertainty_scenario is not None
+            ):
+                candidate_evidence.update(
+                    {
+                        "observation_uncertainty_ensemble_id": (
+                            observation_uncertainty.ensemble_id
+                        ),
+                        "observation_scenario_id": (
+                            observation_uncertainty_scenario.scenario_id
+                        ),
+                        "observation_scenario_kind": (
+                            observation_uncertainty_scenario.kind.value
+                        ),
+                        "observation_path_seed": (
+                            observation_uncertainty_member.path_seed
+                        ),
+                    }
                 )
             encoded_evidence = (
                 canonical_contract_json(candidate_evidence).encode("utf-8")
@@ -844,6 +977,31 @@ def proposal_handler(
             ),
             "historical_product_observation_conditioning": (
                 observation_conditioning
+            ),
+            "observation_uncertainty_ensemble_ref": (
+                observation_uncertainty_ref.to_dict()
+                if observation_uncertainty_ref is not None
+                else None
+            ),
+            "observation_uncertainty_ensemble_id": (
+                observation_uncertainty.ensemble_id
+                if observation_uncertainty is not None
+                else None
+            ),
+            "observation_scenario_id": (
+                observation_uncertainty_scenario.scenario_id
+                if observation_uncertainty_scenario is not None
+                else None
+            ),
+            "observation_scenario_kind": (
+                observation_uncertainty_scenario.kind.value
+                if observation_uncertainty_scenario is not None
+                else None
+            ),
+            "observation_path_seed": (
+                observation_uncertainty_member.path_seed
+                if observation_uncertainty_member is not None
+                else None
             ),
             "proposal_fallback_used": False,
             "proposal_member_assignment_policy": (
@@ -1044,6 +1202,8 @@ def _generate_marked_hawkes_runtime_batches(
     streams: Mapping[str, SyntheticEventStreamV1],
     conditions: Mapping[str, ReferenceMotifConditionV1],
     observation_conditioning: Mapping[str, Any],
+    observation_uncertainty_member: ObservationUncertaintyMemberV1 | None,
+    observation_uncertainty_scenario: ObservationUncertaintyScenarioV1 | None,
     config: MarkedHawkesConfigV1,
     fit: MarkedHawkesFitResultV1,
 ) -> tuple[
@@ -1097,6 +1257,46 @@ def _generate_marked_hawkes_runtime_batches(
             "observation conditioning symbols differ from runtime streams"
         )
     joint_retention = _mapping(observation_conditioning.get("joint_retention"))
+    if (observation_uncertainty_member is None) != (
+        observation_uncertainty_scenario is None
+    ):
+        raise ValueError(
+            "observation uncertainty runtime lineage is incomplete"
+        )
+    if observation_uncertainty_member is not None:
+        assert observation_uncertainty_scenario is not None
+        if (
+            observation_uncertainty_member.scenario_id
+            != observation_uncertainty_scenario.scenario_id
+            or observation_uncertainty_member.ensemble_member_id
+            != invocation.task.window.ensemble_member_id
+        ):
+            raise ValueError("observation uncertainty runtime lineage differs")
+        cardinality_policy = (
+            "synchronized-epoch-scenario-propagated-uncertainty-v1"
+        )
+        retention_probability = (
+            observation_uncertainty_scenario.retention_probability
+        )
+        uncertainty_parameters: dict[str, JSONValue] = {
+            "observation_scenario_id": (
+                observation_uncertainty_scenario.scenario_id
+            ),
+            "observation_scenario_kind": (
+                observation_uncertainty_scenario.kind.value
+            ),
+            "observation_path_seed": observation_uncertainty_member.path_seed,
+        }
+    else:
+        cardinality_policy = (
+            "synchronized-epoch-point-estimate-with-bounded-uncertainty-v1"
+        )
+        retention_probability = float(joint_retention["retention_probability"])
+        uncertainty_parameters = {
+            "legacy_observation_uncertainty_policy": (
+                "v2.4-point-estimate-replay-not-v2.5-scenario-v1"
+            )
+        }
     scenario = BenchmarkScenarioV1(
         split_kind=BenchmarkSplitKind.PRODUCT_INPUT,
         epoch_id=next(iter(epochs)),
@@ -1107,15 +1307,12 @@ def _generate_marked_hawkes_runtime_batches(
         degradation_parameters={
             "runtime_role": "historical_product_input",
             "missingness_identified": True,
-            "cardinality_conditioning_policy": (
-                "synchronized-epoch-point-estimate-with-bounded-uncertainty-v1"
-            ),
+            "cardinality_conditioning_policy": cardinality_policy,
             "observation_conditioning_id": str(
                 observation_conditioning["conditioning_id"]
             ),
-            "retention_probability": float(
-                joint_retention["retention_probability"]
-            ),
+            **uncertainty_parameters,
+            "retention_probability": retention_probability,
             "retention_lower_bound": float(
                 joint_retention["retention_lower_bound"]
             ),
@@ -1816,6 +2013,18 @@ def validation_handler(
             "historical_product_observation_conditioning": cast(
                 JSONValue,
                 proposal["historical_product_observation_conditioning"],
+            ),
+            "observation_uncertainty_ensemble_id": cast(
+                JSONValue, proposal["observation_uncertainty_ensemble_id"]
+            ),
+            "observation_scenario_id": cast(
+                JSONValue, proposal["observation_scenario_id"]
+            ),
+            "observation_scenario_kind": cast(
+                JSONValue, proposal["observation_scenario_kind"]
+            ),
+            "observation_path_seed": cast(
+                JSONValue, proposal["observation_path_seed"]
             ),
         }
         benchmark_evidence = {

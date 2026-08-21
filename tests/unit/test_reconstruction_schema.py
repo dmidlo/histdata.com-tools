@@ -486,6 +486,17 @@ def test_marked_hawkes_plan_requires_frozen_product_selection(
     }
 
     plan["hawkes_product_selection_dossier_path"] = "selection.json"
+    missing_uncertainty = evaluate_reconstruction_compatibility(
+        plan,
+        inspect_source=False,
+        inspect_artifacts=False,
+    )
+    assert not missing_uncertainty.executable
+    assert "missing_observation_uncertainty_policy" in {
+        item.code for item in missing_uncertainty.findings
+    }
+
+    plan["observation_uncertainty_policy_path"] = "uncertainty.json"
     complete = evaluate_reconstruction_compatibility(
         plan,
         inspect_source=False,

@@ -38,6 +38,9 @@ from histdatacom.synthetic import (
 from histdatacom.synthetic.reconstruction_handlers import (
     _historical_product_observation_conditioning,
 )
+from histdatacom.synthetic.historical_conditioning import (
+    historical_product_retention_probability,
+)
 
 SYMBOL = "EURUSD"
 BASE_PARAMETERS = {
@@ -257,6 +260,25 @@ def test_historical_product_cardinality_uses_supported_joint_epoch_evidence(
     assert symbol["retention_probability"] == 0.25
     assert symbol["support_count"] > 0
     assert symbol["context"]["state"] is None
+    for endpoint in ("central", "lower", "upper"):
+        assert (
+            historical_product_retention_probability(
+                operator,
+                feed_epoch_label="epoch-001",
+                information_mode=InformationMode.EX_POST_RECONSTRUCTION,
+                retention_endpoint=endpoint,
+            )
+            == 0.25
+        )
+    with pytest.raises(
+        ValueError, match="unknown historical retention endpoint"
+    ):
+        historical_product_retention_probability(
+            operator,
+            feed_epoch_label="epoch-001",
+            information_mode=InformationMode.EX_POST_RECONSTRUCTION,
+            retention_endpoint="invented",
+        )
 
 
 def test_historical_product_transition_uses_declared_ex_post_bridge() -> None:

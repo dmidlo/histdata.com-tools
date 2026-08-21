@@ -90,6 +90,7 @@ from histdatacom.synthetic import (
     InformationMode,
     ModernReferenceMotifProfileV1,
     ObservationOperatorV1,
+    ObservationUncertaintyPolicyV1,
     ReconstructionDeliveryMode,
     ReconstructionPlanCompatibilityError,
     ReconstructionSourceInventoryV1,
@@ -959,9 +960,37 @@ def test_adaptive_hawkes_windows_preserve_common_anchors_and_runtime_headroom(
             "observation-calibration-v2-operator.json"
         ).read_text(encoding="utf-8")
     )
+    # Keep the adaptive-window behavior under test while using a controlled
+    # qualified lower endpoint that leaves at least one millisecond admissible.
+    operator = replace(
+        operator,
+        strata=tuple(
+            (
+                replace(
+                    stratum,
+                    parameters=tuple(
+                        (
+                            replace(parameter, lower=0.24)
+                            if parameter.name == "retention_probability"
+                            else parameter
+                        )
+                        for parameter in stratum.parameters
+                    ),
+                    stratum_id="",
+                )
+                if stratum.key == "epoch|epoch_id=technology_epoch_01"
+                else stratum
+            )
+            for stratum in operator.strata
+        ),
+        operator_id="",
+    )
     start_ms = 1_015_200_000_000
     end_ms = start_ms + 86_400_000
-    timestamps = [start_ms + index * 30_000 for index in range(2_400)]
+    row_count = 2_402
+    timestamps = [
+        start_ms - 60_000 + index * 30_000 for index in range(row_count)
+    ]
     partitions = []
     for ordinal, symbol in enumerate(_SYMBOLS):
         path = tmp_path / "ASCII" / "T" / symbol / "2002" / "3" / ".data"
@@ -971,13 +1000,13 @@ def test_adaptive_hawkes_windows_preserve_common_anchors_and_runtime_headroom(
                 "datetime": timestamps,
                 "bid": [
                     1.0 + ordinal / 100 + index / 1_000_000
-                    for index in range(2_400)
+                    for index in range(row_count)
                 ],
                 "ask": [
                     1.0002 + ordinal / 100 + index / 1_000_000
-                    for index in range(2_400)
+                    for index in range(row_count)
                 ],
-                "vol": [0] * 2_400,
+                "vol": [0] * row_count,
             }
         )
         with (
@@ -1000,7 +1029,7 @@ def test_adaptive_hawkes_windows_preserve_common_anchors_and_runtime_headroom(
                 symbol=symbol,
                 period="200203",
                 artifact=ref,
-                row_count=2_400,
+                row_count=row_count,
                 coverage_start_ns=1_014_940_800_000_000_000,
                 coverage_end_ns=1_017_619_200_000_000_000,
                 first_timestamp_ms=timestamps[0],
@@ -1015,7 +1044,7 @@ def test_adaptive_hawkes_windows_preserve_common_anchors_and_runtime_headroom(
         partitions=tuple(partitions),
         requested_start_ns=start_ms * 1_000_000,
         requested_end_ns=end_ms * 1_000_000,
-        total_row_count=7_200,
+        total_row_count=row_count * len(_SYMBOLS),
         total_size_bytes=sum(
             int(item.artifact.size_bytes or 0) for item in partitions
         ),
@@ -1037,6 +1066,7 @@ def test_adaptive_hawkes_windows_preserve_common_anchors_and_runtime_headroom(
             requested_end_ns=end_ms * 1_000_000,
             window_size_ns=86_400_000_000_000,
             coverages=coverages,
+            left_halo_ns=60_000_000_000,
         )
         for member_id in run.ensemble_member_ids
     )
@@ -1046,7 +1076,7 @@ def test_adaptive_hawkes_windows_preserve_common_anchors_and_runtime_headroom(
             end_ns=end_ms * 1_000_000,
             symbols=_SYMBOLS,
             core_event_counts={symbol: 2_400 for symbol in _SYMBOLS},
-            input_event_counts={symbol: 2_400 for symbol in _SYMBOLS},
+            input_event_counts={symbol: row_count for symbol in _SYMBOLS},
             common_exact_core_timestamp_count=2_400,
             status=plan_module.ReconstructionPlanSourceSupportStatus.COMPLETE,
             reason="complete source triangle",
@@ -1065,6 +1095,8 @@ def test_adaptive_hawkes_windows_preserve_common_anchors_and_runtime_headroom(
             information_mode=InformationMode.EX_POST_RECONSTRUCTION,
             proposal_engine_id=engine_id,
             proposal_config=config,
+            storage_policy=run.storage_policy,
+            observation_uncertainty_policy=ObservationUncertaintyPolicyV1(),
             requested_max_window_size_ns=86_400_000_000_000,
         )
     )
@@ -1089,6 +1121,41 @@ def test_adaptive_hawkes_windows_preserve_common_anchors_and_runtime_headroom(
     assert all(
         item.common_exact_core_timestamp_count > 0 for item in adapted_support
     )
+    uncertainty_policy = ObservationUncertaintyPolicyV1()
+    planning_configuration = SimpleNamespace(
+        generator_config=plan_module.EmpiricalMotifGeneratorConfigV1(),
+        storage_policy=run.storage_policy,
+    )
+    for window, exact_support in zip(
+        adapted[0].windows, adapted_support, strict=True
+    ):
+        estimate = plan_module._window_resource_estimate(
+            window,
+            source_support=exact_support,
+            configuration=planning_configuration,
+            proposal_config=config,
+            definition=definition,
+            observation_operator=operator,
+            information_mode=InformationMode.EX_POST_RECONSTRUCTION,
+            observation_uncertainty_policy=uncertainty_policy,
+        )
+        observed = sum(exact_support.input_event_counts.values())
+        retention = plan_module.historical_product_retention_probability(
+            operator,
+            feed_epoch_label="technology_epoch_01",
+            information_mode=InformationMode.EX_POST_RECONSTRUCTION,
+            used_at_ns=(window.core_start_ns + window.core_end_ns) // 2,
+            feed_epoch_definition=definition,
+            retention_endpoint="lower",
+        )
+        assert estimate.input_event_count == observed
+        assert estimate.candidate_event_count == (
+            plan_module.observation_admission_missing_count_bound(
+                observed,
+                retention,
+                uncertainty_policy.admission_quantile,
+            )
+        )
 
 
 def test_unsupported_cftc_query_cannot_use_unconditioned_availability_mode() -> (
@@ -2347,7 +2414,15 @@ def test_public_plan_spec_supports_exact_paired_window_bounds(
             final_validation_status="passed",
             cross_instrument_quality_status="passed",
             benchmark_evidence={
-                "scientific_ledger_id": scientific_ledger.ledger_id
+                "scientific_ledger_id": scientific_ledger.ledger_id,
+                "runtime_proposal_evidence": {
+                    "observation_uncertainty_ensemble_id": (
+                        "observation-uncertainty-ensemble:test"
+                    ),
+                    "observation_scenario_id": f"observation-scenario:{ordinal}",
+                    "observation_scenario_kind": "central_fitted_retention",
+                    "observation_path_seed": ordinal,
+                },
             },
             benchmark_artifact_ids=(scientific_ledger_ref.sha256,),
         )
@@ -2395,6 +2470,28 @@ def test_public_plan_spec_supports_exact_paired_window_bounds(
         selected_plan.run.source_version_ids[0]
     )
     assert product_index.synthetic_event_count == 14
+    assert {
+        (
+            entry.observation_uncertainty_ensemble_id,
+            entry.observation_scenario_id,
+            entry.observation_scenario_kind,
+            entry.observation_path_seed,
+        )
+        for entry in product_shard.entries
+    } == {
+        (
+            "observation-uncertainty-ensemble:test",
+            "observation-scenario:1",
+            "central_fitted_retention",
+            1,
+        ),
+        (
+            "observation-uncertainty-ensemble:test",
+            "observation-scenario:2",
+            "central_fitted_retention",
+            2,
+        ),
+    }
     product_inspection = ReconstructionClient().inspect_campaign_products(
         product_index_ref.path,
         start_ns=start_ns,

@@ -94,8 +94,9 @@ def historical_product_retention_probability(
     information_mode: InformationMode,
     used_at_ns: int | None = None,
     feed_epoch_definition: Any | None = None,
+    retention_endpoint: str = "central",
 ) -> float:
-    """Resolve the joint point estimate without materializing full evidence."""
+    """Resolve a declared joint endpoint without materializing full evidence."""
     label = str(feed_epoch_label).strip()
     if not label:
         raise ValueError("historical product conditioning requires an epoch")
@@ -118,10 +119,21 @@ def historical_product_retention_probability(
             raise ValueError(
                 "historical product joint retention lacks an epoch aggregate"
             )
-    retention = joint["retention_probability"]
+    endpoint = str(retention_endpoint).strip().lower()
+    key = {
+        "central": "retention_probability",
+        "lower": "retention_lower_bound",
+        "upper": "retention_upper_bound",
+    }.get(endpoint)
+    if key is None:
+        raise ValueError("unknown historical retention endpoint")
+    retention = joint[key]
     if isinstance(retention, bool) or not isinstance(retention, (int, float)):
         raise TypeError("historical product retention is not numeric")
-    return float(retention)
+    selected = float(retention)
+    if not 0.0 < selected <= 1.0:
+        raise ValueError("historical product retention endpoint is invalid")
+    return selected
 
 
 def _stable_epoch_conditioning(

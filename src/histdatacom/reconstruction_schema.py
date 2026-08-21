@@ -390,6 +390,7 @@ _AUDITED_MODULES = (
     "histdatacom.synthetic.proposal_engines",
     "histdatacom.synthetic.qualification",
     "histdatacom.synthetic.hawkes_selection",
+    "histdatacom.synthetic.observation_uncertainty",
     "histdatacom.synthetic.diagnostics",
     "histdatacom.synthetic.reconstruction_handlers",
     "histdatacom.synthetic.certification",
@@ -456,6 +457,14 @@ _REQUIRED_SCHEMA_TOKENS = (
     "hawkes-product-selection-policy",
     "hawkes-validation-comparison",
     "hawkes-product-selection-dossier",
+    "observation-uncertainty-policy",
+    "observation-uncertainty-scenario",
+    "observation-cardinality-evidence",
+    "observation-uncertainty-member",
+    "observation-uncertainty-ensemble",
+    "observation-uncertainty-diagnostic",
+    "observation-uncertainty-decomposition",
+    "observation-uncertainty-report",
     "reconstruction-diagnostic-chart-bundle",
     "reconstruction-diagnostic-publication",
     "reconstruction-diagnostic-publication-spec",
@@ -551,6 +560,7 @@ _PLAN_FIELDS = frozenset(
         "proposal_evaluation_paths",
         "qualification_dossier_path",
         "hawkes_product_selection_dossier_path",
+        "observation_uncertainty_policy_path",
     }
 )
 
@@ -1078,6 +1088,20 @@ def _check_current_scope(
                 "hawkes_product_selection_dossier_path",
                 "A marked-Hawkes product choice lacks its validation-only selection dossier.",
                 "Freeze and bind the predeclared diagonal-versus-full selection dossier.",
+            )
+        if (
+            set(selected_ids) & hawkes_ids
+            and not str(
+                payload.get("observation_uncertainty_policy_path", "")
+            ).strip()
+        ):
+            _finding(
+                findings,
+                "missing_observation_uncertainty_policy",
+                ReconstructionCompatibilityStatus.INVALID,
+                "observation_uncertainty_policy_path",
+                "A marked-Hawkes product lacks its observation-scenario policy.",
+                "Bind the qualified endpoint and worst-case admission policy.",
             )
     provider = (
         str(
@@ -1746,6 +1770,66 @@ def _inspect_artifacts(
                         "hawkes_product_selection_dossier_path",
                         "Hawkes selection is not a validation-only frozen decision.",
                         "Regenerate it with the installed reconstruction hawkes-select command.",
+                    )
+        observation_uncertainty_path = str(
+            payload.get("observation_uncertainty_policy_path", "")
+        ).strip()
+        if observation_uncertainty_path:
+            path = Path(observation_uncertainty_path).expanduser()
+            try:
+                uncertainty_policy = _read_artifact_mapping(path)
+            except (OSError, TypeError, ValueError) as err:
+                _finding(
+                    findings,
+                    "invalid_observation_uncertainty_policy",
+                    ReconstructionCompatibilityStatus.INVALID,
+                    "observation_uncertainty_policy_path",
+                    str(err),
+                    "Supply a bounded content-addressed uncertainty policy.",
+                )
+            else:
+                if (
+                    uncertainty_policy.get("schema_version")
+                    != "histdatacom.observation-uncertainty-policy.v1"
+                    or uncertainty_policy.get("scenario_order")
+                    != [
+                        "high_retention_low_infill",
+                        "central_fitted_retention",
+                        "low_retention_high_infill",
+                    ]
+                    or uncertainty_policy.get("fully_retained_scenarios")
+                    != [
+                        "high_retention_low_infill",
+                        "central_fitted_retention",
+                        "low_retention_high_infill",
+                    ]
+                    or uncertainty_policy.get("aggregate_only_scenarios") != []
+                    or uncertainty_policy.get("scenario_derivation_policy")
+                    != "qualified-interval-endpoints-no-arbitrary-multipliers-v1"
+                    or uncertainty_policy.get("admission_policy")
+                    != "worst-case-low-retention-scenario-v1"
+                    or uncertainty_policy.get("admission_bound")
+                    != "one-sided-cantelli-upper-bound-v1"
+                    or uncertainty_policy.get("member_assignment_policy")
+                    != "balanced-semantic-round-robin-v1"
+                    or uncertainty_policy.get(
+                        "seed_only_dispersion_is_total_uncertainty"
+                    )
+                    is not False
+                    or uncertainty_policy.get("calibration_splits")
+                    != ["validation", "final_holdout"]
+                    or uncertainty_policy.get("uncertainty_decomposition")
+                    != "operator-between-scenario-plus-path-within-scenario-v1"
+                    or uncertainty_policy.get("legacy_v2_4_policy")
+                    != "replayable-point-estimate-products-not-relabeled-v1"
+                ):
+                    _finding(
+                        findings,
+                        "observation_uncertainty_policy_scope_mismatch",
+                        ReconstructionCompatibilityStatus.INVALID,
+                        "observation_uncertainty_policy_path",
+                        "Observation uncertainty policy lacks the frozen v2.5 scope.",
+                        "Regenerate the three-scenario uncertainty policy.",
                     )
 
 

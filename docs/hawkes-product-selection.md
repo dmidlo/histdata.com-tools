@@ -70,11 +70,14 @@ histdatacom reconstruction --json hawkes-select \
 ```
 
 A v2 plan that selects either marked-Hawkes candidate must set
-`hawkes_product_selection_dossier_path`. Planning verifies the complete replay,
-requires the explicit selected engine to equal the derived engine, binds the
-dossier into the plan artifact graph and frozen experiment, and rejects stale,
-missing, or unbound selection evidence. The v2.5 certification policy requires
-the same dossier alongside powered qualification.
+`hawkes_product_selection_dossier_path` and
+`observation_uncertainty_policy_path`. Planning verifies the complete replay,
+requires the explicit selected engine to equal the derived engine, binds both
+artifacts into the plan graph and frozen experiment, and rejects stale,
+missing, or unbound evidence. The v2.5 certification policy requires the
+selection dossier and the holdout-calibrated observation-uncertainty report
+alongside powered qualification. See [Observation-process uncertainty
+propagation](observation-process-uncertainty.md).
 
 The eligible-but-unselected candidate remains named with machine-readable
 exclusion reasons. The dossier makes no historical-truth, broker, or investment
