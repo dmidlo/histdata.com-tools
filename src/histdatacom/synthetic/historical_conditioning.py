@@ -9,6 +9,11 @@ from typing import Any
 
 from histdatacom.runtime_contracts import JSONValue
 from histdatacom.synthetic.contracts import canonical_contract_json
+from histdatacom.synthetic.feed_epoch_transition import (
+    FeedEpochTransitionPolicyV1,
+    FeedEpochTransitionScenarioKind,
+    build_feed_epoch_transition_scenario,
+)
 from histdatacom.synthetic.information import InformationMode
 from histdatacom.synthetic.observation import (
     ObservationContextV1,
@@ -18,9 +23,12 @@ from histdatacom.synthetic.observation import (
 )
 
 HISTORICAL_PRODUCT_OBSERVATION_CONDITIONING_SCHEMA_VERSION = (
-    "histdatacom.historical-product-observation-conditioning.v2"
+    "histdatacom.historical-product-observation-conditioning.v3"
 )
 TRANSITION_RETENTION_BRIDGE_MODE = "ex-post-adjacent-epoch-linear-transition-v1"
+TRANSITION_RETENTION_SCENARIO_MODE = (
+    "qualified-adjacent-epoch-transition-scenario-v1"
+)
 
 
 def historical_product_observation_conditioning(
@@ -31,6 +39,8 @@ def historical_product_observation_conditioning(
     information_mode: InformationMode,
     used_at_ns: int | None = None,
     feed_epoch_definition: Any | None = None,
+    transition_policy: FeedEpochTransitionPolicyV1 | None = None,
+    transition_scenario_kind: FeedEpochTransitionScenarioKind | None = None,
 ) -> dict[str, JSONValue]:
     """Resolve stable-epoch or explicit transition cardinality evidence."""
     label = str(feed_epoch_label).strip()
@@ -48,6 +58,8 @@ def historical_product_observation_conditioning(
             information_mode=mode,
             used_at_ns=used_at_ns,
             feed_epoch_definition=feed_epoch_definition,
+            transition_policy=transition_policy,
+            transition_scenario_kind=transition_scenario_kind,
         )
     else:
         joint, symbol_evidence = _stable_epoch_conditioning(
@@ -57,8 +69,7 @@ def historical_product_observation_conditioning(
         )
         resolution = {
             "resolution_basis": (
-                "synchronized-epoch-aggregate-for-qualified-"
-                "multivariate-cardinality-v1"
+                "synchronized-epoch-aggregate-for-qualified-multivariate-cardinality-v1"
             ),
             "conditioning_mode": "fitted-stable-epoch-v1",
         }
@@ -95,6 +106,9 @@ def historical_product_retention_probability(
     used_at_ns: int | None = None,
     feed_epoch_definition: Any | None = None,
     retention_endpoint: str = "central",
+    symbols: Sequence[str] = ("GLOBAL",),
+    transition_policy: FeedEpochTransitionPolicyV1 | None = None,
+    transition_scenario_kind: FeedEpochTransitionScenarioKind | None = None,
 ) -> float:
     """Resolve a declared joint endpoint without materializing full evidence."""
     label = str(feed_epoch_label).strip()
@@ -102,13 +116,22 @@ def historical_product_retention_probability(
         raise ValueError("historical product conditioning requires an epoch")
     mode = InformationMode.from_value(information_mode)
     if label.startswith("transition:"):
+        normalized_symbols = tuple(
+            sorted({str(item).upper() for item in symbols})
+        )
+        if not normalized_symbols:
+            raise ValueError(
+                "historical product transition retention requires symbols"
+            )
         joint, _, _ = _transition_conditioning(
             operator,
             feed_epoch_label=label,
-            symbols=(),
+            symbols=normalized_symbols,
             information_mode=mode,
             used_at_ns=used_at_ns,
             feed_epoch_definition=feed_epoch_definition,
+            transition_policy=transition_policy,
+            transition_scenario_kind=transition_scenario_kind,
         )
     else:
         joint = _resolved_retention_evidence(
@@ -168,11 +191,24 @@ def _transition_conditioning(
     information_mode: InformationMode,
     used_at_ns: int | None,
     feed_epoch_definition: Any | None,
+    transition_policy: FeedEpochTransitionPolicyV1 | None,
+    transition_scenario_kind: FeedEpochTransitionScenarioKind | None,
 ) -> tuple[dict[str, JSONValue], dict[str, JSONValue], dict[str, JSONValue]]:
-    if information_mode is not InformationMode.EX_POST_RECONSTRUCTION:
+    if transition_policy is None or transition_scenario_kind is None:
         raise ValueError(
-            "transition retention bridging is qualified only for ex-post "
-            "reconstruction"
+            "transition conditioning requires an explicit transition policy "
+            "and scenario"
+        )
+    if not isinstance(transition_policy, FeedEpochTransitionPolicyV1):
+        raise TypeError("transition policy must use v1")
+    scenario_kind = FeedEpochTransitionScenarioKind(transition_scenario_kind)
+    if (
+        information_mode is not InformationMode.EX_POST_RECONSTRUCTION
+        and transition_policy.ex_ante_prior_artifact_id is None
+    ):
+        raise ValueError(
+            "transition scenarios are ex-ante forbidden without a "
+            "point-in-time-valid prior"
         )
     if feed_epoch_definition is None or used_at_ns is None:
         raise ValueError(
@@ -208,7 +244,21 @@ def _transition_conditioning(
         )
     right_weight = (decision_ns - start_ns) / (end_ns - start_ns)
     left_weight = 1.0 - right_weight
-    symbol_evidence: dict[str, JSONValue] = {}
+    resolved_symbols: dict[
+        str,
+        tuple[
+            tuple[
+                ObservationStratumV1,
+                ObservationParameterEstimateV1,
+                tuple[str, ...],
+            ],
+            tuple[
+                ObservationStratumV1,
+                ObservationParameterEstimateV1,
+                tuple[str, ...],
+            ],
+        ],
+    ] = {}
     for symbol in symbols:
         left = _resolved_retention(
             operator,
@@ -218,12 +268,7 @@ def _transition_conditioning(
             operator,
             ObservationContextV1(symbol=symbol, epoch_id=right_label),
         )
-        symbol_evidence[symbol] = _blended_retention_evidence(
-            left,
-            right,
-            left_weight=left_weight,
-            right_weight=right_weight,
-        )
+        resolved_symbols[symbol] = (left, right)
     left_joint = _resolved_retention(
         operator,
         ObservationContextV1(symbol="GLOBAL", epoch_id=left_label),
@@ -234,28 +279,74 @@ def _transition_conditioning(
     )
     if left_joint[0].level != "epoch" or right_joint[0].level != "epoch":
         raise ValueError("transition bridge lacks adjacent epoch aggregates")
+    all_pairs = tuple(resolved_symbols.values()) + ((left_joint, right_joint),)
+    scenario = build_feed_epoch_transition_scenario(
+        transition_policy,
+        scenario_kind,
+        observation_operator_id=operator.operator_id,
+        feed_epoch_definition_id=operator.feed_epoch_definition_id,
+        feed_epoch_id=feed_epoch_label,
+        transition_boundary_id=str(boundary.boundary_id),
+        transition_start_ns=start_ns,
+        transition_end_ns=end_ns,
+        transition_left_epoch_id=left_label,
+        transition_right_epoch_id=right_label,
+        symbol_scope=tuple(symbols) or ("GLOBAL",),
+        information_mode=information_mode.value,
+        left_stratum_ids=tuple(pair[0][0].stratum_id for pair in all_pairs),
+        right_stratum_ids=tuple(pair[1][0].stratum_id for pair in all_pairs),
+        operator_evidence_ids=tuple(
+            evidence_id
+            for pair in all_pairs
+            for side in pair
+            for evidence_id in side[1].evidence_ids
+        ),
+        linear_right_weight=right_weight,
+    )
+    symbol_evidence: dict[str, JSONValue] = {
+        symbol: _blended_retention_evidence(
+            pair[0],
+            pair[1],
+            left_weight=scenario.left_weight,
+            right_weight=scenario.right_weight,
+        )
+        for symbol, pair in resolved_symbols.items()
+    }
     joint = _blended_retention_evidence(
         left_joint,
         right_joint,
-        left_weight=left_weight,
-        right_weight=right_weight,
+        left_weight=scenario.left_weight,
+        right_weight=scenario.right_weight,
     )
     return (
         joint,
         symbol_evidence,
         {
             "resolution_basis": (
-                "adjacent-fitted-epoch-linear-transition-cardinality-v1"
+                "adjacent-fitted-epoch-scenario-transition-cardinality-v1"
             ),
-            "conditioning_mode": TRANSITION_RETENTION_BRIDGE_MODE,
+            "conditioning_mode": TRANSITION_RETENTION_SCENARIO_MODE,
+            "feed_epoch_transition_policy_id": transition_policy.policy_id,
+            "transition_scenario_id": scenario.scenario_id,
+            "transition_scenario_kind": scenario.kind.value,
+            "transition_scenario": scenario.to_dict(),
             "transition_boundary_id": str(boundary.boundary_id),
             "transition_start_ns": start_ns,
             "transition_end_ns": end_ns,
             "transition_left_epoch_id": left_label,
             "transition_right_epoch_id": right_label,
-            "transition_left_weight": left_weight,
-            "transition_right_weight": right_weight,
-            "transition_future_evidence_use": "declared-ex-post-only",
+            "transition_linear_left_weight": left_weight,
+            "transition_linear_right_weight": right_weight,
+            "transition_left_weight": scenario.left_weight,
+            "transition_right_weight": scenario.right_weight,
+            "transition_future_evidence_use": (
+                "declared-ex-post-only"
+                if information_mode is InformationMode.EX_POST_RECONSTRUCTION
+                else "point-in-time-valid-prior-bound"
+            ),
+            "transition_ex_ante_prior_artifact_id": (
+                transition_policy.ex_ante_prior_artifact_id
+            ),
         },
     )
 
@@ -388,5 +479,6 @@ def _next_period_start_ns(period: str) -> int:
 __all__ = [
     "HISTORICAL_PRODUCT_OBSERVATION_CONDITIONING_SCHEMA_VERSION",
     "TRANSITION_RETENTION_BRIDGE_MODE",
+    "TRANSITION_RETENTION_SCENARIO_MODE",
     "historical_product_observation_conditioning",
 ]

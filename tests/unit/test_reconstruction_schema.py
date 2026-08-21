@@ -18,8 +18,8 @@ from histdatacom.data_quality.training_features import (
     training_feature_definitions,
 )
 from histdatacom.reconstruction import (
-    ReconstructionClient,
     RECONSTRUCTION_PLAN_SET_SCHEMA_VERSION,
+    ReconstructionClient,
     ReconstructionPlanSpecV1,
     ReconstructionRefusedError,
 )
@@ -212,7 +212,7 @@ def test_registry_explains_legacy_training_event_and_future_seams() -> None:
     event = contracts["histdatacom.synthetic-event.v1"]
     evidence = contracts["histdatacom.reconstruction-evidence-projection.v1"]
     historical_conditioning = contracts[
-        "histdatacom.historical-product-observation-conditioning.v2"
+        "histdatacom.historical-product-observation-conditioning.v3"
     ]
     cross_constraint = contracts[
         "histdatacom.cross-series-constraint-window.v1"
@@ -497,6 +497,17 @@ def test_marked_hawkes_plan_requires_frozen_product_selection(
     }
 
     plan["observation_uncertainty_policy_path"] = "uncertainty.json"
+    missing_transition = evaluate_reconstruction_compatibility(
+        plan,
+        inspect_source=False,
+        inspect_artifacts=False,
+    )
+    assert not missing_transition.executable
+    assert "missing_feed_epoch_transition_policy" in {
+        item.code for item in missing_transition.findings
+    }
+
+    plan["feed_epoch_transition_policy_path"] = "transition.json"
     complete = evaluate_reconstruction_compatibility(
         plan,
         inspect_source=False,

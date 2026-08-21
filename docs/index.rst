@@ -16,6 +16,7 @@ Data and reconstruction foundations
    reconstruction-streaming-contracts
    reconstruction-information-modes
    feed-epoch-contracts
+   feed-epoch-transition-uncertainty
    observation-operator-contracts
    observation-process-uncertainty
    market-context-contracts

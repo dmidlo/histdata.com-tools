@@ -141,6 +141,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--output-directory", required=True, metavar="PATH"
     )
 
+    transition_policy = subparsers.add_parser(
+        "feed-epoch-transition-policy",
+        help="freeze the v2.5 three-scenario feed-epoch transition policy",
+    )
+    transition_policy.add_argument(
+        "--output-directory", required=True, metavar="PATH"
+    )
+
     diagnostic_build = subparsers.add_parser(
         "diagnostic-build",
         help="build verified chart data and optional deterministic static figures",
@@ -512,10 +520,15 @@ def _run_command(
         )
         return selection.to_dict(), ReconstructionExitCode.SUCCESS
     if command == "observation-uncertainty-policy":
-        policy = client.create_observation_uncertainty_policy(
+        observation_policy = client.create_observation_uncertainty_policy(
             output_directory=args.output_directory
         )
-        return policy.to_dict(), ReconstructionExitCode.SUCCESS
+        return observation_policy.to_dict(), ReconstructionExitCode.SUCCESS
+    if command == "feed-epoch-transition-policy":
+        transition_policy = client.create_feed_epoch_transition_policy(
+            output_directory=args.output_directory
+        )
+        return transition_policy.to_dict(), ReconstructionExitCode.SUCCESS
     if command == "diagnostic-build":
         publication = client.publish_diagnostics(
             args.spec, output_directory=args.output_directory

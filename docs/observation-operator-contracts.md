@@ -182,6 +182,10 @@ specific parameters were well supported.
 Technological epochs and market states remain separate coordinates. A feed
 epoch cannot be relabeled as a volatility regime, and an uncertain epoch
 boundary remains an explicit transition label supplied by the epoch artifact.
+The [feed-epoch transition policy](feed-epoch-transition-uncertainty.md) keeps
+that boundary-shape uncertainty separate from the operator's fitted retention
+interval and requires the full crossed scenario identity in new marked-Hawkes
+products.
 
 ## Forward application and controlled degradation
 

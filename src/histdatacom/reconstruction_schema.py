@@ -465,6 +465,10 @@ _REQUIRED_SCHEMA_TOKENS = (
     "observation-uncertainty-diagnostic",
     "observation-uncertainty-decomposition",
     "observation-uncertainty-report",
+    "feed-epoch-transition-policy",
+    "feed-epoch-transition-scenario",
+    "feed-epoch-transition-diagnostic",
+    "feed-epoch-transition-report",
     "reconstruction-diagnostic-chart-bundle",
     "reconstruction-diagnostic-publication",
     "reconstruction-diagnostic-publication-spec",
@@ -561,6 +565,7 @@ _PLAN_FIELDS = frozenset(
         "qualification_dossier_path",
         "hawkes_product_selection_dossier_path",
         "observation_uncertainty_policy_path",
+        "feed_epoch_transition_policy_path",
     }
 )
 
@@ -1102,6 +1107,20 @@ def _check_current_scope(
                 "observation_uncertainty_policy_path",
                 "A marked-Hawkes product lacks its observation-scenario policy.",
                 "Bind the qualified endpoint and worst-case admission policy.",
+            )
+        if (
+            set(selected_ids) & hawkes_ids
+            and not str(
+                payload.get("feed_epoch_transition_policy_path", "")
+            ).strip()
+        ):
+            _finding(
+                findings,
+                "missing_feed_epoch_transition_policy",
+                ReconstructionCompatibilityStatus.INVALID,
+                "feed_epoch_transition_policy_path",
+                "A marked-Hawkes product lacks its feed-epoch transition policy.",
+                "Bind the qualified left, linear, and right transition scenarios.",
             )
     provider = (
         str(
@@ -1830,6 +1849,47 @@ def _inspect_artifacts(
                         "observation_uncertainty_policy_path",
                         "Observation uncertainty policy lacks the frozen v2.5 scope.",
                         "Regenerate the three-scenario uncertainty policy.",
+                    )
+        transition_policy_path = str(
+            payload.get("feed_epoch_transition_policy_path", "")
+        ).strip()
+        if transition_policy_path:
+            path = Path(transition_policy_path).expanduser()
+            try:
+                transition_policy = _read_artifact_mapping(path)
+            except (OSError, TypeError, ValueError) as err:
+                _finding(
+                    findings,
+                    "invalid_feed_epoch_transition_policy",
+                    ReconstructionCompatibilityStatus.INVALID,
+                    "feed_epoch_transition_policy_path",
+                    str(err),
+                    "Supply a bounded content-addressed transition policy.",
+                )
+            else:
+                if (
+                    transition_policy.get("schema_version")
+                    != "histdatacom.feed-epoch-transition-policy.v1"
+                    or transition_policy.get("scenario_order")
+                    != [
+                        "left_persistence",
+                        "linear_bridge",
+                        "early_right_adoption",
+                    ]
+                    or transition_policy.get("protected_transition_product_fit")
+                    is not False
+                    or transition_policy.get("member_assignment_policy")
+                    != "complete-transition-x-observation-cross-product-v1"
+                    or transition_policy.get("final_holdout_selection_role")
+                    is not False
+                ):
+                    _finding(
+                        findings,
+                        "feed_epoch_transition_policy_scope_mismatch",
+                        ReconstructionCompatibilityStatus.INVALID,
+                        "feed_epoch_transition_policy_path",
+                        "Feed-epoch transition policy lacks the frozen v2.5 scope.",
+                        "Regenerate the three-scenario transition policy.",
                     )
 
 

@@ -7,6 +7,10 @@ measure uncertainty in the observation operator itself. The v2.5 contracts
 therefore add a separate, evidence-bound operator-scenario axis without
 changing retained v2.4 ensemble member IDs or path seeds.
 
+Feed-boundary shape is a separate semantic axis governed by the
+[feed-epoch transition policy](feed-epoch-transition-uncertainty.md); new
+marked-Hawkes transition products retain the complete 3×3 crossed design.
+
 No scenario claims recovered historical truth. Every output remains a
 plausible counterfactual conditioned on the declared observation operator.
 

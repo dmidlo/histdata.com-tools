@@ -35,11 +35,16 @@ from histdatacom.synthetic import (
     read_observation_operator_artifact,
     write_observation_operator,
 )
-from histdatacom.synthetic.reconstruction_handlers import (
-    _historical_product_observation_conditioning,
+from histdatacom.synthetic.feed_epoch_transition import (
+    FeedEpochTransitionPolicyV1,
+    FeedEpochTransitionScenarioKind,
 )
 from histdatacom.synthetic.historical_conditioning import (
+    historical_product_observation_conditioning,
     historical_product_retention_probability,
+)
+from histdatacom.synthetic.reconstruction_handlers import (
+    _historical_product_observation_conditioning,
 )
 
 SYMBOL = "EURUSD"
@@ -304,16 +309,24 @@ def test_historical_product_transition_uses_declared_ex_post_bridge() -> None:
         for symbol in ("eurgbp", "eurusd", "gbpusd")
     }
 
-    conditioning = _historical_product_observation_conditioning(
-        operator,
-        conditions=conditions,  # type: ignore[arg-type]
-        feed_epoch_definition=definition,
-        used_at_ns=used_at_ns,
-        information_mode=InformationMode.EX_POST_RECONSTRUCTION,
-    )
+    policy = FeedEpochTransitionPolicyV1()
+    conditionings = {
+        kind: historical_product_observation_conditioning(
+            operator,
+            feed_epoch_label=assignment.label,
+            symbols=tuple(conditions),
+            feed_epoch_definition=definition,
+            used_at_ns=used_at_ns,
+            information_mode=InformationMode.EX_POST_RECONSTRUCTION,
+            transition_policy=policy,
+            transition_scenario_kind=kind,
+        )
+        for kind in policy.scenario_order
+    }
+    conditioning = conditionings[FeedEpochTransitionScenarioKind.LINEAR_BRIDGE]
 
     assert conditioning["conditioning_mode"] == (
-        "ex-post-adjacent-epoch-linear-transition-v1"
+        "qualified-adjacent-epoch-transition-scenario-v1"
     )
     assert conditioning["feed_epoch_id"] == assignment.label
     assert conditioning["transition_left_epoch_id"] == "technology_epoch_02"
@@ -321,17 +334,135 @@ def test_historical_product_transition_uses_declared_ex_post_bridge() -> None:
     assert conditioning["transition_left_weight"] + conditioning[
         "transition_right_weight"
     ] == pytest.approx(1.0)
+    assert conditioning["feed_epoch_transition_policy_id"] == policy.policy_id
+    assert (
+        conditioning["transition_scenario_id"]
+        == conditioning["transition_scenario"]["scenario_id"]
+    )
     joint = conditioning["joint_retention"]  # type: ignore[assignment]
     assert joint["stratum_level"] == "transition_bridge"
     assert 0.24065855 < joint["retention_probability"] < 0.49569722
+    left = conditionings[FeedEpochTransitionScenarioKind.LEFT_PERSISTENCE][
+        "joint_retention"
+    ]
+    right = conditionings[FeedEpochTransitionScenarioKind.EARLY_RIGHT_ADOPTION][
+        "joint_retention"
+    ]
+    assert left["retention_probability"] == pytest.approx(0.24065855)
+    assert right["retention_probability"] == pytest.approx(0.49569722)
+    assert (
+        len(
+            {
+                value["transition_scenario_id"]
+                for value in conditionings.values()
+            }
+        )
+        == 3
+    )
 
-    with pytest.raises(ValueError, match="qualified only for ex-post"):
+    with pytest.raises(ValueError, match="explicit transition policy"):
         _historical_product_observation_conditioning(
             operator,
             conditions=conditions,  # type: ignore[arg-type]
             feed_epoch_definition=definition,
             used_at_ns=used_at_ns,
+            information_mode=InformationMode.EX_POST_RECONSTRUCTION,
+        )
+
+    with pytest.raises(ValueError, match="ex-ante forbidden"):
+        historical_product_observation_conditioning(
+            operator,
+            feed_epoch_label=assignment.label,
+            symbols=tuple(conditions),
+            feed_epoch_definition=definition,
+            used_at_ns=used_at_ns,
             information_mode=InformationMode.EX_ANTE_SIMULATION,
+            transition_policy=policy,
+            transition_scenario_kind=(
+                FeedEpochTransitionScenarioKind.LINEAR_BRIDGE
+            ),
+        )
+
+    prior_policy = FeedEpochTransitionPolicyV1(
+        ex_ante_prior_artifact_id="point-in-time-transition-prior:test"
+    )
+    ex_ante = historical_product_observation_conditioning(
+        operator,
+        feed_epoch_label=assignment.label,
+        symbols=tuple(conditions),
+        feed_epoch_definition=definition,
+        used_at_ns=used_at_ns,
+        information_mode=InformationMode.EX_ANTE_SIMULATION,
+        transition_policy=prior_policy,
+        transition_scenario_kind=(
+            FeedEpochTransitionScenarioKind.LINEAR_BRIDGE
+        ),
+    )
+    assert ex_ante["transition_future_evidence_use"] == (
+        "point-in-time-valid-prior-bound"
+    )
+    assert ex_ante["transition_ex_ante_prior_artifact_id"] == (
+        "point-in-time-transition-prior:test"
+    )
+
+    with pytest.raises(ValueError, match="outside uncertainty interval"):
+        historical_product_observation_conditioning(
+            operator,
+            feed_epoch_label=assignment.label,
+            symbols=tuple(conditions),
+            feed_epoch_definition=definition,
+            used_at_ns=int(conditioning["transition_start_ns"]) - 1,
+            information_mode=InformationMode.EX_POST_RECONSTRUCTION,
+            transition_policy=policy,
+            transition_scenario_kind=(
+                FeedEpochTransitionScenarioKind.LINEAR_BRIDGE
+            ),
+        )
+
+    mismatched_operator = SimpleNamespace(
+        operator_id=operator.operator_id,
+        feed_epoch_definition_id=("feed-epoch-definition:sha256:" + "0" * 64),
+        resolve_stratum=operator.resolve_stratum,
+    )
+    with pytest.raises(ValueError, match="differs from observation operator"):
+        historical_product_observation_conditioning(
+            mismatched_operator,  # type: ignore[arg-type]
+            feed_epoch_label=assignment.label,
+            symbols=tuple(conditions),
+            feed_epoch_definition=definition,
+            used_at_ns=used_at_ns,
+            information_mode=InformationMode.EX_POST_RECONSTRUCTION,
+            transition_policy=policy,
+            transition_scenario_kind=(
+                FeedEpochTransitionScenarioKind.LINEAR_BRIDGE
+            ),
+        )
+
+    def resolve_without_right_epoch(context):
+        if (
+            context.epoch_id == "technology_epoch_03"
+            and context.symbol == "GLOBAL"
+        ):
+            raise ValueError("historical product retention is unsupported")
+        return operator.resolve_stratum(context)
+
+    absent_right = SimpleNamespace(
+        operator_id=operator.operator_id,
+        feed_epoch_definition_id=operator.feed_epoch_definition_id,
+        resolve_stratum=resolve_without_right_epoch,
+    )
+    with pytest.raises(ValueError, match="unsupported"):
+        historical_product_observation_conditioning(
+            absent_right,  # type: ignore[arg-type]
+            feed_epoch_label=assignment.label,
+            symbols=tuple(conditions),
+            feed_epoch_definition=definition,
+            used_at_ns=used_at_ns,
+            information_mode=InformationMode.EX_POST_RECONSTRUCTION,
+            transition_policy=policy,
+            transition_scenario_kind=(
+                FeedEpochTransitionScenarioKind.LINEAR_BRIDGE
+            ),
         )
 
 

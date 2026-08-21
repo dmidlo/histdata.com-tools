@@ -90,6 +90,10 @@ from histdatacom.synthetic.diagnostics import (
     diagnostic_publication_listing,
     publish_reconstruction_diagnostics,
 )
+from histdatacom.synthetic.feed_epoch_transition import (
+    FeedEpochTransitionPolicyV1,
+    write_feed_epoch_transition_policy,
+)
 from histdatacom.synthetic.hawkes_selection import (
     HAWKES_SELECTION_ENGINE_IDS,
     HawkesProductSelectionDossierV1,
@@ -304,6 +308,7 @@ class ReconstructionPlanSpecV1:
     qualification_dossier_path: str | None = None
     hawkes_product_selection_dossier_path: str | None = None
     observation_uncertainty_policy_path: str | None = None
+    feed_epoch_transition_policy_path: str | None = None
     schema_version: str = RECONSTRUCTION_PLAN_SPEC_SCHEMA_VERSION
 
     def __post_init__(self) -> None:
@@ -441,6 +446,13 @@ class ReconstructionPlanSpecV1:
             observation_uncertainty_path = str(
                 Path(observation_uncertainty_path).expanduser()
             )
+        transition_policy_path = _optional_text(
+            self.feed_epoch_transition_policy_path
+        )
+        if transition_policy_path is not None:
+            transition_policy_path = str(
+                Path(transition_policy_path).expanduser()
+            )
         if self.schema_version == RECONSTRUCTION_PLAN_SPEC_SCHEMA_VERSION and (
             proposal_engine_ids
             or selected_engine_ids
@@ -448,6 +460,7 @@ class ReconstructionPlanSpecV1:
             or qualification_path is not None
             or hawkes_selection_path is not None
             or observation_uncertainty_path is not None
+            or transition_policy_path is not None
         ):
             raise ReconstructionUnsupportedError(
                 "v1 plan translation cannot declare proposal portfolio fields"
@@ -469,6 +482,11 @@ class ReconstructionPlanSpecV1:
             self,
             "observation_uncertainty_policy_path",
             observation_uncertainty_path,
+        )
+        object.__setattr__(
+            self,
+            "feed_epoch_transition_policy_path",
+            transition_policy_path,
         )
         requested_start = self.requested_start_ns
         requested_end = self.requested_end_ns
@@ -569,6 +587,9 @@ class ReconstructionPlanSpecV1:
             )
             payload["observation_uncertainty_policy_path"] = (
                 self.observation_uncertainty_policy_path
+            )
+            payload["feed_epoch_transition_policy_path"] = (
+                self.feed_epoch_transition_policy_path
             )
         return payload
 
@@ -692,6 +713,9 @@ class ReconstructionPlanSpecV1:
             observation_uncertainty_policy_path=_optional_text(
                 data.get("observation_uncertainty_policy_path")
             ),
+            feed_epoch_transition_policy_path=_optional_text(
+                data.get("feed_epoch_transition_policy_path")
+            ),
             schema_version=str(data.get("schema_version", "")),
         )
 
@@ -737,6 +761,14 @@ class ReconstructionPlanSpecV2(ReconstructionPlanSpecV1):
         ):
             raise ReconstructionUnsupportedError(
                 "v2 marked-Hawkes selection requires observation uncertainty"
+            )
+        if (
+            set(self.selected_proposal_engine_ids)
+            & set(HAWKES_SELECTION_ENGINE_IDS)
+            and self.feed_epoch_transition_policy_path is None
+        ):
+            raise ReconstructionUnsupportedError(
+                "v2 marked-Hawkes selection requires feed-epoch transition policy"
             )
 
 
@@ -2173,6 +2205,10 @@ class ReconstructionCampaignProductEntryV1:
     observation_scenario_id: str | None = None
     observation_scenario_kind: str | None = None
     observation_path_seed: int | None = None
+    feed_epoch_transition_policy_id: str | None = None
+    transition_scenario_id: str | None = None
+    transition_scenario_kind: str | None = None
+    transition_boundary_id: str | None = None
     reason_code: str | None = None
     entry_id: str = ""
     schema_version: str = RECONSTRUCTION_CAMPAIGN_PRODUCT_ENTRY_SCHEMA_VERSION
@@ -2242,6 +2278,38 @@ class ReconstructionCampaignProductEntryV1:
         object.__setattr__(self, "observation_scenario_id", scenario_id)
         object.__setattr__(self, "observation_scenario_kind", scenario_kind)
         object.__setattr__(self, "observation_path_seed", path_seed)
+        transition_policy_id = _optional_text(
+            self.feed_epoch_transition_policy_id
+        )
+        transition_scenario_id = _optional_text(self.transition_scenario_id)
+        transition_scenario_kind = _optional_text(self.transition_scenario_kind)
+        transition_boundary_id = _optional_text(self.transition_boundary_id)
+        transition_values = (
+            transition_policy_id,
+            transition_scenario_id,
+            transition_scenario_kind,
+            transition_boundary_id,
+        )
+        if any(value is not None for value in transition_values) and not all(
+            value is not None for value in transition_values
+        ):
+            raise ReconstructionPlanError(
+                "campaign product feed-epoch transition lineage is incomplete"
+            )
+        object.__setattr__(
+            self,
+            "feed_epoch_transition_policy_id",
+            transition_policy_id,
+        )
+        object.__setattr__(
+            self, "transition_scenario_id", transition_scenario_id
+        )
+        object.__setattr__(
+            self, "transition_scenario_kind", transition_scenario_kind
+        )
+        object.__setattr__(
+            self, "transition_boundary_id", transition_boundary_id
+        )
         if self.status == "verified_product":
             member_id = _required_text(self.ensemble_member_id)
             window_id = _required_text(self.window_id)
@@ -2264,6 +2332,14 @@ class ReconstructionCampaignProductEntryV1:
                 or metadata.get("observation_scenario_id") != scenario_id
                 or metadata.get("observation_scenario_kind") != scenario_kind
                 or metadata.get("observation_path_seed") != path_seed
+                or metadata.get("feed_epoch_transition_policy_id")
+                != transition_policy_id
+                or metadata.get("transition_scenario_id")
+                != transition_scenario_id
+                or metadata.get("transition_scenario_kind")
+                != transition_scenario_kind
+                or metadata.get("transition_boundary_id")
+                != transition_boundary_id
             ):
                 raise ReconstructionPlanError(
                     "campaign product manifest metadata differs from its entry"
@@ -2288,6 +2364,7 @@ class ReconstructionCampaignProductEntryV1:
                 or observed
                 or synthetic
                 or any(value is not None for value in uncertainty_values)
+                or any(value is not None for value in transition_values)
             ):
                 raise ReconstructionPlanError(
                     "missing campaign product contains committed evidence"
@@ -2303,6 +2380,7 @@ class ReconstructionCampaignProductEntryV1:
                 or observed
                 or synthetic
                 or any(value is not None for value in uncertainty_values)
+                or any(value is not None for value in transition_values)
             ):
                 raise ReconstructionPlanError(
                     "terminal non-product outcome contains product evidence"
@@ -2341,6 +2419,12 @@ class ReconstructionCampaignProductEntryV1:
             "observation_scenario_id": self.observation_scenario_id,
             "observation_scenario_kind": self.observation_scenario_kind,
             "observation_path_seed": self.observation_path_seed,
+            "feed_epoch_transition_policy_id": (
+                self.feed_epoch_transition_policy_id
+            ),
+            "transition_scenario_id": self.transition_scenario_id,
+            "transition_scenario_kind": self.transition_scenario_kind,
+            "transition_boundary_id": self.transition_boundary_id,
             "reason_code": self.reason_code,
         }
 
@@ -2387,6 +2471,18 @@ class ReconstructionCampaignProductEntryV1:
                 else _strict_int(
                     data.get("observation_path_seed"), "observation_path_seed"
                 )
+            ),
+            feed_epoch_transition_policy_id=_optional_text(
+                data.get("feed_epoch_transition_policy_id")
+            ),
+            transition_scenario_id=_optional_text(
+                data.get("transition_scenario_id")
+            ),
+            transition_scenario_kind=_optional_text(
+                data.get("transition_scenario_kind")
+            ),
+            transition_boundary_id=_optional_text(
+                data.get("transition_boundary_id")
             ),
             reason_code=_optional_text(data.get("reason_code")),
             entry_id=str(data.get("entry_id", "")),
@@ -3621,6 +3717,17 @@ class ReconstructionClient:
         except (OSError, TypeError, ValueError, RuntimeError) as err:
             raise ReconstructionValidationError(str(err)) from err
 
+    def create_feed_epoch_transition_policy(
+        self, *, output_directory: str | Path
+    ) -> FeedEpochTransitionPolicyV1:
+        """Freeze and publish the default v2.5 transition-scenario policy."""
+        try:
+            policy = FeedEpochTransitionPolicyV1()
+            write_feed_epoch_transition_policy(policy, output_directory)
+            return policy
+        except (OSError, TypeError, ValueError, RuntimeError) as err:
+            raise ReconstructionValidationError(str(err)) from err
+
     def publish_diagnostics(
         self,
         spec: DiagnosticPublicationSpecV1 | str | Path,
@@ -3775,6 +3882,9 @@ class ReconstructionClient:
                 observation_uncertainty_policy_path=(
                     spec.observation_uncertainty_policy_path
                 ),
+                feed_epoch_transition_policy_path=(
+                    spec.feed_epoch_transition_policy_path
+                ),
             )
             validate_synthetic_infill_plan_for_execution(plan)
             return plan
@@ -3846,10 +3956,7 @@ class ReconstructionClient:
         ) -> None:
             start_period = _period_for_ns(requested_start_ns)
             end_period = _period_for_ns(requested_end_ns - 1)
-            shard_key = (
-                f"{start_period}-{end_period}-"
-                f"{requested_start_ns}-{requested_end_ns}"
-            )
+            shard_key = f"{start_period}-{end_period}-{requested_start_ns}-{requested_end_ns}"
             shard_spec = replace(
                 spec,
                 start_period=start_period,
@@ -6478,6 +6585,18 @@ def _build_reconstruction_campaign_product_index(
                             raw_observation_path_seed, "observation_path_seed"
                         )
                     )
+                    feed_epoch_transition_policy_id = _optional_text(
+                        runtime_evidence.get("feed_epoch_transition_policy_id")
+                    )
+                    transition_scenario_id = _optional_text(
+                        runtime_evidence.get("transition_scenario_id")
+                    )
+                    transition_scenario_kind = _optional_text(
+                        runtime_evidence.get("transition_scenario_kind")
+                    )
+                    transition_boundary_id = _optional_text(
+                        runtime_evidence.get("transition_boundary_id")
+                    )
                     product_ref = artifact_ref_for_file(
                         manifest_path,
                         kind=RECONSTRUCTION_MANIFEST_ARTIFACT_KIND,
@@ -6496,6 +6615,14 @@ def _build_reconstruction_campaign_product_index(
                             "observation_scenario_id": observation_scenario_id,
                             "observation_scenario_kind": observation_scenario_kind,
                             "observation_path_seed": observation_path_seed,
+                            "feed_epoch_transition_policy_id": (
+                                feed_epoch_transition_policy_id
+                            ),
+                            "transition_scenario_id": transition_scenario_id,
+                            "transition_scenario_kind": (
+                                transition_scenario_kind
+                            ),
+                            "transition_boundary_id": transition_boundary_id,
                             "logical_content_sha256": (
                                 manifest.replay.logical_content_sha256
                             ),
@@ -6520,6 +6647,12 @@ def _build_reconstruction_campaign_product_index(
                             observation_scenario_id=observation_scenario_id,
                             observation_scenario_kind=observation_scenario_kind,
                             observation_path_seed=observation_path_seed,
+                            feed_epoch_transition_policy_id=(
+                                feed_epoch_transition_policy_id
+                            ),
+                            transition_scenario_id=transition_scenario_id,
+                            transition_scenario_kind=transition_scenario_kind,
+                            transition_boundary_id=transition_boundary_id,
                         )
                     )
             else:

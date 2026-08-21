@@ -1849,8 +1849,9 @@ def modern_reference_triangle_certification_policy(
                 "powered-qualification-dossier",
                 "hawkes-product-selection-dossier",
                 "observation-uncertainty-report",
+                "feed-epoch-transition-report",
             ),
-            "Every selected engine and frozen portfolio weight comes from powered qualification, the validation-only product-selection dossier, and a holdout-calibrated observation-uncertainty report.",
+            "Every selected engine and frozen portfolio weight comes from powered qualification, the validation-only product-selection dossier, and holdout-calibrated observation and feed-transition uncertainty reports.",
         ),
         _requirement(
             CertificationGate.CONDITIONED_SCORECARDS,

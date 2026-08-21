@@ -2981,6 +2981,15 @@ point-estimate artifacts keep their original identity and are never relabeled
 as v2.5 scenario evidence. See
 [`docs/observation-process-uncertainty.md`](docs/observation-process-uncertainty.md).
 
+Uncertain feed-epoch boundaries are also explicit. New marked-Hawkes products
+cross left-persistence, elapsed-time-linear, and early-right-adoption boundary
+scenarios with the three observation-operator endpoint scenarios. Planning
+uses the worst qualified crossed-cell cardinality bound; runtime and product
+evidence expose the transition policy, scenario, and boundary IDs. Ex-ante
+transition use is refused without a separately bound point-in-time-valid prior.
+See
+[`docs/feed-epoch-transition-uncertainty.md`](docs/feed-epoch-transition-uncertainty.md).
+
 #### Reconstruction Math Verification
 
 `current_reconstruction_math_verification_report()` runs the installed v1.0.0

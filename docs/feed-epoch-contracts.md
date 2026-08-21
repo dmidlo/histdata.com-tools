@@ -168,6 +168,12 @@ A period inside a boundary uncertainty interval is assigned to
 `kind="transition"`, not forced into either adjacent epoch. Periods outside
 those intervals receive a stable epoch assignment.
 
+Product reconstruction must additionally bind the
+[`histdatacom.feed-epoch-transition-policy.v1`](feed-epoch-transition-uncertainty.md)
+contract. It evaluates left persistence, the elapsed-time linear bridge, and
+early right adoption as separate scenarios; a transition label is never
+silently collapsed into a stable epoch.
+
 ## Resource limits and determinism
 
 Evidence count, selected feature count, and total sensitivity runs are bounded

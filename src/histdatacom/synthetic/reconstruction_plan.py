@@ -118,6 +118,13 @@ from histdatacom.synthetic.ensembles import (
     EnsembleCalibrationConfigV1,
     plan_reconstruction_ensemble,
 )
+from histdatacom.synthetic.feed_epoch_transition import (
+    FEED_EPOCH_TRANSITION_POLICY_ARTIFACT_KIND,
+    FeedEpochTransitionPolicyV1,
+    FeedEpochTransitionScenarioKind,
+    read_feed_epoch_transition_policy,
+    transition_crossed_member_count,
+)
 from histdatacom.synthetic.generation import (
     EMPIRICAL_MOTIF_GENERATOR_ID,
     EmpiricalMotifGeneratorConfigV1,
@@ -2772,6 +2779,7 @@ def build_synthetic_infill_plan(
     qualification_dossier_path: str | Path | None = None,
     hawkes_product_selection_dossier_path: str | Path | None = None,
     observation_uncertainty_policy_path: str | Path | None = None,
+    feed_epoch_transition_policy_path: str | Path | None = None,
 ) -> SyntheticInfillPlanV1:
     """Resolve real artifacts and build one executable first-party plan."""
     selected_symbols = _symbols(tuple(symbols))
@@ -3015,12 +3023,18 @@ def build_synthetic_infill_plan(
 
     selected_storage = storage_policy or ReconstructionStoragePolicyV1()
     selected_ensemble = ensemble_config or EnsembleCalibrationConfigV1(
+        member_count=(
+            9
+            if set(requested_selected_engine_ids)
+            & set(HAWKES_SELECTION_ENGINE_IDS)
+            else 4
+        ),
         retained_member_count=(
-            3
+            9
             if set(requested_selected_engine_ids)
             & set(HAWKES_SELECTION_ENGINE_IDS)
             else 2
-        )
+        ),
     )
     selected_generator = generator_config or EmpiricalMotifGeneratorConfigV1()
     selected_cross = (
@@ -3139,6 +3153,8 @@ def build_synthetic_infill_plan(
     hawkes_selection_ref: ArtifactRef | None = None
     observation_uncertainty_policy: ObservationUncertaintyPolicyV1 | None = None
     observation_uncertainty_ref: ArtifactRef | None = None
+    transition_policy: FeedEpochTransitionPolicyV1 | None = None
+    transition_policy_ref: ArtifactRef | None = None
     proposal_model_refs: dict[str, Mapping[str, ArtifactRef]] = {}
     if qualification_dossier_path is not None:
         qualification_dossier = read_powered_qualification_dossier(
@@ -3301,6 +3317,46 @@ def build_synthetic_infill_plan(
     elif set(selected_engine_ids) & set(HAWKES_SELECTION_ENGINE_IDS):
         raise ReconstructionPlanCompatibilityError(
             "marked-Hawkes reconstruction requires observation uncertainty"
+        )
+    if feed_epoch_transition_policy_path is not None:
+        if not set(selected_engine_ids) & set(HAWKES_SELECTION_ENGINE_IDS):
+            raise ReconstructionPlanCompatibilityError(
+                "feed-epoch transition policy is unused without marked Hawkes"
+            )
+        transition_policy = read_feed_epoch_transition_policy(
+            feed_epoch_transition_policy_path
+        )
+        transition_policy_ref = artifact_ref_for_file(
+            feed_epoch_transition_policy_path,
+            kind=FEED_EPOCH_TRANSITION_POLICY_ARTIFACT_KIND,
+            metadata={
+                "policy_id": transition_policy.policy_id,
+                "schema_version": transition_policy.schema_version,
+            },
+        )
+        verify_artifact_ref(transition_policy_ref)
+        if observation_uncertainty_policy is None:
+            raise ReconstructionPlanCompatibilityError(
+                "transition scenarios require observation uncertainty"
+            )
+        required_crossed_members = transition_crossed_member_count(
+            transition_policy,
+            observation_scenario_count=len(
+                observation_uncertainty_policy.scenario_order
+            ),
+        )
+        if (
+            selected_ensemble.member_count < required_crossed_members
+            or selected_ensemble.retained_member_count
+            < required_crossed_members
+        ):
+            raise ReconstructionPlanCompatibilityError(
+                "retained ensemble cannot cover the transition-by-observation "
+                "scenario cross-product"
+            )
+    elif set(selected_engine_ids) & set(HAWKES_SELECTION_ENGINE_IDS):
+        raise ReconstructionPlanCompatibilityError(
+            "marked-Hawkes reconstruction requires feed-epoch transition policy"
         )
     common_context_refs = (
         scientific_ledger_ref,
@@ -3476,6 +3532,8 @@ def build_synthetic_infill_plan(
             hawkes_selection_ref=hawkes_selection_ref,
             observation_uncertainty_policy=observation_uncertainty_policy,
             observation_uncertainty_ref=observation_uncertainty_ref,
+            transition_policy=transition_policy,
+            transition_policy_ref=transition_policy_ref,
         ),
         evidence_policy_ids=(
             selected_evidence_policy.policy_id,
@@ -3573,6 +3631,12 @@ def build_synthetic_infill_plan(
             and observation_uncertainty_ref is not None
             else {}
         ),
+        **(
+            {transition_policy.policy_id: transition_policy_ref.sha256}
+            if transition_policy is not None
+            and transition_policy_ref is not None
+            else {}
+        ),
         resolved.market_context.corpus_id: resolved.artifacts[
             "market_context"
         ].sha256,
@@ -3661,6 +3725,7 @@ def build_synthetic_infill_plan(
                     observation_uncertainty_policy=(
                         observation_uncertainty_policy
                     ),
+                    transition_policy=transition_policy,
                     cross_series_policy=selected_cross_series_policy,
                     requested_max_window_size_ns=configuration.window_size_ns,
                 )
@@ -3708,6 +3773,7 @@ def build_synthetic_infill_plan(
         positioning=resolved.cftc_positioning,
         mode=mode,
         observation_operator=resolved.observation_operator,
+        transition_policy=transition_policy,
         context_availability_qualification=(context_availability_qualification),
     )
     executable_keys = {
@@ -3764,6 +3830,7 @@ def build_synthetic_infill_plan(
             observation_operator=resolved.observation_operator,
             information_mode=mode,
             observation_uncertainty_policy=observation_uncertainty_policy,
+            transition_policy=transition_policy,
         )
         for window in executable_boundaries
     }
@@ -3866,6 +3933,8 @@ def build_synthetic_infill_plan(
         graph["hawkes_product_selection_dossier"] = hawkes_selection_ref
     if observation_uncertainty_ref is not None:
         graph["observation_uncertainty_policy"] = observation_uncertainty_ref
+    if transition_policy_ref is not None:
+        graph["feed_epoch_transition_policy"] = transition_policy_ref
     if broker_ref is not None:
         graph["broker_delivery"] = broker_ref
     execution_manifest = ReconstructionPlanExecutionManifestV1(
@@ -4223,6 +4292,35 @@ def validate_synthetic_infill_plan_for_execution(
         elif observation_uncertainty_ref is not None:
             raise ReconstructionPlanCompatibilityError(
                 "unbound observation uncertainty policy is present"
+            )
+        transition_policy_ref = plan.artifact_graph.get(
+            "feed_epoch_transition_policy"
+        )
+        if hawkes_product_selected and transition_policy_ref is None:
+            raise ReconstructionPlanCompatibilityError(
+                "marked-Hawkes plan lacks feed-epoch transition policy"
+            )
+        if hawkes_product_selected and transition_policy_ref is not None:
+            if (
+                transition_policy_ref.kind
+                != FEED_EPOCH_TRANSITION_POLICY_ARTIFACT_KIND
+            ):
+                raise ReconstructionPlanCompatibilityError(
+                    "feed-epoch transition artifact kind differs"
+                )
+            transition_policy = read_feed_epoch_transition_policy(
+                transition_policy_ref.path
+            )
+            if (
+                transition_policy_ref.metadata.get("policy_id")
+                != transition_policy.policy_id
+            ):
+                raise ReconstructionPlanCompatibilityError(
+                    "feed-epoch transition policy binding differs"
+                )
+        elif transition_policy_ref is not None:
+            raise ReconstructionPlanCompatibilityError(
+                "unbound feed-epoch transition policy is present"
             )
         context_availability_ref = plan.artifact_graph.get(
             "context_availability_qualification"
@@ -4978,6 +5076,8 @@ def _experiment_artifact_bindings(
     hawkes_selection_ref: ArtifactRef | None,
     observation_uncertainty_policy: ObservationUncertaintyPolicyV1 | None,
     observation_uncertainty_ref: ArtifactRef | None,
+    transition_policy: FeedEpochTransitionPolicyV1 | None,
+    transition_policy_ref: ArtifactRef | None,
 ) -> tuple[ReconstructionExperimentArtifactBindingV1, ...]:
     """Bind verified authoritative artifacts without duplicating their payloads."""
     roles = (
@@ -5157,6 +5257,20 @@ def _experiment_artifact_bindings(
                 ),
             )
         ),
+        *(
+            ()
+            if transition_policy is None or transition_policy_ref is None
+            else (
+                (
+                    "feed-epoch-transition-policy",
+                    "preprocessing",
+                    transition_policy_ref,
+                    transition_policy.policy_id,
+                    "policy_id",
+                    transition_policy.schema_version,
+                ),
+            )
+        ),
     )
     return tuple(
         ReconstructionExperimentArtifactBindingV1(
@@ -5286,6 +5400,7 @@ def _preflight_window_support(
     positioning: CftcPositioningCorpusV1,
     mode: InformationMode,
     observation_operator: Any | None = None,
+    transition_policy: FeedEpochTransitionPolicyV1 | None = None,
     context_availability_qualification: (
         ReconstructionContextAvailabilityQualificationV1 | None
     ),
@@ -5409,14 +5524,27 @@ def _preflight_window_support(
                 )
                 continue
             try:
-                historical_product_observation_conditioning(
-                    observation_operator,
-                    feed_epoch_label=next(iter(assignment_labels)),
-                    symbols=window.symbols,
-                    information_mode=mode,
-                    used_at_ns=(window.core_start_ns + window.core_end_ns) // 2,
-                    feed_epoch_definition=definition,
+                assignment_label = next(iter(assignment_labels))
+                scenario_kinds: tuple[
+                    FeedEpochTransitionScenarioKind | None, ...
+                ] = (
+                    tuple(transition_policy.scenario_order)
+                    if assignment_label.startswith("transition:")
+                    and transition_policy is not None
+                    else (None,)
                 )
+                for scenario_kind in scenario_kinds:
+                    historical_product_observation_conditioning(
+                        observation_operator,
+                        feed_epoch_label=assignment_label,
+                        symbols=window.symbols,
+                        information_mode=mode,
+                        used_at_ns=(window.core_start_ns + window.core_end_ns)
+                        // 2,
+                        feed_epoch_definition=definition,
+                        transition_policy=transition_policy,
+                        transition_scenario_kind=scenario_kind,
+                    )
             except (TypeError, ValueError) as err:
                 cftc_support.append(
                     _not_evaluated_cftc_support(
@@ -5564,6 +5692,41 @@ def _not_evaluated_cftc_support(
     )
 
 
+def _minimum_transition_retention_scenario(
+    observation_operator: ObservationOperatorV1,
+    *,
+    feed_epoch_label: str,
+    information_mode: InformationMode,
+    used_at_ns: int,
+    feed_epoch_definition: Any,
+    symbols: Sequence[str],
+    transition_policy: FeedEpochTransitionPolicyV1 | None,
+) -> FeedEpochTransitionScenarioKind:
+    """Select the worst qualified transition endpoint for resource admission."""
+    if transition_policy is None:
+        raise ReconstructionPlanCompatibilityError(
+            "transition resource planning lacks feed-epoch transition policy"
+        )
+    probabilities = {
+        kind: historical_product_retention_probability(
+            observation_operator,
+            feed_epoch_label=feed_epoch_label,
+            information_mode=information_mode,
+            used_at_ns=used_at_ns,
+            feed_epoch_definition=feed_epoch_definition,
+            retention_endpoint="lower",
+            symbols=symbols,
+            transition_policy=transition_policy,
+            transition_scenario_kind=kind,
+        )
+        for kind in transition_policy.scenario_order
+    }
+    return min(
+        transition_policy.scenario_order,
+        key=lambda kind: probabilities[kind],
+    )
+
+
 def _adapt_cross_currency_window_plans_for_cardinality(
     member_window_plans: Sequence[CrossCurrencyWindowPlanV1],
     *,
@@ -5577,6 +5740,7 @@ def _adapt_cross_currency_window_plans_for_cardinality(
     storage_policy: ReconstructionStoragePolicyV1,
     observation_uncertainty_policy: ObservationUncertaintyPolicyV1 | None,
     requested_max_window_size_ns: int,
+    transition_policy: FeedEpochTransitionPolicyV1 | None = None,
     cross_series_policy: CrossSeriesConstraintPolicyV1 | None = None,
 ) -> tuple[
     tuple[CrossCurrencyWindowPlanV1, ...],
@@ -5706,6 +5870,21 @@ def _adapt_cross_currency_window_plans_for_cardinality(
             used_at_ns=(start_ns + end_ns) // 2,
             feed_epoch_definition=definition,
             retention_endpoint="lower",
+            symbols=symbols,
+            transition_policy=transition_policy,
+            transition_scenario_kind=(
+                _minimum_transition_retention_scenario(
+                    observation_operator,
+                    feed_epoch_label=next(iter(labels)),
+                    information_mode=information_mode,
+                    used_at_ns=(start_ns + end_ns) // 2,
+                    feed_epoch_definition=definition,
+                    symbols=symbols,
+                    transition_policy=transition_policy,
+                )
+                if next(iter(labels)).startswith("transition:")
+                else None
+            ),
         )
         observed = sum(counts.values())
         modeled = observation_admission_missing_count_bound(
@@ -6432,6 +6611,7 @@ def _window_resource_estimate(
     observation_uncertainty_policy: (
         ObservationUncertaintyPolicyV1 | None
     ) = None,
+    transition_policy: FeedEpochTransitionPolicyV1 | None = None,
 ) -> ReconstructionResourceEstimateV1:
     if (
         source_support.start_ns != window.core_start_ns
@@ -6486,6 +6666,21 @@ def _window_resource_estimate(
             used_at_ns=(window.core_start_ns + window.core_end_ns) // 2,
             feed_epoch_definition=definition,
             retention_endpoint="lower",
+            symbols=window.symbols,
+            transition_policy=transition_policy,
+            transition_scenario_kind=(
+                _minimum_transition_retention_scenario(
+                    observation_operator,
+                    feed_epoch_label=next(iter(labels)),
+                    information_mode=information_mode,
+                    used_at_ns=(window.core_start_ns + window.core_end_ns) // 2,
+                    feed_epoch_definition=definition,
+                    symbols=window.symbols,
+                    transition_policy=transition_policy,
+                )
+                if next(iter(labels)).startswith("transition:")
+                else None
+            ),
         )
         candidates = observation_admission_missing_count_bound(
             input_count,

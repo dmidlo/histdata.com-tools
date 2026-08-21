@@ -65,6 +65,7 @@ def test_installed_help_lists_complete_reconstruction_family(
         "qualify",
         "hawkes-select",
         "observation-uncertainty-policy",
+        "feed-epoch-transition-policy",
         "diagnostic-build",
         "diagnostic-list",
         "compatibility",
@@ -194,6 +195,10 @@ def test_cli_exposes_engine_discovery_portfolio_and_selected_evaluation(
             calls.append(("observation-uncertainty-policy", output_directory))
             return Result("histdatacom.observation-uncertainty-policy.v1")
 
+        def create_feed_epoch_transition_policy(self, *, output_directory):
+            calls.append(("feed-epoch-transition-policy", output_directory))
+            return Result("histdatacom.feed-epoch-transition-policy.v1")
+
         def publish_diagnostics(self, spec, *, output_directory):
             calls.append(("diagnostic-build", (spec, output_directory)))
             return Result(
@@ -299,6 +304,20 @@ def test_cli_exposes_engine_discovery_portfolio_and_selected_evaluation(
         reconstruction_cli.main(
             [
                 "--json",
+                "feed-epoch-transition-policy",
+                "--output-directory",
+                "transition",
+            ]
+        )
+        == 0
+    )
+    assert json.loads(capsys.readouterr().out)["schema_version"].endswith(
+        "transition-policy.v1"
+    )
+    assert (
+        reconstruction_cli.main(
+            [
+                "--json",
                 "diagnostic-build",
                 "--spec",
                 "diagnostics.json",
@@ -349,6 +368,7 @@ def test_cli_exposes_engine_discovery_portfolio_and_selected_evaluation(
             ),
         ),
         ("observation-uncertainty-policy", "uncertainty"),
+        ("feed-epoch-transition-policy", "transition"),
         (
             "diagnostic-build",
             ("diagnostics.json", "publication"),

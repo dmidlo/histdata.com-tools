@@ -135,6 +135,12 @@ from histdatacom.synthetic.delivery import (
     project_modern_reference_delivery,
 )
 from histdatacom.synthetic.ensembles import ReconstructionEnsemblePlanV1
+from histdatacom.synthetic.feed_epoch_transition import (
+    FeedEpochTransitionPolicyV1,
+    FeedEpochTransitionScenarioKind,
+    read_feed_epoch_transition_policy,
+    transition_scenario_kind_for_member,
+)
 from histdatacom.synthetic.generation import (
     EMPIRICAL_MOTIF_GENERATOR_ID,
     EmpiricalMotifCandidateBatchV1,
@@ -628,6 +634,8 @@ def proposal_handler(
             ObservationUncertaintyScenarioV1 | None
         ) = None
         observation_uncertainty_ref: ArtifactRef | None = None
+        transition_policy: FeedEpochTransitionPolicyV1 | None = None
+        transition_scenario_kind: FeedEpochTransitionScenarioKind | None = None
         if selected_engine_id == EMPIRICAL_MOTIF_GENERATOR_ID:
             if not isinstance(selected_config, EmpiricalMotifGeneratorConfigV1):
                 raise TypeError("motif runtime config type differs")
@@ -666,6 +674,52 @@ def proposal_handler(
                 raise ValueError(
                     "source observation operator differs from execution artifact"
                 )
+            transition_policy_ref = plan.execution_manifest.artifacts.get(
+                "feed_epoch_transition_policy"
+            )
+            condition_epochs = {
+                item.feed_epoch_id for item in conditions.values()
+            }
+            if len(condition_epochs) != 1:
+                raise ValueError(
+                    "marked Hawkes runtime requires one synchronized feed epoch"
+                )
+            transition_applicable = next(iter(condition_epochs)).startswith(
+                "transition:"
+            )
+            if transition_applicable and transition_policy_ref is None:
+                raise ValueError(
+                    "marked Hawkes runtime lacks feed-epoch transition policy"
+                )
+            ensemble_plan_ref = plan.execution_manifest.artifacts[
+                "ensemble_plan"
+            ]
+            ensemble_plan = ReconstructionEnsemblePlanV1.from_json(
+                Path(ensemble_plan_ref.path).read_text(encoding="utf-8")
+            )
+            if transition_applicable:
+                assert transition_policy_ref is not None
+                transition_policy = read_feed_epoch_transition_policy(
+                    transition_policy_ref.path
+                )
+                member_ordinals = {
+                    member.member_id: ordinal
+                    for ordinal, member in enumerate(
+                        ensemble_plan.members, start=1
+                    )
+                }
+                member_ordinal = member_ordinals.get(
+                    invocation.task.window.ensemble_member_id
+                )
+                if member_ordinal is None:
+                    raise ValueError(
+                        "runtime ensemble member is absent from plan"
+                    )
+                transition_scenario_kind = transition_scenario_kind_for_member(
+                    transition_policy,
+                    member_ordinal=member_ordinal,
+                    observation_scenario_count=3,
+                )
             observation_conditioning = _historical_product_observation_conditioning(
                 observation_operator,
                 conditions=conditions,
@@ -680,6 +734,8 @@ def proposal_handler(
                 information_mode=(
                     plan.configuration.information_policy.information_mode
                 ),
+                transition_policy=transition_policy,
+                transition_scenario_kind=transition_scenario_kind,
             )
             uncertainty_policy_ref = plan.execution_manifest.artifacts.get(
                 "observation_uncertainty_policy"
@@ -687,12 +743,6 @@ def proposal_handler(
             if uncertainty_policy_ref is not None:
                 uncertainty_policy = read_observation_uncertainty_policy(
                     uncertainty_policy_ref.path
-                )
-                ensemble_plan_ref = plan.execution_manifest.artifacts[
-                    "ensemble_plan"
-                ]
-                ensemble_plan = ReconstructionEnsemblePlanV1.from_json(
-                    Path(ensemble_plan_ref.path).read_text(encoding="utf-8")
                 )
                 input_counts = {
                     symbol.upper(): len(stream.events)
@@ -856,6 +906,31 @@ def proposal_handler(
                 candidate_evidence["observation_conditioning_id"] = str(
                     observation_conditioning["conditioning_id"]
                 )
+                if observation_conditioning.get("transition_scenario_id"):
+                    candidate_evidence.update(
+                        {
+                            "feed_epoch_transition_policy_id": (
+                                observation_conditioning[
+                                    "feed_epoch_transition_policy_id"
+                                ]
+                            ),
+                            "transition_scenario_id": (
+                                observation_conditioning[
+                                    "transition_scenario_id"
+                                ]
+                            ),
+                            "transition_scenario_kind": (
+                                observation_conditioning[
+                                    "transition_scenario_kind"
+                                ]
+                            ),
+                            "transition_boundary_id": (
+                                observation_conditioning[
+                                    "transition_boundary_id"
+                                ]
+                            ),
+                        }
+                    )
             if (
                 observation_uncertainty is not None
                 and observation_uncertainty_member is not None
@@ -1001,6 +1076,26 @@ def proposal_handler(
             "observation_path_seed": (
                 observation_uncertainty_member.path_seed
                 if observation_uncertainty_member is not None
+                else None
+            ),
+            "feed_epoch_transition_policy_id": (
+                observation_conditioning.get("feed_epoch_transition_policy_id")
+                if observation_conditioning is not None
+                else None
+            ),
+            "transition_scenario_id": (
+                observation_conditioning.get("transition_scenario_id")
+                if observation_conditioning is not None
+                else None
+            ),
+            "transition_scenario_kind": (
+                observation_conditioning.get("transition_scenario_kind")
+                if observation_conditioning is not None
+                else None
+            ),
+            "transition_boundary_id": (
+                observation_conditioning.get("transition_boundary_id")
+                if observation_conditioning is not None
                 else None
             ),
             "proposal_fallback_used": False,
@@ -1297,6 +1392,23 @@ def _generate_marked_hawkes_runtime_batches(
                 "v2.4-point-estimate-replay-not-v2.5-scenario-v1"
             )
         }
+    if observation_conditioning.get("transition_scenario_id"):
+        uncertainty_parameters.update(
+            {
+                "feed_epoch_transition_policy_id": str(
+                    observation_conditioning["feed_epoch_transition_policy_id"]
+                ),
+                "transition_scenario_id": str(
+                    observation_conditioning["transition_scenario_id"]
+                ),
+                "transition_scenario_kind": str(
+                    observation_conditioning["transition_scenario_kind"]
+                ),
+                "transition_boundary_id": str(
+                    observation_conditioning["transition_boundary_id"]
+                ),
+            }
+        )
     scenario = BenchmarkScenarioV1(
         split_kind=BenchmarkSplitKind.PRODUCT_INPUT,
         epoch_id=next(iter(epochs)),
@@ -1372,6 +1484,8 @@ def _historical_product_observation_conditioning(
     feed_epoch_definition: Any | None = None,
     used_at_ns: int | None = None,
     information_mode: InformationMode = InformationMode.EX_POST_RECONSTRUCTION,
+    transition_policy: FeedEpochTransitionPolicyV1 | None = None,
+    transition_scenario_kind: FeedEpochTransitionScenarioKind | None = None,
 ) -> dict[str, JSONValue]:
     """Resolve fitted product cardinality without pretending marks are known."""
     if not conditions:
@@ -1388,6 +1502,8 @@ def _historical_product_observation_conditioning(
         information_mode=information_mode,
         used_at_ns=used_at_ns,
         feed_epoch_definition=feed_epoch_definition,
+        transition_policy=transition_policy,
+        transition_scenario_kind=transition_scenario_kind,
     )
 
 
@@ -2025,6 +2141,18 @@ def validation_handler(
             ),
             "observation_path_seed": cast(
                 JSONValue, proposal["observation_path_seed"]
+            ),
+            "feed_epoch_transition_policy_id": cast(
+                JSONValue, proposal["feed_epoch_transition_policy_id"]
+            ),
+            "transition_scenario_id": cast(
+                JSONValue, proposal["transition_scenario_id"]
+            ),
+            "transition_scenario_kind": cast(
+                JSONValue, proposal["transition_scenario_kind"]
+            ),
+            "transition_boundary_id": cast(
+                JSONValue, proposal["transition_boundary_id"]
             ),
         }
         benchmark_evidence = {

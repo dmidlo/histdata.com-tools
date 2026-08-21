@@ -87,6 +87,7 @@ from histdatacom.synthetic import (
     IMMUTABLE_ANCHOR_POLICY,
     SCIENTIFIC_NONCLAIM,
     TICK_ONLY_INPUT_POLICY,
+    FeedEpochTransitionPolicyV1,
     InformationMode,
     ModernReferenceMotifProfileV1,
     ObservationOperatorV1,
@@ -102,13 +103,11 @@ from histdatacom.synthetic import (
     read_reconstruction_plan_source_support_map,
     read_reconstruction_source_inventory,
     read_synthetic_infill_plan,
-)
-from histdatacom.synthetic import reconstruction_handlers as handlers_module
-from histdatacom.synthetic import reconstruction_plan as plan_module
-from histdatacom.synthetic import (
     validate_synthetic_infill_plan_for_execution,
     write_synthetic_infill_plan,
 )
+from histdatacom.synthetic import reconstruction_handlers as handlers_module
+from histdatacom.synthetic import reconstruction_plan as plan_module
 from histdatacom.synthetic.contracts import canonical_contract_json
 from histdatacom.synthetic.generation import EMPIRICAL_MOTIF_GENERATOR_ID
 from histdatacom.synthetic.proposal_engines import (
@@ -885,6 +884,30 @@ def test_transition_cardinality_support_matches_runtime_preflight(
             "observation-calibration-v2-operator.json"
         ).read_text(encoding="utf-8")
     )
+    operator = replace(
+        operator,
+        strata=tuple(
+            replace(
+                stratum,
+                parameters=tuple(
+                    (
+                        replace(
+                            parameter,
+                            value=0.25,
+                            lower=0.2,
+                            upper=0.3,
+                        )
+                        if parameter.name == "retention_probability"
+                        else parameter
+                    )
+                    for parameter in stratum.parameters
+                ),
+                stratum_id="",
+            )
+            for stratum in operator.strata
+        ),
+        operator_id="",
+    )
     start_ns = int(
         datetime(2009, 5, 15, tzinfo=timezone.utc).timestamp() * 1_000_000_000
     )
@@ -900,9 +923,9 @@ def test_transition_cardinality_support_matches_runtime_preflight(
         start_ns=start_ns,
         end_ns=end_ns,
         symbols=_SYMBOLS,
-        core_event_counts={symbol: 3 for symbol in _SYMBOLS},
-        input_event_counts={symbol: 3 for symbol in _SYMBOLS},
-        common_exact_core_timestamp_count=3,
+        core_event_counts={symbol: 300 for symbol in _SYMBOLS},
+        input_event_counts={symbol: 300 for symbol in _SYMBOLS},
+        common_exact_core_timestamp_count=300,
         status=plan_module.ReconstructionPlanSourceSupportStatus.COMPLETE,
         reason="complete source triangle",
     )
@@ -923,6 +946,7 @@ def test_transition_cardinality_support_matches_runtime_preflight(
         "context": SimpleNamespace(),
         "positioning": SimpleNamespace(),
         "context_availability_qualification": None,
+        "transition_policy": FeedEpochTransitionPolicyV1(),
     }
     refusals, executable, _ = plan_module._preflight_window_support(
         **parameters,
@@ -931,6 +955,58 @@ def test_transition_cardinality_support_matches_runtime_preflight(
 
     assert not refusals
     assert executable == (window,)
+
+    transition_policy = parameters["transition_policy"]
+    uncertainty_policy = ObservationUncertaintyPolicyV1()
+    proposal_config = proposal_engine_default_configs()[
+        plan_module.QUALIFIED_CFTC_UNAVAILABLE_ENGINE_ID
+    ]
+    storage_policy = ReconstructionStoragePolicyV1()
+    estimate = plan_module._window_resource_estimate(
+        window,
+        source_support=support,
+        configuration=SimpleNamespace(
+            generator_config=plan_module.EmpiricalMotifGeneratorConfigV1(),
+            storage_policy=storage_policy,
+        ),
+        proposal_config=proposal_config,
+        definition=definition,
+        observation_operator=operator,
+        information_mode=InformationMode.EX_POST_RECONSTRUCTION,
+        observation_uncertainty_policy=uncertainty_policy,
+        transition_policy=transition_policy,
+    )
+    lower_probabilities = tuple(
+        plan_module.historical_product_retention_probability(
+            operator,
+            feed_epoch_label=next(
+                iter(
+                    {
+                        definition.assign(
+                            symbol=symbol,
+                            timestamp_utc_ms=(start_ns + end_ns) // 2_000_000,
+                        ).label
+                        for symbol in _SYMBOLS
+                    }
+                )
+            ),
+            information_mode=InformationMode.EX_POST_RECONSTRUCTION,
+            used_at_ns=(start_ns + end_ns) // 2,
+            feed_epoch_definition=definition,
+            retention_endpoint="lower",
+            symbols=_SYMBOLS,
+            transition_policy=transition_policy,
+            transition_scenario_kind=kind,
+        )
+        for kind in transition_policy.scenario_order
+    )
+    assert estimate.candidate_event_count == (
+        plan_module.observation_admission_missing_count_bound(
+            sum(support.input_event_counts.values()),
+            min(lower_probabilities),
+            uncertainty_policy.admission_quantile,
+        )
+    )
 
     refusals, executable, _ = plan_module._preflight_window_support(
         **parameters,
@@ -942,7 +1018,7 @@ def test_transition_cardinality_support_matches_runtime_preflight(
     assert refusals[0].code is (
         plan_module.ReconstructionPlanRefusalCode.FEED_EPOCH_UNSUPPORTED
     )
-    assert "qualified only for ex-post" in refusals[0].reason
+    assert "ex-ante forbidden" in refusals[0].reason
 
 
 def test_adaptive_hawkes_windows_preserve_common_anchors_and_runtime_headroom(

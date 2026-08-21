@@ -104,7 +104,8 @@ data rows remain in their source artifacts.
   ],
   "qualification_dossier_path": "artifacts/powered-qualification-dossier-<sha256>.json",
   "hawkes_product_selection_dossier_path": "artifacts/hawkes-product-selection-dossier-<sha256>.json",
-  "observation_uncertainty_policy_path": "artifacts/observation-uncertainty-policy-<sha256>.json"
+  "observation_uncertainty_policy_path": "artifacts/observation-uncertainty-policy-<sha256>.json",
+  "feed_epoch_transition_policy_path": "artifacts/feed-epoch-transition-policy-<sha256>.json"
 }
 ```
 
@@ -186,6 +187,25 @@ The plan binds both the validation-only engine choice and this policy. Runtime
 and campaign evidence keep the observation scenario ID and path seed as
 separate machine-readable axes. See
 [`observation-process-uncertainty.md`](observation-process-uncertainty.md).
+
+Freeze the independent feed-boundary scenario policy too:
+
+```sh
+histdatacom reconstruction --json feed-epoch-transition-policy \
+  --output-directory work/feed-epoch-transition
+```
+
+```python
+transition_policy = (
+    ReconstructionClient().create_feed_epoch_transition_policy(
+        output_directory="work/feed-epoch-transition"
+    )
+)
+```
+
+The retained marked-Hawkes ensemble must cover the complete transition by
+observation scenario cross-product. See
+[`feed-epoch-transition-uncertainty.md`](feed-epoch-transition-uncertainty.md).
 
 Retained evidence diagnostics use the same public boundary:
 
