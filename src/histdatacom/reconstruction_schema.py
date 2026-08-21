@@ -393,6 +393,7 @@ _AUDITED_MODULES = (
     "histdatacom.synthetic.hawkes_selection",
     "histdatacom.synthetic.release_holdout",
     "histdatacom.synthetic.release_candidate",
+    "histdatacom.synthetic.partition_invariance",
     "histdatacom.synthetic.observation_uncertainty",
     "histdatacom.synthetic.diagnostics",
     "histdatacom.synthetic.reconstruction_handlers",
@@ -487,6 +488,17 @@ _REQUIRED_SCHEMA_TOKENS = (
     "release-candidate-dependency",
     "reconstruction-release-candidate",
     "release-candidate-artifact-binding",
+    "adaptive-partition-interval",
+    "adaptive-partition-spec",
+    "partition-source-ownership-audit",
+    "partition-history-audit",
+    "partition-seed-ledger",
+    "partition-metric-tolerance",
+    "partition-invariance-policy",
+    "partition-invariance-case",
+    "partition-invariance-run",
+    "partition-invariance-comparison",
+    "partition-invariance-qualification",
     "observation-uncertainty-policy",
     "observation-uncertainty-scenario",
     "observation-cardinality-evidence",
@@ -2010,6 +2022,8 @@ def _contract_status(
 
 
 def _family(module_name: str, version: str) -> str:
+    if "partition_invariance" in module_name:
+        return "scientific"
     if "release_candidate" in module_name:
         return "release"
     if "release_holdout" in module_name:
