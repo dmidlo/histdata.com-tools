@@ -396,6 +396,7 @@ _AUDITED_MODULES = (
     "histdatacom.synthetic.partition_invariance",
     "histdatacom.synthetic.alignment_qualification",
     "histdatacom.synthetic.projection_burden",
+    "histdatacom.synthetic.support_verification",
     "histdatacom.synthetic.observation_uncertainty",
     "histdatacom.synthetic.diagnostics",
     "histdatacom.synthetic.reconstruction_handlers",
@@ -446,6 +447,11 @@ _REQUIRED_SCHEMA_TOKENS = (
     "reconstruction-plan-support-window",
     "reconstruction-plan-support-map",
     "reconstruction-plan-support-map-index",
+    "final-support-partition-replay",
+    "final-support-window-verification",
+    "final-support-census",
+    "final-support-verification-shard",
+    "final-adaptive-support-map-index",
     "reconstruction-plan-set-execution-request",
     "reconstruction-plan-set-receipt-index",
     "reconstruction-campaign-product-entry",
@@ -2049,6 +2055,8 @@ def _contract_status(
 
 
 def _family(module_name: str, version: str) -> str:
+    if "support_verification" in module_name:
+        return "scientific"
     if "projection_burden" in module_name:
         return "scientific"
     if "alignment_qualification" in module_name:

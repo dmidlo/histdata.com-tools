@@ -24,7 +24,7 @@ from dataclasses import dataclass
 from enum import Enum
 from itertools import pairwise
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from histdatacom.runtime_contracts import ArtifactRef, JSONValue
 from histdatacom.synthetic.contracts import canonical_contract_json
@@ -1990,8 +1990,9 @@ class ProjectionBurdenReleaseCoverageV1:
             },
             "receipts": [item.to_dict() for item in self.receipts],
             "receipt_count": len(self.receipts),
-            "consumer_kinds": sorted(
-                {item.consumer_kind.value for item in self.receipts}
+            "consumer_kinds": cast(
+                JSONValue,
+                sorted({item.consumer_kind.value for item in self.receipts}),
             ),
             "projection_burden_release_coverage_valid": (
                 self.release_coverage_valid

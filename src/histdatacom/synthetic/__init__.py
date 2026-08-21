@@ -1240,23 +1240,57 @@ _RECONSTRUCTION_PLAN_EXPORTS = frozenset(
     }
 )
 
+_SUPPORT_VERIFICATION_EXPORTS = frozenset(
+    {
+        "FINAL_ADAPTIVE_SUPPORT_MAP_INDEX_ARTIFACT_KIND",
+        "FINAL_ADAPTIVE_SUPPORT_MAP_INDEX_SCHEMA_VERSION",
+        "FINAL_SUPPORT_CENSUS_SCHEMA_VERSION",
+        "FINAL_SUPPORT_PARTITION_REPLAY_SCHEMA_VERSION",
+        "FINAL_SUPPORT_VERIFICATION_SHARD_ARTIFACT_KIND",
+        "FINAL_SUPPORT_VERIFICATION_SHARD_SCHEMA_VERSION",
+        "FINAL_SUPPORT_WINDOW_VERIFICATION_SCHEMA_VERSION",
+        "INDEPENDENT_DECISION_POLICY",
+        "INDEPENDENT_VERIFIER_ID",
+        "FinalAdaptiveSupportMapIndexV1",
+        "FinalSupportCensusV1",
+        "FinalSupportPartitionReplayV1",
+        "FinalSupportVerificationError",
+        "FinalSupportVerificationShardV1",
+        "FinalSupportWindowVerificationV1",
+        "build_final_adaptive_support_map",
+        "build_final_support_census",
+        "read_final_adaptive_support_map_index",
+        "read_final_support_verification_shard",
+        "write_final_adaptive_support_map_index",
+        "write_final_support_verification_shard",
+    }
+)
+
 
 def __getattr__(name: str) -> Any:
     """Load orchestration-bound planning exports without an import cycle."""
-    if name not in _RECONSTRUCTION_PLAN_EXPORTS:
+    if name in _RECONSTRUCTION_PLAN_EXPORTS:
+        module_name = "histdatacom.synthetic.reconstruction_plan"
+    elif name in _SUPPORT_VERIFICATION_EXPORTS:
+        module_name = "histdatacom.synthetic.support_verification"
+    else:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
     from importlib import import_module
 
-    reconstruction_plan = import_module(
-        "histdatacom.synthetic.reconstruction_plan"
-    )
-    value = getattr(reconstruction_plan, name)
+    module = import_module(module_name)
+    value = getattr(module, name)
     globals()[name] = value
     return value
 
 
 def __dir__() -> list[str]:
-    return sorted({*globals(), *_RECONSTRUCTION_PLAN_EXPORTS})
+    return sorted(
+        {
+            *globals(),
+            *_RECONSTRUCTION_PLAN_EXPORTS,
+            *_SUPPORT_VERIFICATION_EXPORTS,
+        }
+    )
 
 
 __all__ = [
@@ -1428,6 +1462,13 @@ __all__ = [
     "FEED_EPOCH_TRANSITION_REPORT_ARTIFACT_KIND",
     "FEED_EPOCH_TRANSITION_REPORT_SCHEMA_VERSION",
     "FEED_EPOCH_TRANSITION_SCENARIO_SCHEMA_VERSION",
+    "FINAL_ADAPTIVE_SUPPORT_MAP_INDEX_ARTIFACT_KIND",
+    "FINAL_ADAPTIVE_SUPPORT_MAP_INDEX_SCHEMA_VERSION",
+    "FINAL_SUPPORT_CENSUS_SCHEMA_VERSION",
+    "FINAL_SUPPORT_PARTITION_REPLAY_SCHEMA_VERSION",
+    "FINAL_SUPPORT_VERIFICATION_SHARD_ARTIFACT_KIND",
+    "FINAL_SUPPORT_VERIFICATION_SHARD_SCHEMA_VERSION",
+    "FINAL_SUPPORT_WINDOW_VERIFICATION_SCHEMA_VERSION",
     "FIRST_PARTY_RECONSTRUCTION_HANDLERS",
     "HAWKES_MARK_CALIBRATION_BIN_SCHEMA_VERSION",
     "HAWKES_RESIDUAL_POLICY_SCHEMA_VERSION",
@@ -1441,6 +1482,8 @@ __all__ = [
     "HISTORICAL_CARVING_ENGINE_VERSION",
     "HISTORICAL_CARVING_RULE_PRECEDENCE",
     "IMMUTABLE_ANCHOR_POLICY",
+    "INDEPENDENT_DECISION_POLICY",
+    "INDEPENDENT_VERIFIER_ID",
     "MARKED_HAWKES_CANDIDATE_BATCH_SCHEMA_VERSION",
     "MARKED_HAWKES_CANDIDATE_LINEAGE_SCHEMA_VERSION",
     "MARKED_HAWKES_CONFIG_SCHEMA_VERSION",
@@ -1866,6 +1909,12 @@ __all__ = [
     "FeedEpochTransitionScenarioKind",
     "FeedEpochTransitionScenarioV1",
     "FeedEpochTransitionSplit",
+    "FinalAdaptiveSupportMapIndexV1",
+    "FinalSupportCensusV1",
+    "FinalSupportPartitionReplayV1",
+    "FinalSupportVerificationError",
+    "FinalSupportVerificationShardV1",
+    "FinalSupportWindowVerificationV1",
     "FittedAddThinBenchmarkGeneratorV1",
     "FittedEventClockBenchmarkGeneratorV1",
     "FittedMarkedHawkesBenchmarkGeneratorV1",
@@ -2203,6 +2252,8 @@ __all__ = [
     "build_event_clock_benchmark_candidate",
     "build_event_clock_candidate_batches",
     "build_feed_epoch_transition_scenario",
+    "build_final_adaptive_support_map",
+    "build_final_support_census",
     "build_fitted_add_thin_generator",
     "build_fitted_event_clock_generator",
     "build_fitted_marked_hawkes_generator",
@@ -2314,6 +2365,8 @@ __all__ = [
     "read_feed_epoch_evidence_v2",
     "read_feed_epoch_transition_policy",
     "read_feed_epoch_transition_report",
+    "read_final_adaptive_support_map_index",
+    "read_final_support_verification_shard",
     "read_hawkes_residual_report",
     "read_modern_reference_certification_campaign_spec",
     "read_modern_reference_motif_artifact",
@@ -2394,6 +2447,8 @@ __all__ = [
     "write_benchmark_window_metric_trace",
     "write_feed_epoch_transition_policy",
     "write_feed_epoch_transition_report",
+    "write_final_adaptive_support_map_index",
+    "write_final_support_verification_shard",
     "write_hawkes_residual_report",
     "write_modern_reference_motif_artifacts",
     "write_modern_reference_reconstruction_certification_dossier",

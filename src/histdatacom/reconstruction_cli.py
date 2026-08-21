@@ -219,6 +219,19 @@ def build_parser() -> argparse.ArgumentParser:
         "--output-directory", required=True, metavar="PATH"
     )
 
+    support_verify = subparsers.add_parser(
+        "support-verify",
+        help="independently replay and candidate-bind final adaptive support",
+    )
+    support_verify.add_argument("--plan-set", required=True, metavar="PATH")
+    support_verify.add_argument("--support-map", required=True, metavar="PATH")
+    support_verify.add_argument(
+        "--release-candidate", required=True, metavar="PATH"
+    )
+    support_verify.add_argument(
+        "--output-directory", required=True, metavar="PATH"
+    )
+
     support_inspect = subparsers.add_parser(
         "support-inspect",
         help="inspect a bounded slice of monolithic or indexed support",
@@ -587,6 +600,14 @@ def _run_command(
     if command == "support-map":
         ref = client.construct_plan_support_map(
             args.plan_set,
+            output_directory=args.output_directory,
+        )
+        return ref.to_dict(), ReconstructionExitCode.SUCCESS
+    if command == "support-verify":
+        ref = client.construct_final_adaptive_support_map(
+            args.plan_set,
+            args.support_map,
+            args.release_candidate,
             output_directory=args.output_directory,
         )
         return ref.to_dict(), ReconstructionExitCode.SUCCESS

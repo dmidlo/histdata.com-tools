@@ -91,6 +91,12 @@ histdatacom reconstruction --json support-map \
   --plan-set work/artifacts/reconstruction-plan-set-<sha256>.json \
   --output-directory work/support-map
 
+histdatacom reconstruction --json support-verify \
+  --plan-set work/artifacts/reconstruction-plan-set-<sha256>.json \
+  --support-map work/support-map/reconstruction-plan-support-map-index-<sha256>.json \
+  --release-candidate work/release/reconstruction-release-candidate-<sha256>.json \
+  --output-directory work/final-support
+
 histdatacom reconstruction --json support-inspect \
   --support-map work/support-map/reconstruction-plan-support-map-index-<sha256>.json \
   --limit 100
@@ -106,6 +112,12 @@ refused windows that contain valid common reconstruction evidence, not the
 scientifically incorrect claim that every wall-clock interval contains
 liquidity.
 
+`support-verify` must complete before execution intent is bound. Its final
+index rereads immutable Arrow rows, proves strict ownership and selected
+alignment events, reconciles cardinality/resources, binds the frozen candidate,
+and publishes the complete terminal census. See the
+[final support verification contract](final-adaptive-support-verification.md).
+
 ## Bind intent and execute through Temporal
 
 The request set binds the plan and support identities plus the information-mode
@@ -117,7 +129,7 @@ zero refusal outcomes of any kind.
 ```sh
 histdatacom reconstruction --json request-set \
   --plan-set work/artifacts/reconstruction-plan-set-<sha256>.json \
-  --support-map work/support-map/reconstruction-plan-support-map-index-<sha256>.json \
+  --support-map work/final-support/final-adaptive-support-map-index-<sha256>.json \
   --information-mode ex_post_reconstruction \
   --acknowledge-scientific-nonclaim \
   --output-directory work/request-set

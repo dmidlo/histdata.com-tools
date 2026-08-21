@@ -72,6 +72,7 @@ Persistence, projections, and validation
    adaptive-partition-invariance
    triangle-alignment-qualification
    projection-burden-diagnostics
+   final-adaptive-support-verification
    reconstruction-diagnostics
    reconstruction-certification-contracts
    reconstruction-temporal-orchestration

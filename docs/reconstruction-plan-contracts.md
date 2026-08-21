@@ -38,6 +38,7 @@ are downstream projections from committed final ticks.
 | `ReconstructionPlanRefusalV1` | Stable, bounded reason that a planned window cannot execute. Refused windows never become workflow tasks. |
 | `ReconstructionPlanResourceSummaryV1` | Source size, candidate amplification, peak memory/scratch, retained output, partition, window, member, and request estimates. |
 | `SyntheticInfillPlanV1` | Deterministic top-level identity, requests, resources, refusals, delivery mode, information mode, nonclaim, and anchor policy. |
+| `FinalAdaptiveSupportMapIndexV1` | Frozen-candidate root over independently replayed partition/window evidence, exact terminal census, selected engine/scenario IDs, and bounded verification shards. |
 | `load_reconstruction_stage_plan()` | Public loader used by a stage handler to resolve its exact execution manifest, configuration, source inventory, and input references. |
 
 Every stage command carries one strong reference to the execution manifest.
@@ -213,3 +214,9 @@ artifact digests and sizes, resources, and refusals without expanding source
 rows. `plan.resources` records both per-concurrent-window peaks and retained
 ensemble output estimates. Storage-policy preflight occurs before a workflow
 request can be submitted.
+
+The preliminary planner support map is not the final execution proof. Before a
+full campaign, `build_final_adaptive_support_map()` independently rereads the
+Arrow partitions, reconstructs terminal decisions and resource estimates, and
+binds the result to the frozen release candidate. See
+[`final-adaptive-support-verification.md`](final-adaptive-support-verification.md).

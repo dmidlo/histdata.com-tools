@@ -3156,6 +3156,7 @@ class ReconstructionExecutionRequestV1:
     timeframe: str = RECONSTRUCTION_TIMEFRAME
     symbols: tuple[str, ...] = RECONSTRUCTION_SYMBOLS
     allow_refusals: bool = False
+    support_map_ref: ArtifactRef | None = None
     request_id: str = ""
     schema_version: str = RECONSTRUCTION_EXECUTION_REQUEST_SCHEMA_VERSION
 
@@ -3190,6 +3191,18 @@ class ReconstructionExecutionRequestV1:
         object.__setattr__(self, "source_format", RECONSTRUCTION_SOURCE_FORMAT)
         object.__setattr__(self, "timeframe", RECONSTRUCTION_TIMEFRAME)
         object.__setattr__(self, "symbols", RECONSTRUCTION_SYMBOLS)
+        if (
+            self.support_map_ref is not None
+            and self.support_map_ref.kind
+            not in {
+                "reconstruction_plan_support_map_v1",
+                "reconstruction_plan_support_map_index_v2",
+                "final_adaptive_support_map_index_v1",
+            }
+        ):
+            raise ReconstructionPlanError(
+                "execution request has the wrong support artifact"
+            )
         expected = _stable_id(
             "reconstruction-execution-request", self.identity_payload()
         )
@@ -3201,7 +3214,7 @@ class ReconstructionExecutionRequestV1:
 
     def identity_payload(self) -> dict[str, JSONValue]:
         """Return the exact operator and plan inputs bound by request_id."""
-        return {
+        payload: dict[str, JSONValue] = {
             "schema_version": self.schema_version,
             "plan_path": self.plan_path,
             "plan_id": self.plan_id,
@@ -3213,6 +3226,9 @@ class ReconstructionExecutionRequestV1:
             "scientific_nonclaim": SCIENTIFIC_NONCLAIM,
             "scientific_nonclaim_acknowledged": True,
         }
+        if self.support_map_ref is not None:
+            payload["support_map_ref"] = self.support_map_ref.to_dict()
+        return payload
 
     def to_dict(self) -> dict[str, JSONValue]:
         """Return bounded machine-readable operator metadata."""
@@ -3246,6 +3262,13 @@ class ReconstructionExecutionRequestV1:
             allow_refusals=_strict_bool(
                 data.get("allow_refusals", False), "allow_refusals"
             ),
+            support_map_ref=(
+                None
+                if data.get("support_map_ref") is None
+                else ArtifactRef.from_dict(
+                    _mapping(data.get("support_map_ref"))
+                )
+            ),
             request_id=str(data.get("request_id", "")),
             schema_version=str(data.get("schema_version", "")),
         )
@@ -3278,6 +3301,7 @@ class ReconstructionPlanSetExecutionRequestV1:
         if self.support_map_ref.kind not in {
             "reconstruction_plan_support_map_v1",
             "reconstruction_plan_support_map_index_v2",
+            "final_adaptive_support_map_index_v1",
         }:
             raise ReconstructionPlanError(
                 "plan-set execution request has the wrong support artifact"
@@ -3305,6 +3329,36 @@ class ReconstructionPlanSetExecutionRequestV1:
         if len({item.information_mode for item in requests}) != 1:
             raise ReconstructionPlanError(
                 "plan-set execution requests use different information modes"
+            )
+        request_support_refs = {
+            (
+                None
+                if item.support_map_ref is None
+                else (
+                    item.support_map_ref.kind,
+                    item.support_map_ref.sha256,
+                    item.support_map_ref.size_bytes,
+                )
+            )
+            for item in requests
+        }
+        expected_support_ref = (
+            self.support_map_ref.kind,
+            self.support_map_ref.sha256,
+            self.support_map_ref.size_bytes,
+        )
+        if request_support_refs != {None} and request_support_refs != {
+            expected_support_ref
+        }:
+            raise ReconstructionPlanError(
+                "plan-set execution requests bind different support artifacts"
+            )
+        if (
+            self.support_map_ref.kind == "final_adaptive_support_map_index_v1"
+            and request_support_refs != {expected_support_ref}
+        ):
+            raise ReconstructionPlanError(
+                "every final campaign request must bind final support"
             )
         object.__setattr__(self, "requests", requests)
         expected = _stable_id(
@@ -4263,6 +4317,26 @@ class ReconstructionClient:
             support_map_index, output_directory
         )
 
+    def construct_final_adaptive_support_map(
+        self,
+        plan_set_path: str | Path,
+        claimed_support_path: str | Path,
+        release_candidate_path: str | Path,
+        *,
+        output_directory: str | Path,
+    ) -> ArtifactRef:
+        """Replay immutable sources and publish candidate-bound support."""
+        from histdatacom.synthetic.support_verification import (
+            build_final_adaptive_support_map,
+        )
+
+        return build_final_adaptive_support_map(
+            plan_set_path,
+            claimed_support_path,
+            release_candidate_path,
+            output_directory=output_directory,
+        )
+
     def inspect_plan_support_map(
         self,
         path: str | Path,
@@ -4481,6 +4555,7 @@ class ReconstructionClient:
         information_mode: InformationMode | str,
         acknowledge_scientific_nonclaim: bool,
         allow_refusals: bool = False,
+        support_map_ref: ArtifactRef | None = None,
     ) -> ReconstructionExecutionRequestV1:
         """Bind explicit operator intent to a verified plan identity."""
         plan = _read_plan(plan_path)
@@ -4490,6 +4565,7 @@ class ReconstructionClient:
             information_mode=InformationMode.from_value(information_mode),
             scientific_nonclaim_acknowledged=acknowledge_scientific_nonclaim,
             allow_refusals=allow_refusals,
+            support_map_ref=support_map_ref,
         )
 
     def create_plan_set_requests(
@@ -4499,6 +4575,7 @@ class ReconstructionClient:
         information_mode: InformationMode | str,
         acknowledge_scientific_nonclaim: bool,
         allow_refusals: bool = True,
+        support_map_ref: ArtifactRef | None = None,
     ) -> tuple[ReconstructionExecutionRequestV1, ...]:
         """Bind operator intent to every verified shard of one plan set."""
         preflight = self.preflight_plan_set(plan_set_path)
@@ -4522,6 +4599,7 @@ class ReconstructionClient:
                     acknowledge_scientific_nonclaim
                 ),
                 allow_refusals=allow_refusals,
+                support_map_ref=support_map_ref,
             )
             for shard in plan_set.shards
         )
@@ -4539,12 +4617,6 @@ class ReconstructionClient:
         plan_set_target = Path(plan_set_path).expanduser().resolve()
         support_target = Path(support_map_path).expanduser().resolve()
         plan_set = read_reconstruction_plan_set(plan_set_target)
-        requests = self.create_plan_set_requests(
-            plan_set_target,
-            information_mode=information_mode,
-            acknowledge_scientific_nonclaim=acknowledge_scientific_nonclaim,
-            allow_refusals=allow_refusals,
-        )
         plan_set_ref = artifact_ref_for_file(
             plan_set_target,
             kind="reconstruction_plan_set_v1",
@@ -4580,6 +4652,24 @@ class ReconstructionClient:
                 "window_count": support_index.window_count,
                 "status": support_index.status,
             }
+        elif support_schema == (
+            "histdatacom.final-adaptive-support-map-index.v1"
+        ):
+            from histdatacom.synthetic.support_verification import (
+                read_final_adaptive_support_map_index,
+            )
+
+            final_support = read_final_adaptive_support_map_index(
+                support_target
+            )
+            support_kind = "final_adaptive_support_map_index_v1"
+            support_metadata = {
+                "final_support_map_id": final_support.final_support_map_id,
+                "plan_set_id": final_support.plan_set_id,
+                "release_candidate_id": (final_support.release_candidate_id),
+                "window_count": final_support.census.window_count,
+                "status": final_support.status,
+            }
         else:
             raise ReconstructionPlanError(
                 "unsupported plan-set support artifact schema"
@@ -4588,6 +4678,13 @@ class ReconstructionClient:
             support_target,
             kind=support_kind,
             metadata=support_metadata,
+        )
+        requests = self.create_plan_set_requests(
+            plan_set_target,
+            information_mode=information_mode,
+            acknowledge_scientific_nonclaim=acknowledge_scientific_nonclaim,
+            allow_refusals=allow_refusals,
+            support_map_ref=support_ref,
         )
         request = ReconstructionPlanSetExecutionRequestV1(
             plan_set_ref=plan_set_ref,
@@ -5789,16 +5886,19 @@ def _validate_plan_set_execution_request_artifacts(
         raise ReconstructionPlanError(
             "plan-set request artifact identity differs from its plan set"
         )
+    support: Any
+    support_campaign_status: str
     if request.support_map_ref.kind == "reconstruction_plan_support_map_v1":
-        support: (
-            ReconstructionPlanSupportMapV1 | ReconstructionPlanSupportMapIndexV2
-        )
         support = read_reconstruction_plan_support_map(
             request.support_map_ref.path
         )
         support_id = support.support_map_id
         expected_id = request.support_map_ref.metadata.get("support_map_id")
-    else:
+        support_campaign_status = support.status
+    elif (
+        request.support_map_ref.kind
+        == "reconstruction_plan_support_map_index_v2"
+    ):
         support = read_reconstruction_plan_support_map_index(
             request.support_map_ref.path,
             verify_shards=verify_artifacts,
@@ -5807,12 +5907,30 @@ def _validate_plan_set_execution_request_artifacts(
         expected_id = request.support_map_ref.metadata.get(
             "support_map_index_id"
         )
+        support_campaign_status = support.status
+    else:
+        from histdatacom.synthetic.support_verification import (
+            read_final_adaptive_support_map_index,
+        )
+
+        final_support = read_final_adaptive_support_map_index(
+            request.support_map_ref.path,
+            verify_shards=verify_artifacts,
+        )
+        support = final_support
+        support_id = final_support.final_support_map_id
+        expected_id = request.support_map_ref.metadata.get(
+            "final_support_map_id"
+        )
+        support_campaign_status = str(
+            final_support.claimed_support_ref.metadata.get("status", "")
+        )
     if (
         support_id != expected_id
         or support.plan_set_id != plan_set.plan_set_id
         or support.requested_start_ns != plan_set.requested_start_ns
         or support.requested_end_ns != plan_set.requested_end_ns
-        or support.status != plan_set.status
+        or support_campaign_status != plan_set.status
     ):
         raise ReconstructionPlanError(
             "plan-set support artifact differs from the execution campaign"
@@ -5830,6 +5948,36 @@ def _validate_plan_set_execution_request_artifacts(
     if observed_requests != expected_requests:
         raise ReconstructionPlanError(
             "plan-set execution requests do not cover its shards in order"
+        )
+    expected_support_identity = (
+        request.support_map_ref.kind,
+        request.support_map_ref.sha256,
+        request.support_map_ref.size_bytes,
+    )
+    child_support_identities = {
+        (
+            None
+            if item.support_map_ref is None
+            else (
+                item.support_map_ref.kind,
+                item.support_map_ref.sha256,
+                item.support_map_ref.size_bytes,
+            )
+        )
+        for item in request.requests
+    }
+    legacy_unbound = (
+        request.support_map_ref.kind != "final_adaptive_support_map_index_v1"
+        and child_support_identities == {None}
+    )
+    # V1 execution-request artifacts predate child-level support binding.
+    # Continue to accept those immutable artifacts while requiring every
+    # request created from the final verifier to bind its exact index.
+    if child_support_identities != {expected_support_identity} and not (
+        legacy_unbound
+    ):
+        raise ReconstructionPlanError(
+            "each plan-set execution request must bind exact support"
         )
     if any(
         item.information_mode is not plan_set.source_spec.information_mode

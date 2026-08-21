@@ -73,6 +73,7 @@ def test_installed_help_lists_complete_reconstruction_family(
         "plan-set",
         "preflight-set",
         "support-map",
+        "support-verify",
         "support-inspect",
         "product-index",
         "product-inspect",
@@ -409,6 +410,13 @@ def test_cli_constructs_and_preflights_public_plan_set(
         sha256="2" * 64,
         metadata={"support_map_id": "reconstruction-plan-support-map:test"},
     )
+    final_support_ref = ArtifactRef(
+        kind="final_adaptive_support_map_index_v1",
+        path=str(tmp_path / "final-support-map.json"),
+        size_bytes=10,
+        sha256="3" * 64,
+        metadata={"final_support_map_id": "final-adaptive-support-map:test"},
+    )
 
     class FakeClient:
         def construct_plan_set(self, supplied, *, periods_per_shard):
@@ -423,6 +431,27 @@ def test_cli_constructs_and_preflights_public_plan_set(
         def construct_plan_support_map(self, supplied, *, output_directory):
             calls.append(("support-map", f"{supplied}:{output_directory}"))
             return support_ref
+
+        def construct_final_adaptive_support_map(
+            self,
+            plan_set,
+            support_map,
+            release_candidate,
+            *,
+            output_directory,
+        ):
+            calls.append(
+                (
+                    "support-verify",
+                    (
+                        plan_set,
+                        support_map,
+                        release_candidate,
+                        output_directory,
+                    ),
+                )
+            )
+            return final_support_ref
 
     monkeypatch.setattr(reconstruction_cli, "_client", lambda _: FakeClient())
     monkeypatch.setattr(reconstruction_cli, "read_plan_spec", lambda _: spec)
@@ -468,10 +497,39 @@ def test_cli_constructs_and_preflights_public_plan_set(
     assert json.loads(capsys.readouterr().out)["kind"] == (
         "reconstruction_plan_support_map_v1"
     )
+    assert (
+        reconstruction_cli.main(
+            [
+                "--json",
+                "support-verify",
+                "--plan-set",
+                "plan-set.json",
+                "--support-map",
+                "support.json",
+                "--release-candidate",
+                "candidate.json",
+                "--output-directory",
+                "final-support",
+            ]
+        )
+        == ReconstructionExitCode.SUCCESS
+    )
+    assert json.loads(capsys.readouterr().out)["kind"] == (
+        "final_adaptive_support_map_index_v1"
+    )
     assert calls == [
         ("plan-set", 6),
         ("preflight-set", "plan-set.json"),
         ("support-map", "plan-set.json:support"),
+        (
+            "support-verify",
+            (
+                "plan-set.json",
+                "support.json",
+                "candidate.json",
+                "final-support",
+            ),
+        ),
     ]
 
 

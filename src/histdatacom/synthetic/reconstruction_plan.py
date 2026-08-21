@@ -1622,6 +1622,64 @@ class ReconstructionWindowSizingAuditV1:
     def to_json(self) -> str:
         return str(canonical_contract_json(self.to_dict()))
 
+    @classmethod
+    def from_dict(
+        cls, data: Mapping[str, Any]
+    ) -> ReconstructionWindowSizingAuditV1:
+        """Restore and identity-check one adaptive sizing audit."""
+        _require_schema(data, RECONSTRUCTION_WINDOW_SIZING_AUDIT_SCHEMA_VERSION)
+        _require_derived(
+            data,
+            "sizing_policy",
+            "recursive-observation-conditioned-cardinality-v1",
+        )
+        _require_derived(
+            data,
+            "cardinality_safety_fraction",
+            _ADAPTIVE_CARDINALITY_SAFETY_FRACTION,
+        )
+        _require_derived(
+            data, "count_basis", "exact-immutable-arrow-input-counts-v1"
+        )
+        return cls(
+            proposal_engine_id=str(data.get("proposal_engine_id", "")),
+            proposal_config_id=str(data.get("proposal_config_id", "")),
+            requested_max_window_size_ns=_strict_int(
+                data.get("requested_max_window_size_ns"),
+                "requested_max_window_size_ns",
+            ),
+            minimum_window_size_ns=_strict_int(
+                data.get("minimum_window_size_ns"), "minimum_window_size_ns"
+            ),
+            runtime_generated_event_limit=_strict_int(
+                data.get("runtime_generated_event_limit"),
+                "runtime_generated_event_limit",
+            ),
+            modeled_missing_event_limit=_strict_int(
+                data.get("modeled_missing_event_limit"),
+                "modeled_missing_event_limit",
+            ),
+            initial_window_count=_strict_int(
+                data.get("initial_window_count"), "initial_window_count"
+            ),
+            final_window_count=_strict_int(
+                data.get("final_window_count"), "final_window_count"
+            ),
+            subdivided_window_count=_strict_int(
+                data.get("subdivided_window_count"),
+                "subdivided_window_count",
+            ),
+            maximum_modeled_missing_events=float(
+                data.get("maximum_modeled_missing_events", 0.0)
+            ),
+            width_counts={
+                str(key): _strict_int(value, f"width_counts[{key}]")
+                for key, value in _mapping(data.get("width_counts")).items()
+            },
+            audit_id=str(data.get("audit_id", "")),
+            schema_version=str(data.get("schema_version", "")),
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class ReconstructionPlanCftcSupportV1:
@@ -4612,6 +4670,16 @@ def read_reconstruction_context_availability_qualification(
     return ReconstructionContextAvailabilityQualificationV1.from_dict(payload)
 
 
+def read_reconstruction_window_sizing_audit(
+    path: str | Path,
+) -> ReconstructionWindowSizingAuditV1:
+    """Hash-verify and restore one adaptive window-sizing audit."""
+    payload = _read_content_addressed_json(
+        path, "reconstruction-window-sizing-audit"
+    )
+    return ReconstructionWindowSizingAuditV1.from_dict(payload)
+
+
 def load_reconstruction_stage_plan(
     command: ReconstructionStageCommandV1,
     *,
@@ -7544,6 +7612,7 @@ __all__ = [
     "RECONSTRUCTION_SCIENTIFIC_LEDGER_ARTIFACT_KIND",
     "RECONSTRUCTION_SOURCE_INVENTORY_SCHEMA_VERSION",
     "RECONSTRUCTION_SOURCE_PARTITION_SCHEMA_VERSION",
+    "RECONSTRUCTION_WINDOW_SIZING_AUDIT_SCHEMA_VERSION",
     "SCIENTIFIC_NONCLAIM",
     "SOURCE_INVENTORY_ARTIFACT_KIND",
     "SOURCE_SUPPORT_MAP_ARTIFACT_KIND",
@@ -7566,6 +7635,7 @@ __all__ = [
     "ReconstructionSourceInventoryV1",
     "ReconstructionSourcePartitionV1",
     "ReconstructionStagePlanV1",
+    "ReconstructionWindowSizingAuditV1",
     "SyntheticInfillPlanV1",
     "build_synthetic_infill_plan",
     "load_reconstruction_stage_plan",
@@ -7574,6 +7644,7 @@ __all__ = [
     "read_reconstruction_plan_execution_manifest",
     "read_reconstruction_plan_source_support_map",
     "read_reconstruction_source_inventory",
+    "read_reconstruction_window_sizing_audit",
     "read_synthetic_infill_plan",
     "validate_synthetic_infill_plan_for_execution",
     "write_synthetic_infill_plan",

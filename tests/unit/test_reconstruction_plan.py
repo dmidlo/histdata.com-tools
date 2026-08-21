@@ -108,6 +108,7 @@ from histdatacom.synthetic import (
 )
 from histdatacom.synthetic import reconstruction_handlers as handlers_module
 from histdatacom.synthetic import reconstruction_plan as plan_module
+from histdatacom.synthetic import support_verification as support_module
 from histdatacom.synthetic.contracts import canonical_contract_json
 from histdatacom.synthetic.generation import EMPIRICAL_MOTIF_GENERATOR_ID
 from histdatacom.synthetic.proposal_engines import (
@@ -2167,6 +2168,198 @@ def test_public_plan_set_preserves_a_contiguous_refusal_only_shard(
         item.refusal_reason == "context unsupported"
         for item in support_map.windows
     )
+
+
+def test_independent_support_replay_reconstructs_raw_source_decisions(
+    planned_environment: tuple[Path, dict[str, Any]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The final verifier derives support from Arrow rows, not planner helpers."""
+    source_root, kwargs = planned_environment
+    resolved = plan_module._resolve_plan_inputs()
+    monkeypatch.setattr(
+        support_module,
+        "read_active_time_feed_epoch_definition",
+        lambda *_: resolved.feed_epoch_definition,
+    )
+    monkeypatch.setattr(
+        support_module,
+        "read_observation_operator_artifact",
+        lambda *_: resolved.observation_operator,
+    )
+    monkeypatch.setattr(
+        support_module,
+        "read_market_context_corpus",
+        lambda *_: resolved.market_context,
+    )
+    monkeypatch.setattr(
+        support_module,
+        "read_cftc_positioning_corpus",
+        lambda *_: resolved.cftc_positioning,
+    )
+    monkeypatch.setattr(
+        support_module,
+        "preflight_market_context_corpus",
+        lambda *_, **__: SimpleNamespace(reasons=()),
+    )
+    monkeypatch.setattr(
+        support_module,
+        "query_cftc_positioning_corpus",
+        _ready_cftc_query,
+    )
+    monkeypatch.setattr(
+        support_module,
+        "_context_labels",
+        lambda *_, **__: ("fx-open", "market_context:none:test"),
+    )
+    client = ReconstructionClient()
+    plan_set_ref = client.construct_plan_set(
+        _public_spec(source_root, kwargs), periods_per_shard=1
+    )
+    support_ref = client.construct_plan_support_map(
+        plan_set_ref.path, output_directory=source_root / "independent-support"
+    )
+    plan_set = read_reconstruction_plan_set(plan_set_ref.path)
+    support_maps = (
+        (read_reconstruction_plan_support_map(support_ref.path),)
+        if support_ref.kind == "reconstruction_plan_support_map_v1"
+        else tuple(
+            iter_reconstruction_plan_support_maps(
+                read_reconstruction_plan_support_map_index(support_ref.path)
+            )
+        )
+    )
+    first_shard = plan_set.shards[0]
+    plan = read_synthetic_infill_plan(first_shard.plan_ref.path)
+    inventory = read_reconstruction_source_inventory(
+        plan.artifact_graph["source_inventory"].path
+    )
+    claims = tuple(
+        window
+        for support_map in support_maps
+        for window in support_map.windows
+        if window.shard_id == first_shard.shard_id
+    )
+    claimed_map_id = next(
+        support_map.support_map_id
+        for support_map in support_maps
+        if any(
+            window.shard_id == first_shard.shard_id
+            for window in support_map.windows
+        )
+    )
+    candidate = SimpleNamespace(
+        candidate_id="reconstruction-release-candidate:sha256:" + "a" * 64,
+        source_partition_hashes={
+            f"{item.symbol}:{item.period}": item.artifact.sha256
+            for item in inventory.partitions
+        },
+    )
+
+    verified = support_module._verify_plan_shard(
+        plan_set=plan_set,
+        plan_shard=first_shard,
+        plan=plan,
+        claimed_windows=claims,
+        claimed_support_map_id=claimed_map_id,
+        candidate=candidate,
+    )
+
+    assert verified.plan_set_id == plan_set.plan_set_id
+    assert verified.census.window_count == len(claims)
+    assert verified.census.terminal_counts == {"executable": len(claims)}
+    assert verified.census.valid_common_data_implementation_refusal_count == 0
+    assert sum(
+        item.in_requested_domain_row_count
+        for item in verified.partition_replays
+    ) == sum(sum(item.core_event_counts.values()) for item in verified.windows)
+    assert all(item.core_row_identity_digest for item in verified.windows)
+    assert all(item.alignment_source_event_digest for item in verified.windows)
+
+    shifted = (
+        replace(
+            claims[0],
+            start_ns=claims[0].start_ns + 1,
+            support_id="",
+        ),
+        *claims[1:],
+    )
+    with pytest.raises(
+        support_module.FinalSupportVerificationError,
+        match="bounds differ|not contiguous",
+    ):
+        support_module._verify_plan_shard(
+            plan_set=plan_set,
+            plan_shard=first_shard,
+            plan=plan,
+            claimed_windows=shifted,
+            claimed_support_map_id=claimed_map_id,
+            candidate=candidate,
+        )
+
+    alignment_shifted = (
+        replace(
+            claims[0],
+            recommended_cross_series_event_time_ns=(
+                claims[0].recommended_cross_series_event_time_ns + 1
+            ),
+            support_id="",
+        ),
+        *claims[1:],
+    )
+    with pytest.raises(
+        support_module.FinalSupportVerificationError,
+        match="recommended_cross_series_event_time_ns",
+    ):
+        support_module._verify_plan_shard(
+            plan_set=plan_set,
+            plan_shard=first_shard,
+            plan=plan,
+            claimed_windows=alignment_shifted,
+            claimed_support_map_id=claimed_map_id,
+            candidate=candidate,
+        )
+
+    resource = dict(claims[0].resource_estimate or {})
+    resource["candidate_event_count"] = (
+        int(resource["candidate_event_count"]) + 1
+    )
+    cardinality_shifted = (
+        replace(claims[0], resource_estimate=resource, support_id=""),
+        *claims[1:],
+    )
+    with pytest.raises(
+        support_module.FinalSupportVerificationError,
+        match="resource_estimate",
+    ):
+        support_module._verify_plan_shard(
+            plan_set=plan_set,
+            plan_shard=first_shard,
+            plan=plan,
+            claimed_windows=cardinality_shifted,
+            claimed_support_map_id=claimed_map_id,
+            candidate=candidate,
+        )
+
+    bad_candidate = SimpleNamespace(
+        candidate_id=candidate.candidate_id,
+        source_partition_hashes={
+            **candidate.source_partition_hashes,
+            next(iter(candidate.source_partition_hashes)): "0" * 64,
+        },
+    )
+    with pytest.raises(
+        support_module.FinalSupportVerificationError,
+        match="source hash differs",
+    ):
+        support_module._verify_plan_shard(
+            plan_set=plan_set,
+            plan_shard=first_shard,
+            plan=plan,
+            claimed_windows=claims,
+            claimed_support_map_id=claimed_map_id,
+            candidate=bad_candidate,
+        )
 
 
 def test_public_plan_spec_threads_bounded_window_size_into_resources(

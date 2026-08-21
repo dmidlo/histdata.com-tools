@@ -321,6 +321,24 @@ same filesystem for atomic publication; see the
 [complete campaign runbook](reconstruction-campaign-runbook.md) for mount,
 storage, execution, crash/restart, product-index, and dataset-publication gates.
 
+Full campaigns add a second, independent support pass after the claimed support
+map is built:
+
+```sh
+histdatacom reconstruction --json support-verify \
+  --plan-set work/plan-artifacts/reconstruction-plan-set-<sha256>.json \
+  --support-map work/support-map/reconstruction-plan-support-map-index-<sha256>.json \
+  --release-candidate work/release/reconstruction-release-candidate-<sha256>.json \
+  --output-directory work/final-support
+```
+
+`ReconstructionClient.construct_final_adaptive_support_map()` is the equivalent
+typed API. It rereads raw partitions and independently reconstructs ownership,
+alignment, feed/context/CFTC decisions, modeled cardinality, and resources. The
+returned `FinalAdaptiveSupportMapIndexV1` is the support reference supplied to
+`request-set`; every child execution request binds that exact reference. See
+[`final-adaptive-support-verification.md`](final-adaptive-support-verification.md).
+
 Preflight hash-verifies the plan and its declared artifacts, validates that the
 operator information mode matches the immutable plan, and emits the bounded
 dry-run graph, resources, refusal reasons, and validation/qualification audit
