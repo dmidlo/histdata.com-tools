@@ -21,9 +21,6 @@ from histdatacom.cross_series_constraints import (
     CrossSeriesConstraintPolicyV1,
     read_cross_series_constraint_policy,
 )
-from histdatacom.data_analytics.feed_epochs_v2 import (
-    read_active_time_feed_epoch_definition,
-)
 from histdatacom.data_quality.training_features import (
     enrich_tick_cache_with_training_features,
 )
@@ -90,7 +87,6 @@ from histdatacom.synthetic import (
     FeedEpochTransitionPolicyV1,
     InformationMode,
     ModernReferenceMotifProfileV1,
-    ObservationOperatorV1,
     ObservationUncertaintyPolicyV1,
     ReconstructionDeliveryMode,
     ReconstructionPlanCompatibilityError,
@@ -114,6 +110,9 @@ from histdatacom.synthetic.generation import EMPIRICAL_MOTIF_GENERATOR_ID
 from histdatacom.synthetic.proposal_engines import (
     ProposalEngineEvidenceV1,
     proposal_engine_default_configs,
+)
+from tests.fixtures.reconstruction_transition import (
+    reconstruction_transition_fixture,
 )
 
 _SYMBOLS = ("eurgbp", "eurusd", "gbpusd")
@@ -873,18 +872,7 @@ def test_unavailable_cftc_is_explicitly_qualified_or_refused(
 def test_transition_cardinality_support_matches_runtime_preflight(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    root = Path(__file__).resolve().parents[2]
-    definition = read_active_time_feed_epoch_definition(
-        root / "data/.histdatacom/analytics/feed-epochs-v2-issue-460/"
-        "feed-epochs-v2-definition.json"
-    )
-    operator = ObservationOperatorV1.from_json(
-        (
-            root / "data/.histdatacom/analytics/"
-            "observation-calibration-v2-issue-462/"
-            "observation-calibration-v2-operator.json"
-        ).read_text(encoding="utf-8")
-    )
+    definition, operator = reconstruction_transition_fixture()
     operator = replace(
         operator,
         strata=tuple(
@@ -1025,18 +1013,7 @@ def test_transition_cardinality_support_matches_runtime_preflight(
 def test_adaptive_hawkes_windows_preserve_common_anchors_and_runtime_headroom(
     tmp_path: Path,
 ) -> None:
-    root = Path(__file__).resolve().parents[2]
-    definition = read_active_time_feed_epoch_definition(
-        root / "data/.histdatacom/analytics/feed-epochs-v2-issue-460/"
-        "feed-epochs-v2-definition.json"
-    )
-    operator = ObservationOperatorV1.from_json(
-        (
-            root / "data/.histdatacom/analytics/"
-            "observation-calibration-v2-issue-462/"
-            "observation-calibration-v2-operator.json"
-        ).read_text(encoding="utf-8")
-    )
+    definition, operator = reconstruction_transition_fixture()
     # Keep the adaptive-window behavior under test while using a controlled
     # qualified lower endpoint that leaves at least one millisecond admissible.
     operator = replace(

@@ -16,9 +16,6 @@ from histdatacom.data_analytics import (
     FeedEpochEvidenceV1,
     fit_feed_epochs,
 )
-from histdatacom.data_analytics.feed_epochs_v2 import (
-    read_active_time_feed_epoch_definition,
-)
 from histdatacom.synthetic import (
     OBSERVATION_PARAMETER_NAMES,
     InformationMode,
@@ -45,6 +42,9 @@ from histdatacom.synthetic.historical_conditioning import (
 )
 from histdatacom.synthetic.reconstruction_handlers import (
     _historical_product_observation_conditioning,
+)
+from tests.fixtures.reconstruction_transition import (
+    reconstruction_transition_fixture,
 )
 
 SYMBOL = "EURUSD"
@@ -287,18 +287,7 @@ def test_historical_product_cardinality_uses_supported_joint_epoch_evidence(
 
 
 def test_historical_product_transition_uses_declared_ex_post_bridge() -> None:
-    root = Path(__file__).resolve().parents[2]
-    definition = read_active_time_feed_epoch_definition(
-        root / "data/.histdatacom/analytics/feed-epochs-v2-issue-460/"
-        "feed-epochs-v2-definition.json"
-    )
-    operator = ObservationOperatorV1.from_json(
-        (
-            root / "data/.histdatacom/analytics/"
-            "observation-calibration-v2-issue-462/"
-            "observation-calibration-v2-operator.json"
-        ).read_text(encoding="utf-8")
-    )
+    definition, operator = reconstruction_transition_fixture()
     used_at_ns = 1_242_345_600_000_000_000
     assignment = definition.assign(
         symbol="EURUSD", timestamp_utc_ms=used_at_ns // 1_000_000
