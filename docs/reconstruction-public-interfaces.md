@@ -339,6 +339,21 @@ returned `FinalAdaptiveSupportMapIndexV1` is the support reference supplied to
 `request-set`; every child execution request binds that exact reference. See
 [`final-adaptive-support-verification.md`](final-adaptive-support-verification.md).
 
+Before binding complete-campaign execution intent, measure and admit the exact
+verified support rectangle:
+
+```sh
+histdatacom reconstruction --json resource-audit \
+  --spec work/resource-audit-spec.json \
+  --output-directory work/resource-audit
+```
+
+The command verifies synthetic-delta v3 products, fits high-quantile envelopes
+with observed-tail residual guards, qualifies the frozen output/scratch
+filesystem and disconnect/remount evidence, and freezes concurrency and shard
+size. `build_campaign_resource_audit_from_spec()` is the equivalent typed API.
+See [`reconstruction-resource-envelopes.md`](reconstruction-resource-envelopes.md).
+
 Preflight hash-verifies the plan and its declared artifacts, validates that the
 operator information mode matches the immutable plan, and emits the bounded
 dry-run graph, resources, refusal reasons, and validation/qualification audit

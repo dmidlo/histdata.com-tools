@@ -118,6 +118,27 @@ alignment events, reconciles cardinality/resources, binds the frozen candidate,
 and publishes the complete terminal census. See the
 [final support verification contract](final-adaptive-support-verification.md).
 
+## Measure and admit campaign resources
+
+Run the representative success/refusal/cancellation/failure corpus and the
+mounted-volume write, read, disconnect, and remount drills before creating the
+request set. Keep their strong evidence references in the resource-audit spec,
+then admit the exact independently verified support rectangle:
+
+```sh
+histdatacom reconstruction --json resource-audit \
+  --spec work/resource-audit-spec.json \
+  --output-directory work/resource-audit
+```
+
+Do not proceed unless the returned audit status is `qualified`. Review its
+storage and inode forecast, wall-clock and CPU ranges, per-worker memory and
+scratch peaks, amplification ceilings, reserve, concurrency, shard size,
+packing decision, residuals, and extrapolation factor. A changed candidate,
+support map, mounted device, runtime, writer/compression implementation, or
+capacity requires a new audit. See the
+[measured resource envelope contract](reconstruction-resource-envelopes.md).
+
 ## Bind intent and execute through Temporal
 
 The request set binds the plan and support identities plus the information-mode

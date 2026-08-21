@@ -75,6 +75,7 @@ def test_installed_help_lists_complete_reconstruction_family(
         "support-map",
         "support-verify",
         "support-inspect",
+        "resource-audit",
         "product-index",
         "product-inspect",
         "dataset-publish",
@@ -97,6 +98,43 @@ def test_installed_help_lists_complete_reconstruction_family(
         assert command in output
     assert "not recovered historical truth" in output
     assert "M1/bar inputs" in output
+
+
+def test_cli_builds_campaign_resource_audit_from_operator_spec(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    calls: list[tuple[str, str]] = []
+    ref = ArtifactRef(
+        kind="reconstruction_campaign_resource_audit_v1",
+        path="/tmp/resource-audit.json",
+        size_bytes=10,
+        sha256="a" * 64,
+        metadata={"status": "qualified"},
+    )
+
+    def build(spec: str, *, output_directory: str) -> ArtifactRef:
+        calls.append((spec, output_directory))
+        return ref
+
+    monkeypatch.setattr(
+        reconstruction_cli, "build_campaign_resource_audit_from_spec", build
+    )
+
+    code = reconstruction_cli.main(
+        [
+            "--json",
+            "resource-audit",
+            "--spec",
+            "resource-spec.json",
+            "--output-directory",
+            "audit-output",
+        ]
+    )
+
+    assert code == 0
+    assert json.loads(capsys.readouterr().out) == ref.to_dict()
+    assert calls == [("resource-spec.json", "audit-output")]
 
 
 def test_cli_exposes_current_scientific_ledger(

@@ -2,6 +2,11 @@
 
 ### Added
 
+- **reconstruction**: add stratified synthetic-delta physical/runtime
+  measurement, residual-guarded campaign resource envelopes, exact
+  all-member storage/inode/duration forecasts, frozen concurrency/shard and
+  amplification policy, conservative packing review, and strong mounted-
+  storage disconnect/remount admission evidence (#518).
 - **scientific validation**: add an installed, content-addressed reconstruction
   math harness with independent negative-binomial, Hawkes stability,
   time-rescaling, proper-score, projection, triangle-envelope, quote-age, and

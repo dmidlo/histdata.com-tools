@@ -33,6 +33,9 @@ from histdatacom.reconstruction import (
 from histdatacom.reconstruction_schema import ReconstructionCompatibilityStatus
 from histdatacom.synthetic.certification import CertificationState
 from histdatacom.synthetic.information import InformationMode
+from histdatacom.synthetic.resource_envelopes import (
+    build_campaign_resource_audit_from_spec,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -240,6 +243,15 @@ def build_parser() -> argparse.ArgumentParser:
     support_inspect.add_argument("--start-ns", type=int)
     support_inspect.add_argument("--end-ns", type=int)
     support_inspect.add_argument("--limit", type=int, default=100)
+
+    resource_audit = subparsers.add_parser(
+        "resource-audit",
+        help="measure and admit the final campaign against qualified storage",
+    )
+    resource_audit.add_argument("--spec", required=True, metavar="PATH")
+    resource_audit.add_argument(
+        "--output-directory", required=True, metavar="PATH"
+    )
 
     product_index = subparsers.add_parser(
         "product-index",
@@ -621,6 +633,12 @@ def _run_command(
             ),
             ReconstructionExitCode.SUCCESS,
         )
+    if command == "resource-audit":
+        ref = build_campaign_resource_audit_from_spec(
+            args.spec,
+            output_directory=args.output_directory,
+        )
+        return ref.to_dict(), ReconstructionExitCode.SUCCESS
     if command == "product-index":
         ref = client.construct_campaign_product_index(
             args.plan_set,

@@ -397,6 +397,7 @@ _AUDITED_MODULES = (
     "histdatacom.synthetic.alignment_qualification",
     "histdatacom.synthetic.projection_burden",
     "histdatacom.synthetic.support_verification",
+    "histdatacom.synthetic.resource_envelopes",
     "histdatacom.synthetic.observation_uncertainty",
     "histdatacom.synthetic.diagnostics",
     "histdatacom.synthetic.reconstruction_handlers",
@@ -452,6 +453,16 @@ _REQUIRED_SCHEMA_TOKENS = (
     "final-support-census",
     "final-support-verification-shard",
     "final-adaptive-support-map-index",
+    "reconstruction-resource-runtime-telemetry",
+    "reconstruction-resource-probe",
+    "reconstruction-resource-measurement",
+    "reconstruction-resource-measurement-corpus",
+    "reconstruction-resource-envelope",
+    "reconstruction-campaign-resource-forecast",
+    "reconstruction-campaign-resource-policy",
+    "reconstruction-physical-packing-review",
+    "reconstruction-storage-qualification",
+    "reconstruction-campaign-resource-audit",
     "reconstruction-plan-set-execution-request",
     "reconstruction-plan-set-receipt-index",
     "reconstruction-campaign-product-entry",
@@ -2055,6 +2066,8 @@ def _contract_status(
 
 
 def _family(module_name: str, version: str) -> str:
+    if "resource_envelopes" in module_name:
+        return "release"
     if "support_verification" in module_name:
         return "scientific"
     if "projection_burden" in module_name:

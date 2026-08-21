@@ -73,6 +73,7 @@ Persistence, projections, and validation
    triangle-alignment-qualification
    projection-burden-diagnostics
    final-adaptive-support-verification
+   reconstruction-resource-envelopes
    reconstruction-diagnostics
    reconstruction-certification-contracts
    reconstruction-temporal-orchestration
