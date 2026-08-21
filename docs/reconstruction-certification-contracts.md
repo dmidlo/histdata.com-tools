@@ -44,7 +44,7 @@ live #498 seam while retaining #449/#491 as predecessor evidence:
 | `information-safety` | The current scientific ledger, passing math-verification report, and plan/product/dataset lineage binding are valid; every market-context and CFTC input has an explicit completeness/information-mode state; generated origin is not misclassified; every ex-post product retains `invalid-for-backtest`; and ex-post/ex-ante uses have distinct zero-violation point-in-time audits. |
 | `reverse-degradation` | The benchmark corpus predates candidate results, thresholds are predeclared, blocked holdouts pass, and negative controls fail as expected. |
 | `conditioned-scorecards` | Feed epochs and observation operators are valid; eligibility and weights come from powered qualification, the marked-Hawkes product choice comes from its validation-only selection dossier, observation uncertainty has validation and untouched-holdout evidence, all required strata exist, and product/benchmark tolerances pass. |
-| `cross-currency` | Triangle, inverse, synchronization, and stale-alignment checks pass before and after identity delivery. |
+| `cross-currency` | Triangle, inverse, synchronization, and stale-alignment checks pass before and after identity delivery; projection-burden reports and exact consumer receipts cover model selection, products, campaign shards, era audits, and certification; no excessive burden, hidden final-residual-only pass, or surviving synthetic residual is admitted. |
 | `ensemble-evidence` | Calibration, diversity, refusal, unsupported-region, between-seed, and between-window uncertainty are reported. |
 | `product-reconciliation` | Final ticks, activity, and bars reconcile; the nonclaim is published; full-range preflight and execution pass; every executable retained-member product exists; empty/closed/unsupported windows contain no invented liquidity; the complete product index and provider-neutral dataset publication verify; representative windows and CLI/API evidence-chain parity pass. |
 | `failure-resume` | Mid-run failure and qualified storage disconnect resume with no missing/duplicate partition; cancellation publishes no partial partition. |
@@ -106,6 +106,9 @@ result is a scalar, and only then creates a certification observation.
 This prevents a handwritten summary boolean from standing in for a producer
 report. Producer-specific contracts still own how reports calculate their
 metrics; the campaign owns identity, extraction, aggregation, and publication.
+The projection-burden producer contract is described in
+[`projection-burden-diagnostics.md`](projection-burden-diagnostics.md); its
+report and release-consumption receipts are mandatory cross-currency evidence.
 
 Run the installed public surface with:
 

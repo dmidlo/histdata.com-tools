@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
@@ -175,7 +176,7 @@ class CertificationArtifactV1:
         relative_path: str,
         verified: bool = True,
         metadata: Mapping[str, JSONValue] | None = None,
-    ) -> "CertificationArtifactV1":
+    ) -> CertificationArtifactV1:
         """Bind one compact JSON contract without retaining its source rows."""
         content = canonical_contract_json(dict(payload)).encode("utf-8")
         return cls(
@@ -210,7 +211,7 @@ class CertificationArtifactV1:
         return {**self.identity_payload(), "evidence_id": self.evidence_id}
 
     @classmethod
-    def from_dict(cls, data: Mapping[str, Any]) -> "CertificationArtifactV1":
+    def from_dict(cls, data: Mapping[str, Any]) -> CertificationArtifactV1:
         """Restore and verify artifact evidence."""
         _require_schema(data, CERTIFICATION_ARTIFACT_SCHEMA_VERSION)
         return cls(
@@ -287,7 +288,7 @@ class CertificationRequirementV1:
         }
 
     @classmethod
-    def from_dict(cls, data: Mapping[str, Any]) -> "CertificationRequirementV1":
+    def from_dict(cls, data: Mapping[str, Any]) -> CertificationRequirementV1:
         """Restore one predeclared requirement."""
         _require_schema(data, CERTIFICATION_REQUIREMENT_SCHEMA_VERSION)
         return cls(
@@ -358,7 +359,7 @@ class CertificationObservationV1:
         }
 
     @classmethod
-    def from_dict(cls, data: Mapping[str, Any]) -> "CertificationObservationV1":
+    def from_dict(cls, data: Mapping[str, Any]) -> CertificationObservationV1:
         """Restore one content-bound observation."""
         _require_schema(data, CERTIFICATION_OBSERVATION_SCHEMA_VERSION)
         return cls(
@@ -444,7 +445,7 @@ class CertificationCheckResultV1:
         return {**self.identity_payload(), "result_id": self.result_id}
 
     @classmethod
-    def from_dict(cls, data: Mapping[str, Any]) -> "CertificationCheckResultV1":
+    def from_dict(cls, data: Mapping[str, Any]) -> CertificationCheckResultV1:
         """Restore one computed check result."""
         _require_schema(data, CERTIFICATION_CHECK_RESULT_SCHEMA_VERSION)
         return cls(
@@ -522,7 +523,7 @@ class CertificationGateResultV1:
         }
 
     @classmethod
-    def from_dict(cls, data: Mapping[str, Any]) -> "CertificationGateResultV1":
+    def from_dict(cls, data: Mapping[str, Any]) -> CertificationGateResultV1:
         """Restore one gate result and verify its derived status."""
         _require_schema(data, CERTIFICATION_GATE_RESULT_SCHEMA_VERSION)
         result = cls(
@@ -640,7 +641,7 @@ class ReconstructionCertificationPolicyV1:
     @classmethod
     def from_dict(
         cls, data: Mapping[str, Any]
-    ) -> "ReconstructionCertificationPolicyV1":
+    ) -> ReconstructionCertificationPolicyV1:
         """Restore and verify a certification policy."""
         _require_schema(
             data, RECONSTRUCTION_CERTIFICATION_POLICY_SCHEMA_VERSION
@@ -804,7 +805,7 @@ class ReconstructionCertificationPolicyV2:
     @classmethod
     def from_dict(
         cls, data: Mapping[str, Any]
-    ) -> "ReconstructionCertificationPolicyV2":
+    ) -> ReconstructionCertificationPolicyV2:
         """Restore and verify a modern-reference certification policy."""
         _require_schema(
             data, RECONSTRUCTION_CERTIFICATION_POLICY_V2_SCHEMA_VERSION
@@ -814,8 +815,10 @@ class ReconstructionCertificationPolicyV2:
             ("promotion_policy", "coverage-once-at-dev-to-main-boundary"),
             (
                 "broker_adaptation",
-                "excluded-from-v"
-                f"{str(data.get('product_version', ''))}-certification",
+                (
+                    "excluded-from-v"
+                    f"{data.get('product_version', '')!s}-certification"
+                ),
             ),
         ):
             _require_derived(data, name, expected)
@@ -1041,9 +1044,11 @@ class ReconstructionCertificationDossierV1:
             [
                 "## Trust boundary",
                 "",
-                "This dossier is bounded derived metadata. It contains no tick rows, "
-                "does not select an automatic winner, and does not claim historical truth "
-                "or authorize an investment recommendation.",
+                (
+                    "This dossier is bounded derived metadata. It contains no tick rows, "
+                    "does not select an automatic winner, and does not claim historical "
+                    "truth or authorize an investment recommendation."
+                ),
                 "",
             ]
         )
@@ -1052,7 +1057,7 @@ class ReconstructionCertificationDossierV1:
     @classmethod
     def from_dict(
         cls, data: Mapping[str, Any]
-    ) -> "ReconstructionCertificationDossierV1":
+    ) -> ReconstructionCertificationDossierV1:
         """Restore and verify a complete dossier."""
         _require_schema(
             data, RECONSTRUCTION_CERTIFICATION_DOSSIER_SCHEMA_VERSION
@@ -1097,7 +1102,7 @@ class ReconstructionCertificationDossierV1:
         return dossier
 
     @classmethod
-    def from_json(cls, text: str) -> "ReconstructionCertificationDossierV1":
+    def from_json(cls, text: str) -> ReconstructionCertificationDossierV1:
         """Restore a dossier from canonical JSON."""
         return cls.from_dict(_json_mapping(text))
 
@@ -1305,10 +1310,12 @@ class ReconstructionCertificationDossierV2:
             [
                 "## Trust boundary",
                 "",
-                "This dossier certifies modern-reference, unconditioned output only. "
-                "It makes no broker-specific claim, contains no tick rows, does not "
-                "select an automatic winner, and does not claim historical truth or "
-                "authorize an investment recommendation.",
+                (
+                    "This dossier certifies modern-reference, unconditioned output only. "
+                    "It makes no broker-specific claim, contains no tick rows, does not "
+                    "select an automatic winner, and does not claim historical truth or "
+                    "authorize an investment recommendation."
+                ),
                 "",
             ]
         )
@@ -1317,7 +1324,7 @@ class ReconstructionCertificationDossierV2:
     @classmethod
     def from_dict(
         cls, data: Mapping[str, Any]
-    ) -> "ReconstructionCertificationDossierV2":
+    ) -> ReconstructionCertificationDossierV2:
         """Restore and verify a complete modern-reference dossier."""
         _require_schema(
             data, RECONSTRUCTION_CERTIFICATION_DOSSIER_V2_SCHEMA_VERSION
@@ -1365,7 +1372,7 @@ class ReconstructionCertificationDossierV2:
         return dossier
 
     @classmethod
-    def from_json(cls, text: str) -> "ReconstructionCertificationDossierV2":
+    def from_json(cls, text: str) -> ReconstructionCertificationDossierV2:
         """Restore a modern-reference dossier from canonical JSON."""
         return cls.from_dict(_json_mapping(text))
 
@@ -1450,7 +1457,10 @@ def eurusd_triangle_certification_policy(
             "post_broker_cross_currency_failure_count",
             CertificationComparator.ZERO,
             0,
-            ("cross-currency-validation-report", "broker-delivery-fingerprint"),
+            (
+                "cross-currency-validation-report",
+                "broker-delivery-fingerprint",
+            ),
             "Triangle, inverse, and stale-join checks pass after broker rendering.",
         ),
         _requirement(
@@ -1757,7 +1767,10 @@ def modern_reference_triangle_certification_policy(
             "ex_post_invalid_for_backtest_missing_count",
             CertificationComparator.ZERO,
             0,
-            ("reconstruction-scientific-ledger", "strategy-sensitivity-report"),
+            (
+                "reconstruction-scientific-ledger",
+                "strategy-sensitivity-report",
+            ),
             "Every ex-post strategy-sensitivity output preserves invalid-for-backtest.",
         ),
         _requirement(
@@ -1885,6 +1898,41 @@ def modern_reference_triangle_certification_policy(
                 "reconstruction-product-manifest",
             ),
             "Triangle, inverse, synchronization, and stale-alignment checks pass before and after identity delivery.",
+        ),
+        _requirement(
+            CertificationGate.CROSS_CURRENCY,
+            "projection_burden_release_coverage_valid",
+            CertificationComparator.TRUE,
+            True,
+            (
+                "projection-burden-report",
+                "projection-burden-consumption-receipts",
+            ),
+            "Projection burden is bound into model selection, product manifests, campaign shard summaries, era audits, and certification.",
+        ),
+        _requirement(
+            CertificationGate.CROSS_CURRENCY,
+            "excessive_projection_burden_product_count",
+            CertificationComparator.ZERO,
+            0,
+            ("projection-burden-report", "reconstruction-product-manifest"),
+            "No released product exceeds its predeclared projection-burden thresholds.",
+        ),
+        _requirement(
+            CertificationGate.CROSS_CURRENCY,
+            "synthetic_post_projection_residual_failure_count",
+            CertificationComparator.ZERO,
+            0,
+            ("projection-burden-report",),
+            "Every residual involving synthetic data passes after permitted projection.",
+        ),
+        _requirement(
+            CertificationGate.CROSS_CURRENCY,
+            "final_residual_only_projection_pass_count",
+            CertificationComparator.ZERO,
+            0,
+            ("projection-burden-report",),
+            "A passing final residual never hides excessive proposal movement.",
         ),
         _requirement(
             CertificationGate.ENSEMBLE_EVIDENCE,
@@ -2792,9 +2840,9 @@ def _normalized_symbol(value: Any) -> str:
 
 def _numeric(value: JSONScalar, name: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise ValueError(f"{name} must be numeric")
+        raise ValueError(f"{name} must be numeric")  # noqa: TRY004
     number = float(value)
-    if not number == number or number in {float("inf"), float("-inf")}:
+    if not math.isfinite(number):
         raise ValueError(f"{name} must be finite")
     return number
 
@@ -2855,13 +2903,13 @@ def _required_sha256(value: Any) -> str:
 
 def _strict_bool(value: Any, name: str) -> bool:
     if not isinstance(value, bool):
-        raise ValueError(f"{name} must be boolean")
+        raise ValueError(f"{name} must be boolean")  # noqa: TRY004
     return value
 
 
 def _strict_int(value: Any, name: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int):
-        raise ValueError(f"{name} must be an integer")
+        raise ValueError(f"{name} must be an integer")  # noqa: TRY004
     return value
 
 
@@ -2911,7 +2959,7 @@ def _bounded_mapping(
 
 def _mapping(value: Any, name: str) -> Mapping[str, Any]:
     if not isinstance(value, Mapping):
-        raise ValueError(f"{name} must be a mapping")
+        raise ValueError(f"{name} must be a mapping")  # noqa: TRY004
     return cast(Mapping[str, Any], value)
 
 
@@ -2919,7 +2967,7 @@ def _mapping_sequence(value: Any, name: str) -> tuple[Mapping[str, Any], ...]:
     if not isinstance(value, Sequence) or isinstance(
         value, (str, bytes, bytearray)
     ):
-        raise ValueError(f"{name} must be a sequence")
+        raise ValueError(f"{name} must be a sequence")  # noqa: TRY004
     return tuple(_mapping(item, name) for item in value)
 
 
@@ -2927,7 +2975,7 @@ def _string_tuple(value: Any, name: str) -> tuple[str, ...]:
     if not isinstance(value, Sequence) or isinstance(
         value, (str, bytes, bytearray)
     ):
-        raise ValueError(f"{name} must be a sequence")
+        raise ValueError(f"{name} must be a sequence")  # noqa: TRY004
     return tuple(str(item) for item in value)
 
 

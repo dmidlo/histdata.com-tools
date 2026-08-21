@@ -858,7 +858,10 @@ class ReconstructionSourceManifestV1:
 
     def to_dict(self) -> dict[str, JSONValue]:
         """Return compact source-manifest JSON."""
-        return {**self.payload(), "source_manifest_id": self.source_manifest_id}
+        return {
+            **self.payload(),
+            "source_manifest_id": self.source_manifest_id,
+        }
 
     @classmethod
     def from_dict(
@@ -1236,6 +1239,9 @@ class ReconstructionDeliveryQualityManifestV1:
     cross_series_constraint_bundle_ids: tuple[str, ...] = ()
     cross_series_constraint_window_ids: tuple[str, ...] = ()
     cross_series_constraint_decision_ids: tuple[str, ...] = ()
+    projection_burden_report_ids: tuple[str, ...] = ()
+    projection_burden_receipt_ids: tuple[str, ...] = ()
+    projection_burden_status: str = "not_claimed"
     quality_manifest_id: str = ""
     schema_version: str = (
         RECONSTRUCTION_DELIVERY_QUALITY_MANIFEST_SCHEMA_VERSION
@@ -1325,6 +1331,12 @@ class ReconstructionDeliveryQualityManifestV1:
         cross_decisions = _normalized_text_tuple(
             self.cross_series_constraint_decision_ids
         )
+        projection_reports = _normalized_text_tuple(
+            self.projection_burden_report_ids
+        )
+        projection_receipts = _normalized_text_tuple(
+            self.projection_burden_receipt_ids
+        )
         if len(projections) > 64 or len(decisions) > 256:
             raise ValueError("delivery quality evidence lineage is unbounded")
         if (
@@ -1335,6 +1347,8 @@ class ReconstructionDeliveryQualityManifestV1:
             raise ValueError(
                 "delivery cross-series constraint lineage is unbounded"
             )
+        if len(projection_reports) > 64 or len(projection_receipts) > 256:
+            raise ValueError("delivery projection-burden lineage is unbounded")
         object.__setattr__(
             self, "point_in_time_evidence_projection_ids", projections
         )
@@ -1350,6 +1364,37 @@ class ReconstructionDeliveryQualityManifestV1:
         object.__setattr__(
             self, "cross_series_constraint_decision_ids", cross_decisions
         )
+        object.__setattr__(
+            self, "projection_burden_report_ids", projection_reports
+        )
+        object.__setattr__(
+            self, "projection_burden_receipt_ids", projection_receipts
+        )
+        projection_status = _required_text(self.projection_burden_status)
+        if projection_status not in {
+            "not_claimed",
+            "qualified",
+            "limited",
+            "failed",
+        }:
+            raise ValueError("delivery projection-burden status is unsupported")
+        has_projection_evidence = bool(
+            projection_reports and projection_receipts
+        )
+        if bool(projection_reports) != bool(projection_receipts) or (
+            (projection_status == "not_claimed") == has_projection_evidence
+        ):
+            raise ValueError(
+                "delivery projection-burden status and evidence differ"
+            )
+        if (
+            self.cross_instrument_quality_status == "cross_currency_coherent"
+            and projection_status != "qualified"
+        ):
+            raise ValueError(
+                "cross-currency coherence claim lacks qualified projection burden"
+            )
+        object.__setattr__(self, "projection_burden_status", projection_status)
         if self.final_validation_status != "passed":
             raise ValueError("final delivery validation is not passing")
         if self.cross_instrument_quality_status == "failed":
@@ -1407,6 +1452,17 @@ class ReconstructionDeliveryQualityManifestV1:
             payload["cross_series_constraint_decision_ids"] = list(
                 self.cross_series_constraint_decision_ids
             )
+        if self.projection_burden_report_ids:
+            payload["projection_burden_report_ids"] = list(
+                self.projection_burden_report_ids
+            )
+            payload["projection_burden_receipt_ids"] = list(
+                self.projection_burden_receipt_ids
+            )
+            payload["projection_burden_status"] = self.projection_burden_status
+            payload["cross_currency_coherence_claim_permitted"] = (
+                self.projection_burden_status == "qualified"
+            )
         return payload
 
     def to_dict(self) -> dict[str, JSONValue]:
@@ -1424,6 +1480,12 @@ class ReconstructionDeliveryQualityManifestV1:
         _require_schema(
             data, RECONSTRUCTION_DELIVERY_QUALITY_MANIFEST_SCHEMA_VERSION
         )
+        if data.get("projection_burden_report_ids", ()):
+            _require_derived(
+                data,
+                "cross_currency_coherence_claim_permitted",
+                data.get("projection_burden_status") == "qualified",
+            )
         return cls(
             delivery_manifest_id=str(data.get("delivery_manifest_id", "")),
             delivery_profile_id=str(data.get("delivery_profile_id", "")),
@@ -1487,6 +1549,17 @@ class ReconstructionDeliveryQualityManifestV1:
             cross_series_constraint_decision_ids=_string_tuple(
                 data.get("cross_series_constraint_decision_ids", ()),
                 "cross_series_constraint_decision_ids",
+            ),
+            projection_burden_report_ids=_string_tuple(
+                data.get("projection_burden_report_ids", ()),
+                "projection_burden_report_ids",
+            ),
+            projection_burden_receipt_ids=_string_tuple(
+                data.get("projection_burden_receipt_ids", ()),
+                "projection_burden_receipt_ids",
+            ),
+            projection_burden_status=str(
+                data.get("projection_burden_status", "not_claimed")
             ),
             quality_manifest_id=str(data.get("quality_manifest_id", "")),
             schema_version=str(data.get("schema_version", "")),
@@ -1577,7 +1650,10 @@ class ReconstructionReplayManifestV1:
 
     def to_dict(self) -> dict[str, JSONValue]:
         """Return compact replay-manifest JSON."""
-        return {**self.payload(), "replay_manifest_id": self.replay_manifest_id}
+        return {
+            **self.payload(),
+            "replay_manifest_id": self.replay_manifest_id,
+        }
 
     @classmethod
     def from_dict(
@@ -1695,7 +1771,10 @@ class ReconstructionReplayManifestV2:
 
     def to_dict(self) -> dict[str, JSONValue]:
         """Return compact replay v2 JSON."""
-        return {**self.payload(), "replay_manifest_id": self.replay_manifest_id}
+        return {
+            **self.payload(),
+            "replay_manifest_id": self.replay_manifest_id,
+        }
 
     @classmethod
     def from_dict(
@@ -3211,6 +3290,9 @@ def stage_delivery_reconstruction_publication(
     cross_series_constraint_bundle_ids: Sequence[str] = (),
     cross_series_constraint_window_ids: Sequence[str] = (),
     cross_series_constraint_decision_ids: Sequence[str] = (),
+    projection_burden_report_ids: Sequence[str] = (),
+    projection_burden_receipt_ids: Sequence[str] = (),
+    projection_burden_status: str = "not_claimed",
     immutable_source_anchors: Iterable[SyntheticEventV1],
     immutable_source_artifacts: Mapping[str, ArtifactRef] | None = None,
     symbol_group_id: str,
@@ -3321,6 +3403,9 @@ def stage_delivery_reconstruction_publication(
             cross_series_constraint_decision_ids=(
                 cross_series_constraint_decision_ids
             ),
+            projection_burden_report_ids=projection_burden_report_ids,
+            projection_burden_receipt_ids=projection_burden_receipt_ids,
+            projection_burden_status=projection_burden_status,
         )
         ensemble = ReconstructionEnsembleManifestV1(
             run_id=retention_plan.run_id,
@@ -4679,6 +4764,9 @@ def _delivery_quality_manifest(
     cross_series_constraint_bundle_ids: Sequence[str],
     cross_series_constraint_window_ids: Sequence[str],
     cross_series_constraint_decision_ids: Sequence[str],
+    projection_burden_report_ids: Sequence[str],
+    projection_burden_receipt_ids: Sequence[str],
+    projection_burden_status: str,
 ) -> ReconstructionDeliveryQualityManifestV1:
     manifest = group.manifest
     output_hash = reconstruction_streams_content_sha256(group.streams)
@@ -4705,6 +4793,9 @@ def _delivery_quality_manifest(
         "cross_series_constraint_decision_ids": list(
             cross_series_constraint_decision_ids
         ),
+        "projection_burden_report_ids": list(projection_burden_report_ids),
+        "projection_burden_receipt_ids": list(projection_burden_receipt_ids),
+        "projection_burden_status": projection_burden_status,
     }
     quality_hash = _content_sha256(evidence)
     identity_hash = cast(str, manifest.identity_lineage_sha256)
@@ -4745,6 +4836,9 @@ def _delivery_quality_manifest(
         cross_series_constraint_decision_ids=tuple(
             cross_series_constraint_decision_ids
         ),
+        projection_burden_report_ids=tuple(projection_burden_report_ids),
+        projection_burden_receipt_ids=tuple(projection_burden_receipt_ids),
+        projection_burden_status=projection_burden_status,
     )
 
 
@@ -4845,9 +4939,11 @@ def _read_observed_anchor_events(
                     quote_policy = artifact.metadata.get(
                         "quote_order_projection_policy"
                     )
-                    for position, (timestamp_ms, bid_raw, ask_raw) in enumerate(
-                        zip(times, bids, asks, strict=True)
-                    ):
+                    for position, (
+                        timestamp_ms,
+                        bid_raw,
+                        ask_raw,
+                    ) in enumerate(zip(times, bids, asks, strict=True)):
                         row_id = overlap_start + position
                         row_key = (segment.source_series_id, row_id)
                         if row_key in seen_rows:

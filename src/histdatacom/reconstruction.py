@@ -2502,6 +2502,7 @@ class ReconstructionCampaignProductShardV1:
     requested_end_ns: int
     entries: tuple[ReconstructionCampaignProductEntryV1, ...]
     status: str
+    projection_burden_receipt_ids: tuple[str, ...] = ()
     product_shard_id: str = ""
     schema_version: str = RECONSTRUCTION_CAMPAIGN_PRODUCT_SHARD_SCHEMA_VERSION
 
@@ -2593,6 +2594,24 @@ class ReconstructionCampaignProductShardV1:
                     "campaign terminal support outcome is ambiguous"
                 )
         object.__setattr__(self, "entries", entries)
+        projection_receipts = tuple(
+            sorted(
+                {
+                    _required_text(item)
+                    for item in self.projection_burden_receipt_ids
+                }
+            )
+        )
+        if (
+            len(projection_receipts)
+            > MAX_RECONSTRUCTION_CAMPAIGN_ENTRIES_PER_SHARD
+        ):
+            raise ReconstructionPlanError(
+                "campaign projection-burden receipt count is unbounded"
+            )
+        object.__setattr__(
+            self, "projection_burden_receipt_ids", projection_receipts
+        )
         expected_status = (
             "complete"
             if not any(item.status == "missing_product" for item in entries)
@@ -2646,7 +2665,7 @@ class ReconstructionCampaignProductShardV1:
         return sum(item.synthetic_event_count for item in self.entries)
 
     def identity_payload(self) -> dict[str, JSONValue]:
-        return {
+        payload: dict[str, JSONValue] = {
             "schema_version": self.schema_version,
             "plan_set_id": self.plan_set_id,
             "support_artifact_id": self.support_artifact_id,
@@ -2664,6 +2683,14 @@ class ReconstructionCampaignProductShardV1:
             "synthetic_event_count": self.synthetic_event_count,
             "status": self.status,
         }
+        if self.projection_burden_receipt_ids:
+            payload["projection_burden_receipt_ids"] = list(
+                self.projection_burden_receipt_ids
+            )
+            payload["projection_burden_receipt_count"] = len(
+                self.projection_burden_receipt_ids
+            )
+        return payload
 
     def to_dict(self) -> dict[str, JSONValue]:
         return {
@@ -2675,6 +2702,16 @@ class ReconstructionCampaignProductShardV1:
     def from_dict(
         cls, data: Mapping[str, Any]
     ) -> ReconstructionCampaignProductShardV1:
+        projection_receipts = tuple(
+            str(item)
+            for item in _sequence(data.get("projection_burden_receipt_ids", ()))
+        )
+        if projection_receipts and data.get(
+            "projection_burden_receipt_count"
+        ) != len(set(projection_receipts)):
+            raise ReconstructionPlanError(
+                "campaign projection-burden receipt count differs"
+            )
         return cls(
             plan_set_id=str(data.get("plan_set_id", "")),
             support_artifact_id=str(data.get("support_artifact_id", "")),
@@ -2691,6 +2728,7 @@ class ReconstructionCampaignProductShardV1:
                 for value in _sequence(data.get("entries"))
             ),
             status=str(data.get("status", "")),
+            projection_burden_receipt_ids=projection_receipts,
             product_shard_id=str(data.get("product_shard_id", "")),
             schema_version=str(data.get("schema_version", "")),
         )
@@ -3270,7 +3308,8 @@ class ReconstructionPlanSetExecutionRequestV1:
             )
         object.__setattr__(self, "requests", requests)
         expected = _stable_id(
-            "reconstruction-plan-set-execution-request", self.identity_payload()
+            "reconstruction-plan-set-execution-request",
+            self.identity_payload(),
         )
         if self.request_set_id and self.request_set_id != expected:
             raise ReconstructionPlanError(
@@ -5316,6 +5355,9 @@ def write_reconstruction_campaign_product_shard(
             "refused_window_count": shard.refused_window_count,
             "observed_event_count": shard.observed_event_count,
             "synthetic_event_count": shard.synthetic_event_count,
+            "projection_burden_receipt_count": len(
+                shard.projection_burden_receipt_ids
+            ),
             "status": shard.status,
         },
     )
@@ -6503,6 +6545,7 @@ def _build_reconstruction_campaign_product_index(
             for task in request.tasks
         }
         entries: list[ReconstructionCampaignProductEntryV1] = []
+        projection_burden_receipt_ids: set[str] = set()
         for support in support_windows:
             if support.status == "executable":
                 for member_id in support.member_ids:
@@ -6532,6 +6575,13 @@ def _build_reconstruction_campaign_product_index(
                         )
                         continue
                     manifest, manifest_path = product
+                    projection_burden_receipt_ids.update(
+                        getattr(
+                            manifest.quality,
+                            "projection_burden_receipt_ids",
+                            (),
+                        )
+                    )
                     scientific_ledger, ledger_ref, experiment_id = (
                         scientific_lineage_by_run[manifest.run_id]
                     )
@@ -6679,6 +6729,7 @@ def _build_reconstruction_campaign_product_index(
             requested_start_ns=shard.requested_start_ns,
             requested_end_ns=shard.requested_end_ns,
             entries=tuple(entries),
+            projection_burden_receipt_ids=tuple(projection_burden_receipt_ids),
             status=(
                 "complete"
                 if not any(item.status == "missing_product" for item in entries)

@@ -395,6 +395,7 @@ _AUDITED_MODULES = (
     "histdatacom.synthetic.release_candidate",
     "histdatacom.synthetic.partition_invariance",
     "histdatacom.synthetic.alignment_qualification",
+    "histdatacom.synthetic.projection_burden",
     "histdatacom.synthetic.observation_uncertainty",
     "histdatacom.synthetic.diagnostics",
     "histdatacom.synthetic.reconstruction_handlers",
@@ -514,6 +515,17 @@ _REQUIRED_SCHEMA_TOKENS = (
     "triangle-alignment-consumption-receipt",
     "triangle-alignment-qualification-policy",
     "triangle-alignment-qualification",
+    "projection-burden-policy",
+    "projection-burden-scenario",
+    "projection-burden-event",
+    "projection-burden-distribution",
+    "projection-burden-slice",
+    "projection-burden-model-decision",
+    "projection-burden-model-comparison",
+    "projection-burden-report",
+    "projection-burden-hawkes-binding",
+    "projection-burden-consumption-receipt",
+    "projection-burden-release-coverage",
     "observation-uncertainty-policy",
     "observation-uncertainty-scenario",
     "observation-cardinality-evidence",
@@ -2037,6 +2049,8 @@ def _contract_status(
 
 
 def _family(module_name: str, version: str) -> str:
+    if "projection_burden" in module_name:
+        return "scientific"
     if "alignment_qualification" in module_name:
         return "scientific"
     if "partition_invariance" in module_name:
@@ -2089,7 +2103,11 @@ def _consumer_stages(family: str) -> tuple[str, ...]:
     return {
         "dataset": ("catalog_selection", "source_enrichment"),
         "source": ("source_enrichment",),
-        "training": ("source_enrichment", "evidence_qualification", "proposal"),
+        "training": (
+            "source_enrichment",
+            "evidence_qualification",
+            "proposal",
+        ),
         "feed_epoch": ("evidence_qualification", "proposal", "validation"),
         "context": ("evidence_qualification", "proposal", "validation"),
         "scientific": (
@@ -2221,7 +2239,11 @@ def _field_publication_safety(name: str) -> str:
 
 
 def _field_description(version: str, name: str) -> str:
-    if "synthetic-event" in version and name in {"bid", "ask", "event_time_ns"}:
+    if "synthetic-event" in version and name in {
+        "bid",
+        "ask",
+        "event_time_ns",
+    }:
         return (
             "Immutable for observed origin; generated only for explicitly "
             "synthetic origin with separate lineage."

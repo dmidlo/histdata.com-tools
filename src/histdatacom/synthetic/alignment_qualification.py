@@ -2472,7 +2472,9 @@ def build_triangle_quote_age_slices(
     slices = []
     for (dimension, key, support), samples in grouped.items():
         ages = sorted(item[0] for item in samples)
-        tuple_digest = _content_sha256(sorted(item[1] for item in samples))
+        tuple_ids: list[JSONValue] = []
+        tuple_ids.extend(sorted(item[1] for item in samples))
+        tuple_digest = _content_sha256(tuple_ids)
         slices.append(
             TriangleQuoteAgeSliceV1(
                 dimension=dimension,
