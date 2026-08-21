@@ -392,6 +392,7 @@ _AUDITED_MODULES = (
     "histdatacom.synthetic.hawkes_residuals",
     "histdatacom.synthetic.hawkes_selection",
     "histdatacom.synthetic.release_holdout",
+    "histdatacom.synthetic.release_candidate",
     "histdatacom.synthetic.observation_uncertainty",
     "histdatacom.synthetic.diagnostics",
     "histdatacom.synthetic.reconstruction_handlers",
@@ -477,6 +478,15 @@ _REQUIRED_SCHEMA_TOKENS = (
     "release-holdout-evaluation-result",
     "release-holdout-evaluation-receipt",
     "release-holdout-retirement-marker",
+    "release-candidate-git-identity",
+    "release-candidate-build-set",
+    "release-candidate-runtime-identity",
+    "release-candidate-filesystem-root",
+    "release-candidate-validation-gate",
+    "release-candidate-branch-governance",
+    "release-candidate-dependency",
+    "reconstruction-release-candidate",
+    "release-candidate-artifact-binding",
     "observation-uncertainty-policy",
     "observation-uncertainty-scenario",
     "observation-cardinality-evidence",
@@ -2000,6 +2010,8 @@ def _contract_status(
 
 
 def _family(module_name: str, version: str) -> str:
+    if "release_candidate" in module_name:
+        return "release"
     if "release_holdout" in module_name:
         return "experiment"
     if "reconstruction_science" in module_name:
