@@ -966,7 +966,7 @@ class HawkesProductSelectionDossierV1:
     """Retained deterministic product choice and exclusion rationale."""
 
     policy: HawkesProductSelectionPolicyV1
-    comparison_id: str
+    comparison_id: str | None
     qualification_dossier_id: str
     qualification_decision_ids: Mapping[str, str]
     qualification_residual_report_ids: Mapping[str, tuple[str, ...]]
@@ -990,9 +990,11 @@ class HawkesProductSelectionDossierV1:
         )
         if not isinstance(self.policy, HawkesProductSelectionPolicyV1):
             raise TypeError("Hawkes selection dossier policy must use v1")
-        object.__setattr__(
-            self, "comparison_id", _required_text(self.comparison_id)
-        )
+        gate_selection = self.comparison_id is None
+        if not gate_selection:
+            object.__setattr__(
+                self, "comparison_id", _required_text(self.comparison_id)
+            )
         object.__setattr__(
             self,
             "qualification_dossier_id",
@@ -1039,39 +1041,58 @@ class HawkesProductSelectionDossierV1:
                 key=lambda item: item.engine_id,
             )
         )
-        if {item.engine_id for item in final_reports} != set(
-            HAWKES_SELECTION_ENGINE_IDS
-        ) or any(
-            item.comparison_id != self.comparison_id
-            or item.policy_id != self.policy.policy_id
-            or item.qualification_dossier_id != self.qualification_dossier_id
-            or item.status != "available"
-            for item in final_reports
-        ):
-            raise ValueError(
-                "Hawkes dossier final-product residual reports differ"
-            )
-        if {item.metric_id for item in comparisons} != set(METRIC_DIRECTIONS):
-            raise ValueError(
-                "Hawkes dossier metric comparison coverage differs"
-            )
-        if any(
-            not item.power_sufficient
-            or item.conclusion is HawkesComparisonConclusion.INCONCLUSIVE
-            for item in comparisons
-        ):
-            raise ValueError("Hawkes dossier contains unresolved comparisons")
         selection_reasons = _text_tuple(self.selection_reason_codes)
         exclusion_reasons = _text_tuple(self.exclusion_reason_codes)
+        if gate_selection:
+            if comparisons or final_reports:
+                raise ValueError(
+                    "hard-gate Hawkes selection cannot contain pairwise results"
+                )
+            if (
+                "only_reconstruction_eligible_candidate"
+                not in selection_reasons
+                or "reconstruction_ineligible_candidate"
+                not in exclusion_reasons
+            ):
+                raise ValueError("hard-gate Hawkes selection reasons differ")
+        else:
+            if {item.engine_id for item in final_reports} != set(
+                HAWKES_SELECTION_ENGINE_IDS
+            ) or any(
+                item.comparison_id != self.comparison_id
+                or item.policy_id != self.policy.policy_id
+                or item.qualification_dossier_id
+                != self.qualification_dossier_id
+                or item.status != "available"
+                for item in final_reports
+            ):
+                raise ValueError(
+                    "Hawkes dossier final-product residual reports differ"
+                )
+            if {item.metric_id for item in comparisons} != set(
+                METRIC_DIRECTIONS
+            ):
+                raise ValueError(
+                    "Hawkes dossier metric comparison coverage differs"
+                )
+            if any(
+                not item.power_sufficient
+                or item.conclusion is HawkesComparisonConclusion.INCONCLUSIVE
+                for item in comparisons
+            ):
+                raise ValueError(
+                    "Hawkes dossier contains unresolved comparisons"
+                )
+            if "only_reconstruction_eligible_candidate" in selection_reasons:
+                raise ValueError("paired Hawkes selection reasons differ")
         artifacts = {
             _required_text(key): value
             for key, value in sorted(self.input_artifacts.items())
         }
-        if set(artifacts) != {
-            "policy",
-            "qualification",
-            "validation_comparison",
-        }:
+        expected_artifacts = {"policy", "qualification"}
+        if not gate_selection:
+            expected_artifacts.add("validation_comparison")
+        if set(artifacts) != expected_artifacts:
             raise ValueError(
                 "Hawkes selection dossier input artifact set differs"
             )
@@ -1110,10 +1131,16 @@ class HawkesProductSelectionDossierV1:
         _bounded_json(self.to_json(), "Hawkes product selection dossier")
 
     def payload(self) -> dict[str, JSONValue]:
+        gate_selection = self.comparison_id is None
         return {
             "schema_version": self.schema_version,
             "policy": self.policy.to_dict(),
             "comparison_id": self.comparison_id,
+            "selection_mode": (
+                "qualification_hard_gate"
+                if gate_selection
+                else "paired_validation"
+            ),
             "qualification_dossier_id": self.qualification_dossier_id,
             "qualification_decision_ids": dict(self.qualification_decision_ids),
             "qualification_residual_report_ids": {
@@ -1137,7 +1164,9 @@ class HawkesProductSelectionDossierV1:
             "implementation_sha256": self.implementation_sha256,
             "validation_only": True,
             "final_holdout_used_for_selection": False,
-            "eligible_but_unselected_engine_excluded": True,
+            "paired_validation_comparison_reached": not gate_selection,
+            "eligible_but_unselected_engine_excluded": not gate_selection,
+            "reconstruction_ineligible_engine_excluded": gate_selection,
             "manual_preference_used": False,
             "repository_order_used": False,
             "historical_truth_claim": False,
@@ -1156,18 +1185,36 @@ class HawkesProductSelectionDossierV1:
         for name, expected in (
             ("validation_only", True),
             ("final_holdout_used_for_selection", False),
-            ("eligible_but_unselected_engine_excluded", True),
             ("manual_preference_used", False),
             ("repository_order_used", False),
             ("historical_truth_claim", False),
         ):
             if data.get(name) != expected:
                 raise ValueError(f"Hawkes selection dossier {name} differs")
+        selection_mode = str(data.get("selection_mode", ""))
+        gate_selection = selection_mode == "qualification_hard_gate"
+        if selection_mode not in {
+            "qualification_hard_gate",
+            "paired_validation",
+        }:
+            raise ValueError("Hawkes selection dossier mode differs")
+        for name, expected in (
+            ("paired_validation_comparison_reached", not gate_selection),
+            ("eligible_but_unselected_engine_excluded", not gate_selection),
+            ("reconstruction_ineligible_engine_excluded", gate_selection),
+        ):
+            if data.get(name) != expected:
+                raise ValueError(f"Hawkes selection dossier {name} differs")
+        comparison_value = data.get("comparison_id")
+        if gate_selection != (comparison_value is None):
+            raise ValueError("Hawkes selection dossier comparison mode differs")
         return cls(
             policy=HawkesProductSelectionPolicyV1.from_dict(
                 _mapping(data.get("policy"))
             ),
-            comparison_id=str(data.get("comparison_id", "")),
+            comparison_id=(
+                None if comparison_value is None else str(comparison_value)
+            ),
             qualification_dossier_id=str(
                 data.get("qualification_dossier_id", "")
             ),
@@ -1218,12 +1265,76 @@ class HawkesProductSelectionDossierV1:
 
 def derive_hawkes_product_selection_dossier(
     policy: HawkesProductSelectionPolicyV1,
-    comparison: HawkesValidationComparisonV1,
+    comparison: HawkesValidationComparisonV1 | None,
     qualification: PoweredQualificationDossierV1,
     *,
     input_artifacts: Mapping[str, ArtifactRef],
 ) -> HawkesProductSelectionDossierV1:
     """Replay the product choice without holdout, issue-order, or manual input."""
+    decisions = {
+        engine_id: qualification.decision(engine_id)
+        for engine_id in HAWKES_SELECTION_ENGINE_IDS
+    }
+    eligible = tuple(
+        engine_id
+        for engine_id in HAWKES_SELECTION_ENGINE_IDS
+        if decisions[engine_id].reconstruction_eligible
+    )
+    if not eligible:
+        raise ValueError("no Hawkes candidate is reconstruction eligible")
+    if len(eligible) == 1:
+        if comparison is not None:
+            raise ValueError(
+                "Hawkes pairwise comparison must be omitted after hard-gate "
+                "exclusion"
+            )
+        selected = eligible[0]
+        excluded = (
+            FULL_HAWKES_ENGINE_ID
+            if selected == DIAGONAL_HAWKES_ENGINE_ID
+            else DIAGONAL_HAWKES_ENGINE_ID
+        )
+        failed_gates = tuple(
+            sorted(
+                gate_id
+                for gate_id, status in decisions[excluded].gate_statuses.items()
+                if getattr(status, "value", status) == "failed"
+            )
+        )
+        exclusion_reasons = (
+            "reconstruction_ineligible_candidate",
+            "one_or_more_powered_gates_failed",
+            *(f"hard_gate_failed:{gate_id}" for gate_id in failed_gates),
+        )
+        return HawkesProductSelectionDossierV1(
+            policy=policy,
+            comparison_id=None,
+            qualification_dossier_id=qualification.dossier_id,
+            qualification_decision_ids={
+                key: value.decision_id for key, value in decisions.items()
+            },
+            qualification_residual_report_ids={
+                key: tuple(value.residual_report_ids)
+                for key, value in decisions.items()
+            },
+            metric_comparisons=(),
+            final_product_residual_reports=(),
+            selected_engine_id=selected,
+            excluded_engine_id=excluded,
+            selection_reason_codes=(
+                "only_reconstruction_eligible_candidate",
+                "predeclared_hard_gate_precedes_pairwise_comparison",
+                "pairwise_validation_comparison_not_reached",
+                "final_holdout_not_used",
+            ),
+            exclusion_reason_codes=exclusion_reasons,
+            input_artifacts=input_artifacts,
+            implementation_sha256=_implementation_sha256(),
+        )
+    if comparison is None:
+        raise ValueError(
+            "both eligible Hawkes candidates require a paired comparison"
+        )
     if comparison.policy_id != policy.policy_id:
         raise ValueError("Hawkes comparison policy is stale")
     if comparison.qualification_dossier_id != qualification.dossier_id:
@@ -1232,14 +1343,6 @@ def derive_hawkes_product_selection_dossier(
         raise ValueError("Hawkes comparison is below paired-cell minimum")
     for ref in comparison.evidence_artifacts.values():
         verify_artifact_ref(ref)
-    decisions = {
-        engine_id: qualification.decision(engine_id)
-        for engine_id in HAWKES_SELECTION_ENGINE_IDS
-    }
-    if any(not item.reconstruction_eligible for item in decisions.values()):
-        raise ValueError(
-            "both Hawkes candidates must be reconstruction eligible"
-        )
     final_product_residual_reports = tuple(
         _final_product_residual_report(policy, comparison, engine_id)
         for engine_id in HAWKES_SELECTION_ENGINE_IDS
@@ -1350,27 +1453,32 @@ def _final_product_residual_report(
 
 def build_hawkes_product_selection_dossier(
     policy_path: str | Path,
-    comparison_path: str | Path,
+    comparison_path: str | Path | None,
     qualification_path: str | Path,
     *,
     output_directory: str | Path,
 ) -> HawkesProductSelectionDossierV1:
     """Read exact retained inputs, derive, verify, and publish one dossier."""
     policy = read_hawkes_product_selection_policy(policy_path)
-    comparison = read_hawkes_validation_comparison(comparison_path)
+    comparison = (
+        None
+        if comparison_path is None
+        else read_hawkes_validation_comparison(comparison_path)
+    )
     qualification = read_powered_qualification_dossier(qualification_path)
     verify_powered_qualification_dossier(qualification)
     refs = {
         "policy": artifact_ref_for_file(
             policy_path, kind="hawkes_product_selection_policy_v1"
         ),
-        "validation_comparison": artifact_ref_for_file(
-            comparison_path, kind="hawkes_validation_comparison_v1"
-        ),
         "qualification": artifact_ref_for_file(
             qualification_path, kind="powered_qualification_dossier_v1"
         ),
     }
+    if comparison_path is not None:
+        refs["validation_comparison"] = artifact_ref_for_file(
+            comparison_path, kind="hawkes_validation_comparison_v1"
+        )
     dossier = derive_hawkes_product_selection_dossier(
         policy, comparison, qualification, input_artifacts=refs
     )
@@ -1392,8 +1500,11 @@ def verify_hawkes_product_selection_dossier(
     policy = read_hawkes_product_selection_policy(
         dossier.input_artifacts["policy"].path
     )
-    comparison = read_hawkes_validation_comparison(
-        dossier.input_artifacts["validation_comparison"].path
+    comparison_ref = dossier.input_artifacts.get("validation_comparison")
+    comparison = (
+        None
+        if comparison_ref is None
+        else read_hawkes_validation_comparison(comparison_ref.path)
     )
     qualification = read_powered_qualification_dossier(
         dossier.input_artifacts["qualification"].path

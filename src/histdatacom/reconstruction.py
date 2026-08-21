@@ -3783,12 +3783,12 @@ class ReconstructionClient:
     def select_hawkes_product(
         self,
         policy_path: str | Path,
-        comparison_path: str | Path,
+        comparison_path: str | Path | None,
         qualification_path: str | Path,
         *,
         output_directory: str | Path,
     ) -> HawkesProductSelectionDossierV1:
-        """Freeze the validation-only diagonal-versus-full product choice."""
+        """Freeze the hard-gate or paired-validation Hawkes product choice."""
         try:
             return build_hawkes_product_selection_dossier(
                 policy_path,

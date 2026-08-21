@@ -329,6 +329,24 @@ def test_cli_exposes_engine_discovery_portfolio_and_selected_evaluation(
         reconstruction_cli.main(
             [
                 "--json",
+                "hawkes-select",
+                "--policy",
+                "policy.json",
+                "--qualification",
+                "qualification.json",
+                "--output-directory",
+                "gate-selection",
+            ]
+        )
+        == 0
+    )
+    assert json.loads(capsys.readouterr().out)["schema_version"].endswith(
+        "selection-dossier.v1"
+    )
+    assert (
+        reconstruction_cli.main(
+            [
+                "--json",
                 "observation-uncertainty-policy",
                 "--output-directory",
                 "uncertainty",
@@ -404,6 +422,15 @@ def test_cli_exposes_engine_discovery_portfolio_and_selected_evaluation(
                 "comparison.json",
                 "qualification.json",
                 "selection",
+            ),
+        ),
+        (
+            "hawkes-select",
+            (
+                "policy.json",
+                None,
+                "qualification.json",
+                "gate-selection",
             ),
         ),
         ("observation-uncertainty-policy", "uncertainty"),

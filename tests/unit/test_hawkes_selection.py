@@ -112,15 +112,31 @@ def _observations(
 
 
 def _qualification(
-    *, full_eligible: bool = True, residual_complete: bool = True
+    *,
+    diagonal_eligible: bool = True,
+    full_eligible: bool = True,
+    residual_complete: bool = True,
 ) -> Any:
     decisions = {
         engine_id: SimpleNamespace(
             engine_id=engine_id,
             decision_id=f"engine-qualification-decision:{engine_id}",
             reconstruction_eligible=(
-                full_eligible if engine_id == FULL_HAWKES_ENGINE_ID else True
+                full_eligible
+                if engine_id == FULL_HAWKES_ENGINE_ID
+                else diagonal_eligible
             ),
+            gate_statuses={
+                "time_serial_dependence": (
+                    "passed"
+                    if (
+                        full_eligible
+                        if engine_id == FULL_HAWKES_ENGINE_ID
+                        else diagonal_eligible
+                    )
+                    else "failed"
+                )
+            },
             residual_report_ids=(
                 *(
                     (f"hawkes-residual-report:{engine_id}",)
@@ -162,6 +178,12 @@ def _input_artifacts(tmp_path: Path) -> dict[str, ArtifactRef]:
     }
 
 
+def _gate_input_artifacts(tmp_path: Path) -> dict[str, ArtifactRef]:
+    artifacts = _input_artifacts(tmp_path)
+    artifacts.pop("validation_comparison")
+    return artifacts
+
+
 def test_validation_only_selection_prefers_lower_resource_diagonal(
     tmp_path: Path,
 ) -> None:
@@ -188,7 +210,10 @@ def test_validation_only_selection_prefers_lower_resource_diagonal(
     )
     assert {
         item.engine_id for item in dossier.final_product_residual_reports
-    } == {DIAGONAL_HAWKES_ENGINE_ID, FULL_HAWKES_ENGINE_ID}
+    } == {
+        DIAGONAL_HAWKES_ENGINE_ID,
+        FULL_HAWKES_ENGINE_ID,
+    }
     assert all(
         item.to_dict()["diagnostic_stage"] == "final_constrained_product"
         and item.to_dict()["method"]
@@ -306,12 +331,47 @@ def test_selection_refuses_stale_underpowered_and_conflicting_evidence(
             input_artifacts=artifacts,
         )
 
-    with pytest.raises(ValueError, match="both Hawkes candidates"):
+    gate_selected = derive_hawkes_product_selection_dossier(
+        policy,
+        None,
+        cast(Any, _qualification(full_eligible=False)),
+        input_artifacts=_gate_input_artifacts(tmp_path),
+    )
+    assert gate_selected.selected_engine_id == DIAGONAL_HAWKES_ENGINE_ID
+    assert gate_selected.comparison_id is None
+    assert not gate_selected.metric_comparisons
+    assert not gate_selected.final_product_residual_reports
+    assert gate_selected.to_dict()["selection_mode"] == (
+        "qualification_hard_gate"
+    )
+    assert "hard_gate_failed:time_serial_dependence" in (
+        gate_selected.exclusion_reason_codes
+    )
+    assert (
+        HawkesProductSelectionDossierV1.from_json(gate_selected.to_json())
+        == gate_selected
+    )
+
+    with pytest.raises(ValueError, match="must be omitted"):
         derive_hawkes_product_selection_dossier(
             policy,
             comparison,
             cast(Any, _qualification(full_eligible=False)),
             input_artifacts=artifacts,
+        )
+
+    with pytest.raises(ValueError, match="no Hawkes candidate"):
+        derive_hawkes_product_selection_dossier(
+            policy,
+            None,
+            cast(
+                Any,
+                _qualification(
+                    diagonal_eligible=False,
+                    full_eligible=False,
+                ),
+            ),
+            input_artifacts=_gate_input_artifacts(tmp_path),
         )
 
     with pytest.raises(ValueError, match="raw and benchmark residual reports"):
@@ -431,3 +491,37 @@ def test_public_builder_replays_and_publishes_exact_inputs(
     )
     assert len(published) == 1
     assert read_hawkes_product_selection_dossier(published[0]) == dossier
+
+
+def test_public_builder_selects_only_hard_gate_eligible_candidate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    policy_ref = write_hawkes_product_selection_policy(
+        HawkesProductSelectionPolicyV1(), tmp_path
+    )
+    qualification_path = tmp_path / "qualification.json"
+    qualification_path.write_text("{}\n", encoding="utf-8")
+    qualification = _qualification(diagonal_eligible=False)
+    monkeypatch.setattr(
+        selection_module,
+        "read_powered_qualification_dossier",
+        lambda _: qualification,
+    )
+    monkeypatch.setattr(
+        selection_module,
+        "verify_powered_qualification_dossier",
+        lambda _: None,
+    )
+
+    dossier = build_hawkes_product_selection_dossier(
+        policy_ref.path,
+        None,
+        qualification_path,
+        output_directory=tmp_path / "selection",
+    )
+
+    assert dossier.selected_engine_id == FULL_HAWKES_ENGINE_ID
+    assert dossier.excluded_engine_id == DIAGONAL_HAWKES_ENGINE_ID
+    assert dossier.comparison_id is None
+    assert set(dossier.input_artifacts) == {"policy", "qualification"}
+    verify_hawkes_product_selection_dossier(dossier)

@@ -127,10 +127,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     hawkes_select = subparsers.add_parser(
         "hawkes-select",
-        help="freeze a validation-only diagonal-versus-full Hawkes choice",
+        help="freeze a hard-gate or paired-validation Hawkes choice",
     )
     hawkes_select.add_argument("--policy", required=True, metavar="PATH")
-    hawkes_select.add_argument("--comparison", required=True, metavar="PATH")
+    hawkes_select.add_argument(
+        "--comparison",
+        required=False,
+        metavar="PATH",
+        help="required only when both Hawkes candidates remain eligible",
+    )
     hawkes_select.add_argument("--qualification", required=True, metavar="PATH")
     hawkes_select.add_argument(
         "--output-directory", required=True, metavar="PATH"

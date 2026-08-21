@@ -7,7 +7,18 @@ qualification dossier may declare both
 The v2.5 product may bind either engine only through a replay-verified
 `histdatacom.hawkes-product-selection-dossier.v1`.
 
-The dossier is derived from three content-addressed inputs:
+The dossier first replays the powered hard-gate decisions. If exactly one
+candidate is reconstruction-eligible, that candidate is selected immediately
+and the rejected candidate's failed gates are retained. The pairwise decision
+surface is explicitly recorded as not reached; an ineligible model is never
+treated as a valid comparator. This gate-only path is derived from two
+content-addressed inputs:
+
+1. a predeclared `histdatacom.hawkes-product-selection-policy.v1`; and
+2. the powered qualification dossier.
+
+If both candidates remain eligible, the dossier is instead derived from three
+content-addressed inputs:
 
 1. a predeclared `histdatacom.hawkes-product-selection-policy.v1`;
 2. an exact paired `histdatacom.hawkes-validation-comparison.v1`; and
@@ -51,13 +62,13 @@ Each row-free observation retains the aggregate numerator, denominator, and
 projection event count; construction refuses a supplied burden or count that
 does not reproduce those aggregates.
 
-For every metric, the implementation publishes paired means, a Student-t
-confidence interval for the oriented relative effect, achieved power at the
-predeclared materiality margin, and one of `favors_diagonal`, `favors_full`,
-`practically_equivalent`, or `inconclusive`. Selection refuses underpowered or
-inconclusive comparisons and Pareto conflicts. Both candidates must remain
-reconstruction-eligible and every observed branching matrix must satisfy the
-strict predeclared spectral-radius bound.
+When both candidates pass the hard gates, the implementation publishes paired
+means, a Student-t confidence interval for the oriented relative effect,
+achieved power at the predeclared materiality margin, and one of
+`favors_diagonal`, `favors_full`, `practically_equivalent`, or `inconclusive`.
+Selection refuses underpowered or inconclusive comparisons and Pareto conflicts.
+Both candidates must remain reconstruction-eligible and every observed
+branching matrix must satisfy the strict predeclared spectral-radius bound.
 
 The replay rule evaluates raw cross-series behavior and projection burden
 first, then the complete scientific surface. Resource comparisons are used
@@ -80,6 +91,17 @@ histdatacom reconstruction --json hawkes-select \
   --output-directory work/selection
 ```
 
+When powered qualification leaves exactly one eligible candidate, omit the
+comparison. The hard-gate decision is replayed before any pairwise result could
+influence selection:
+
+```sh
+histdatacom reconstruction --json hawkes-select \
+  --policy work/selection/hawkes-product-selection-policy-<sha256>.json \
+  --qualification work/qualification/powered-qualification-dossier-<sha256>.json \
+  --output-directory work/selection
+```
+
 A v2 plan that selects either marked-Hawkes candidate must set
 `hawkes_product_selection_dossier_path` and
 `observation_uncertainty_policy_path`, and
@@ -92,6 +114,6 @@ powered qualification. See [Observation-process uncertainty
 propagation](observation-process-uncertainty.md) and [feed-epoch transition
 uncertainty](feed-epoch-transition-uncertainty.md).
 
-The eligible-but-unselected candidate remains named with machine-readable
-exclusion reasons. The dossier makes no historical-truth, broker, or investment
-claim.
+The unselected candidate remains named with machine-readable exclusion reasons,
+whether it failed a hard gate or lost the powered paired comparison. The dossier
+makes no historical-truth, broker, or investment claim.
