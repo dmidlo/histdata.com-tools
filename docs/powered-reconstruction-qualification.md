@@ -85,9 +85,13 @@ component probabilities by their current intensity contributions. It reports
 deterministically randomized discrete PITs, log and Brier scores, calibration
 bins, transition confusion counts, previous-mark and duration-conditioned
 residual summaries, and missing mark support. Benjamini-Hochberg correction is
-performed within each protected split and diagnostic family. Deterministic
-misspecification simulations separately audit wrong baseline/decay, excitation,
-and mark probabilities and prevent an underpowered family from passing.
+performed within each protected split and diagnostic family and retained as
+descriptive exact-null evidence. The hard gate uses the same predeclared
+`0.20` practical-effect tolerance as the clustered-window predictive check,
+avoiding a second sample-size-dependent acceptance rule over the pooled
+residuals. Deterministic misspecification simulations separately audit wrong
+baseline/decay, excitation, and mark probabilities and prevent an underpowered
+family from passing.
 
 These analytic reports explicitly state that their compensator applies before
 carving and does not apply to the reconciled product. A Hawkes qualification

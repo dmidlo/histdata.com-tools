@@ -54,6 +54,7 @@ EXACT_COMPENSATOR_METHOD = (
 MARK_PIT_METHOD = "ordered-randomized-discrete-pit-semantic-sha256-v1"
 MULTIPLICITY_METHOD = "benjamini-hochberg-within-split-family-v1"
 POWER_STUDY_METHOD = "hawkes-residual-power-study-v1"
+PRACTICAL_RESIDUAL_TOLERANCE = 0.20
 MAX_RESIDUAL_WINDOWS = 512
 MAX_RESIDUAL_EVENTS = 1_000_000
 MAX_RESIDUAL_STRATA = 512
@@ -1763,17 +1764,22 @@ def _summarize_stratum(
         status = HawkesResidualStatus.INSUFFICIENT_EVIDENCE
         reasons.append("residual_cell_support_below_policy_minimum")
     elif (
-        time_p is None
-        or time_p < policy.alpha
+        time_ks is None
+        or time_ks > PRACTICAL_RESIDUAL_TOLERANCE
         or lag is None
         or abs(lag) > policy.maximum_absolute_lag1
-        or (mark_p is not None and mark_p < policy.alpha)
+        or (mark_ks is not None and mark_ks > PRACTICAL_RESIDUAL_TOLERANCE)
     ):
         status = HawkesResidualStatus.FAILED
-        reasons.append("raw_proposal_residual_cell_rejects_model")
+        reasons.append("raw_proposal_residual_cell_practical_gate_failed")
     else:
         status = HawkesResidualStatus.PASSED
-        reasons.append("raw_proposal_residual_cell_does_not_reject_model")
+        reasons.append("raw_proposal_residual_cell_practical_gate_passed")
+    if any(
+        value is not None and value < policy.alpha
+        for value in (time_p, lag_p, mark_p)
+    ):
+        reasons.append("raw_proposal_exact_null_rejected_descriptively")
     missing = tuple(mark for mark in MARK_STATES if mark not in observed_marks)
     if missing:
         reasons.append("one_or_more_mark_states_unsupported_in_cell")
@@ -1912,7 +1918,6 @@ def _apply_multiplicity(
     )
     result: list[HawkesResidualStratumV1] = []
     for item in strata:
-        status = item.status
         reasons = list(item.reason_codes)
         adjusted_values = tuple(
             value
@@ -1923,12 +1928,12 @@ def _apply_multiplicity(
             )
             if value is not None
         )
-        if status is not HawkesResidualStatus.INSUFFICIENT_EVIDENCE and any(
-            value < policy.alpha for value in adjusted_values
+        if (
+            item.status is not HawkesResidualStatus.INSUFFICIENT_EVIDENCE
+            and any(value < policy.alpha for value in adjusted_values)
         ):
-            status = HawkesResidualStatus.FAILED
             reasons.append(
-                "multiplicity_adjusted_residual_family_rejects_model"
+                "multiplicity_adjusted_exact_null_rejected_descriptively"
             )
         result.append(
             replace(
@@ -1940,7 +1945,6 @@ def _apply_multiplicity(
                 mark_uniform_adjusted_p_value=mark_adjusted.get(
                     item.stratum_id
                 ),
-                status=status,
                 reason_codes=tuple(dict.fromkeys(reasons)),
                 stratum_id="",
             )
@@ -1958,7 +1962,8 @@ def _family_statuses(
     def selected_status(
         *,
         support: int,
-        adjusted_p: float | None,
+        practical_effect: float | None,
+        maximum_effect: float,
         observed_ok: bool,
         power_families: Sequence[str],
     ) -> HawkesResidualStatus:
@@ -1979,34 +1984,37 @@ def _family_statuses(
             for status in power_statuses
         ):
             return HawkesResidualStatus.INSUFFICIENT_EVIDENCE
-        if adjusted_p is None:
+        if practical_effect is None:
             return HawkesResidualStatus.INSUFFICIENT_EVIDENCE
         return (
             HawkesResidualStatus.PASSED
-            if adjusted_p >= policy.alpha and observed_ok
+            if practical_effect <= maximum_effect and observed_ok
             else HawkesResidualStatus.FAILED
         )
 
     return {
         "time_uniformity": selected_status(
             support=overall.sample_count,
-            adjusted_p=overall.time_uniform_adjusted_p_value,
+            practical_effect=overall.time_uniform_ks,
+            maximum_effect=PRACTICAL_RESIDUAL_TOLERANCE,
             observed_ok=True,
             power_families=("wrong_baseline", "wrong_decay"),
         ),
         "time_serial_dependence": selected_status(
             support=overall.sample_count,
-            adjusted_p=overall.time_lag1_adjusted_p_value,
-            observed_ok=(
-                overall.time_lag1_autocorrelation is not None
-                and abs(overall.time_lag1_autocorrelation)
-                <= policy.maximum_absolute_lag1
+            practical_effect=(
+                abs(overall.time_lag1_autocorrelation)
+                if overall.time_lag1_autocorrelation is not None
+                else None
             ),
+            maximum_effect=policy.maximum_absolute_lag1,
+            observed_ok=(overall.time_lag1_autocorrelation is not None),
             power_families=("wrong_excitation",),
         ),
         "mark_calibration": selected_status(
             support=overall.mark_sample_count,
-            adjusted_p=overall.mark_uniform_adjusted_p_value,
+            practical_effect=overall.mark_uniform_ks,
+            maximum_effect=PRACTICAL_RESIDUAL_TOLERANCE,
             observed_ok=not overall.missing_mark_states,
             power_families=("wrong_mark_probabilities",),
         ),

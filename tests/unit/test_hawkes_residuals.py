@@ -12,10 +12,12 @@ import histdatacom.synthetic.hawkes_residuals as residual_module
 from histdatacom.synthetic.benchmark import BenchmarkEventV1
 from histdatacom.synthetic.event_clock import EventClockCalibrationWindowV1
 from histdatacom.synthetic.hawkes_residuals import (
+    PRACTICAL_RESIDUAL_TOLERANCE,
     HawkesResidualPolicyV1,
     HawkesResidualReportV1,
     HawkesResidualStage,
     HawkesResidualStatus,
+    HawkesResidualStratumV1,
     HawkesResidualWindowV1,
     evaluate_marked_hawkes_residuals,
     read_hawkes_residual_report,
@@ -32,6 +34,48 @@ from histdatacom.synthetic.marked_hawkes import (
 SYMBOLS = ("EURGBP", "EURUSD", "GBPUSD")
 SECOND = 1_000_000_000
 START = 1_700_000_000_000_000_000
+
+
+def _overall_stratum(
+    *,
+    time_uniform_ks: float = 0.05,
+    time_lag1_autocorrelation: float = 0.10,
+    mark_uniform_ks: float = 0.04,
+) -> HawkesResidualStratumV1:
+    return HawkesResidualStratumV1(
+        dimension="overall",
+        key="all",
+        window_count=6,
+        sample_count=256,
+        mark_sample_count=256,
+        time_uniform_ks=time_uniform_ks,
+        time_uniform_p_value=1e-20,
+        time_uniform_adjusted_p_value=None,
+        time_lag1_autocorrelation=time_lag1_autocorrelation,
+        time_lag1_p_value=1e-20,
+        time_lag1_adjusted_p_value=None,
+        mark_uniform_ks=mark_uniform_ks,
+        mark_uniform_p_value=1e-20,
+        mark_uniform_adjusted_p_value=None,
+        integrated_hazard_quantiles={},
+        pit_tail_rates={},
+        mark_log_score=0.0,
+        mark_brier_score=0.0,
+        mark_calibration_bins=(),
+        transition_confusion_counts={},
+        conditional_pit_means={},
+        missing_mark_states=(),
+        reset_count=6,
+        right_censoring_count=6,
+        right_censoring_hazard_mean=0.0,
+        right_censoring_hazard_max=0.0,
+        protected_anchor_truncation_count=0,
+        support_boundary_truncation_count=0,
+        tied_event_count=0,
+        skipped_event_count=0,
+        status=HawkesResidualStatus.PASSED,
+        reason_codes=("test_practical_gate_passed",),
+    )
 
 
 def _events(start_ns: int, *, count: int = 24) -> tuple[BenchmarkEventV1, ...]:
@@ -134,6 +178,62 @@ def test_exact_compensator_and_power_study_are_deterministic() -> None:
         <= policy.maximum_false_positive_rate
         for item in first
     )
+
+
+def test_exact_null_probabilities_remain_descriptive() -> None:
+    policy = HawkesResidualPolicyV1(power_replications=128)
+    overall = _overall_stratum()
+    adjusted = residual_module._apply_multiplicity((overall,), policy)[0]
+
+    assert adjusted.status is HawkesResidualStatus.PASSED
+    assert adjusted.time_uniform_adjusted_p_value == pytest.approx(1e-20)
+    assert (
+        "multiplicity_adjusted_exact_null_rejected_descriptively"
+        in adjusted.reason_codes
+    )
+
+    powers = run_hawkes_residual_power_study(
+        policy, observed_time_support=256, observed_mark_support=256
+    )
+    assert residual_module._family_statuses(adjusted, powers, policy) == {
+        "time_uniformity": HawkesResidualStatus.PASSED,
+        "time_serial_dependence": HawkesResidualStatus.PASSED,
+        "mark_calibration": HawkesResidualStatus.PASSED,
+    }
+
+
+@pytest.mark.parametrize(  # type: ignore[untyped-decorator]
+    ("field", "value", "family"),
+    (
+        (
+            "time_uniform_ks",
+            PRACTICAL_RESIDUAL_TOLERANCE + 0.01,
+            "time_uniformity",
+        ),
+        (
+            "time_lag1_autocorrelation",
+            0.21,
+            "time_serial_dependence",
+        ),
+        (
+            "mark_uniform_ks",
+            PRACTICAL_RESIDUAL_TOLERANCE + 0.01,
+            "mark_calibration",
+        ),
+    ),
+)
+def test_practical_residual_effect_breaches_still_fail_closed(
+    field: str, value: float, family: str
+) -> None:
+    policy = HawkesResidualPolicyV1(power_replications=128)
+    overall = replace(_overall_stratum(), **{field: value}, stratum_id="")
+    powers = run_hawkes_residual_power_study(
+        policy, observed_time_support=256, observed_mark_support=256
+    )
+
+    statuses = residual_module._family_statuses(overall, powers, policy)
+
+    assert statuses[family] is HawkesResidualStatus.FAILED
 
 
 @pytest.mark.parametrize(  # type: ignore[untyped-decorator]

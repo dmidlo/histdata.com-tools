@@ -45,6 +45,7 @@ from histdatacom.synthetic.benchmark_corpus import (
 )
 from histdatacom.synthetic.contracts import canonical_contract_json
 from histdatacom.synthetic.hawkes_residuals import (
+    PRACTICAL_RESIDUAL_TOLERANCE,
     HawkesResidualReportV1,
     HawkesResidualStatus,
     HawkesResidualStratumV1,
@@ -148,7 +149,6 @@ DEFAULT_GATE_TEST_METHODS = {
 RESIDUAL_SUPPORT_GATES = frozenset(
     {"time_uniformity", "time_serial_dependence", "mark_calibration"}
 )
-PRACTICAL_RESIDUAL_TOLERANCE = 0.20
 CONFORMAL_TARGET_COVERAGE = 0.90
 RAW_RANK_ENVELOPE_METHOD = "raw-finite-rank-envelope-v1"
 VALIDATION_SPLIT_CONFORMAL_METHOD = "validation-split-conformal-envelope-v1"

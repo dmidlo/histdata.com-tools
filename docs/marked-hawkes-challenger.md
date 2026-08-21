@@ -175,10 +175,15 @@ session, event state, and observation scenario. Transition-conditioned marks
 use the fitted immigrant/source mixture at the event time and expose
 deterministically randomized discrete PIT, log score, Brier score, calibration
 bins, confusion counts, conditional PIT summaries, and missing states.
-Multiplicity is controlled within split and family. A deterministic power
-study injects wrong baseline/decay, wrong excitation, and wrong mark
-probabilities; inadequate support or power is recorded as
-`insufficient_evidence`, never silently passed.
+Exact-null probabilities and Benjamini-Hochberg-adjusted probabilities are
+retained within each split and family as descriptive misspecification
+evidence. Because the campaign pools residuals from protected windows, hard
+qualification uses the predeclared practical-effect gates shared with the
+clustered-window predictive checks: KS distance and absolute lag-one
+correlation must not exceed `0.20`. A deterministic power study injects wrong
+baseline/decay, wrong excitation, and wrong mark probabilities; inadequate
+support or power is recorded as `insufficient_evidence`, never silently
+passed.
 
 The analytic compensator diagnoses only `raw_proposal`. Candidate carving,
 anchor rejection, and cross-currency reconciliation change the probability
