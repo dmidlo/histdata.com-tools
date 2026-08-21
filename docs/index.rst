@@ -70,6 +70,7 @@ Persistence, projections, and validation
    release-holdout-governance
    reconstruction-release-candidate
    adaptive-partition-invariance
+   triangle-alignment-qualification
    reconstruction-diagnostics
    reconstruction-certification-contracts
    reconstruction-temporal-orchestration

@@ -394,6 +394,7 @@ _AUDITED_MODULES = (
     "histdatacom.synthetic.release_holdout",
     "histdatacom.synthetic.release_candidate",
     "histdatacom.synthetic.partition_invariance",
+    "histdatacom.synthetic.alignment_qualification",
     "histdatacom.synthetic.observation_uncertainty",
     "histdatacom.synthetic.diagnostics",
     "histdatacom.synthetic.reconstruction_handlers",
@@ -499,6 +500,20 @@ _REQUIRED_SCHEMA_TOKENS = (
     "partition-invariance-run",
     "partition-invariance-comparison",
     "partition-invariance-qualification",
+    "triangle-alignment-source-event",
+    "triangle-alignment-source-window",
+    "triangle-alignment-tuple",
+    "triangle-alignment-window-evidence",
+    "triangle-support-census",
+    "triangle-quote-age-slice",
+    "triangle-alignment-metric-tolerance",
+    "triangle-alignment-outcome",
+    "triangle-alignment-comparison",
+    "triangle-alignment-age-rule",
+    "triangle-alignment-residual-bin",
+    "triangle-alignment-consumption-receipt",
+    "triangle-alignment-qualification-policy",
+    "triangle-alignment-qualification",
     "observation-uncertainty-policy",
     "observation-uncertainty-scenario",
     "observation-cardinality-evidence",
@@ -2022,6 +2037,8 @@ def _contract_status(
 
 
 def _family(module_name: str, version: str) -> str:
+    if "alignment_qualification" in module_name:
+        return "scientific"
     if "partition_invariance" in module_name:
         return "scientific"
     if "release_candidate" in module_name:
