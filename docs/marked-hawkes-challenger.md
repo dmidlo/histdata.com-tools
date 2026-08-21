@@ -152,6 +152,43 @@ bypasses immutable anchors, fingerprint policy, context support, quarantine,
 session closure, resource bounds, spread projection, or final local
 validation.
 
+## Exact raw-proposal residual diagnostics
+
+`histdatacom.synthetic.hawkes_residuals` evaluates the fitted proposal law on
+protected validation and final-holdout windows before carving. For destination
+`i`, elapsed time `d`, and the strict-prior recursion `R_j`, each interval uses
+the exact compensator increment
+
+\[
+  \mu_i d + \sum_j \alpha_{ij} R_j(1-e^{-\beta d}).
+\]
+
+Recursions reset at every protected window. Events at one timestamp see the
+same strict-prior state and update history only after the whole timestamp
+group. The report retains reset counts, window-end censoring hazards, tied and
+skipped events, and declared support/protected-anchor truncation without
+retaining either event rows or residual rows.
+
+Time-rescaled residuals are checked for uniformity, lag-one dependence,
+integrated-hazard quantiles, and PIT tails overall and by symbol, feed epoch,
+session, event state, and observation scenario. Transition-conditioned marks
+use the fitted immigrant/source mixture at the event time and expose
+deterministically randomized discrete PIT, log score, Brier score, calibration
+bins, confusion counts, conditional PIT summaries, and missing states.
+Multiplicity is controlled within split and family. A deterministic power
+study injects wrong baseline/decay, wrong excitation, and wrong mark
+probabilities; inadequate support or power is recorded as
+`insufficient_evidence`, never silently passed.
+
+The analytic compensator diagnoses only `raw_proposal`. Candidate carving,
+anchor rejection, and cross-currency reconciliation change the probability
+law. Qualification therefore retains a separate
+`benchmark_candidate` simulation-predictive report. Product selection then
+derives a separately identified `final_constrained_product` predictive report
+from paired realized-versus-ensemble metrics after shared carving and
+reconciliation. The selection dossier binds the raw, benchmark, and final
+report identities instead of treating any one law as another.
+
 ## Reverse-degradation comparison
 
 Passing `marked_hawkes_configs=default_marked_hawkes_configs()` to

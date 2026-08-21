@@ -44,6 +44,12 @@ from histdatacom.synthetic.benchmark_corpus import (
     read_reverse_degradation_benchmark_corpus,
 )
 from histdatacom.synthetic.contracts import canonical_contract_json
+from histdatacom.synthetic.hawkes_residuals import (
+    HawkesResidualReportV1,
+    HawkesResidualStatus,
+    HawkesResidualStratumV1,
+    verify_hawkes_residual_artifact_ref,
+)
 from histdatacom.synthetic.proposal_engines import (
     ProposalEngineEvidenceV1,
     ProposalPortfolioEvaluationV1,
@@ -428,6 +434,7 @@ class PointProcessResidualReportV1:
     status: QualificationStatus
     reason_codes: tuple[str, ...]
     residual_input_id: str
+    diagnostic_stage: str = "benchmark_candidate"
     report_id: str = ""
     schema_version: str = POINT_PROCESS_RESIDUAL_REPORT_SCHEMA_VERSION
 
@@ -474,6 +481,20 @@ class PointProcessResidualReportV1:
         quantiles = _float_mapping(self.quantiles, "residual quantile", 16)
         object.__setattr__(self, "quantiles", quantiles)
         object.__setattr__(self, "status", QualificationStatus(self.status))
+        if self.diagnostic_stage not in {
+            "raw_proposal",
+            "benchmark_candidate",
+        }:
+            raise ValueError("point-process residual diagnostic stage differs")
+        expected_stage = (
+            "raw_proposal"
+            if self.method is PointProcessResidualMethod.ANALYTIC_TIME_RESCALING
+            else "benchmark_candidate"
+        )
+        if self.diagnostic_stage != expected_stage:
+            raise ValueError(
+                "point-process residual method and diagnostic stage differ"
+            )
         reasons = _text_tuple(self.reason_codes, allow_empty=False)
         object.__setattr__(self, "reason_codes", reasons)
         expected = _stable_id("point-process-residual-report", self.payload())
@@ -489,6 +510,7 @@ class PointProcessResidualReportV1:
             "split_kind": self.split_kind,
             "stratum_id": self.stratum_id,
             "method": self.method.value,
+            "diagnostic_stage": self.diagnostic_stage,
             "sample_count": self.sample_count,
             "mark_sample_count": self.mark_sample_count,
             "time_uniform_ks": self.time_uniform_ks,
@@ -501,6 +523,8 @@ class PointProcessResidualReportV1:
             "reason_codes": list(self.reason_codes),
             "residual_input_id": self.residual_input_id,
             "residual_rows_embedded": False,
+            "analytic_compensator_applies_to_final_product": False,
+            "complete_constrained_product_diagnostic": False,
         }
 
     def to_dict(self) -> dict[str, JSONValue]:
@@ -508,8 +532,14 @@ class PointProcessResidualReportV1:
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> PointProcessResidualReportV1:
-        if data.get("residual_rows_embedded") is not False:
-            raise ValueError("residual report embeds residual rows")
+        if (
+            data.get("residual_rows_embedded") is not False
+            or data.get("analytic_compensator_applies_to_final_product", False)
+            is not False
+            or data.get("complete_constrained_product_diagnostic", False)
+            is not False
+        ):
+            raise ValueError("residual report scope or row-free claim differs")
         return cls(
             engine_id=str(data.get("engine_id", "")),
             config_id=str(data.get("config_id", "")),
@@ -538,6 +568,17 @@ class PointProcessResidualReportV1:
             status=QualificationStatus(str(data.get("status", ""))),
             reason_codes=_string_tuple(data.get("reason_codes")),
             residual_input_id=str(data.get("residual_input_id", "")),
+            diagnostic_stage=str(
+                data.get(
+                    "diagnostic_stage",
+                    (
+                        "raw_proposal"
+                        if data.get("method")
+                        == PointProcessResidualMethod.ANALYTIC_TIME_RESCALING.value
+                        else "benchmark_candidate"
+                    ),
+                )
+            ),
             report_id=str(data.get("report_id", "")),
             schema_version=str(data.get("schema_version", "")),
         )
@@ -603,6 +644,12 @@ def evaluate_point_process_residuals(
         status=status,
         reason_codes=tuple(reasons),
         residual_input_id=inputs.residual_input_id,
+        diagnostic_stage=(
+            "raw_proposal"
+            if inputs.method
+            is PointProcessResidualMethod.ANALYTIC_TIME_RESCALING
+            else "benchmark_candidate"
+        ),
     )
 
 
@@ -1829,6 +1876,7 @@ class PoweredQualificationDossierV1:
     control_checks: Mapping[str, bool]
     input_artifacts: Mapping[str, ArtifactRef]
     implementation_sha256: str
+    analytic_residual_reports: tuple[HawkesResidualReportV1, ...] = ()
     dossier_id: str = ""
     schema_version: str = POWERED_QUALIFICATION_DOSSIER_SCHEMA_VERSION
 
@@ -1863,10 +1911,54 @@ class PoweredQualificationDossierV1:
         decisions = tuple(
             sorted(self.engine_decisions, key=lambda item: item.engine_id)
         )
+        analytic_residuals = tuple(
+            sorted(
+                self.analytic_residual_reports,
+                key=lambda item: item.report_id,
+            )
+        )
         if not residuals or not scores or not decisions:
             raise ValueError("qualification dossier evidence is incomplete")
         if len({item.engine_id for item in decisions}) != len(decisions):
             raise ValueError("qualification dossier engine decisions duplicate")
+        if len({item.report_id for item in analytic_residuals}) != len(
+            analytic_residuals
+        ):
+            raise ValueError("analytic residual reports duplicate")
+        decision_by_engine = {item.engine_id: item for item in decisions}
+        if any(
+            item.engine_id not in decision_by_engine
+            for item in analytic_residuals
+        ):
+            raise ValueError("analytic residual engine lacks a decision")
+        analytic_by_engine: dict[str, list[HawkesResidualReportV1]] = (
+            defaultdict(list)
+        )
+        for item in analytic_residuals:
+            analytic_by_engine[item.engine_id].append(item)
+        for engine_id, decision in decision_by_engine.items():
+            if not engine_id.startswith("histdatacom.marked-hawkes."):
+                continue
+            reports = analytic_by_engine.get(engine_id, [])
+            if decision.status is QualificationStatus.REFUSED:
+                if reports:
+                    raise ValueError(
+                        "refused Hawkes decision contains analytic reports"
+                    )
+                continue
+            if {item.split_kind for item in reports} != {
+                "validation",
+                "final_holdout",
+            } or len(reports) != 2:
+                raise ValueError(
+                    "Hawkes decision lacks both protected analytic reports"
+                )
+            if not {item.report_id for item in reports}.issubset(
+                decision.residual_report_ids
+            ):
+                raise ValueError(
+                    "Hawkes decision does not bind analytic reports"
+                )
         if not isinstance(
             self.portfolio_calibration, ProposalPortfolioCalibrationV1
         ):
@@ -1874,6 +1966,9 @@ class PoweredQualificationDossierV1:
         if self.portfolio_calibration.evaluation_id != self.evaluation_id:
             raise ValueError("qualification portfolio evaluation differs")
         object.__setattr__(self, "residual_reports", residuals)
+        object.__setattr__(
+            self, "analytic_residual_reports", analytic_residuals
+        )
         object.__setattr__(self, "score_reports", scores)
         object.__setattr__(self, "engine_decisions", decisions)
         checks = {
@@ -1948,6 +2043,9 @@ class PoweredQualificationDossierV1:
             "residual_reports": [
                 item.to_dict() for item in self.residual_reports
             ],
+            "analytic_residual_reports": [
+                item.to_dict() for item in self.analytic_residual_reports
+            ],
             "score_reports": [item.to_dict() for item in self.score_reports],
             "portfolio_calibration": self.portfolio_calibration.to_dict(),
             "engine_decisions": [
@@ -2013,6 +2111,10 @@ class PoweredQualificationDossierV1:
             residual_reports=tuple(
                 PointProcessResidualReportV1.from_dict(_mapping(item))
                 for item in _sequence(data.get("residual_reports"))
+            ),
+            analytic_residual_reports=tuple(
+                HawkesResidualReportV1.from_dict(_mapping(item))
+                for item in _sequence(data.get("analytic_residual_reports", ()))
             ),
             score_reports=tuple(
                 PredictiveScoreReportV1.from_dict(_mapping(item))
@@ -2091,6 +2193,31 @@ def _build_powered_qualification_dossier(
         or campaign.campaign_id != evaluation.campaign_id
     ):
         raise ValueError("qualification campaign/trace identity differs")
+    analytic_residual_reports = tuple(
+        verify_hawkes_residual_artifact_ref(ref)
+        for _, ref in sorted(evaluation.artifact_refs.items())
+        if ref.metadata.get("artifact_role") == "raw_proposal_residual"
+    )
+    expected_analytic_engines = {
+        engine_id
+        for engine_id in evaluation.requested_engine_ids
+        if engine_id.startswith("histdatacom.marked-hawkes.")
+        and engine_id not in evaluation.refused_engine_ids
+    }
+    analytic_by_engine: dict[str, list[HawkesResidualReportV1]] = defaultdict(
+        list
+    )
+    for report in analytic_residual_reports:
+        analytic_by_engine[report.engine_id].append(report)
+    if set(analytic_by_engine) != expected_analytic_engines or any(
+        len(reports) != 2
+        or {item.split_kind for item in reports}
+        != {"validation", "final_holdout"}
+        for reports in analytic_by_engine.values()
+    ):
+        raise ValueError(
+            "proposal evaluation Hawkes analytic residual coverage differs"
+        )
     experiment = read_reconstruction_experiment(experiment_path)
     verification = verify_reconstruction_experiment(experiment)
     if not verification.verified:
@@ -2232,6 +2359,7 @@ def _build_powered_qualification_dossier(
     decisions = _engine_decisions(
         evaluation,
         residual_reports,
+        analytic_residual_reports,
         score_reports,
         power_study,
         calibration,
@@ -2259,6 +2387,7 @@ def _build_powered_qualification_dossier(
         policy=selected_policy,
         power_study=power_study,
         residual_reports=residual_reports,
+        analytic_residual_reports=analytic_residual_reports,
         score_reports=score_reports,
         portfolio_calibration=calibration,
         engine_decisions=decisions,
@@ -2976,6 +3105,7 @@ def _calibrate_portfolio(
 def _engine_decisions(
     evaluation: ProposalPortfolioEvaluationV1,
     residual_reports: Sequence[PointProcessResidualReportV1],
+    analytic_residual_reports: Sequence[HawkesResidualReportV1],
     score_reports: Sequence[PredictiveScoreReportV1],
     power_study: QualificationPowerStudyV1,
     calibration: ProposalPortfolioCalibrationV1,
@@ -2985,11 +3115,16 @@ def _engine_decisions(
     residual_by_engine: dict[str, list[PointProcessResidualReportV1]] = (
         defaultdict(list)
     )
+    analytic_by_engine: dict[str, list[HawkesResidualReportV1]] = defaultdict(
+        list
+    )
     score_by_engine: dict[str, list[PredictiveScoreReportV1]] = defaultdict(
         list
     )
     for residual_report in residual_reports:
         residual_by_engine[residual_report.engine_id].append(residual_report)
+    for analytic_report in analytic_residual_reports:
+        analytic_by_engine[analytic_report.engine_id].append(analytic_report)
     for score_report in score_reports:
         score_by_engine[score_report.engine_id].append(score_report)
     linear_control = next(
@@ -3031,6 +3166,7 @@ def _engine_decisions(
             continue
         evidence = evidence_by_engine[engine_id]
         residuals = tuple(residual_by_engine.get(engine_id, ()))
+        analytic_residuals = tuple(analytic_by_engine.get(engine_id, ()))
         scores = tuple(score_by_engine.get(engine_id, ()))
         final_residual = next(
             (item for item in residuals if item.split_kind == "final_holdout"),
@@ -3040,23 +3176,46 @@ def _engine_decisions(
             (item for item in scores if item.split_kind == "final_holdout"),
             None,
         )
-        raw_p_values = {
-            "time_uniformity": (
-                final_residual.time_uniform_p_value
-                if final_residual
-                and final_residual.time_uniform_p_value is not None
-                else 0.0
+        final_analytic = next(
+            (
+                item
+                for item in analytic_residuals
+                if item.split_kind == "final_holdout"
             ),
-            "mark_calibration": (
-                final_residual.mark_uniform_p_value
-                if final_residual
-                and final_residual.mark_uniform_p_value is not None
-                else 0.0
-            ),
-        }
-        adjusted = _benjamini_hochberg(raw_p_values)
+            None,
+        )
+        analytic_overall = _hawkes_overall_stratum(final_analytic)
+        if analytic_overall is not None:
+            adjusted = {
+                "time_uniformity": (
+                    analytic_overall.time_uniform_adjusted_p_value or 0.0
+                ),
+                "time_serial_dependence": (
+                    analytic_overall.time_lag1_adjusted_p_value or 0.0
+                ),
+                "mark_calibration": (
+                    analytic_overall.mark_uniform_adjusted_p_value or 0.0
+                ),
+            }
+        else:
+            raw_p_values = {
+                "time_uniformity": (
+                    final_residual.time_uniform_p_value
+                    if final_residual
+                    and final_residual.time_uniform_p_value is not None
+                    else 0.0
+                ),
+                "mark_calibration": (
+                    final_residual.mark_uniform_p_value
+                    if final_residual
+                    and final_residual.mark_uniform_p_value is not None
+                    else 0.0
+                ),
+            }
+            adjusted = _benjamini_hochberg(raw_p_values)
         gates = _observed_gate_statuses(
             final_residual,
+            final_analytic,
             final_score,
             evidence,
             power_study,
@@ -3103,7 +3262,10 @@ def _engine_decisions(
             EngineQualificationDecisionV1(
                 engine_id=engine_id,
                 evidence_ids=(evidence.evidence_id,),
-                residual_report_ids=tuple(item.report_id for item in residuals),
+                residual_report_ids=(
+                    tuple(item.report_id for item in residuals)
+                    + tuple(item.report_id for item in analytic_residuals)
+                ),
                 score_report_ids=tuple(item.report_id for item in scores),
                 power_study_id=power_study.study_id,
                 portfolio_calibration_id=calibration.calibration_id,
@@ -3119,8 +3281,24 @@ def _engine_decisions(
     return tuple(decisions)
 
 
+def _hawkes_overall_stratum(
+    report: HawkesResidualReportV1 | None,
+) -> HawkesResidualStratumV1 | None:
+    if report is None:
+        return None
+    return next(
+        (
+            item
+            for item in report.strata
+            if item.dimension == "overall" and item.key == "all"
+        ),
+        None,
+    )
+
+
 def _observed_gate_statuses(
     residual: PointProcessResidualReportV1 | None,
+    analytic_residual: HawkesResidualReportV1 | None,
     score: PredictiveScoreReportV1 | None,
     evidence: ProposalEngineEvidenceV1,
     power_study: QualificationPowerStudyV1,
@@ -3215,6 +3393,26 @@ def _observed_gate_statuses(
     }
     statuses: dict[str, QualificationStatus] = {}
     for gate_id, observed in values.items():
+        analytic_status = (
+            analytic_residual.family_statuses.get(gate_id)
+            if analytic_residual is not None
+            and gate_id
+            in {
+                "time_uniformity",
+                "time_serial_dependence",
+                "mark_calibration",
+            }
+            else None
+        )
+        if analytic_status is HawkesResidualStatus.REFUSED:
+            statuses[gate_id] = QualificationStatus.REFUSED
+            continue
+        if analytic_status is HawkesResidualStatus.FAILED:
+            statuses[gate_id] = QualificationStatus.FAILED
+            continue
+        if analytic_status is HawkesResidualStatus.INSUFFICIENT_EVIDENCE:
+            statuses[gate_id] = QualificationStatus.INSUFFICIENT_EVIDENCE
+            continue
         reliability = power_study.result(gate_id).status
         if (
             reliability is not QualificationStatus.PASSED

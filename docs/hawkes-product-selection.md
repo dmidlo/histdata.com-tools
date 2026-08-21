@@ -13,6 +13,17 @@ The dossier is derived from three content-addressed inputs:
 2. an exact paired `histdatacom.hawkes-validation-comparison.v1`; and
 3. the powered qualification dossier that admits both candidates.
 
+For each candidate, the selection dossier also freezes the qualification
+decision's residual-report identities. The set must contain exact
+`raw_proposal` Hawkes diagnostics and the common simulation-predictive
+`benchmark_candidate` diagnostics. The dossier separately derives one
+`final_constrained_product` report per candidate from the paired validation
+observations after carving and reconciliation. Each final report binds the
+coordinate IDs, final constraint-set IDs, and mean/q95 event, time, mark,
+cross-series, path, tail, failure/refusal, and diversity metrics. Selection
+refuses a candidate whose analytic or final-product report is missing,
+underpowered, stale, or substituted across diagnostic stages.
+
 No final-holdout metric is accepted. Every comparison coordinate binds the
 same validation window, degradation scenario, seed, anchor set, adaptive
 partition, final constraint set, and early/transition/modern era. Each

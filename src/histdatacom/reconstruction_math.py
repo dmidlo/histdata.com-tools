@@ -32,7 +32,7 @@ RECONSTRUCTION_MATH_VERIFICATION_REPORT_SCHEMA_VERSION = (
 RECONSTRUCTION_MATH_VERIFICATION_ARTIFACT_KIND = (
     "reconstruction-math-verification-report"
 )
-RECONSTRUCTION_MATH_FORMULA_VERSION = "1.0.0"
+RECONSTRUCTION_MATH_FORMULA_VERSION = "1.1.0"
 
 MAX_RECONSTRUCTION_MATH_CHECKS = 64
 MAX_RECONSTRUCTION_MATH_MAPPING_ITEMS = 64
@@ -50,6 +50,9 @@ RECONSTRUCTION_MATH_FORMULAS: Mapping[str, str] = {
     "negative-binomial-failures-v1": (
         "P(M=k)=Gamma(k+r)/(Gamma(r)k!)*p^r*(1-p)^k; "
         "E[M]=r(1-p)/p; Var[M]=r(1-p)/p^2"
+    ),
+    "ordered-discrete-mark-pit-v1": (
+        "u=sum_{m'<m}(pi_m')+pi_m*semantic_uniform_sha256"
     ),
     "projection-burden-dimensionless-v1": (
         "sum_e(||q'_e-q_e||_1)/sum_e(max(spread(q_e),epsilon))"
@@ -869,6 +872,10 @@ def _hawkes_stability_checks() -> list[ReconstructionMathCheckV1]:
 
 
 def _time_rescaling_checks() -> list[ReconstructionMathCheckV1]:
+    from histdatacom.synthetic.hawkes_residuals import (
+        _accumulate_hazard,
+        _randomized_mark_pit,
+    )
     from histdatacom.synthetic.qualification import (
         PointProcessResidualInputV1,
         PointProcessResidualMethod,
@@ -939,6 +946,95 @@ def _time_rescaling_checks() -> list[ReconstructionMathCheckV1]:
                 "histdatacom.synthetic.neural_tpp._inverse_elapsed_seconds",
             ),
             note="Bounded bisection recovers the interval from its analytic hazard.",
+        )
+    )
+    elapsed = 1.25
+    recursion = (2.0, 1.5)
+    baseline = (0.7, 0.4)
+    excitation = ((0.3, 0.2), (0.1, 0.25))
+    accumulated = [0.0, 0.0]
+    _accumulate_hazard(
+        accumulated,
+        recursion,
+        baseline,
+        excitation,
+        decay_rate,
+        elapsed,
+    )
+    kernel_mass = 1.0 - math.exp(-decay_rate * elapsed)
+    expected_multivariate = tuple(
+        baseline[destination] * elapsed
+        + sum(
+            excitation[destination][source] * recursion[source] * kernel_mass
+            for source in range(2)
+        )
+        for destination in range(2)
+    )
+    checks.append(
+        _check(
+            "hawkes-raw-proposal-multivariate-compensator",
+            "time-rescaling-pit-v1",
+            all(
+                math.isclose(actual, expected, rel_tol=0.0, abs_tol=1e-15)
+                for actual, expected in zip(
+                    accumulated, expected_multivariate, strict=True
+                )
+            ),
+            expected={
+                "destination_0": _stable_float(expected_multivariate[0]),
+                "destination_1": _stable_float(expected_multivariate[1]),
+            },
+            actual={
+                "destination_0": _stable_float(accumulated[0]),
+                "destination_1": _stable_float(accumulated[1]),
+            },
+            tolerance=1e-15,
+            production_paths=(
+                "histdatacom.synthetic.hawkes_residuals._accumulate_hazard",
+            ),
+            note=(
+                "The installed raw-proposal adapter exactly integrates every "
+                "destination/source exponential-kernel contribution."
+            ),
+        )
+    )
+    mark_probabilities = {
+        "ask_only": 0.10,
+        "bid_only": 0.20,
+        "joint": 0.30,
+        "unchanged": 0.40,
+    }
+    semantic_key = "math-verification|ordered-mark-pit"
+    randomizer = (
+        int.from_bytes(
+            hashlib.sha256(semantic_key.encode("utf-8")).digest()[:8], "big"
+        )
+        / 2**64
+    )
+    expected_mark_pit = 0.30 + 0.30 * randomizer
+    production_mark_pit = _randomized_mark_pit(
+        mark_probabilities, "joint", semantic_key=semantic_key
+    )
+    checks.append(
+        _check(
+            "hawkes-conditioned-mark-semantic-pit",
+            "ordered-discrete-mark-pit-v1",
+            math.isclose(
+                production_mark_pit,
+                expected_mark_pit,
+                rel_tol=0.0,
+                abs_tol=1e-15,
+            ),
+            expected={"ordered_mark_pit": _stable_float(expected_mark_pit)},
+            actual={"production_mark_pit": _stable_float(production_mark_pit)},
+            tolerance=1e-15,
+            production_paths=(
+                "histdatacom.synthetic.hawkes_residuals._randomized_mark_pit",
+            ),
+            note=(
+                "Ordered categorical PIT randomization is fixed by the "
+                "semantic SHA-256 key."
+            ),
         )
     )
     pit = time_rescaling_pit(hazard)

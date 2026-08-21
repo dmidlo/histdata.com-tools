@@ -44,6 +44,9 @@ HAWKES_VALIDATION_OBSERVATION_SCHEMA_VERSION = (
 HAWKES_VALIDATION_COMPARISON_SCHEMA_VERSION = (
     "histdatacom.hawkes-validation-comparison.v1"
 )
+HAWKES_FINAL_PRODUCT_RESIDUAL_REPORT_SCHEMA_VERSION = (
+    "histdatacom.hawkes-final-product-residual-report.v1"
+)
 HAWKES_METRIC_COMPARISON_SCHEMA_VERSION = (
     "histdatacom.hawkes-metric-comparison.v1"
 )
@@ -129,6 +132,19 @@ RESOURCE_METRIC_IDS = (
 )
 SCIENTIFIC_METRIC_IDS = tuple(
     name for name in METRIC_DIRECTIONS if name not in RESOURCE_METRIC_IDS
+)
+FINAL_PRODUCT_DIAGNOSTIC_METRICS = (
+    "event_count_error",
+    "interarrival_error",
+    "time_rescaling_error",
+    "mark_error",
+    "post_triangle_residual",
+    "spread_error",
+    "path_error",
+    "tail_error",
+    "generation_failure_rate",
+    "generation_refusal_rate",
+    "ensemble_diversity",
 )
 
 
@@ -449,6 +465,10 @@ class HawkesValidationObservationV1:
             "projection_l1_numerator": self.projection_l1_numerator,
             "projection_spread_denominator": self.projection_spread_denominator,
             "projection_event_count": self.projection_event_count,
+            "complete_constrained_generator_metrics": True,
+            "carving_applied": True,
+            "reconciliation_applied": True,
+            "identical_policy_ensemble": True,
             "event_rows_embedded": False,
             "final_holdout_metrics_embedded": False,
         }
@@ -463,6 +483,10 @@ class HawkesValidationObservationV1:
         if (
             data.get("event_rows_embedded") is not False
             or data.get("final_holdout_metrics_embedded") is not False
+            or data.get("complete_constrained_generator_metrics") is not True
+            or data.get("carving_applied") is not True
+            or data.get("reconciliation_applied") is not True
+            or data.get("identical_policy_ensemble") is not True
         ):
             raise ValueError(
                 "Hawkes comparison contains prohibited rows or holdout"
@@ -644,6 +668,166 @@ class HawkesValidationComparisonV1:
 
 
 @dataclass(frozen=True, slots=True)
+class HawkesFinalProductResidualReportV1:
+    """Row-free simulation-predictive check of the constrained product law."""
+
+    engine_id: str
+    policy_id: str
+    comparison_id: str
+    qualification_dossier_id: str
+    coordinate_ids: tuple[str, ...]
+    final_constraint_set_ids: tuple[str, ...]
+    metric_summaries: Mapping[str, float]
+    observation_count: int
+    status: str
+    reason_codes: tuple[str, ...]
+    report_id: str = ""
+    schema_version: str = HAWKES_FINAL_PRODUCT_RESIDUAL_REPORT_SCHEMA_VERSION
+
+    def __post_init__(self) -> None:
+        _require_schema(
+            self.schema_version,
+            HAWKES_FINAL_PRODUCT_RESIDUAL_REPORT_SCHEMA_VERSION,
+        )
+        if self.engine_id not in HAWKES_SELECTION_ENGINE_IDS:
+            raise ValueError("unsupported final-product Hawkes engine")
+        for name in (
+            "policy_id",
+            "comparison_id",
+            "qualification_dossier_id",
+        ):
+            object.__setattr__(self, name, _required_text(getattr(self, name)))
+        coordinates = tuple(
+            sorted({_required_text(item) for item in self.coordinate_ids})
+        )
+        constraints = tuple(
+            sorted(
+                {_required_text(item) for item in self.final_constraint_set_ids}
+            )
+        )
+        if not coordinates or not constraints:
+            raise ValueError("final-product residual support is empty")
+        observation_count = _strict_int(
+            self.observation_count, "observation_count"
+        )
+        if (
+            not 1 <= observation_count <= MAX_SELECTION_CELLS
+            or observation_count != len(coordinates)
+        ):
+            raise ValueError("final-product residual observation count differs")
+        summaries = {
+            _required_text(key): _nonnegative_float(value, key)
+            for key, value in self.metric_summaries.items()
+        }
+        expected_summary_keys = {
+            f"{metric}_{suffix}"
+            for metric in FINAL_PRODUCT_DIAGNOSTIC_METRICS
+            for suffix in ("mean", "q95")
+        }
+        if set(summaries) != expected_summary_keys:
+            raise ValueError("final-product residual metric summaries differ")
+        if self.status not in {"available", "insufficient_evidence"}:
+            raise ValueError("final-product residual status differs")
+        reasons = _text_tuple(self.reason_codes)
+        expected_reason = (
+            "constrained_product_simulation_predictive_metrics_available"
+            if self.status == "available"
+            else "constrained_product_coordinate_support_below_policy_minimum"
+        )
+        if reasons != (expected_reason,):
+            raise ValueError("final-product residual reason differs")
+        object.__setattr__(self, "coordinate_ids", coordinates)
+        object.__setattr__(self, "observation_count", observation_count)
+        object.__setattr__(self, "final_constraint_set_ids", constraints)
+        object.__setattr__(
+            self, "metric_summaries", dict(sorted(summaries.items()))
+        )
+        object.__setattr__(self, "reason_codes", reasons)
+        expected = _stable_id(
+            "hawkes-final-product-residual-report", self.payload()
+        )
+        if self.report_id and self.report_id != expected:
+            raise ValueError(
+                "Hawkes final-product residual report identity differs"
+            )
+        object.__setattr__(self, "report_id", expected)
+
+    def payload(self) -> dict[str, JSONValue]:
+        return {
+            "schema_version": self.schema_version,
+            "engine_id": self.engine_id,
+            "policy_id": self.policy_id,
+            "comparison_id": self.comparison_id,
+            "qualification_dossier_id": self.qualification_dossier_id,
+            "coordinate_ids": list(self.coordinate_ids),
+            "final_constraint_set_ids": list(self.final_constraint_set_ids),
+            "metric_summaries": dict(self.metric_summaries),
+            "observation_count": self.observation_count,
+            "status": self.status,
+            "reason_codes": list(self.reason_codes),
+            "diagnostic_stage": "final_constrained_product",
+            "method": "simulation_predictive_metric_ensemble.v1",
+            "comparison_basis": (
+                "realized_final_metrics_vs_identical_policy_ensemble"
+            ),
+            "carving_applied": True,
+            "reconciliation_applied": True,
+            "identical_final_constraint_policy_per_coordinate": True,
+            "analytic_compensator_applied": False,
+            "event_rows_embedded": False,
+            "residual_rows_embedded": False,
+            "historical_truth_claim": False,
+        }
+
+    def to_dict(self) -> dict[str, JSONValue]:
+        return {**self.payload(), "report_id": self.report_id}
+
+    @classmethod
+    def from_dict(
+        cls, data: Mapping[str, Any]
+    ) -> HawkesFinalProductResidualReportV1:
+        fixed = {
+            "diagnostic_stage": "final_constrained_product",
+            "method": "simulation_predictive_metric_ensemble.v1",
+            "comparison_basis": (
+                "realized_final_metrics_vs_identical_policy_ensemble"
+            ),
+            "carving_applied": True,
+            "reconciliation_applied": True,
+            "identical_final_constraint_policy_per_coordinate": True,
+            "analytic_compensator_applied": False,
+            "event_rows_embedded": False,
+            "residual_rows_embedded": False,
+            "historical_truth_claim": False,
+        }
+        if any(data.get(key) != value for key, value in fixed.items()):
+            raise ValueError("final-product residual scope or nonclaim differs")
+        return cls(
+            engine_id=str(data.get("engine_id", "")),
+            policy_id=str(data.get("policy_id", "")),
+            comparison_id=str(data.get("comparison_id", "")),
+            qualification_dossier_id=str(
+                data.get("qualification_dossier_id", "")
+            ),
+            coordinate_ids=_string_tuple(data.get("coordinate_ids")),
+            final_constraint_set_ids=_string_tuple(
+                data.get("final_constraint_set_ids")
+            ),
+            metric_summaries={
+                str(key): _finite_float(value, str(key))
+                for key, value in _mapping(data.get("metric_summaries")).items()
+            },
+            observation_count=_strict_int(
+                data.get("observation_count"), "observation_count"
+            ),
+            status=str(data.get("status", "")),
+            reason_codes=_string_tuple(data.get("reason_codes")),
+            report_id=str(data.get("report_id", "")),
+            schema_version=str(data.get("schema_version", "")),
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class HawkesMetricComparisonV1:
     """Paired estimate, uncertainty, power, and frozen conclusion."""
 
@@ -785,7 +969,11 @@ class HawkesProductSelectionDossierV1:
     comparison_id: str
     qualification_dossier_id: str
     qualification_decision_ids: Mapping[str, str]
+    qualification_residual_report_ids: Mapping[str, tuple[str, ...]]
     metric_comparisons: tuple[HawkesMetricComparisonV1, ...]
+    final_product_residual_reports: tuple[
+        HawkesFinalProductResidualReportV1, ...
+    ]
     selected_engine_id: str
     excluded_engine_id: str
     selection_reason_codes: tuple[str, ...]
@@ -824,9 +1012,45 @@ class HawkesProductSelectionDossierV1:
         }
         if set(decisions) != set(HAWKES_SELECTION_ENGINE_IDS):
             raise ValueError("Hawkes dossier qualification decisions differ")
+        residuals = {
+            _required_text(key): _text_tuple(value)
+            for key, value in self.qualification_residual_report_ids.items()
+        }
+        if set(residuals) != set(HAWKES_SELECTION_ENGINE_IDS) or any(
+            not any(
+                report_id.startswith("hawkes-residual-report:")
+                for report_id in report_ids
+            )
+            or not any(
+                report_id.startswith("point-process-residual-report:")
+                for report_id in report_ids
+            )
+            for report_ids in residuals.values()
+        ):
+            raise ValueError(
+                "Hawkes dossier must bind raw and benchmark residual reports"
+            )
         comparisons = tuple(
             sorted(self.metric_comparisons, key=lambda item: item.metric_id)
         )
+        final_reports = tuple(
+            sorted(
+                self.final_product_residual_reports,
+                key=lambda item: item.engine_id,
+            )
+        )
+        if {item.engine_id for item in final_reports} != set(
+            HAWKES_SELECTION_ENGINE_IDS
+        ) or any(
+            item.comparison_id != self.comparison_id
+            or item.policy_id != self.policy.policy_id
+            or item.qualification_dossier_id != self.qualification_dossier_id
+            or item.status != "available"
+            for item in final_reports
+        ):
+            raise ValueError(
+                "Hawkes dossier final-product residual reports differ"
+            )
         if {item.metric_id for item in comparisons} != set(METRIC_DIRECTIONS):
             raise ValueError(
                 "Hawkes dossier metric comparison coverage differs"
@@ -858,7 +1082,15 @@ class HawkesProductSelectionDossierV1:
         object.__setattr__(
             self, "qualification_decision_ids", dict(sorted(decisions.items()))
         )
+        object.__setattr__(
+            self,
+            "qualification_residual_report_ids",
+            dict(sorted(residuals.items())),
+        )
         object.__setattr__(self, "metric_comparisons", comparisons)
+        object.__setattr__(
+            self, "final_product_residual_reports", final_reports
+        )
         object.__setattr__(self, "selection_reason_codes", selection_reasons)
         object.__setattr__(self, "exclusion_reason_codes", exclusion_reasons)
         object.__setattr__(self, "input_artifacts", artifacts)
@@ -884,8 +1116,15 @@ class HawkesProductSelectionDossierV1:
             "comparison_id": self.comparison_id,
             "qualification_dossier_id": self.qualification_dossier_id,
             "qualification_decision_ids": dict(self.qualification_decision_ids),
+            "qualification_residual_report_ids": {
+                key: list(value)
+                for key, value in self.qualification_residual_report_ids.items()
+            },
             "metric_comparisons": [
                 item.to_dict() for item in self.metric_comparisons
+            ],
+            "final_product_residual_reports": [
+                item.to_dict() for item in self.final_product_residual_reports
             ],
             "selected_engine_id": self.selected_engine_id,
             "excluded_engine_id": self.excluded_engine_id,
@@ -938,9 +1177,21 @@ class HawkesProductSelectionDossierV1:
                     data.get("qualification_decision_ids")
                 ).items()
             },
+            qualification_residual_report_ids={
+                str(key): _string_tuple(value)
+                for key, value in _mapping(
+                    data.get("qualification_residual_report_ids")
+                ).items()
+            },
             metric_comparisons=tuple(
                 HawkesMetricComparisonV1.from_dict(_mapping(item))
                 for item in _sequence(data.get("metric_comparisons"))
+            ),
+            final_product_residual_reports=tuple(
+                HawkesFinalProductResidualReportV1.from_dict(_mapping(item))
+                for item in _sequence(
+                    data.get("final_product_residual_reports")
+                )
             ),
             selected_engine_id=str(data.get("selected_engine_id", "")),
             excluded_engine_id=str(data.get("excluded_engine_id", "")),
@@ -989,6 +1240,10 @@ def derive_hawkes_product_selection_dossier(
         raise ValueError(
             "both Hawkes candidates must be reconstruction eligible"
         )
+    final_product_residual_reports = tuple(
+        _final_product_residual_report(policy, comparison, engine_id)
+        for engine_id in HAWKES_SELECTION_ENGINE_IDS
+    )
     if any(
         item.metrics["maximum_spectral_radius"]
         >= policy.maximum_spectral_radius
@@ -1031,13 +1286,65 @@ def derive_hawkes_product_selection_dossier(
         qualification_decision_ids={
             key: value.decision_id for key, value in decisions.items()
         },
+        qualification_residual_report_ids={
+            key: tuple(value.residual_report_ids)
+            for key, value in decisions.items()
+        },
         metric_comparisons=metric_comparisons,
+        final_product_residual_reports=final_product_residual_reports,
         selected_engine_id=selected,
         excluded_engine_id=excluded,
         selection_reason_codes=selection_reasons,
         exclusion_reason_codes=exclusion_reasons,
         input_artifacts=input_artifacts,
         implementation_sha256=_implementation_sha256(),
+    )
+
+
+def _final_product_residual_report(
+    policy: HawkesProductSelectionPolicyV1,
+    comparison: HawkesValidationComparisonV1,
+    engine_id: str,
+) -> HawkesFinalProductResidualReportV1:
+    observations = tuple(
+        item for item in comparison.observations if item.engine_id == engine_id
+    )
+    status = (
+        "available"
+        if len(observations) >= policy.minimum_paired_cells
+        else "insufficient_evidence"
+    )
+    reason = (
+        "constrained_product_simulation_predictive_metrics_available"
+        if status == "available"
+        else "constrained_product_coordinate_support_below_policy_minimum"
+    )
+    return HawkesFinalProductResidualReportV1(
+        engine_id=engine_id,
+        policy_id=policy.policy_id,
+        comparison_id=comparison.comparison_id,
+        qualification_dossier_id=comparison.qualification_dossier_id,
+        coordinate_ids=tuple(
+            item.coordinate.coordinate_id for item in observations
+        ),
+        final_constraint_set_ids=tuple(
+            item.coordinate.final_constraint_set_id for item in observations
+        ),
+        metric_summaries={
+            f"{metric}_{suffix}": (
+                statistics.fmean(item.metrics[metric] for item in observations)
+                if suffix == "mean"
+                else _quantile(
+                    tuple(item.metrics[metric] for item in observations),
+                    0.95,
+                )
+            )
+            for metric in FINAL_PRODUCT_DIAGNOSTIC_METRICS
+            for suffix in ("mean", "q95")
+        },
+        observation_count=len(observations),
+        status=status,
+        reason_codes=(reason,),
     )
 
 
@@ -1494,6 +1801,24 @@ def _text_tuple(value: Sequence[str]) -> tuple[str, ...]:
     return selected
 
 
+def _quantile(values: Sequence[float], level: float) -> float:
+    selected = tuple(
+        sorted(_finite_float(item, "quantile value") for item in values)
+    )
+    if not selected:
+        raise ValueError("quantile values are empty")
+    selected_level = _finite_float(level, "quantile level")
+    if not 0.0 <= selected_level <= 1.0:
+        raise ValueError("quantile level is outside [0, 1]")
+    position = (len(selected) - 1) * selected_level
+    lower = math.floor(position)
+    upper = math.ceil(position)
+    if lower == upper:
+        return selected[lower]
+    weight = position - lower
+    return selected[lower] * (1.0 - weight) + selected[upper] * weight
+
+
 def _required_text(value: Any) -> str:
     selected = str(value).strip()
     if not selected:
@@ -1553,9 +1878,11 @@ def _require_schema(value: str, expected: str) -> None:
 __all__ = [
     "DIAGONAL_HAWKES_ENGINE_ID",
     "FULL_HAWKES_ENGINE_ID",
+    "HAWKES_FINAL_PRODUCT_RESIDUAL_REPORT_SCHEMA_VERSION",
     "HAWKES_PRODUCT_SELECTION_DOSSIER_ARTIFACT_KIND",
     "HAWKES_SELECTION_ENGINE_IDS",
     "HawkesComparisonConclusion",
+    "HawkesFinalProductResidualReportV1",
     "HawkesMetricComparisonV1",
     "HawkesMetricDirection",
     "HawkesProductSelectionDossierV1",

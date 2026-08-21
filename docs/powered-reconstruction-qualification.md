@@ -64,13 +64,39 @@ bounded summaries and strong references only.
 
 `PointProcessResidualReportV1` persists sample support, KS-style statistics,
 combined probabilities, serial dependence, quantiles, method, applicability,
-and reason codes without persisting residual rows. The current common real
-campaign uses the simulation-predictive route for all engines because the
-#489 row-free trace exposes comparable realized/predictive streams rather than
-model-specific compensator increments. The analytic route is a first-party
-contract and deterministic implementation, but its use must be declared by a
-future evaluator adapter that actually supplies an exact fitted compensator;
-the qualification layer does not infer one from a status label.
+and reason codes without persisting residual rows. Each report now declares
+whether it diagnoses the `raw_proposal` law or the
+`benchmark_candidate` law. The common row-free metric trace remains the
+simulation-predictive benchmark route for every engine; it does not claim that
+shared carving and cross-currency reconciliation have already run.
+
+Marked Hawkes fits additionally have an installed exact adapter. The evaluator
+keeps protected real events process-local, applies each fitted diagonal or full
+exponential-kernel compensator before candidate carving, and persists one
+row-free `HawkesResidualReportV1` for validation and one for final holdout. The
+adapter resets recursion at every window, treats equal timestamps as a
+strict-prior group, retains right-censoring hazards, and records every tie,
+skip, support-boundary truncation, and protected-anchor truncation. It reports
+overall and symbol, feed-epoch, session, event-state, and observation-scenario
+strata. Small cells remain explicitly `insufficient_evidence`.
+
+For conditioned transition marks, the adapter mixes the immigrant and source
+component probabilities by their current intensity contributions. It reports
+deterministically randomized discrete PITs, log and Brier scores, calibration
+bins, transition confusion counts, previous-mark and duration-conditioned
+residual summaries, and missing mark support. Benjamini-Hochberg correction is
+performed within each protected split and diagnostic family. Deterministic
+misspecification simulations separately audit wrong baseline/decay, excitation,
+and mark probabilities and prevent an underpowered family from passing.
+
+These analytic reports explicitly state that their compensator applies before
+carving and does not apply to the reconciled product. A Hawkes qualification
+decision binds both protected raw-proposal reports and the common benchmark-
+candidate predictive reports. The downstream diagonal-versus-full selection
+dossier binds those identities and separately derives one row-free
+`final_constrained_product` simulation-predictive report per candidate from
+paired realized-versus-ensemble metrics under the identical final constraint
+policy. Missing, refused, underpowered, or stale evidence fails closed.
 
 Time-rescaling can reveal intensity misspecification. It cannot by itself
 establish realistic marks, paths, cross-currency dependence, tail behavior,

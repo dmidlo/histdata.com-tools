@@ -16,6 +16,7 @@ from histdatacom.synthetic.hawkes_selection import (
     FULL_HAWKES_ENGINE_ID,
     METRIC_DIRECTIONS,
     HawkesComparisonConclusion,
+    HawkesFinalProductResidualReportV1,
     HawkesProductSelectionDossierV1,
     HawkesProductSelectionPolicyV1,
     HawkesValidationComparisonV1,
@@ -110,13 +111,23 @@ def _observations(
     return tuple(observations)
 
 
-def _qualification(*, full_eligible: bool = True) -> Any:
+def _qualification(
+    *, full_eligible: bool = True, residual_complete: bool = True
+) -> Any:
     decisions = {
         engine_id: SimpleNamespace(
             engine_id=engine_id,
             decision_id=f"engine-qualification-decision:{engine_id}",
             reconstruction_eligible=(
                 full_eligible if engine_id == FULL_HAWKES_ENGINE_ID else True
+            ),
+            residual_report_ids=(
+                *(
+                    (f"hawkes-residual-report:{engine_id}",)
+                    if residual_complete
+                    else ()
+                ),
+                f"point-process-residual-report:{engine_id}",
             ),
         )
         for engine_id in (DIAGONAL_HAWKES_ENGINE_ID, FULL_HAWKES_ENGINE_ID)
@@ -175,6 +186,17 @@ def test_validation_only_selection_prefers_lower_resource_diagonal(
         item.conclusion is not HawkesComparisonConclusion.INCONCLUSIVE
         for item in dossier.metric_comparisons
     )
+    assert {
+        item.engine_id for item in dossier.final_product_residual_reports
+    } == {DIAGONAL_HAWKES_ENGINE_ID, FULL_HAWKES_ENGINE_ID}
+    assert all(
+        item.to_dict()["diagnostic_stage"] == "final_constrained_product"
+        and item.to_dict()["method"]
+        == "simulation_predictive_metric_ensemble.v1"
+        and item.to_dict()["event_rows_embedded"] is False
+        and item.status == "available"
+        for item in dossier.final_product_residual_reports
+    )
     payload = dossier.to_dict()
     assert payload["validation_only"] is True
     assert payload["final_holdout_used_for_selection"] is False
@@ -202,6 +224,10 @@ def test_policy_comparison_and_dossier_are_content_addressed(
     assert (
         HawkesProductSelectionDossierV1.from_json(dossier.to_json()) == dossier
     )
+    final_payload = dossier.final_product_residual_reports[0].to_dict()
+    final_payload["analytic_compensator_applied"] = True
+    with pytest.raises(ValueError, match="scope or nonclaim"):
+        HawkesFinalProductResidualReportV1.from_dict(final_payload)
 
 
 def test_comparison_rejects_holdout_and_unpaired_or_incomplete_era_evidence(
@@ -285,6 +311,14 @@ def test_selection_refuses_stale_underpowered_and_conflicting_evidence(
             policy,
             comparison,
             cast(Any, _qualification(full_eligible=False)),
+            input_artifacts=artifacts,
+        )
+
+    with pytest.raises(ValueError, match="raw and benchmark residual reports"):
+        derive_hawkes_product_selection_dossier(
+            policy,
+            comparison,
+            cast(Any, _qualification(residual_complete=False)),
             input_artifacts=artifacts,
         )
 

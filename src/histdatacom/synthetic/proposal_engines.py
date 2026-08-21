@@ -33,8 +33,10 @@ from histdatacom.synthetic.add_thin import (
     AddThinFitResultV1,
     default_add_thin_config,
 )
+from histdatacom.synthetic.benchmark import BenchmarkEventV1
 from histdatacom.synthetic.benchmark_corpus import (
     BenchmarkWindowMetricTraceV1,
+    BenchmarkWindowPartitionV1,
     ReverseDegradationBenchmarkCampaignV1,
     read_reverse_degradation_benchmark_campaign,
     read_reverse_degradation_benchmark_corpus,
@@ -64,6 +66,11 @@ from histdatacom.synthetic.generation import (
     EMPIRICAL_MOTIF_GENERATOR_VERSION,
     MOTIF_CANDIDATE_BATCH_SCHEMA_VERSION,
     EmpiricalMotifGeneratorConfigV1,
+)
+from histdatacom.synthetic.hawkes_residuals import (
+    HawkesResidualWindowV1,
+    evaluate_marked_hawkes_residuals,
+    write_hawkes_residual_report,
 )
 from histdatacom.synthetic.marked_hawkes import (
     MARKED_HAWKES_CANDIDATE_BATCH_SCHEMA_VERSION,
@@ -1723,6 +1730,9 @@ def run_histdata_proposal_portfolio_evaluation(
     corpus = read_reverse_degradation_benchmark_corpus(benchmark_manifest_path)
     metric_trace_out: list[BenchmarkWindowMetricTraceV1] = []
     fit_result_out: list[Any] = []
+    protected_window_out: list[
+        tuple[BenchmarkWindowPartitionV1, tuple[BenchmarkEventV1, ...]]
+    ] = []
     campaign, motif_index = run_reverse_degradation_benchmark_campaign(
         corpus,
         source_root,
@@ -1745,6 +1755,7 @@ def run_histdata_proposal_portfolio_evaluation(
         schrodinger_bridge_broker_target=None,
         metric_trace_out=metric_trace_out,
         fit_result_out=fit_result_out,
+        protected_window_out=protected_window_out,
     )
     if len(metric_trace_out) != 1:
         raise RuntimeError("proposal evaluation did not emit one metric trace")
@@ -1767,6 +1778,53 @@ def run_histdata_proposal_portfolio_evaluation(
             output_directory=output_directory,
         )
     )
+    hawkes_windows = tuple(
+        HawkesResidualWindowV1(
+            window_id=partition.window_id,
+            split_kind=partition.split_kind,
+            start_ns=partition.start_ns,
+            end_ns=partition.end_ns,
+            epoch_id=partition.epoch_label,
+            session=partition.session,
+            observation_scenario_id=(
+                f"observation-operator:{corpus.observation_operator_id}"
+            ),
+            events=events,
+            support_boundary_truncation_count=sum(
+                count >= corpus.profile.max_events_per_symbol
+                for count in partition.symbol_event_counts.values()
+            ),
+        )
+        for partition, events in protected_window_out
+    )
+    hawkes_fits = {
+        fit.config_id: fit
+        for fit in fit_result_out
+        if isinstance(fit, MarkedHawkesFitResultV1)
+    }
+    for index, engine_id in enumerate(
+        sorted(
+            item
+            for item in requested
+            if item.startswith("histdatacom.marked-hawkes.")
+        )
+    ):
+        config = cast(MarkedHawkesConfigV1, configs[engine_id])
+        try:
+            fit = hawkes_fits[config.config_id]
+        except KeyError as err:
+            raise RuntimeError(
+                "proposal evaluation omitted a requested marked-Hawkes fit"
+            ) from err
+        for report in evaluate_marked_hawkes_residuals(
+            config,
+            fit,
+            hawkes_windows,
+            engine_id=engine_id,
+        ):
+            refs[f"hawkes_raw_residual_{index:02d}_{report.split_kind}"] = (
+                write_hawkes_residual_report(report, output_directory)
+            )
     evidence = proposal_evidence_from_campaigns((campaign,))
     executed = tuple(item.engine_id for item in evidence)
     refused = tuple(

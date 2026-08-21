@@ -1865,6 +1865,39 @@ def _point_process_residual_chart(
                         strata={"qualification_status": report.status.value},
                     )
                 )
+    for report in getattr(context.dossier, "analytic_residual_reports", ()):
+        overall = next(
+            (
+                item
+                for item in report.strata
+                if item.dimension == "overall" and item.key == "all"
+            ),
+            None,
+        )
+        if overall is None:
+            continue
+        label = _short_engine(report.engine_id)
+        for series, value in (
+            ("raw time uniform KS", overall.time_uniform_ks),
+            (
+                "raw absolute time lag-1",
+                _abs_optional(overall.time_lag1_autocorrelation),
+            ),
+            ("raw mark uniform KS", overall.mark_uniform_ks),
+        ):
+            if value is not None:
+                points.append(
+                    _datum(
+                        x=label,
+                        y=value,
+                        series=f"{report.split_kind} {series}",
+                        sources=(source,),
+                        strata={
+                            "qualification_status": report.status.value,
+                            "diagnostic_stage": "raw_proposal",
+                        },
+                    )
+                )
     return _chart(
         family=DiagnosticFamily.POINT_PROCESS_RESIDUAL,
         view_id="residual_summary",
@@ -1904,6 +1937,31 @@ def _mark_refusal_charts(
                     series=f"{report.split_kind} mark PIT p-value",
                     sources=(qualification,),
                     strata={"qualification_status": report.status.value},
+                )
+            )
+    for report in getattr(context.dossier, "analytic_residual_reports", ()):
+        overall = next(
+            (
+                item
+                for item in report.strata
+                if item.dimension == "overall" and item.key == "all"
+            ),
+            None,
+        )
+        if (
+            overall is not None
+            and overall.mark_uniform_adjusted_p_value is not None
+        ):
+            calibration_points.append(
+                _datum(
+                    x=_short_engine(report.engine_id),
+                    y=overall.mark_uniform_adjusted_p_value,
+                    series=f"{report.split_kind} raw mark PIT adjusted p-value",
+                    sources=(qualification,),
+                    strata={
+                        "qualification_status": report.status.value,
+                        "diagnostic_stage": "raw_proposal",
+                    },
                 )
             )
     engine_by_method = {

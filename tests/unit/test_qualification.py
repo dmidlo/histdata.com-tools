@@ -68,6 +68,11 @@ def test_analytic_time_rescaling_is_deterministic_and_power_guarded() -> None:
 
     assert adequate.status is QualificationStatus.PASSED
     assert adequate.method is PointProcessResidualMethod.ANALYTIC_TIME_RESCALING
+    assert adequate.diagnostic_stage == "raw_proposal"
+    assert (
+        adequate.payload()["analytic_compensator_applies_to_final_product"]
+        is False
+    )
     assert adequate == evaluate_point_process_residuals(
         _residual_input(256), policy
     )

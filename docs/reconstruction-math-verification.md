@@ -8,7 +8,7 @@ arrays.
 
 ## Versioned formula registry
 
-`histdatacom.reconstruction_math` publishes formula version `1.0.0` and the
+`histdatacom.reconstruction_math` publishes formula version `1.1.0` and the
 following named contracts:
 
 | Formula | Definition | Production consumer |
@@ -17,6 +17,7 @@ following named contracts:
 | `adaptive-cardinality-safety-v1` | `floor(max_events * safety_fraction)`; the current identity is `floor(8192 * 0.85) = 6963`. | Adaptive reconstruction planning. |
 | `hawkes-integrated-kernel-v1` | For `g_ij(t)=sum_q alpha_ijq beta_q exp(-beta_q t)`, `K_ij=sum_q alpha_ijq`. Stationary admission is strict: `rho(K) < configured_bound < 1`. | Marked-Hawkes fitting, deserialization, and generation. |
 | `time-rescaling-pit-v1` | `z=int lambda(s|H_s) ds` and `u=1-exp(-z)`. | Analytic point-process residual inputs. |
+| `ordered-discrete-mark-pit-v1` | `u=sum_{m'<m}(pi_m')+pi_m*semantic_uniform_sha256`. | Conditioned marked-Hawkes raw-proposal residuals. |
 | `energy-score-finite-ensemble-v1` | `mean(||X-y||) - 0.5 mean(||X-X'||)`. | Powered multivariate qualification. |
 | `variogram-score-finite-ensemble-v1` | `sum_ij w_ij (|y_i-y_j|^p-E|X_i-X_j|^p)^2`. | Powered dependence qualification. |
 | `projection-burden-dimensionless-v1` | L1 bid/ask projection movement divided by original quoted spread, with an explicit positive epsilon for zero-spread rows and no clipping. | Cross-currency projection diagnostics. |
@@ -29,7 +30,7 @@ proper-score missing-cell policy is rejection, not implicit imputation.
 
 ## Deterministic fixtures
 
-`current_reconstruction_math_verification_report()` executes 23 checks:
+`current_reconstruction_math_verification_report()` executes 25 checks:
 
 - bounded negative-binomial tail sums for sparse, transition, and modern
   retention regimes, plus a fixed-seed production sampler comparison;
@@ -37,9 +38,10 @@ proper-score missing-cell policy is rejection, not implicit imputation.
 - multi-exponential integration, exact 2x2 Perron roots, strict checks below,
   at, and above the configured Hawkes bound, and serialized structural
   tampering refusal;
-- analytic compensator versus dense numerical integration, PIT and inverse
-  transforms, right censoring, reset boundaries, and a finite-difference
-  compensator-gradient check;
+- analytic compensator versus dense numerical integration, exact multivariate
+  Hawkes adapter parity, PIT and inverse transforms, semantic ordered mark PIT,
+  right censoring, reset boundaries, and a finite-difference compensator-
+  gradient check;
 - energy and variogram numerical goldens, permutation invariance,
   non-negativity, degenerate ensembles, scaling, and missing-cell refusal; and
 - dimensionless projection burden, exact bid/ask triangle sides, quote age,
@@ -54,7 +56,7 @@ declared tolerance.
 
 `ReconstructionMathVerificationReportV1` contains the complete formula
 registry, content-addressed checks, a derived summary, and a report ID. The
-current report has 23 passing checks and sets both `event_rows_inline` and
+current report has 25 passing checks and sets both `event_rows_inline` and
 `samples_inline` to `false`. `from_json()` and
 `read_reconstruction_math_verification_report()` recompute every nested
 identity and reject changed checks, formula text, or derived summaries.

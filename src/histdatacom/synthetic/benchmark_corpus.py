@@ -2495,6 +2495,10 @@ def run_reverse_degradation_benchmark_campaign(
     ) = None,
     metric_trace_out: list[BenchmarkWindowMetricTraceV1] | None = None,
     fit_result_out: list[Any] | None = None,
+    protected_window_out: (
+        list[tuple[BenchmarkWindowPartitionV1, tuple[BenchmarkEventV1, ...]]]
+        | None
+    ) = None,
 ) -> tuple[ReverseDegradationBenchmarkCampaignV1, ReferenceMotifIndexV1]:
     """Run controls and every explicitly configured challenger family."""
     if not isinstance(corpus, ReverseDegradationBenchmarkCorpusV1):
@@ -2503,6 +2507,8 @@ def run_reverse_degradation_benchmark_campaign(
         raise ValueError("benchmark metric trace output must start empty")
     if fit_result_out is not None and fit_result_out:
         raise ValueError("benchmark fit-result output must start empty")
+    if protected_window_out is not None and protected_window_out:
+        raise ValueError("benchmark protected-window output must start empty")
     started_wall = datetime.now(timezone.utc)
     started = time.monotonic()
     root = Path(source_root).expanduser().resolve()
@@ -2527,6 +2533,12 @@ def run_reverse_degradation_benchmark_campaign(
         )
         for item in corpus.windows
     }
+    if protected_window_out is not None:
+        protected_window_out.extend(
+            (item, events_by_window[item.window_id])
+            for item in corpus.windows
+            if item.split_kind in {"validation", "final_holdout"}
+        )
     if motif_index is None:
         motif_index = _build_real_reference_motif_index(
             corpus,

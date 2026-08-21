@@ -42,8 +42,8 @@ def test_current_report_passes_is_deterministic_and_round_trips(
     assert report.formula_version == RECONSTRUCTION_MATH_FORMULA_VERSION
     assert report.passed is True
     assert report.summary == {
-        "check_count": 23,
-        "passed_check_count": 23,
+        "check_count": 25,
+        "passed_check_count": 25,
         "failed_check_count": 0,
         "passed": True,
     }

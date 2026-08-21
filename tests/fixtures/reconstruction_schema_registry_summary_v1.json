@@ -1,11 +1,11 @@
 {
-  "contract_count": 504,
-  "registry_id": "reconstruction-schema-registry:sha256:d689dc59ec2a6fa54b6e78cd247fc22ddb1ee17d08cc0424b76121d3c9c14a98",
+  "contract_count": 511,
+  "registry_id": "reconstruction-schema-registry:sha256:9aaee858ddfd88909ef1ee8cd5f63e240d5b89ba42917557e04b6c869ed96662",
   "schema_version": "histdatacom.reconstruction-schema-registry.v1",
   "status_counts": {
     "deprecated": 1,
     "internal_only": 122,
     "optional": 303,
-    "required": 78
+    "required": 85
   }
 }
