@@ -116,6 +116,12 @@ count, or partition count exceed policy. Publication additionally refuses if
 actual rows or partitions exceed those conservative estimates or if staged and
 final bytes exceed the bound policy.
 
+The default policy admits nine retained members so the public v2.5
+marked-Hawkes plan can preserve the complete three observation-scenario by
+three feed-transition-scenario cross-product. An explicitly supplied smaller
+limit remains authoritative and fails preflight rather than dropping a
+scenario.
+
 This preflight is the final-storage complement to #442's all-member computation
 and scratch estimate. Omitted ensemble members remain reproducible compact
 artifacts; they are not silently materialized as final Parquet.

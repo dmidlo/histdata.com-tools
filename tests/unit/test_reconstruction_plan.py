@@ -581,6 +581,54 @@ def test_public_builder_is_deterministic_bounded_and_stage_consumable(
     assert broker_command.input_manifest_refs == ()
 
 
+def test_execution_manifest_schedules_executable_scenario_policies(
+    planned_environment: tuple[Path, dict[str, Any]],
+    tmp_path: Path,
+) -> None:
+    """The proposal stage receives both frozen executable policy artifacts."""
+    source_root, kwargs = planned_environment
+    plan = build_synthetic_infill_plan(source_root, **kwargs)
+    execution = read_reconstruction_plan_execution_manifest(
+        plan.artifact_graph["execution_manifest"].path
+    )
+    uncertainty_ref = _artifact(
+        tmp_path,
+        "observation-uncertainty-policy",
+        "observation_uncertainty_policy_v1",
+    )
+    transition_ref = _artifact(
+        tmp_path,
+        "feed-epoch-transition-policy",
+        "feed_epoch_transition_policy_v1",
+    )
+    rebound = replace(
+        execution,
+        artifacts={
+            **execution.artifacts,
+            "observation_uncertainty_policy": uncertainty_ref,
+            "feed_epoch_transition_policy": transition_ref,
+        },
+        manifest_id="",
+    )
+    inventory = read_reconstruction_source_inventory(
+        plan.artifact_graph["source_inventory"].path
+    )
+
+    commands = plan_module._stage_commands(
+        plan.workflow_requests[0].tasks[0].window,
+        scratch=Path(rebound.scratch_root),
+        inventory=inventory,
+        execution_manifest=rebound,
+        execution_ref=plan.artifact_graph["execution_manifest"],
+    )
+    proposal = next(
+        item for item in commands if item.stage is ReconstructionStage.PROPOSAL
+    )
+
+    assert uncertainty_ref in proposal.input_manifest_refs
+    assert transition_ref in proposal.input_manifest_refs
+
+
 def test_plan_records_source_empty_windows_without_fabricating_work(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -119,7 +119,7 @@ class ReconstructionStoragePolicyV1:
     max_memory_bytes: int = 2 * 1024**3
     max_scratch_bytes: int = 100 * 1024**3
     max_output_bytes: int = 100 * 1024**3
-    max_retained_ensemble_members: int = 4
+    max_retained_ensemble_members: int = 9
     checkpoint_every_batches: int = 1
     heartbeat_every_batches: int = 1
     max_checkpoint_bytes: int = DEFAULT_MAX_CHECKPOINT_BYTES

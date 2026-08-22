@@ -683,6 +683,38 @@ def test_retention_preflight_estimates_primary_and_all_retained_members() -> (
     assert len(raised.value.violations) == 2
 
 
+def test_default_storage_covers_crossed_hawkes_scenarios() -> None:
+    """The public default retains every 3-by-3 Hawkes scenario member."""
+    member_counts = {f"member-{index:03d}": 1 for index in range(9)}
+    default_policy = ReconstructionStoragePolicyV1()
+
+    accepted = estimate_reconstruction_retention(
+        run_id="run:crossed-scenarios",
+        primary_member_id="member-000",
+        retained_member_event_counts=member_counts,
+        estimated_partition_count=9,
+        storage_policy=default_policy,
+    )
+
+    assert default_policy.max_retained_ensemble_members == 9
+    assert accepted.retained_member_ids == tuple(member_counts)
+
+    undersized_policy = ReconstructionStoragePolicyV1(
+        max_retained_ensemble_members=8
+    )
+    with pytest.raises(
+        ReconstructionStoragePreflightError,
+        match="retained members 9 exceed 8",
+    ):
+        estimate_reconstruction_retention(
+            run_id="run:undersized-crossed-scenarios",
+            primary_member_id="member-000",
+            retained_member_event_counts=member_counts,
+            estimated_partition_count=9,
+            storage_policy=undersized_policy,
+        )
+
+
 def test_cleanup_removes_only_transaction_scratch(
     tmp_path: Path,
 ) -> None:

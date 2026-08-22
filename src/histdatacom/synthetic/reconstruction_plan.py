@@ -2103,6 +2103,8 @@ class ReconstructionPlanExecutionManifestV1:
             "proposal_portfolio_evaluation",
             "powered_qualification_dossier",
             "hawkes_product_selection_dossier",
+            "observation_uncertainty_policy",
+            "feed_epoch_transition_policy",
             "source_support_map",
             "window_sizing_audit",
         }
@@ -4329,6 +4331,10 @@ def validate_synthetic_infill_plan_for_execution(
         observation_uncertainty_ref = plan.artifact_graph.get(
             "observation_uncertainty_policy"
         )
+        if hawkes_product_selected and observation_uncertainty_ref is None:
+            raise ReconstructionPlanCompatibilityError(
+                "marked-Hawkes plan lacks observation uncertainty policy"
+            )
         if hawkes_product_selected and observation_uncertainty_ref is not None:
             if (
                 observation_uncertainty_ref.kind
@@ -6923,6 +6929,8 @@ def _stage_commands(
                     "proposal_dataset_resolution",
                     "proposal_portfolio_evaluation",
                     "powered_qualification_dossier",
+                    "observation_uncertainty_policy",
+                    "feed_epoch_transition_policy",
                 }
                 or name.startswith(
                     (
