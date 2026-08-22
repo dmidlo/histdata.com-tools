@@ -342,6 +342,7 @@ class ReconstructionPlanRefusalCode(str, Enum):
     FEED_EPOCH_UNSUPPORTED = "feed_epoch_unsupported"
     MARKET_CONTEXT_UNSUPPORTED = "market_context_unsupported"
     CFTC_POSITIONING_UNSUPPORTED = "cftc_positioning_unsupported"
+    OBSERVATION_CARDINALITY_UNSUPPORTED = "observation_cardinality_unsupported"
     INFORMATION_LEAKAGE = "information_leakage"
 
 
@@ -1528,7 +1529,7 @@ class ReconstructionContextAvailabilityQualificationV1:
 
 @dataclass(frozen=True, slots=True)
 class ReconstructionWindowSizingAuditV1:
-    """Content-bound proof that window cardinality fits proposal limits."""
+    """Content-bound account of fitted and scientifically refused windows."""
 
     proposal_engine_id: str
     proposal_config_id: str
@@ -1541,6 +1542,8 @@ class ReconstructionWindowSizingAuditV1:
     subdivided_window_count: int
     maximum_modeled_missing_events: float
     width_counts: Mapping[str, int]
+    cardinality_refusal_count: int = 0
+    maximum_refused_modeled_missing_events: int = 0
     audit_id: str = ""
     schema_version: str = RECONSTRUCTION_WINDOW_SIZING_AUDIT_SCHEMA_VERSION
 
@@ -1562,6 +1565,8 @@ class ReconstructionWindowSizingAuditV1:
             "initial_window_count",
             "final_window_count",
             "subdivided_window_count",
+            "cardinality_refusal_count",
+            "maximum_refused_modeled_missing_events",
         ):
             object.__setattr__(
                 self, name, _nonnegative_int(getattr(self, name), name)
@@ -1581,6 +1586,16 @@ class ReconstructionWindowSizingAuditV1:
         if maximum > self.modeled_missing_event_limit:
             raise ValueError("window-sizing audit exceeds modeled event limit")
         object.__setattr__(self, "maximum_modeled_missing_events", maximum)
+        if self.cardinality_refusal_count > self.final_window_count:
+            raise ValueError(
+                "window-sizing refusal count exceeds final windows"
+            )
+        if bool(self.cardinality_refusal_count) != bool(
+            self.maximum_refused_modeled_missing_events
+        ):
+            raise ValueError(
+                "window-sizing refusal count and refused maximum differ"
+            )
         counts = {
             _required_text(str(key)): _nonnegative_int(
                 value, f"width_counts.{key}"
@@ -1598,7 +1613,7 @@ class ReconstructionWindowSizingAuditV1:
         object.__setattr__(self, "audit_id", expected)
 
     def payload(self) -> dict[str, JSONValue]:
-        return {
+        payload: dict[str, JSONValue] = {
             "schema_version": self.schema_version,
             "proposal_engine_id": self.proposal_engine_id,
             "proposal_config_id": self.proposal_config_id,
@@ -1615,6 +1630,14 @@ class ReconstructionWindowSizingAuditV1:
             "cardinality_safety_fraction": _ADAPTIVE_CARDINALITY_SAFETY_FRACTION,
             "count_basis": "exact-immutable-arrow-input-counts-v1",
         }
+        if self.cardinality_refusal_count:
+            payload["cardinality_refusal_count"] = (
+                self.cardinality_refusal_count
+            )
+            payload["maximum_refused_modeled_missing_events"] = (
+                self.maximum_refused_modeled_missing_events
+            )
+        return payload
 
     def to_dict(self) -> dict[str, JSONValue]:
         return {**self.payload(), "audit_id": self.audit_id}
@@ -1676,6 +1699,14 @@ class ReconstructionWindowSizingAuditV1:
                 str(key): _strict_int(value, f"width_counts[{key}]")
                 for key, value in _mapping(data.get("width_counts")).items()
             },
+            cardinality_refusal_count=_strict_int(
+                data.get("cardinality_refusal_count", 0),
+                "cardinality_refusal_count",
+            ),
+            maximum_refused_modeled_missing_events=_strict_int(
+                data.get("maximum_refused_modeled_missing_events", 0),
+                "maximum_refused_modeled_missing_events",
+            ),
             audit_id=str(data.get("audit_id", "")),
             schema_version=str(data.get("schema_version", "")),
         )
@@ -3763,6 +3794,7 @@ def build_synthetic_infill_plan(
         cross_series_policy=selected_cross_series_policy,
     )
     window_sizing_audit: ReconstructionWindowSizingAuditV1 | None = None
+    cardinality_refusals: tuple[ReconstructionPlanRefusalV1, ...] = ()
     if len(proposal_portfolio.selected_engine_ids) == 1:
         selected_engine_id = proposal_portfolio.selected_engine_ids[0]
         selected_proposal_config = proposal_configs[selected_engine_id]
@@ -3771,24 +3803,24 @@ def build_synthetic_infill_plan(
             and selected_proposal_config.cardinality_policy
             == OPERATOR_CONDITIONED_CARDINALITY_POLICY
         ):
-            member_window_plans, window_sizing_audit = (
-                _adapt_cross_currency_window_plans_for_cardinality(
-                    member_window_plans,
-                    initial_source_support=source_support,
-                    inventory=inventory,
-                    definition=resolved.feed_epoch_definition,
-                    observation_operator=resolved.observation_operator,
-                    information_mode=mode,
-                    proposal_engine_id=selected_engine_id,
-                    proposal_config=selected_proposal_config,
-                    storage_policy=configuration.storage_policy,
-                    observation_uncertainty_policy=(
-                        observation_uncertainty_policy
-                    ),
-                    transition_policy=transition_policy,
-                    cross_series_policy=selected_cross_series_policy,
-                    requested_max_window_size_ns=configuration.window_size_ns,
-                )
+            (
+                member_window_plans,
+                window_sizing_audit,
+                cardinality_refusals,
+            ) = _adapt_cross_currency_window_plans_for_cardinality(
+                member_window_plans,
+                initial_source_support=source_support,
+                inventory=inventory,
+                definition=resolved.feed_epoch_definition,
+                observation_operator=resolved.observation_operator,
+                information_mode=mode,
+                proposal_engine_id=selected_engine_id,
+                proposal_config=selected_proposal_config,
+                storage_policy=configuration.storage_policy,
+                observation_uncertainty_policy=(observation_uncertainty_policy),
+                transition_policy=transition_policy,
+                cross_series_policy=selected_cross_series_policy,
+                requested_max_window_size_ns=configuration.window_size_ns,
             )
             boundary_windows = member_window_plans[0].windows
             source_support = _build_exact_source_support(
@@ -3835,6 +3867,7 @@ def build_synthetic_infill_plan(
         observation_operator=resolved.observation_operator,
         transition_policy=transition_policy,
         context_availability_qualification=(context_availability_qualification),
+        cardinality_refusals=cardinality_refusals,
     )
     executable_keys = {
         (item.core_start_ns, item.core_end_ns) for item in executable_boundaries
@@ -5478,6 +5511,7 @@ def _preflight_window_support(
     context_availability_qualification: (
         ReconstructionContextAvailabilityQualificationV1 | None
     ),
+    cardinality_refusals: Sequence[ReconstructionPlanRefusalV1] = (),
 ) -> tuple[
     tuple[ReconstructionPlanRefusalV1, ...],
     tuple[ReconstructionWindowV1, ...],
@@ -5486,6 +5520,30 @@ def _preflight_window_support(
     refusals: list[ReconstructionPlanRefusalV1] = []
     executable: list[ReconstructionWindowV1] = []
     cftc_support: list[ReconstructionPlanCftcSupportV1] = []
+    cardinality_by_boundary: dict[
+        tuple[int, int], ReconstructionPlanRefusalV1
+    ] = {}
+    for refusal in cardinality_refusals:
+        if (
+            refusal.code
+            is not ReconstructionPlanRefusalCode.OBSERVATION_CARDINALITY_UNSUPPORTED
+        ):
+            raise ReconstructionPlanCompatibilityError(
+                "cardinality preflight contains a different refusal category"
+            )
+        boundary = (refusal.start_ns, refusal.end_ns)
+        if boundary in cardinality_by_boundary:
+            raise ReconstructionPlanCompatibilityError(
+                "cardinality preflight contains duplicate boundaries"
+            )
+        cardinality_by_boundary[boundary] = refusal
+    window_boundaries = {
+        (window.core_start_ns, window.core_end_ns) for window in windows
+    }
+    if not set(cardinality_by_boundary).issubset(window_boundaries):
+        raise ReconstructionPlanCompatibilityError(
+            "cardinality preflight contains an unknown boundary"
+        )
     required_context = (
         ("EUR", MarketContextKind.POLICY_RATE_CHANGE),
         ("GBP", MarketContextKind.POLICY_RATE_CHANGE),
@@ -5693,7 +5751,11 @@ def _preflight_window_support(
                     query_id=positioning_query.query_id,
                 )
             )
-            executable.append(window)
+            cardinality_refusal = cardinality_by_boundary.get(boundary)
+            if cardinality_refusal is None:
+                executable.append(window)
+            else:
+                refusals.append(cardinality_refusal)
             continue
         if (
             positioning_query.status in CFTC_UNCONDITIONED_AVAILABILITY_STATUSES
@@ -5719,7 +5781,11 @@ def _preflight_window_support(
                     ),
                 )
             )
-            executable.append(window)
+            cardinality_refusal = cardinality_by_boundary.get(boundary)
+            if cardinality_refusal is None:
+                executable.append(window)
+            else:
+                refusals.append(cardinality_refusal)
             continue
         cftc_support.append(
             ReconstructionPlanCftcSupportV1(
@@ -5819,8 +5885,9 @@ def _adapt_cross_currency_window_plans_for_cardinality(
 ) -> tuple[
     tuple[CrossCurrencyWindowPlanV1, ...],
     ReconstructionWindowSizingAuditV1,
+    tuple[ReconstructionPlanRefusalV1, ...],
 ]:
-    """Recursively fit qualified windows below the Hawkes count ceiling."""
+    """Fit Hawkes windows or retain irreducible scientific refusals."""
     if observation_uncertainty_policy is None:
         raise ReconstructionPlanCompatibilityError(
             "adaptive cardinality sizing lacks observation uncertainty policy"
@@ -5909,9 +5976,11 @@ def _adapt_cross_currency_window_plans_for_cardinality(
         return values
 
     intervals: list[tuple[int, int]] = []
+    cardinality_refusals: list[ReconstructionPlanRefusalV1] = []
     width_counts: Counter[str] = Counter()
     subdivided = 0
-    maximum_modeled = 0.0
+    maximum_modeled = 0
+    maximum_refused_modeled = 0
 
     def modeled_for_counts(
         start_ns: int,
@@ -5919,9 +5988,9 @@ def _adapt_cross_currency_window_plans_for_cardinality(
         counts: Mapping[str, int],
         *,
         symbols: Sequence[str],
-    ) -> float:
+    ) -> tuple[int, int]:
         if not all(counts.values()):
-            return 0.0
+            return 0, 0
         assignments = tuple(
             definition.assign(
                 symbol=symbol,
@@ -5966,9 +6035,8 @@ def _adapt_cross_currency_window_plans_for_cardinality(
             retention,
             observation_uncertainty_policy.admission_quantile,
         )
-        if modeled > math.floor(observed * amplification_limit):
-            return math.inf
-        return float(modeled)
+        amplification_bound = math.floor(observed * amplification_limit)
+        return modeled, amplification_bound
 
     for initial_window in initial_windows:
         boundary = (initial_window.core_start_ns, initial_window.core_end_ns)
@@ -5978,12 +6046,12 @@ def _adapt_cross_currency_window_plans_for_cardinality(
             width_counts[str(boundary[1] - boundary[0])] += 1
             continue
         window_symbols = initial_window.symbols
-        initial_modeled = modeled_for_counts(
+        initial_modeled, initial_amplification_bound = modeled_for_counts(
             *boundary,
             support.input_event_counts,
             symbols=window_symbols,
         )
-        if initial_modeled <= modeled_limit:
+        if initial_modeled <= min(modeled_limit, initial_amplification_bound):
             intervals.append(boundary)
             width_counts[str(boundary[1] - boundary[0])] += 1
             maximum_modeled = max(maximum_modeled, initial_modeled)
@@ -6039,23 +6107,40 @@ def _adapt_cross_currency_window_plans_for_cardinality(
                 start_ns - initial_window.left_halo_ns,
                 end_ns + initial_window.right_lookahead_ns,
             )
-            modeled = modeled_for_counts(
+            modeled, amplification_bound = modeled_for_counts(
                 start_ns,
                 end_ns,
                 counts,
                 symbols=window_symbols,
             )
-            if modeled <= modeled_limit:
+            effective_limit = min(modeled_limit, amplification_bound)
+            if modeled <= effective_limit:
                 selected.append((start_ns, end_ns))
                 maximum_modeled = max(maximum_modeled, modeled)
                 continue
             if end_ns - start_ns <= 1_000_000:
-                raise ReconstructionPlanCompatibilityError(
-                    "one immutable millisecond exceeds qualified cardinality "
-                    f"headroom: start_ns={start_ns}, end_ns={end_ns}, "
-                    f"modeled_missing_events={modeled:.6f}, "
-                    f"maximum_candidate_amplification={amplification_limit:.6f}"
+                selected.append((start_ns, end_ns))
+                maximum_refused_modeled = max(maximum_refused_modeled, modeled)
+                cardinality_refusals.append(
+                    ReconstructionPlanRefusalV1(
+                        start_ns=start_ns,
+                        end_ns=end_ns,
+                        code=(
+                            ReconstructionPlanRefusalCode.OBSERVATION_CARDINALITY_UNSUPPORTED
+                        ),
+                        reason=(
+                            "irreducible one-millisecond interval requires "
+                            f"{modeled} modeled missing events, exceeding "
+                            f"effective qualified headroom {effective_limit} "
+                            f"(runtime safety limit {modeled_limit}; observed "
+                            f"input events {sum(counts.values())}; candidate "
+                            f"amplification limit {amplification_bound} at "
+                            f"maximum amplification {amplification_limit:.12g}); "
+                            "the proposal count is not capped"
+                        ),
+                    )
                 )
+                continue
             midpoint = ((start_ns + end_ns) // 2 // 1_000_000) * 1_000_000
             if midpoint <= start_ns:
                 midpoint = start_ns + 1_000_000
@@ -6109,8 +6194,10 @@ def _adapt_cross_currency_window_plans_for_cardinality(
         subdivided_window_count=subdivided,
         maximum_modeled_missing_events=maximum_modeled,
         width_counts=width_counts,
+        cardinality_refusal_count=len(cardinality_refusals),
+        maximum_refused_modeled_missing_events=maximum_refused_modeled,
     )
-    return tuple(adapted), audit
+    return tuple(adapted), audit, tuple(cardinality_refusals)
 
 
 def _build_exact_source_support(

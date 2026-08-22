@@ -2237,8 +2237,42 @@ def _independent_modeled_count(
             math.floor(
                 input_count * proposal_config.limits.max_candidate_amplification
             ),
+            math.floor(
+                input_count
+                * configuration.storage_policy.max_candidate_amplification
+            ),
         )
     return candidates, limit
+
+
+def _independent_cardinality_refusal(
+    modeled_count: int,
+    generator_limit: int,
+    *,
+    duration_ns: int,
+    sizing_audit: ReconstructionWindowSizingAuditV1 | None,
+) -> str | None:
+    """Classify only an independently proven irreducible count overflow."""
+    effective_limit = min(
+        generator_limit,
+        (
+            sizing_audit.modeled_missing_event_limit
+            if sizing_audit is not None
+            else generator_limit
+        ),
+    )
+    if modeled_count <= effective_limit:
+        return None
+    if duration_ns > 1_000_000:
+        raise FinalSupportVerificationError(
+            "independent modeled cardinality exceeds generator safety before "
+            "the irreducible one-millisecond boundary"
+        )
+    return (
+        "independent replay found irreducible one-millisecond observation "
+        f"cardinality requiring {modeled_count} modeled missing events above "
+        f"effective qualified headroom {effective_limit}"
+    )
 
 
 def _independent_resource_estimate(
@@ -2864,7 +2898,7 @@ def _verify_plan_shard(
         modeled_limit = 0
         resource_estimate: ReconstructionResourceEstimateV1 | None = None
         if status == "executable":
-            modeled_count, modeled_limit = _independent_modeled_count(
+            required_modeled_count, modeled_limit = _independent_modeled_count(
                 input_count,
                 midpoint_ns=midpoint,
                 symbols=RECONSTRUCTION_SYMBOLS,
@@ -2876,26 +2910,33 @@ def _verify_plan_shard(
                 uncertainty_policy=uncertainty_policy,
                 transition_policy=transition_policy,
             )
-            if modeled_count > modeled_limit or (
-                sizing_audit is not None
-                and modeled_count > sizing_audit.modeled_missing_event_limit
-            ):
-                raise FinalSupportVerificationError(
-                    "independent modeled cardinality exceeds generator safety"
-                )
-            resource_estimate = _independent_resource_estimate(
-                input_count, modeled_count, configuration
+            cardinality_reason = _independent_cardinality_refusal(
+                required_modeled_count,
+                modeled_limit,
+                duration_ns=claimed.end_ns - claimed.start_ns,
+                sizing_audit=sizing_audit,
             )
-            resource_estimates.append(resource_estimate)
-            for task in tasks:
-                if task.resource_estimate != resource_estimate:
-                    raise FinalSupportVerificationError(
-                        "workflow task resource estimate differs from independent "
-                        "reconciliation"
-                    )
-                candidate_events_by_member[
-                    task.window.ensemble_member_id
-                ] += modeled_count
+            if cardinality_reason is not None:
+                status = "refused"
+                refusal_code = (
+                    ReconstructionPlanRefusalCode.OBSERVATION_CARDINALITY_UNSUPPORTED.value
+                )
+                refusal_reason = cardinality_reason
+            else:
+                modeled_count = required_modeled_count
+                resource_estimate = _independent_resource_estimate(
+                    input_count, modeled_count, configuration
+                )
+                resource_estimates.append(resource_estimate)
+                for task in tasks:
+                    if task.resource_estimate != resource_estimate:
+                        raise FinalSupportVerificationError(
+                            "workflow task resource estimate differs from "
+                            "independent reconciliation"
+                        )
+                    candidate_events_by_member[
+                        task.window.ensemble_member_id
+                    ] += modeled_count
         _assert_claimed_window(
             claimed,
             status=status,

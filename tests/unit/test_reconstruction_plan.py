@@ -1187,7 +1187,7 @@ def test_adaptive_hawkes_windows_preserve_common_anchors_and_runtime_headroom(
     engine_id = plan_module.QUALIFIED_CFTC_UNAVAILABLE_ENGINE_ID
     config = proposal_engine_default_configs()[engine_id]
 
-    adapted, audit = (
+    adapted, audit, cardinality_refusals = (
         plan_module._adapt_cross_currency_window_plans_for_cardinality(
             plans,
             initial_source_support=support,
@@ -1209,6 +1209,7 @@ def test_adaptive_hawkes_windows_preserve_common_anchors_and_runtime_headroom(
     assert audit.initial_window_count == 1
     assert audit.final_window_count > 1
     assert audit.subdivided_window_count == 1
+    assert not cardinality_refusals
     assert (
         audit.maximum_modeled_missing_events
         <= audit.modeled_missing_event_limit
@@ -1258,6 +1259,197 @@ def test_adaptive_hawkes_windows_preserve_common_anchors_and_runtime_headroom(
                 uncertainty_policy.admission_quantile,
             )
         )
+
+
+def test_irreducible_cardinality_overflow_is_a_finite_scientific_refusal(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    definition, operator = reconstruction_transition_fixture()
+    operator = replace(
+        operator,
+        strata=tuple(
+            (
+                replace(
+                    stratum,
+                    parameters=tuple(
+                        (
+                            replace(parameter, lower=0.001)
+                            if parameter.name == "retention_probability"
+                            else parameter
+                        )
+                        for parameter in stratum.parameters
+                    ),
+                    stratum_id="",
+                )
+                if stratum.key == "epoch|epoch_id=technology_epoch_01"
+                else stratum
+            )
+            for stratum in operator.strata
+        ),
+        operator_id="",
+    )
+    start_ms = 1_015_200_000_000
+    end_ms = start_ms + 1
+    timestamps = [start_ms - 60_000, start_ms - 1, start_ms]
+    partitions = []
+    for ordinal, symbol in enumerate(_SYMBOLS):
+        path = tmp_path / "ASCII" / "T" / symbol / "2002" / "3" / ".data"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        table = pa.table(
+            {
+                "datetime": timestamps,
+                "bid": [
+                    1.0 + ordinal / 100 + index / 1_000_000
+                    for index in range(3)
+                ],
+                "ask": [
+                    1.0002 + ordinal / 100 + index / 1_000_000
+                    for index in range(3)
+                ],
+                "vol": [0, 0, 0],
+            }
+        )
+        with (
+            pa.OSFile(str(path), "wb") as sink,
+            ipc.new_file(sink, table.schema) as writer,
+        ):
+            writer.write_table(table)
+        ref = artifact_ref_for_file(
+            path,
+            kind=ASCII_TICK_SOURCE_KIND,
+            metadata={
+                "symbol": symbol,
+                "period": "200203",
+                "timestamp_regression_count": 0,
+                "maximum_timestamp_regression_ms": 0,
+            },
+        )
+        partitions.append(
+            plan_module.ReconstructionSourcePartitionV1(
+                symbol=symbol,
+                period="200203",
+                artifact=ref,
+                row_count=3,
+                coverage_start_ns=1_014_940_800_000_000_000,
+                coverage_end_ns=1_017_619_200_000_000_000,
+                first_timestamp_ms=timestamps[0],
+                last_timestamp_ms=timestamps[-1],
+                feed_epoch_evidence_id=f"feed-evidence:{symbol}:200203",
+            )
+        )
+    inventory = plan_module.ReconstructionSourceInventoryV1(
+        source_root=str(tmp_path / "ASCII" / "T"),
+        symbols=_SYMBOLS,
+        periods=("200203",),
+        partitions=tuple(partitions),
+        requested_start_ns=start_ms * 1_000_000,
+        requested_end_ns=end_ms * 1_000_000,
+        total_row_count=9,
+        total_size_bytes=sum(
+            int(item.artifact.size_bytes or 0) for item in partitions
+        ),
+    )
+    run = plan_module.ReconstructionRunV1(
+        symbols=_SYMBOLS,
+        source_version_ids=("source-version:test",),
+        configuration_ids=("configuration:test",),
+        ensemble_member_ids=("ensemble-member:a",),
+        base_seed=1,
+        storage_policy=ReconstructionStoragePolicyV1(),
+    )
+    plans = (
+        plan_module.plan_cross_currency_windows(
+            run,
+            ensemble_member_id=run.ensemble_member_ids[0],
+            requested_start_ns=start_ms * 1_000_000,
+            requested_end_ns=end_ms * 1_000_000,
+            window_size_ns=1_000_000,
+            coverages=plan_module._source_coverages(inventory),
+            left_halo_ns=60_000_000_000,
+        ),
+    )
+    initial_support = (
+        plan_module.ReconstructionPlanSourceSupportV1(
+            start_ns=start_ms * 1_000_000,
+            end_ns=end_ms * 1_000_000,
+            symbols=_SYMBOLS,
+            core_event_counts={symbol: 1 for symbol in _SYMBOLS},
+            input_event_counts={symbol: 3 for symbol in _SYMBOLS},
+            common_exact_core_timestamp_count=1,
+            status=plan_module.ReconstructionPlanSourceSupportStatus.COMPLETE,
+            reason="complete source triangle",
+        ),
+    )
+    engine_id = plan_module.QUALIFIED_CFTC_UNAVAILABLE_ENGINE_ID
+    config = proposal_engine_default_configs()[engine_id]
+
+    adapted, audit, cardinality_refusals = (
+        plan_module._adapt_cross_currency_window_plans_for_cardinality(
+            plans,
+            initial_source_support=initial_support,
+            inventory=inventory,
+            definition=definition,
+            observation_operator=operator,
+            information_mode=InformationMode.EX_POST_RECONSTRUCTION,
+            proposal_engine_id=engine_id,
+            proposal_config=config,
+            storage_policy=run.storage_policy,
+            observation_uncertainty_policy=ObservationUncertaintyPolicyV1(),
+            requested_max_window_size_ns=1_000_000,
+        )
+    )
+
+    assert len(adapted[0].windows) == 1
+    assert audit.minimum_window_size_ns == 1_000_000
+    assert audit.maximum_modeled_missing_events == 0
+    assert len(cardinality_refusals) == 1
+    assert audit.cardinality_refusal_count == 1
+    assert audit.maximum_refused_modeled_missing_events > (
+        audit.modeled_missing_event_limit
+    )
+    assert (
+        plan_module.ReconstructionWindowSizingAuditV1.from_dict(audit.to_dict())
+        == audit
+    )
+    cardinality_refusal = cardinality_refusals[0]
+    assert cardinality_refusal.code is (
+        plan_module.ReconstructionPlanRefusalCode.OBSERVATION_CARDINALITY_UNSUPPORTED
+    )
+    assert "requires " in cardinality_refusal.reason
+    assert "effective qualified headroom" in cardinality_refusal.reason
+    assert "inf" not in cardinality_refusal.reason.lower()
+
+    exact_support = plan_module._build_exact_source_support(
+        adapted[0].windows, inventory=inventory
+    )
+    monkeypatch.setattr(
+        plan_module,
+        "preflight_market_context_corpus",
+        lambda *_, **__: SimpleNamespace(reasons=()),
+    )
+    monkeypatch.setattr(
+        plan_module, "query_cftc_positioning_corpus", _ready_cftc_query
+    )
+    refusals, executable, cftc_support = plan_module._preflight_window_support(
+        adapted[0].windows,
+        source_support={
+            (item.start_ns, item.end_ns): item for item in exact_support
+        },
+        definition=definition,
+        observation_operator=operator,
+        context=SimpleNamespace(),
+        positioning=SimpleNamespace(),
+        mode=InformationMode.EX_POST_RECONSTRUCTION,
+        context_availability_qualification=None,
+        cardinality_refusals=cardinality_refusals,
+    )
+
+    assert refusals == cardinality_refusals
+    assert not executable
+    assert cftc_support[0].conditioning_mode is (
+        plan_module.ReconstructionCftcConditioningMode.CONDITIONED
+    )
 
 
 def test_unsupported_cftc_query_cannot_use_unconditioned_availability_mode() -> (

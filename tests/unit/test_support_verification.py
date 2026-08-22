@@ -145,6 +145,42 @@ def test_final_support_census_rejects_invalid_quantile_maps() -> None:
         type(census).from_dict(nonmonotone)
 
 
+def test_independent_cardinality_refusal_requires_irreducible_boundary() -> (
+    None
+):
+    sizing_audit = SimpleNamespace(modeled_missing_event_limit=70)
+
+    reason = support_module._independent_cardinality_refusal(
+        71,
+        72,
+        duration_ns=1_000_000,
+        sizing_audit=sizing_audit,
+    )
+
+    assert reason is not None
+    assert "requiring 71" in reason
+    assert "headroom 70" in reason
+    assert (
+        support_module._independent_cardinality_refusal(
+            70,
+            72,
+            duration_ns=1_000_000,
+            sizing_audit=sizing_audit,
+        )
+        is None
+    )
+    with pytest.raises(
+        FinalSupportVerificationError,
+        match="before the irreducible one-millisecond boundary",
+    ):
+        support_module._independent_cardinality_refusal(
+            71,
+            72,
+            duration_ns=1_000_001,
+            sizing_audit=sizing_audit,
+        )
+
+
 def test_valid_common_data_implementation_refusal_blocks_a_shard() -> None:
     refusal = replace(
         _window(0, 10, status="refused"),

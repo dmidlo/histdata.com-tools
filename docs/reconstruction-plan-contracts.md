@@ -209,6 +209,16 @@ supported feed assignment, market context, or sufficiently fresh CFTC state
 remain visible as deterministic window refusals. At least one executable
 window is required.
 
+Marked-Hawkes planning also retains a one-millisecond interval as an
+`observation_cardinality_unsupported` scientific refusal when its qualified
+lower-retention endpoint still requires more candidates than the runtime and
+storage headroom permit. The refusal records finite required and permitted
+counts, never caps the proposal count, contributes no workflow tasks or work
+estimate, and preserves contiguous source/support coverage. The sizing audit
+separately records its finite accepted maximum, refusal count, and maximum
+refused modeled count. The final support verifier recomputes this decision
+independently from immutable input counts.
+
 `plan.to_dry_run_json()` returns the bounded operational view: request chunks,
 artifact digests and sizes, resources, and refusals without expanding source
 rows. `plan.resources` records both per-concurrent-window peaks and retained
