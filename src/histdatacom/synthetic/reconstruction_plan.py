@@ -6038,6 +6038,42 @@ def _adapt_cross_currency_window_plans_for_cardinality(
         amplification_bound = math.floor(observed * amplification_limit)
         return modeled, amplification_bound
 
+    def retain_cardinality_refusal(
+        start_ns: int,
+        end_ns: int,
+        *,
+        modeled: int,
+        amplification_bound: int,
+        observed: int,
+        constraint: str,
+    ) -> ReconstructionPlanRefusalV1:
+        nonlocal maximum_refused_modeled
+        maximum_refused_modeled = max(maximum_refused_modeled, modeled)
+        if constraint == "amplification":
+            reason = (
+                "qualified observation cardinality requires "
+                f"{modeled} modeled missing events, exceeding candidate "
+                f"amplification headroom {amplification_bound} for {observed} "
+                f"observed input events at maximum amplification "
+                f"{amplification_limit:.12g}; subdivision cannot repair this "
+                "ratio constraint and the proposal count is not capped"
+            )
+        else:
+            reason = (
+                "irreducible one-millisecond interval requires "
+                f"{modeled} modeled missing events, exceeding runtime safety "
+                f"headroom {modeled_limit}; observed input events {observed}; "
+                "the proposal count is not capped"
+            )
+        return ReconstructionPlanRefusalV1(
+            start_ns=start_ns,
+            end_ns=end_ns,
+            code=(
+                ReconstructionPlanRefusalCode.OBSERVATION_CARDINALITY_UNSUPPORTED
+            ),
+            reason=reason,
+        )
+
     for initial_window in initial_windows:
         boundary = (initial_window.core_start_ns, initial_window.core_end_ns)
         support = support_by_boundary[boundary]
@@ -6051,7 +6087,20 @@ def _adapt_cross_currency_window_plans_for_cardinality(
             support.input_event_counts,
             symbols=window_symbols,
         )
-        if initial_modeled <= min(modeled_limit, initial_amplification_bound):
+        if initial_modeled > initial_amplification_bound:
+            intervals.append(boundary)
+            width_counts[str(boundary[1] - boundary[0])] += 1
+            cardinality_refusals.append(
+                retain_cardinality_refusal(
+                    *boundary,
+                    modeled=initial_modeled,
+                    amplification_bound=initial_amplification_bound,
+                    observed=sum(support.input_event_counts.values()),
+                    constraint="amplification",
+                )
+            )
+            continue
+        if initial_modeled <= modeled_limit:
             intervals.append(boundary)
             width_counts[str(boundary[1] - boundary[0])] += 1
             maximum_modeled = max(maximum_modeled, initial_modeled)
@@ -6113,31 +6162,33 @@ def _adapt_cross_currency_window_plans_for_cardinality(
                 counts,
                 symbols=window_symbols,
             )
-            effective_limit = min(modeled_limit, amplification_bound)
-            if modeled <= effective_limit:
+            if modeled > amplification_bound:
+                selected.append((start_ns, end_ns))
+                cardinality_refusals.append(
+                    retain_cardinality_refusal(
+                        start_ns,
+                        end_ns,
+                        modeled=modeled,
+                        amplification_bound=amplification_bound,
+                        observed=sum(counts.values()),
+                        constraint="amplification",
+                    )
+                )
+                continue
+            if modeled <= modeled_limit:
                 selected.append((start_ns, end_ns))
                 maximum_modeled = max(maximum_modeled, modeled)
                 continue
             if end_ns - start_ns <= 1_000_000:
                 selected.append((start_ns, end_ns))
-                maximum_refused_modeled = max(maximum_refused_modeled, modeled)
                 cardinality_refusals.append(
-                    ReconstructionPlanRefusalV1(
-                        start_ns=start_ns,
-                        end_ns=end_ns,
-                        code=(
-                            ReconstructionPlanRefusalCode.OBSERVATION_CARDINALITY_UNSUPPORTED
-                        ),
-                        reason=(
-                            "irreducible one-millisecond interval requires "
-                            f"{modeled} modeled missing events, exceeding "
-                            f"effective qualified headroom {effective_limit} "
-                            f"(runtime safety limit {modeled_limit}; observed "
-                            f"input events {sum(counts.values())}; candidate "
-                            f"amplification limit {amplification_bound} at "
-                            f"maximum amplification {amplification_limit:.12g}); "
-                            "the proposal count is not capped"
-                        ),
+                    retain_cardinality_refusal(
+                        start_ns,
+                        end_ns,
+                        modeled=modeled,
+                        amplification_bound=amplification_bound,
+                        observed=sum(counts.values()),
+                        constraint="runtime",
                     )
                 )
                 continue

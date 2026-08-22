@@ -2175,7 +2175,7 @@ def _independent_modeled_count(
     observation_operator: Any,
     uncertainty_policy: ObservationUncertaintyPolicyV1 | None,
     transition_policy: FeedEpochTransitionPolicyV1 | None,
-) -> tuple[int, int]:
+) -> tuple[int, int, int]:
     interval_count = max(0, input_count - len(symbols))
     candidates = min(
         configuration.generator_config.max_events_per_interval * interval_count,
@@ -2184,7 +2184,8 @@ def _independent_modeled_count(
             * configuration.storage_policy.max_candidate_amplification
         ),
     )
-    limit = candidates
+    runtime_limit = candidates
+    amplification_limit = candidates
     if isinstance(proposal_config, MarkedHawkesConfigV1):
         if (
             not isinstance(observation_operator, ObservationOperatorV1)
@@ -2232,8 +2233,8 @@ def _independent_modeled_count(
             min(retentions),
             uncertainty_policy.admission_quantile,
         )
-        limit = min(
-            proposal_config.limits.max_generated_events_per_window,
+        runtime_limit = proposal_config.limits.max_generated_events_per_window
+        amplification_limit = min(
             math.floor(
                 input_count * proposal_config.limits.max_candidate_amplification
             ),
@@ -2242,27 +2243,38 @@ def _independent_modeled_count(
                 * configuration.storage_policy.max_candidate_amplification
             ),
         )
-    return candidates, limit
+    return candidates, runtime_limit, amplification_limit
 
 
 def _independent_cardinality_refusal(
     modeled_count: int,
-    generator_limit: int,
     *,
+    runtime_limit: int,
+    amplification_limit: int,
     duration_ns: int,
     sizing_audit: ReconstructionWindowSizingAuditV1 | None,
 ) -> str | None:
     """Classify only an independently proven irreducible count overflow."""
-    effective_limit = min(
-        generator_limit,
+    effective_runtime_limit = min(
+        runtime_limit,
         (
             sizing_audit.modeled_missing_event_limit
             if sizing_audit is not None
-            else generator_limit
+            else runtime_limit
         ),
     )
-    if modeled_count <= effective_limit:
+    if (
+        modeled_count <= effective_runtime_limit
+        and modeled_count <= amplification_limit
+    ):
         return None
+    if modeled_count > amplification_limit:
+        return (
+            "independent replay found qualified observation cardinality "
+            f"requiring {modeled_count} modeled missing events above candidate "
+            f"amplification headroom {amplification_limit}; subdivision cannot "
+            "repair the ratio constraint"
+        )
     if duration_ns > 1_000_000:
         raise FinalSupportVerificationError(
             "independent modeled cardinality exceeds generator safety before "
@@ -2271,7 +2283,7 @@ def _independent_cardinality_refusal(
     return (
         "independent replay found irreducible one-millisecond observation "
         f"cardinality requiring {modeled_count} modeled missing events above "
-        f"effective qualified headroom {effective_limit}"
+        f"runtime safety headroom {effective_runtime_limit}"
     )
 
 
@@ -2898,7 +2910,11 @@ def _verify_plan_shard(
         modeled_limit = 0
         resource_estimate: ReconstructionResourceEstimateV1 | None = None
         if status == "executable":
-            required_modeled_count, modeled_limit = _independent_modeled_count(
+            (
+                required_modeled_count,
+                modeled_limit,
+                amplification_limit,
+            ) = _independent_modeled_count(
                 input_count,
                 midpoint_ns=midpoint,
                 symbols=RECONSTRUCTION_SYMBOLS,
@@ -2912,7 +2928,8 @@ def _verify_plan_shard(
             )
             cardinality_reason = _independent_cardinality_refusal(
                 required_modeled_count,
-                modeled_limit,
+                runtime_limit=modeled_limit,
+                amplification_limit=amplification_limit,
                 duration_ns=claimed.end_ns - claimed.start_ns,
                 sizing_audit=sizing_audit,
             )

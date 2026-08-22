@@ -1261,9 +1261,11 @@ def test_adaptive_hawkes_windows_preserve_common_anchors_and_runtime_headroom(
         )
 
 
-def test_irreducible_cardinality_overflow_is_a_finite_scientific_refusal(
+@pytest.mark.parametrize("duration_ms", [1, 60_000])
+def test_cardinality_amplification_overflow_is_a_finite_bounded_refusal(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    duration_ms: int,
 ) -> None:
     definition, operator = reconstruction_transition_fixture()
     operator = replace(
@@ -1290,7 +1292,7 @@ def test_irreducible_cardinality_overflow_is_a_finite_scientific_refusal(
         operator_id="",
     )
     start_ms = 1_015_200_000_000
-    end_ms = start_ms + 1
+    end_ms = start_ms + duration_ms
     timestamps = [start_ms - 60_000, start_ms - 1, start_ms]
     partitions = []
     for ordinal, symbol in enumerate(_SYMBOLS):
@@ -1364,7 +1366,7 @@ def test_irreducible_cardinality_overflow_is_a_finite_scientific_refusal(
             ensemble_member_id=run.ensemble_member_ids[0],
             requested_start_ns=start_ms * 1_000_000,
             requested_end_ns=end_ms * 1_000_000,
-            window_size_ns=1_000_000,
+            window_size_ns=duration_ms * 1_000_000,
             coverages=plan_module._source_coverages(inventory),
             left_halo_ns=60_000_000_000,
         ),
@@ -1396,12 +1398,14 @@ def test_irreducible_cardinality_overflow_is_a_finite_scientific_refusal(
             proposal_config=config,
             storage_policy=run.storage_policy,
             observation_uncertainty_policy=ObservationUncertaintyPolicyV1(),
-            requested_max_window_size_ns=1_000_000,
+            requested_max_window_size_ns=duration_ms * 1_000_000,
         )
     )
 
     assert len(adapted[0].windows) == 1
-    assert audit.minimum_window_size_ns == 1_000_000
+    assert audit.minimum_window_size_ns == duration_ms * 1_000_000
+    assert audit.final_window_count == 1
+    assert audit.subdivided_window_count == 0
     assert audit.maximum_modeled_missing_events == 0
     assert len(cardinality_refusals) == 1
     assert audit.cardinality_refusal_count == 1
@@ -1417,7 +1421,8 @@ def test_irreducible_cardinality_overflow_is_a_finite_scientific_refusal(
         plan_module.ReconstructionPlanRefusalCode.OBSERVATION_CARDINALITY_UNSUPPORTED
     )
     assert "requires " in cardinality_refusal.reason
-    assert "effective qualified headroom" in cardinality_refusal.reason
+    assert "amplification headroom" in cardinality_refusal.reason
+    assert "subdivision cannot repair" in cardinality_refusal.reason
     assert "inf" not in cardinality_refusal.reason.lower()
 
     exact_support = plan_module._build_exact_source_support(

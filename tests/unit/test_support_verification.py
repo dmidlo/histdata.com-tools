@@ -152,18 +152,20 @@ def test_independent_cardinality_refusal_requires_irreducible_boundary() -> (
 
     reason = support_module._independent_cardinality_refusal(
         71,
-        72,
+        runtime_limit=72,
+        amplification_limit=100,
         duration_ns=1_000_000,
         sizing_audit=sizing_audit,
     )
 
     assert reason is not None
     assert "requiring 71" in reason
-    assert "headroom 70" in reason
+    assert "runtime safety headroom 70" in reason
     assert (
         support_module._independent_cardinality_refusal(
             70,
-            72,
+            runtime_limit=72,
+            amplification_limit=100,
             duration_ns=1_000_000,
             sizing_audit=sizing_audit,
         )
@@ -175,10 +177,22 @@ def test_independent_cardinality_refusal_requires_irreducible_boundary() -> (
     ):
         support_module._independent_cardinality_refusal(
             71,
-            72,
+            runtime_limit=72,
+            amplification_limit=100,
             duration_ns=1_000_001,
             sizing_audit=sizing_audit,
         )
+
+    amplification_reason = support_module._independent_cardinality_refusal(
+        73,
+        runtime_limit=100,
+        amplification_limit=72,
+        duration_ns=60_000_000_000,
+        sizing_audit=SimpleNamespace(modeled_missing_event_limit=90),
+    )
+    assert amplification_reason is not None
+    assert "amplification headroom 72" in amplification_reason
+    assert "subdivision cannot repair" in amplification_reason
 
 
 def test_valid_common_data_implementation_refusal_blocks_a_shard() -> None:
