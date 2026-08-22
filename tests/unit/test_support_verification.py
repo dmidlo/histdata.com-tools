@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -17,6 +18,7 @@ from histdatacom.reconstruction import (
 )
 from histdatacom.runtime_contracts import ArtifactRef
 from histdatacom.synthetic import support_verification as support_module
+from histdatacom.synthetic.contracts import canonical_contract_json
 from histdatacom.synthetic.information import InformationMode
 from histdatacom.synthetic.support_verification import (
     FINAL_SUPPORT_VERIFICATION_SHARD_ARTIFACT_KIND,
@@ -112,7 +114,35 @@ def test_final_support_census_is_exact_content_addressed_and_round_trips() -> (
     assert census.minimum_window_size_ns == 10
     assert census.maximum_window_size_ns == 10
     assert census.valid_common_data_implementation_refusal_count == 0
-    assert type(census).from_dict(census.to_dict()) == census
+    serialized = canonical_contract_json(census.to_dict())
+    assert type(census).from_dict(json.loads(serialized)) == census
+
+
+def test_final_support_census_rejects_invalid_quantile_maps() -> None:
+    census = build_final_support_census((_window(0, 10),))
+    missing = census.to_dict()
+    missing["alignment_age_quantiles_ns"] = {
+        key: value
+        for key, value in census.alignment_age_quantiles_ns.items()
+        if key != "p99"
+    }
+    with pytest.raises(
+        FinalSupportVerificationError,
+        match="alignment_age_quantiles_ns keys differ",
+    ):
+        type(census).from_dict(missing)
+
+    nonmonotone = census.to_dict()
+    nonmonotone["modeled_deficit_quantiles"] = {
+        **census.modeled_deficit_quantiles,
+        "p25": 1.0,
+        "p50": 0.0,
+    }
+    with pytest.raises(
+        FinalSupportVerificationError,
+        match="modeled_deficit_quantiles is not monotone",
+    ):
+        type(census).from_dict(nonmonotone)
 
 
 def test_valid_common_data_implementation_refusal_blocks_a_shard() -> None:

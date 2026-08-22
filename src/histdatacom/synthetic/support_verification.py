@@ -243,6 +243,9 @@ def _quantile(values: Sequence[float], probability: float) -> float:
     return round(ordered[index], 12)
 
 
+_QUANTILE_KEYS = ("p00", "p25", "p50", "p75", "p95", "p99", "p100")
+
+
 def _quantiles(values: Sequence[float]) -> dict[str, float]:
     return {
         "p00": _quantile(values, 0.0),
@@ -905,22 +908,15 @@ class FinalSupportCensusV1:
             "modeled_deficit_quantiles",
             "candidate_amplification_quantiles",
         ):
-            values = {
+            supplied = {
                 _required_text(str(key), f"{name} key"): round(
                     _float(value, f"{name}[{key}]"), 12
                 )
                 for key, value in getattr(self, name).items()
             }
-            if tuple(values) != (
-                "p00",
-                "p25",
-                "p50",
-                "p75",
-                "p95",
-                "p99",
-                "p100",
-            ):
+            if set(supplied) != set(_QUANTILE_KEYS):
                 raise FinalSupportVerificationError(f"{name} keys differ")
+            values = {key: supplied[key] for key in _QUANTILE_KEYS}
             if tuple(values.values()) != tuple(sorted(values.values())):
                 raise FinalSupportVerificationError(f"{name} is not monotone")
             object.__setattr__(self, name, values)
