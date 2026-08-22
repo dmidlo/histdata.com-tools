@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import contextvars
 from dataclasses import replace
 from importlib import import_module
 import logging
 from pathlib import Path
 from tempfile import gettempdir
+import threading
 from typing import Any, Callable, Mapping, TypeVar, cast
 
 from histdatacom.activity_stages import (
@@ -122,6 +124,61 @@ def _load_activity_api() -> Any:
 activity = _load_activity_api()
 _Callable = TypeVar("_Callable", bound=Callable[..., Any])
 _ACTIVITY_LOGGER = logging.getLogger(__name__)
+_RECONSTRUCTION_HEARTBEAT_RELAY_SECONDS = 15.0
+
+
+class _ReconstructionHeartbeatRelay:
+    """Repeat the latest progress while one scientific interval is running."""
+
+    def __init__(
+        self,
+        *,
+        interval_seconds: float = _RECONSTRUCTION_HEARTBEAT_RELAY_SECONDS,
+    ) -> None:
+        if interval_seconds <= 0:
+            raise ValueError("heartbeat relay interval must be positive")
+        self._interval_seconds = interval_seconds
+        self._latest: dict[str, JSONValue] | None = None
+        self._lock = threading.Lock()
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    def __enter__(self) -> "_ReconstructionHeartbeatRelay":
+        activity_context = contextvars.copy_context()
+        self._thread = threading.Thread(
+            target=activity_context.run,
+            args=(self._run,),
+            name="histdatacom-reconstruction-heartbeat",
+            daemon=True,
+        )
+        self._thread.start()
+        return self
+
+    def __exit__(self, *_args: Any) -> None:
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join()
+
+    def emit(self, heartbeat: Any) -> None:
+        """Publish semantic progress and retain it for liveness repeats."""
+        metadata = cast(dict[str, JSONValue], heartbeat.to_dict())
+        with self._lock:
+            self._latest = dict(metadata)
+        _activity_heartbeat(metadata)
+
+    def _run(self) -> None:
+        while not self._stop.wait(self._interval_seconds):
+            with self._lock:
+                metadata = None if self._latest is None else dict(self._latest)
+            if metadata is None:
+                continue
+            try:
+                _activity_heartbeat(metadata)
+            except Exception:
+                _ACTIVITY_LOGGER.exception(
+                    "Reconstruction liveness heartbeat failed"
+                )
+                return
 
 
 def activity_defn(**kwargs: Any) -> Callable[[_Callable], _Callable]:
@@ -571,35 +628,40 @@ def reconstruction_window_activity(
     task = request.tasks[0]
     store = ReconstructionCheckpointStore(request.manifest_store_root)
 
-    def emit(heartbeat: Any) -> None:
-        _activity_heartbeat(heartbeat.to_dict())
-
-    try:
-        state = asyncio.run(
-            run_reconstruction_window(
-                request,
-                task,
-                checkpoint_store=store,
-                stage_executor=RegisteredReconstructionStageExecutor(),
-                heartbeat=emit,
-                cancellation_requested=_activity_cancelled,
+    with _ReconstructionHeartbeatRelay() as heartbeat_relay:
+        try:
+            state = asyncio.run(
+                run_reconstruction_window(
+                    request,
+                    task,
+                    checkpoint_store=store,
+                    stage_executor=RegisteredReconstructionStageExecutor(),
+                    heartbeat=heartbeat_relay.emit,
+                    cancellation_requested=_activity_cancelled,
+                )
             )
-        )
-    except (Exception, asyncio.CancelledError) as err:
-        if not _reconstruction_cancellation_error(err):
+        except (Exception, asyncio.CancelledError) as err:
+            if not _reconstruction_cancellation_error(err):
+                raise
+            stored_state = store.load(task.window)
+            if (
+                stored_state is not None
+                and stored_state.checkpoint.phase
+                not in {
+                    ReconstructionCommitPhase.COMMITTED,
+                    ReconstructionCommitPhase.CANCELLED,
+                }
+            ):
+                cancelled = stored_state.interrupted(
+                    ReconstructionCommitPhase.CANCELLED,
+                    "Temporal cancelled reconstruction window activity",
+                )
+                store.save(
+                    cancelled,
+                    expected_state_id=stored_state.state_id,
+                )
+            cleanup_reconstruction_window_scratch(task.scratch_directory)
             raise
-        stored_state = store.load(task.window)
-        if stored_state is not None and stored_state.checkpoint.phase not in {
-            ReconstructionCommitPhase.COMMITTED,
-            ReconstructionCommitPhase.CANCELLED,
-        }:
-            cancelled = stored_state.interrupted(
-                ReconstructionCommitPhase.CANCELLED,
-                "Temporal cancelled reconstruction window activity",
-            )
-            store.save(cancelled, expected_state_id=stored_state.state_id)
-        cleanup_reconstruction_window_scratch(task.scratch_directory)
-        raise
     return cast(dict[str, Any], state.to_dict())
 
 

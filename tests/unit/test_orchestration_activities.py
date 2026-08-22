@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+import contextvars
 from importlib import import_module
 import io
 import json
 import logging
 import shutil
 from tempfile import gettempdir
+import threading
+from types import SimpleNamespace
 import zipfile
 from pathlib import Path
 from typing import Any, get_type_hints
@@ -792,6 +795,39 @@ def test_activity_context_helpers_ignore_absent_temporal_context(
     activities._activity_heartbeat({"stage": "validate_url"})
 
     assert activities._activity_cancelled() is False
+
+
+def test_reconstruction_heartbeat_relay_repeats_latest_activity_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Long sync intervals should retain liveness and activity context."""
+    import histdatacom.orchestration.activities as activities
+
+    activity_marker = contextvars.ContextVar[str]("activity-marker")
+    activity_marker.set("reconstruction-window")
+    observed: list[tuple[dict[str, object], str]] = []
+    repeated = threading.Event()
+
+    def heartbeat(metadata: dict[str, object]) -> None:
+        observed.append((dict(metadata), activity_marker.get()))
+        if len(observed) >= 2:
+            repeated.set()
+
+    monkeypatch.setattr(activities, "_activity_heartbeat", heartbeat)
+    relay = activities._ReconstructionHeartbeatRelay(interval_seconds=0.01)
+
+    with relay:
+        relay.emit(
+            SimpleNamespace(
+                to_dict=lambda: {"sequence": 7, "stage": "proposal"}
+            )
+        )
+        assert repeated.wait(timeout=1)
+
+    assert relay._thread is not None
+    assert not relay._thread.is_alive()
+    assert observed[0][0] == observed[1][0]
+    assert {marker for _, marker in observed} == {"reconstruction-window"}
 
 
 def test_validate_urls_activity_returns_no_data(monkeypatch, tmp_path) -> None:
