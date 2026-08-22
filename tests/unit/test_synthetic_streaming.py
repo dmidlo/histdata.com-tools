@@ -349,7 +349,7 @@ def test_window_plan_rejects_gaps_overlaps_and_scope_drift() -> None:
     (
         ("candidate_event_count", 251, "amplification"),
         ("peak_events_per_batch", 100_001, "peak_events_per_batch"),
-        ("retained_ensemble_members", 5, "retained_ensemble_members"),
+        ("retained_ensemble_members", 10, "retained_ensemble_members"),
         ("inflight_batches", 9, "inflight_batches"),
         ("estimated_memory_bytes", 2 * 1024**3 + 1, "memory"),
         ("estimated_scratch_bytes", 100 * 1024**3 + 1, "scratch"),
