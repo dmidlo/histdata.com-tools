@@ -323,13 +323,16 @@ def test_frozen_context_dependency_mismatch_fails_closed(
     tmp_path: Path,
 ) -> None:
     dependency_to_graph = {
-        "alignment_policy": "cross_series_constraint_policy",
+        "benchmark_corpus": "benchmark_manifest",
         "cftc_positioning": "cftc_positioning",
         "dataset_catalog": "dataset_catalog",
-        "experiment_manifest": "experiment_manifest",
         "feed_epoch_definition": "feed_epochs",
         "market_context": "market_context",
         "observation_operator": "observation_operator",
+        "powered_qualification_dossier": "powered_qualification_dossier",
+        "product_selection_dossier": "hawkes_product_selection_dossier",
+        "proposal_evaluation": "proposal_portfolio_evaluation",
+        "reconciliation_policy": "cross_series_constraint_policy",
         "scientific_ledger": "scientific_ledger",
     }
     dependency_refs = {
@@ -365,3 +368,137 @@ def test_frozen_context_dependency_mismatch_fails_closed(
             candidate,
             SimpleNamespace(),
         )
+
+
+def test_frozen_candidate_binds_executable_roles_and_qualification_chain(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    dependency_to_graph = {
+        "benchmark_corpus": "benchmark_manifest",
+        "cftc_positioning": "cftc_positioning",
+        "dataset_catalog": "dataset_catalog",
+        "feed_epoch_definition": "feed_epochs",
+        "market_context": "market_context",
+        "observation_operator": "observation_operator",
+        "powered_qualification_dossier": "powered_qualification_dossier",
+        "product_selection_dossier": "hawkes_product_selection_dossier",
+        "proposal_evaluation": "proposal_portfolio_evaluation",
+        "reconciliation_policy": "cross_series_constraint_policy",
+        "scientific_ledger": "scientific_ledger",
+    }
+    dependency_refs = {
+        dependency: _artifact(
+            tmp_path / f"candidate-{dependency}.json",
+            f"{graph_role}_v1",
+            artifact_id=f"{dependency}:v1",
+        )
+        for dependency, graph_role in dependency_to_graph.items()
+    }
+    config_ref = _artifact(
+        tmp_path / "selected-config.json",
+        "proposal_engine_config_v1",
+        artifact_id="config:selected",
+    )
+    fit_ref = _artifact(
+        tmp_path / "selected-fit.json",
+        "proposal_engine_fit_v1",
+        artifact_id="fit:selected",
+    )
+    experiment_ref = _artifact(
+        tmp_path / "scientific-experiment.json",
+        "reconstruction_experiment_manifest_v1",
+        artifact_id="experiment:scientific",
+    )
+    dependencies = {
+        name: SimpleNamespace(
+            artifact_id=f"{name}:v1",
+            artifact_ref=ref,
+        )
+        for name, ref in dependency_refs.items()
+    }
+    dependencies.update(
+        {
+            "selected_engine_config": SimpleNamespace(
+                artifact_id="config:selected", artifact_ref=config_ref
+            ),
+            "selected_engine_fit": SimpleNamespace(
+                artifact_id="fit:selected", artifact_ref=fit_ref
+            ),
+            "experiment_manifest": SimpleNamespace(
+                artifact_id="experiment:scientific",
+                artifact_ref=experiment_ref,
+            ),
+        }
+    )
+    candidate = SimpleNamespace(
+        selected_engine_id="histdatacom.marked-hawkes.full",
+        experiment_id="experiment:scientific",
+        dependency=lambda name: dependencies[name],
+    )
+    qualification = SimpleNamespace(
+        dossier_id="powered_qualification_dossier:v1",
+        experiment_id=candidate.experiment_id,
+        evaluation_id="proposal_evaluation:v1",
+        corpus_id="benchmark_corpus:v1",
+        reconstruction_eligible_engine_ids=(candidate.selected_engine_id,),
+    )
+    selection = SimpleNamespace(
+        dossier_id="product_selection_dossier:v1",
+        qualification_dossier_id=qualification.dossier_id,
+        selected_engine_id=candidate.selected_engine_id,
+        input_artifacts={
+            "qualification": dependency_refs["powered_qualification_dossier"]
+        },
+    )
+    evaluation = SimpleNamespace(
+        evaluation_id="proposal_evaluation:v1",
+        corpus_id="benchmark_corpus:v1",
+    )
+    monkeypatch.setattr(
+        support_module,
+        "read_powered_qualification_dossier",
+        lambda *_: qualification,
+    )
+    monkeypatch.setattr(
+        support_module,
+        "read_hawkes_product_selection_dossier",
+        lambda *_: selection,
+    )
+    monkeypatch.setattr(
+        support_module,
+        "read_proposal_portfolio_evaluation",
+        lambda *_: evaluation,
+    )
+    monkeypatch.setattr(
+        support_module,
+        "proposal_evaluation_engine_artifacts",
+        lambda *_: {"fit": fit_ref},
+    )
+
+    class _Portfolio:
+        def binding(self, engine_id: str) -> SimpleNamespace:
+            assert engine_id == candidate.selected_engine_id
+            return SimpleNamespace(config_ref=config_ref, fit_ref=fit_ref)
+
+    configuration = SimpleNamespace(proposal_portfolio=_Portfolio())
+    monkeypatch.setattr(
+        support_module,
+        "ReconstructionPlanConfigurationV2",
+        type(configuration),
+    )
+    graph = {
+        graph_role: dependency_refs[dependency]
+        for dependency, graph_role in dependency_to_graph.items()
+    }
+    graph["experiment_manifest"] = _artifact(
+        tmp_path / "campaign-experiment.json",
+        "reconstruction_experiment_manifest_v1",
+        artifact_id="experiment:campaign",
+    )
+
+    support_module._verify_release_candidate_dependencies(
+        SimpleNamespace(artifact_graph=graph),
+        candidate,
+        configuration,
+    )

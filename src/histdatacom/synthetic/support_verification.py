@@ -66,6 +66,9 @@ from histdatacom.synthetic.feed_epoch_transition import (
     FeedEpochTransitionPolicyV1,
     read_feed_epoch_transition_policy,
 )
+from histdatacom.synthetic.hawkes_selection import (
+    read_hawkes_product_selection_dossier,
+)
 from histdatacom.synthetic.historical_conditioning import (
     historical_product_observation_conditioning,
     historical_product_retention_probability,
@@ -85,6 +88,13 @@ from histdatacom.synthetic.persistence import (
     DEFAULT_ESTIMATED_COMPRESSION_RATIO,
     DEFAULT_MANIFEST_BYTES_PER_PARTITION,
     DEFAULT_MANIFEST_BYTES_PER_PRODUCT,
+)
+from histdatacom.synthetic.proposal_engines import (
+    proposal_evaluation_engine_artifacts,
+    read_proposal_portfolio_evaluation,
+)
+from histdatacom.synthetic.qualification import (
+    read_powered_qualification_dossier,
 )
 from histdatacom.synthetic.reconstruction_plan import (
     CFTC_READY_CONDITIONING_MODE,
@@ -108,6 +118,7 @@ from histdatacom.synthetic.reconstruction_plan import (
 from histdatacom.synthetic.release_candidate import (
     ReconstructionReleaseCandidateV1,
     read_reconstruction_release_candidate,
+    verify_reconstruction_release_candidate,
 )
 from histdatacom.synthetic.streaming import ReconstructionResourceEstimateV1
 
@@ -2017,13 +2028,16 @@ def _verify_release_candidate_dependencies(
 ) -> None:
     """Require the plan to use the scientific graph frozen by the candidate."""
     direct_roles = {
-        "alignment_policy": "cross_series_constraint_policy",
+        "benchmark_corpus": "benchmark_manifest",
         "cftc_positioning": "cftc_positioning",
         "dataset_catalog": "dataset_catalog",
-        "experiment_manifest": "experiment_manifest",
         "feed_epoch_definition": "feed_epochs",
         "market_context": "market_context",
         "observation_operator": "observation_operator",
+        "powered_qualification_dossier": "powered_qualification_dossier",
+        "product_selection_dossier": "hawkes_product_selection_dossier",
+        "proposal_evaluation": "proposal_portfolio_evaluation",
+        "reconciliation_policy": "cross_series_constraint_policy",
         "scientific_ledger": "scientific_ledger",
     }
     for dependency_name, graph_role in direct_roles.items():
@@ -2036,6 +2050,68 @@ def _verify_release_candidate_dependencies(
                 "plan scientific dependency differs from frozen release candidate: "
                 f"{dependency_name}"
             )
+    try:
+        qualification = read_powered_qualification_dossier(
+            candidate.dependency(
+                "powered_qualification_dossier"
+            ).artifact_ref.path
+        )
+        selection = read_hawkes_product_selection_dossier(
+            candidate.dependency("product_selection_dossier").artifact_ref.path
+        )
+        evaluation = read_proposal_portfolio_evaluation(
+            candidate.dependency("proposal_evaluation").artifact_ref.path
+        )
+        selected_model_refs = proposal_evaluation_engine_artifacts(
+            evaluation, candidate.selected_engine_id
+        )
+    except (KeyError, OSError, TypeError, ValueError) as err:
+        raise FinalSupportVerificationError(
+            "release-candidate qualification graph is invalid"
+        ) from err
+    if (
+        qualification.dossier_id
+        != candidate.dependency("powered_qualification_dossier").artifact_id
+        or qualification.experiment_id != candidate.experiment_id
+        or qualification.evaluation_id
+        != candidate.dependency("proposal_evaluation").artifact_id
+        or qualification.corpus_id
+        != candidate.dependency("benchmark_corpus").artifact_id
+        or candidate.selected_engine_id
+        not in qualification.reconstruction_eligible_engine_ids
+    ):
+        raise FinalSupportVerificationError(
+            "release-candidate powered qualification binding differs"
+        )
+    qualification_input = selection.input_artifacts.get("qualification")
+    if (
+        selection.dossier_id
+        != candidate.dependency("product_selection_dossier").artifact_id
+        or selection.qualification_dossier_id != qualification.dossier_id
+        or selection.selected_engine_id != candidate.selected_engine_id
+        or qualification_input is None
+        or _artifact_identity(qualification_input)
+        != _artifact_identity(
+            candidate.dependency("powered_qualification_dossier").artifact_ref
+        )
+    ):
+        raise FinalSupportVerificationError(
+            "release-candidate product selection binding differs"
+        )
+    selected_fit = selected_model_refs.get("fit")
+    if (
+        evaluation.evaluation_id
+        != candidate.dependency("proposal_evaluation").artifact_id
+        or evaluation.corpus_id != qualification.corpus_id
+        or selected_fit is None
+        or _artifact_identity(selected_fit)
+        != _artifact_identity(
+            candidate.dependency("selected_engine_fit").artifact_ref
+        )
+    ):
+        raise FinalSupportVerificationError(
+            "release-candidate proposal evaluation binding differs"
+        )
     if not isinstance(configuration, ReconstructionPlanConfigurationV2):
         raise FinalSupportVerificationError(
             "final support verification requires candidate-bound v2 planning"
@@ -3221,6 +3297,7 @@ def build_final_adaptive_support_map(
     """Independently replay and publish the final candidate-bound support map."""
     plan_set = read_reconstruction_plan_set(plan_set_path)
     candidate = read_reconstruction_release_candidate(release_candidate_path)
+    verify_reconstruction_release_candidate(candidate)
     if plan_set.requested_end_ns > candidate.source_cutoff_ns:
         raise FinalSupportVerificationError(
             "plan set exceeds frozen release-candidate source cutoff"

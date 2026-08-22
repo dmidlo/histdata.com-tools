@@ -89,6 +89,33 @@ REQUIRED_RELEASE_CANDIDATE_DEPENDENCIES = frozenset(
         "storage_policy",
     }
 )
+REQUIRED_RELEASE_CANDIDATE_DEPENDENCY_KINDS = {
+    "adaptive_window_policy": "release_scientific_policy_registry_v1",
+    "alignment_policy": "release_scientific_policy_registry_v1",
+    "benchmark_corpus": "reverse_degradation_manifest_v1",
+    "candidate_graph": "release_candidate_freeze_v1",
+    "carving_policy": "release_scientific_policy_registry_v1",
+    "certification_policy": "release_scientific_policy_registry_v1",
+    "cftc_positioning": "cftc_positioning_corpus_v1",
+    "dataset_catalog": "dataset_catalog_v1",
+    "experiment_manifest": "reconstruction_experiment_manifest_v1",
+    "feed_epoch_definition": "feed_epoch_definition_v2",
+    "market_context": "market_context_corpus_v1",
+    "observation_operator": "observation-operator",
+    "observation_scenario_registry": ("release_scientific_policy_registry_v1"),
+    "product_selection_dossier": "hawkes_product_selection_dossier_v1",
+    "proposal_evaluation": "proposal_portfolio_evaluation_v1",
+    "protected_release_holdout": "protected_release_holdout_manifest_v1",
+    "powered_qualification_dossier": "powered_qualification_dossier_v1",
+    "reconciliation_policy": "cross_series_constraint_policy_v1",
+    "schema_registry": "reconstruction_schema_registry_v1",
+    "scientific_ledger": "reconstruction_scientific_ledger_v1",
+    "selected_engine_config": "proposal_engine_config_v1",
+    "selected_engine_fit": "proposal_engine_fit_v1",
+    "storage_policy": "release_scientific_policy_registry_v1",
+}
+REQUIRED_RELEASE_CANDIDATE_SYMBOLS = frozenset({"eurgbp", "eurusd", "gbpusd"})
+REQUIRED_RELEASE_CANDIDATE_FIRST_PERIOD = "200203"
 REQUIRED_RELEASE_CANDIDATE_ROOTS = frozenset(
     {"artifact", "output", "checkpoint", "scratch"}
 )
@@ -743,6 +770,12 @@ class ReleaseCandidateDependencyV1:
         if not isinstance(self.artifact_ref, ArtifactRef):
             raise TypeError("release candidate dependency reference invalid")
         _require_strong_ref(self.artifact_ref)
+        expected_kind = REQUIRED_RELEASE_CANDIDATE_DEPENDENCY_KINDS[name]
+        if self.artifact_ref.kind != expected_kind:
+            raise ValueError(
+                "release candidate dependency artifact kind differs: "
+                f"{name} requires {expected_kind}"
+            )
         if self.artifact_id not in self.artifact_ref.metadata.values():
             raise ValueError("release candidate dependency identity absent")
         expected = _stable_id("release-candidate-dependency", self.payload())
@@ -1316,6 +1349,101 @@ def verify_reconstruction_release_candidate(
     ]
     for ref in refs:
         _verify_artifact_ref(ref)
+    _verify_campaign_dataset_binding(candidate)
+
+
+def _verify_campaign_dataset_binding(
+    candidate: ReconstructionReleaseCandidateV1,
+) -> None:
+    """Bind the executable source inventory to one complete catalog version."""
+    from histdatacom.datasets import DatasetCatalog
+
+    dependency = candidate.dependency("dataset_catalog")
+    catalog = DatasetCatalog.read(dependency.artifact_ref.path)
+    if catalog.catalog_id != dependency.artifact_id:
+        raise ValueError("release candidate dataset catalog identity differs")
+    try:
+        version = next(
+            item
+            for item in catalog.versions
+            if item.dataset_version_id == candidate.dataset_revision
+        )
+    except StopIteration as err:
+        raise ValueError(
+            "release candidate dataset revision is absent from catalog"
+        ) from err
+    expected_hashes = {
+        f"{partition.symbol.lower()}:{partition.period}": (
+            partition.artifact.sha256
+        )
+        for partition in version.partitions
+    }
+    if expected_hashes != candidate.source_partition_hashes:
+        raise ValueError(
+            "release candidate source hashes differ from dataset catalog"
+        )
+    symbols_by_period: dict[str, set[str]] = {}
+    for partition in version.partitions:
+        symbol = partition.symbol.lower()
+        symbols_by_period.setdefault(partition.period, set()).add(symbol)
+        if (
+            partition.source_provider_id != "histdata.com"
+            or partition.format != "ascii"
+            or partition.granularity != "T"
+            or symbol not in REQUIRED_RELEASE_CANDIDATE_SYMBOLS
+        ):
+            raise ValueError(
+                "release candidate dataset partition scope differs"
+            )
+        if partition.coverage_end_ns > candidate.source_cutoff_ns:
+            raise ValueError("release candidate dataset exceeds source cutoff")
+    if not symbols_by_period or any(
+        symbols != REQUIRED_RELEASE_CANDIDATE_SYMBOLS
+        for symbols in symbols_by_period.values()
+    ):
+        raise ValueError(
+            "release candidate dataset lacks a complete source triangle"
+        )
+    if set(symbols_by_period) != set(
+        _campaign_periods_before(candidate.source_cutoff_ns)
+    ):
+        raise ValueError(
+            "release candidate dataset period coverage is incomplete"
+        )
+
+
+def _campaign_periods_before(source_cutoff_ns: int) -> tuple[str, ...]:
+    if source_cutoff_ns % 1_000_000_000:
+        raise ValueError(
+            "release candidate source cutoff differs from campaign month boundary"
+        )
+    cutoff = datetime.fromtimestamp(
+        source_cutoff_ns // 1_000_000_000, tz=timezone.utc
+    )
+    if (
+        cutoff.day != 1
+        or cutoff.hour
+        or cutoff.minute
+        or cutoff.second
+        or cutoff.microsecond
+    ):
+        raise ValueError(
+            "release candidate source cutoff differs from campaign month boundary"
+        )
+    year = int(REQUIRED_RELEASE_CANDIDATE_FIRST_PERIOD[:4])
+    month = int(REQUIRED_RELEASE_CANDIDATE_FIRST_PERIOD[4:])
+    periods: list[str] = []
+    while (year, month) < (cutoff.year, cutoff.month):
+        periods.append(f"{year:04d}{month:02d}")
+        month += 1
+        if month == 13:
+            year += 1
+            month = 1
+    if not periods:
+        raise ValueError(
+            "release candidate source cutoff predates campaign coverage"
+        )
+    return tuple(periods)
 
 
 def bind_release_candidate_artifact(
@@ -1676,10 +1804,13 @@ __all__ = [
     "RELEASE_CANDIDATE_VALIDATION_GATE_SCHEMA_VERSION",
     "REQUIRED_RELEASE_CANDIDATE_COMMANDS",
     "REQUIRED_RELEASE_CANDIDATE_DEPENDENCIES",
+    "REQUIRED_RELEASE_CANDIDATE_DEPENDENCY_KINDS",
     "REQUIRED_RELEASE_CANDIDATE_FORBIDDEN_FALLBACKS",
+    "REQUIRED_RELEASE_CANDIDATE_FIRST_PERIOD",
     "REQUIRED_RELEASE_CANDIDATE_GATES",
     "REQUIRED_RELEASE_CANDIDATE_ROOTS",
     "REQUIRED_RELEASE_CANDIDATE_RUNTIME_DEPENDENCIES",
+    "REQUIRED_RELEASE_CANDIDATE_SYMBOLS",
     "ReconstructionReleaseCandidateV1",
     "ReleaseCandidateArtifactBindingV1",
     "ReleaseCandidateBranchGovernanceV1",

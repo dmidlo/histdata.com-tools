@@ -22,8 +22,8 @@ The candidate contains strong, local artifact references and stable IDs for:
 | Source control | repository URL, full Git object IDs for commit and tree, clean-tree proof, and ref name |
 | Distribution | SemVer package version plus the exact wheel and sdist byte hashes built from that commit |
 | Runtime | Python implementation/version/ABI, OS release, architecture, machine class, critical dependency versions, and compression versions |
-| Schema and source | reconstruction schema-registry ID, dataset catalog/revision, source partition SHA-256 values, and exact source cutoff |
-| Scientific inputs | experiment, ledger, feed epoch, observation operator, market context, CFTC, benchmark, proposal evaluation, powered qualification, and product-selection artifacts |
+| Schema and source | reconstruction schema-registry ID, complete campaign dataset catalog/revision, exact executable-partition SHA-256 values, and source cutoff |
+| Scientific inputs | scientific training/qualification experiment, ledger, raw feed epoch, raw observation operator, market context, raw CFTC, benchmark, proposal evaluation, powered qualification, and product-selection artifacts |
 | Selected product | selected engine ID, configuration, fit, observation-scenario registry, and the sealed candidate graph |
 | Policies | adaptive window, alignment, carving, reconciliation, storage, and certification artifacts |
 | Protected evidence | a fresh still-sealed release-holdout manifest used by the candidate graph |
@@ -34,6 +34,26 @@ The candidate contains strong, local artifact references and stable IDs for:
 Every dependency is part of the canonical payload. A one-byte artifact change,
 new dependency ID, new path, environment version, Git tree, gate receipt, or
 policy creates another `candidate_id`.
+
+Dependency roles also require the artifact kinds consumed by an executable v2
+plan. Certification-report wrappers cannot replace the raw CFTC corpus, feed
+epoch definition, observation operator, benchmark manifest, proposal config,
+or proposal fit. The `reconciliation_policy` dependency—not the policy-registry
+`alignment_policy` entry—binds the plan's
+`cross_series_constraint_policy` role.
+
+The candidate's `experiment_manifest` is the protected scientific experiment
+used by powered qualification. Each campaign shard may have a separate
+historical-anchor/product-input experiment, so those two experiment references
+are linked transitively through qualification rather than required to be the
+same artifact. In contrast, `dataset_catalog` is the complete executable
+campaign catalog. Its selected revision must contain exactly one
+HistData.com ASCII/T partition for every EURGBP/EURUSD/GBPUSD period from the
+first common archive month (`200203`) through the month immediately before the
+UTC month-boundary `source_cutoff_ns`. Every partition must end at or before
+that cutoff, and
+`source_partition_hashes` must equal the catalog's
+`symbol.lower():period -> partition.artifact.sha256` projection.
 
 ## Freeze procedure
 
@@ -46,9 +66,10 @@ qualification or the release holdout is opened.
    `inspect_release_candidate_git_identity()` and capture the runtime with
    `capture_release_candidate_runtime_identity()`.
 3. Bind every required dependency with `ReleaseCandidateDependencyV1`. The
-   schema registry must equal the installed CLI/API registry, the experiment
-   and dataset revision must agree, and both selected-engine artifacts must
-   name the selected engine.
+   schema registry must equal the installed CLI/API registry, each dependency
+   must use its executable artifact kind, the powered-qualification experiment
+   must agree, the campaign catalog and source hashes must agree, and both
+   selected-engine artifacts must name the selected engine.
 4. Bind four non-overlapping absolute roots using
    `ReleaseCandidateFilesystemRootV1`. Each root requires a byte-verified
    qualification receipt for writable, durable, atomic-replace storage on the
@@ -63,7 +84,8 @@ qualification or the release holdout is opened.
    includes the SHA-256 of the canonical manifest bytes.
 
 The freeze fails if the working tree is dirty, the package version differs
-from the installed API, the registry is stale, any strong reference differs,
+from the installed API, the registry is stale, an artifact kind or strong
+reference differs, the campaign catalog is incomplete or exceeds the cutoff,
 the holdout graph points to another manifest, a root overlaps, or a gate is
 missing.
 

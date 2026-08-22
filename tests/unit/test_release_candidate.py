@@ -6,12 +6,16 @@ import hashlib
 import json
 import subprocess
 from dataclasses import replace
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import polars as pl
 import pytest
 
+from histdatacom.datasets import DatasetCatalog, histdata_cache_path
 from histdatacom.orchestration.reconstruction import artifact_ref_for_file
+from histdatacom.reconstruction_experiment import build_legacy_histdata_catalog
 from histdatacom.reconstruction_schema import reconstruction_schema_registry
 from histdatacom.runtime_contracts import ArtifactRef
 from histdatacom.synthetic.reconstruction_plan import (
@@ -21,6 +25,7 @@ from histdatacom.synthetic.release_candidate import (
     CRITICAL_PATH_GATE_EVIDENCE_KINDS,
     REQUIRED_RELEASE_CANDIDATE_COMMANDS,
     REQUIRED_RELEASE_CANDIDATE_DEPENDENCIES,
+    REQUIRED_RELEASE_CANDIDATE_DEPENDENCY_KINDS,
     REQUIRED_RELEASE_CANDIDATE_FORBIDDEN_FALLBACKS,
     REQUIRED_RELEASE_CANDIDATE_GATES,
     REQUIRED_RELEASE_CANDIDATE_RUNTIME_DEPENDENCIES,
@@ -54,6 +59,13 @@ from histdatacom.synthetic.release_holdout import (
 )
 
 _DAY_NS = 24 * 60 * 60 * 1_000_000_000
+_SOURCE_CUTOFF_NS = int(
+    datetime(2002, 4, 1, tzinfo=timezone.utc).timestamp() * 1_000_000_000
+)
+_SOURCE_START_MS = int(
+    datetime(2002, 3, 2, tzinfo=timezone.utc).timestamp() * 1000
+)
+_SYMBOLS = ("EURGBP", "EURUSD", "GBPUSD")
 _COMMIT_SHA = hashlib.sha256(b"commit").hexdigest()
 _TREE_SHA = hashlib.sha256(b"tree").hexdigest()
 _MACHINE_CLASS = "darwin-arm64-research-runner"
@@ -95,7 +107,7 @@ def _holdout_refs(tmp_path: Path) -> tuple[ArtifactRef, ArtifactRef, int]:
         split_role="validation",
         period="202501",
         start_ns=1,
-        end_ns=_DAY_NS,
+        end_ns=_SOURCE_CUTOFF_NS,
         source_partition_ids=("partition:development",),
         source_hashes={"eurusd": _sha("development-source")},
         source_signature_sha256=_sha("development-signature"),
@@ -122,7 +134,7 @@ def _holdout_refs(tmp_path: Path) -> tuple[ArtifactRef, ArtifactRef, int]:
     windows = []
     for index in range(4):
         label = f"holdout-{index}"
-        start_ns = 100 * _DAY_NS + index * 9 * _DAY_NS
+        start_ns = _SOURCE_CUTOFF_NS + (index + 1) * 9 * _DAY_NS
         windows.append(
             ProtectedReleaseHoldoutWindowV1(
                 period=f"2026{index + 1:02d}",
@@ -159,7 +171,7 @@ def _holdout_refs(tmp_path: Path) -> tuple[ArtifactRef, ArtifactRef, int]:
         (development,),
         selection_dossier_id="selection:dossier:v1",
         selection_dossier_ref=selection_ref,
-        source_cutoff_ns=development.end_ns,
+        source_cutoff_ns=_SOURCE_CUTOFF_NS,
         claim_scope="v2.5-release-candidate",
         frozen_at_utc="2026-08-20T12:00:00Z",
     )
@@ -182,7 +194,7 @@ def _holdout_refs(tmp_path: Path) -> tuple[ArtifactRef, ArtifactRef, int]:
         write_protected_release_holdout_manifest(
             manifest, tmp_path / "holdout"
         ),
-        development.end_ns,
+        _SOURCE_CUTOFF_NS,
     )
 
 
@@ -241,9 +253,71 @@ def _runtime() -> ReleaseCandidateRuntimeIdentityV1:
     )
 
 
+def _dataset_catalog_dependency(
+    tmp_path: Path,
+) -> tuple[ReleaseCandidateDependencyV1, str, dict[str, str]]:
+    source_root = tmp_path / "ASCII" / "T"
+    for ordinal, symbol in enumerate(_SYMBOLS):
+        path = histdata_cache_path(source_root, symbol, "200203")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        pl.DataFrame(
+            {
+                "datetime": [
+                    _SOURCE_START_MS + ordinal,
+                    _SOURCE_START_MS + 1000 + ordinal,
+                ],
+                "bid": [1.0 + ordinal / 1000, 1.0001 + ordinal / 1000],
+                "ask": [1.0002 + ordinal / 1000, 1.0003 + ordinal / 1000],
+                "vol": [0, 0],
+            },
+            schema={
+                "datetime": pl.Int64,
+                "bid": pl.Float64,
+                "ask": pl.Float64,
+                "vol": pl.Int32,
+            },
+        ).write_ipc(path)
+    qualification_ref = _artifact(
+        tmp_path,
+        "dataset-qualification.json",
+        metadata={"status": "qualified"},
+    )
+    catalog, catalog_path, version = build_legacy_histdata_catalog(
+        source_root,
+        symbols=_SYMBOLS,
+        periods=("200203",),
+        qualification_evidence=(qualification_ref,),
+        path=tmp_path / "dataset-catalog.json",
+    )
+    catalog_ref = artifact_ref_for_file(
+        catalog_path,
+        kind=REQUIRED_RELEASE_CANDIDATE_DEPENDENCY_KINDS["dataset_catalog"],
+        metadata={
+            "artifact_id": catalog.catalog_id,
+            "dataset_revision": version.dataset_version_id,
+        },
+    )
+    source_hashes = {
+        f"{partition.symbol.lower()}:{partition.period}": (
+            partition.artifact.sha256
+        )
+        for partition in version.partitions
+    }
+    return (
+        ReleaseCandidateDependencyV1(
+            name="dataset_catalog",
+            artifact_id=catalog.catalog_id,
+            artifact_ref=catalog_ref,
+        ),
+        version.dataset_version_id,
+        source_hashes,
+    )
+
+
 def _dependencies(tmp_path: Path) -> tuple[ReleaseCandidateDependencyV1, ...]:
     graph_ref, holdout_ref, _ = _holdout_refs(tmp_path)
     registry_id = reconstruction_schema_registry().registry_id
+    dataset_dependency, _, _ = _dataset_catalog_dependency(tmp_path)
     dependencies = []
     for name in REQUIRED_RELEASE_CANDIDATE_DEPENDENCIES:
         if name == "candidate_graph":
@@ -252,12 +326,16 @@ def _dependencies(tmp_path: Path) -> tuple[ReleaseCandidateDependencyV1, ...]:
         elif name == "protected_release_holdout":
             artifact_id = str(holdout_ref.metadata["manifest_id"])
             ref = holdout_ref
+        elif name == "dataset_catalog":
+            dependencies.append(dataset_dependency)
+            continue
         elif name == "schema_registry":
             artifact_id = registry_id
             ref = _artifact(
                 tmp_path,
                 f"dependency-{name}.json",
                 metadata={"registry_id": artifact_id},
+                kind=REQUIRED_RELEASE_CANDIDATE_DEPENDENCY_KINDS[name],
             )
         elif name == "experiment_manifest":
             artifact_id = "experiment:v2.5.0"
@@ -265,18 +343,18 @@ def _dependencies(tmp_path: Path) -> tuple[ReleaseCandidateDependencyV1, ...]:
                 tmp_path,
                 f"dependency-{name}.json",
                 metadata={"experiment_id": artifact_id},
+                kind=REQUIRED_RELEASE_CANDIDATE_DEPENDENCY_KINDS[name],
             )
         else:
             artifact_id = f"{name}:v1"
             extra: dict[str, object] = {"artifact_id": artifact_id}
-            if name == "dataset_catalog":
-                extra["dataset_revision"] = "histdata-triangle:2026-07"
             if name in {"selected_engine_config", "selected_engine_fit"}:
                 extra["engine_id"] = "histdatacom.marked-hawkes"
             ref = _artifact(
                 tmp_path,
                 f"dependency-{name}.json",
                 metadata=extra,
+                kind=REQUIRED_RELEASE_CANDIDATE_DEPENDENCY_KINDS[name],
             )
         dependencies.append(
             ReleaseCandidateDependencyV1(
@@ -374,17 +452,23 @@ def _branch_governance(tmp_path: Path) -> ReleaseCandidateBranchGovernanceV1:
 
 def _candidate(tmp_path: Path) -> ReconstructionReleaseCandidateV1:
     dependencies = _dependencies(tmp_path)
+    catalog_dependency = next(
+        item for item in dependencies if item.name == "dataset_catalog"
+    )
+    catalog = DatasetCatalog.read(catalog_dependency.artifact_ref.path)
+    version = catalog.versions[0]
     _, _, source_cutoff_ns = _holdout_refs(tmp_path / "cutoff")
     return freeze_reconstruction_release_candidate(
         git_identity=_git_identity(),
         build_set=_build_set(tmp_path),
         runtime_identity=_runtime(),
         schema_registry_id=reconstruction_schema_registry().registry_id,
-        dataset_revision="histdata-triangle:2026-07",
+        dataset_revision=version.dataset_version_id,
         source_partition_hashes={
-            "eurgbp:202607": _sha("eurgbp:202607"),
-            "eurusd:202607": _sha("eurusd:202607"),
-            "gbpusd:202607": _sha("gbpusd:202607"),
+            f"{partition.symbol.lower()}:{partition.period}": (
+                partition.artifact.sha256
+            )
+            for partition in version.partitions
         },
         experiment_id="experiment:v2.5.0",
         selected_engine_id="histdatacom.marked-hawkes",
@@ -440,6 +524,7 @@ def test_any_dependency_change_creates_a_new_candidate(tmp_path: Path) -> None:
         tmp_path,
         "changed-storage-policy.json",
         metadata={"artifact_id": "storage_policy:v2"},
+        kind=REQUIRED_RELEASE_CANDIDATE_DEPENDENCY_KINDS["storage_policy"],
     )
     changed_dependency = ReleaseCandidateDependencyV1(
         name="storage_policy",
@@ -456,6 +541,70 @@ def test_any_dependency_change_creates_a_new_candidate(tmp_path: Path) -> None:
     )
 
     assert changed.candidate_id != candidate.candidate_id
+
+
+def test_dependency_kind_must_match_executable_plan_artifact(
+    tmp_path: Path,
+) -> None:
+    candidate = _candidate(tmp_path)
+    cftc = candidate.dependency("cftc_positioning")
+
+    with pytest.raises(
+        ValueError,
+        match="cftc_positioning requires cftc_positioning_corpus_v1",
+    ):
+        replace(
+            cftc,
+            artifact_ref=replace(
+                cftc.artifact_ref,
+                kind="certification_report_v1",
+            ),
+            dependency_id="",
+        )
+
+
+def test_campaign_catalog_exactly_binds_hashes_and_source_cutoff(
+    tmp_path: Path,
+) -> None:
+    candidate = _candidate(tmp_path)
+    source_key = next(iter(candidate.source_partition_hashes))
+    changed_hashes = {
+        **candidate.source_partition_hashes,
+        source_key: "0" * 64,
+    }
+
+    with pytest.raises(
+        ValueError,
+        match="source hashes differ from dataset catalog",
+    ):
+        verify_reconstruction_release_candidate(
+            replace(
+                candidate,
+                source_partition_hashes=changed_hashes,
+                candidate_id="",
+            )
+        )
+
+    with pytest.raises(ValueError, match="dataset exceeds source cutoff"):
+        verify_reconstruction_release_candidate(
+            replace(
+                candidate,
+                source_cutoff_ns=candidate.source_cutoff_ns - 1,
+                candidate_id="",
+            )
+        )
+
+    with pytest.raises(ValueError, match="period coverage is incomplete"):
+        verify_reconstruction_release_candidate(
+            replace(
+                candidate,
+                source_cutoff_ns=int(
+                    datetime(2002, 5, 1, tzinfo=timezone.utc).timestamp()
+                    * 1_000_000_000
+                ),
+                candidate_id="",
+            )
+        )
 
 
 def test_incomplete_gates_and_mismatched_commit_fail_closed(
