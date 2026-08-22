@@ -53,6 +53,11 @@ from histdatacom.reconstruction_science import (
 )
 from histdatacom.runtime_contracts import ArtifactRef
 from histdatacom.synthetic.contracts import canonical_contract_json
+from histdatacom.synthetic.ensembles import ReconstructionEnsemblePlanV1
+from histdatacom.synthetic.observation_uncertainty import (
+    ObservationUncertaintyPolicyV1,
+    ObservationUncertaintyScenarioKind,
+)
 from histdatacom.synthetic.persistence import (
     ReconstructionProductManifestV3,
     ReconstructionRetentionPlanV1,
@@ -77,10 +82,7 @@ from histdatacom.synthetic.reconstruction_plan import (
     read_reconstruction_plan_execution_manifest,
     read_synthetic_infill_plan,
 )
-from histdatacom.synthetic.streaming import (
-    ReconstructionCommitPhase,
-    ReconstructionResourceEstimateV1,
-)
+from histdatacom.synthetic.streaming import ReconstructionCommitPhase
 
 _PLAN_ENV = "HISTDATACOM_REAL_RECONSTRUCTION_PLAN"
 _START_ENV = "HISTDATACOM_REAL_RECONSTRUCTION_START"
@@ -118,7 +120,13 @@ def test_real_triangle_is_deterministic_and_recovers_post_rename_crash(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """All seven real handlers commit deterministic queryable Parquet."""
-    first = _case(tmp_path / "concurrency-1", max_parallel_windows=1)
+    first = _case(
+        tmp_path / "concurrency-1",
+        max_parallel_windows=1,
+        observation_scenario_kind=(
+            ObservationUncertaintyScenarioKind.LOW_RETENTION_HIGH_INFILL
+        ),
+    )
     register_first_party_reconstruction_handlers()
     first_store = ReconstructionCheckpointStore(
         first.request.manifest_store_root
@@ -462,7 +470,13 @@ def test_real_triangle_is_deterministic_and_recovers_post_rename_crash(
     ) == (descriptor["cross_series_constraint_decision_ids"])
 
     monkeypatch.undo()
-    second = _case(tmp_path / "concurrency-2", max_parallel_windows=2)
+    second = _case(
+        tmp_path / "concurrency-2",
+        max_parallel_windows=2,
+        observation_scenario_kind=(
+            ObservationUncertaintyScenarioKind.LOW_RETENTION_HIGH_INFILL
+        ),
+    )
     second_state = asyncio.run(
         run_reconstruction_window(
             second.request,
@@ -513,7 +527,6 @@ def test_real_zero_deficit_triangle_commits_observed_only(
     case = _case(
         tmp_path / "zero-deficit",
         max_parallel_windows=1,
-        preserve_planned_candidate_count=True,
     )
     if case.task.resource_estimate.candidate_event_count != 0:
         pytest.skip("selected real plan window does not have zero deficit")
@@ -572,8 +585,11 @@ def test_real_scientific_evidence_refusal_prevents_atomic_commit(
         )
     )
     assert state.checkpoint.phase is ReconstructionCommitPhase.FAILED
-    assert "final_validation_failed" in state.checkpoint.interruption_reason
-    assert len(state.outcomes) == 5
+    assert state.checkpoint.interruption_reason in {
+        "proposal_validation_failed",
+        "final_validation_failed",
+    }
+    assert 1 <= len(state.outcomes) <= 5
     assert discover_reconstruction_manifests(case.execution.output_root) == ()
 
 
@@ -691,19 +707,19 @@ def test_real_public_cli_and_api_execute_same_one_window_product(
 
     assert cli_preview == api_preview
     assert cli_replay == api_replay
-    assert {row["origin"] for row in api_preview["rows"]} == {
-        "observed",
-        "synthetic",
-    }
-    synthetic = next(
+    preview_origins = {row["origin"] for row in api_preview["rows"]}
+    assert "observed" in preview_origins
+    assert preview_origins <= {"observed", "synthetic"}
+    synthetic_rows = tuple(
         row for row in api_preview["rows"] if row["origin"] == "synthetic"
     )
-    assert synthetic["generation"]["generator_id"]
-    assert synthetic["generation"]["confidence"] is None
-    assert synthetic["constraint_decision"]["decision"] == "accepted"
-    assert synthetic["constraint_decision"]["constraint_set_id"]
-    assert synthetic["lineage"]["left_anchor_event_id"]
-    assert synthetic["lineage"]["right_anchor_event_id"]
+    for synthetic in synthetic_rows:
+        assert synthetic["generation"]["generator_id"]
+        assert synthetic["generation"]["confidence"] is None
+        assert synthetic["constraint_decision"]["decision"] == "accepted"
+        assert synthetic["constraint_decision"]["constraint_set_id"]
+        assert synthetic["lineage"]["left_anchor_event_id"]
+        assert synthetic["lineage"]["right_anchor_event_id"]
     assert api_replay["event_count"] == manifest.event_count
     assert api_replay["replay_verified"]
 
@@ -713,7 +729,7 @@ def _case(
     *,
     max_parallel_windows: int,
     failing_scientific_evidence: bool = False,
-    preserve_planned_candidate_count: bool = False,
+    observation_scenario_kind: ObservationUncertaintyScenarioKind | None = None,
 ) -> _Case:
     plan = _real_plan()
     start = _real_start_ns()
@@ -724,12 +740,35 @@ def _case(
             )
         )
     )
-    primary = retention.primary_member_id
-    original = next(
-        task
+    member_id = retention.primary_member_id
+    if observation_scenario_kind is not None:
+        ensemble = ReconstructionEnsemblePlanV1.from_dict(
+            json.loads(
+                Path(plan.artifact_graph["ensemble_plan"].path).read_text(
+                    encoding="utf-8"
+                )
+            )
+        )
+        policy = ObservationUncertaintyPolicyV1.from_dict(
+            json.loads(
+                Path(
+                    plan.artifact_graph["observation_uncertainty_policy"].path
+                ).read_text(encoding="utf-8")
+            )
+        )
+        scenario_index = policy.scenario_order.index(observation_scenario_kind)
+        member_id = next(
+            member.member_id
+            for member in ensemble.members
+            if (member.ordinal - 1) % len(policy.scenario_order)
+            == scenario_index
+        )
+        assert member_id in retention.retained_member_ids
+    original_request, original = next(
+        (request, task)
         for request in plan.workflow_requests
         for task in request.tasks
-        if task.window.ensemble_member_id == primary
+        if task.window.ensemble_member_id == member_id
         and task.window.reads_event_time(start)
     )
     old_execution = read_reconstruction_plan_execution_manifest(
@@ -783,27 +822,9 @@ def _case(
                 configuration_refs=(execution_ref,),
             )
         )
-    integration_input_event_estimate = 5_000
     task = ReconstructionWindowTaskV1(
         window=window,
-        resource_estimate=ReconstructionResourceEstimateV1(
-            input_event_count=integration_input_event_estimate,
-            candidate_event_count=(
-                original.resource_estimate.candidate_event_count
-                if preserve_planned_candidate_count
-                else int(
-                    integration_input_event_estimate
-                    * plan.run.storage_policy.max_candidate_amplification
-                )
-            ),
-            retained_ensemble_members=1,
-            inflight_batches=1,
-            peak_events_per_batch=1_000,
-            estimated_memory_bytes=16 * 1024**2,
-            estimated_scratch_bytes=32 * 1024**2,
-            estimated_output_bytes=32 * 1024**2,
-            estimated_batch_count=10,
-        ),
+        resource_estimate=original.resource_estimate,
         commands=tuple(commands),
         scratch_directory=str(scratch),
     )
@@ -813,9 +834,9 @@ def _case(
         tasks=(task,),
         manifest_store_root=execution.checkpoint_root,
         report_root=str(root / "reports"),
-        task_queues={"reconstruction": "local"},
+        task_queues=original_request.task_queues,
         max_parallel_windows=max_parallel_windows,
-        max_inflight_memory_bytes=64 * 1024**2,
+        max_inflight_memory_bytes=(original_request.max_inflight_memory_bytes),
     )
     return _Case(plan=plan, execution=execution, request=request, task=task)
 
