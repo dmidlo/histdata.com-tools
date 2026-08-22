@@ -97,6 +97,10 @@ from histdatacom.reconstruction_science import (
     current_histdata_reconstruction_scientific_ledger,
     read_reconstruction_scientific_ledger,
 )
+from histdatacom.reconstruction_storage import (
+    require_guarded_storage_path,
+    verify_reconstruction_storage_for_execution,
+)
 from histdatacom.resource_usage import peak_rss_bytes
 from histdatacom.runtime_contracts import ArtifactRef, JSONScalar, JSONValue
 from histdatacom.synthetic.benchmark import (
@@ -2238,6 +2242,9 @@ def validation_handler(
             retention_plan=retention,
             storage_policy=plan.configuration.storage_policy,
             staging_root=_stage_directory(invocation, "publication"),
+            storage_guard_ref=plan.execution_manifest.artifacts[
+                "storage_root_guard"
+            ],
             experiment_id=read_reconstruction_experiment(
                 plan.execution_manifest.artifacts["experiment_manifest"].path
             ).experiment_id,
@@ -2382,7 +2389,17 @@ def atomic_commit_handler(
                 manifest=manifest_v2,
             )
         _cancel_if_requested(invocation)
-        published = _commit_or_recover(staged)
+        storage = verify_reconstruction_storage_for_execution(
+            invocation.command.configuration_refs[0]
+        )
+        if storage is None:
+            raise ValueError(
+                "atomic commit lacks a reconstruction storage-root guard"
+            )
+        storage_guard_ref, _ = storage
+        published = _commit_or_recover(
+            staged, storage_guard_ref=storage_guard_ref
+        )
         removed_scratch_bytes = _cleanup_committed_window_scratch(
             invocation,
             recovery_ref=descriptor_ref,
@@ -3644,9 +3661,13 @@ def _commit_or_recover(
     staged: (
         StagedReconstructionPublicationV2 | StagedReconstructionPublicationV3
     ),
+    *,
+    storage_guard_ref: ArtifactRef,
 ) -> PublishedReconstructionV2 | PublishedReconstructionV3:
     if staged.staging_directory.exists():
-        return commit_delivery_reconstruction_publication(staged)
+        return commit_delivery_reconstruction_publication(
+            staged, storage_guard_ref=storage_guard_ref
+        )
     manifest_path = staged.committed_directory / "manifest.json"
     if not manifest_path.exists():
         raise ValueError("neither staged nor committed publication exists")
@@ -4318,7 +4339,16 @@ def _cleanup_committed_window_scratch(
 def _stage_directory(
     invocation: ReconstructionStageInvocationV1, name: str
 ) -> Path:
+    storage = verify_reconstruction_storage_for_execution(
+        invocation.command.configuration_refs[0]
+    )
+    if storage is None:
+        raise ValueError("first-party stage lacks a storage-root guard")
+    _, guard = storage
     root = Path(invocation.task.scratch_directory).expanduser().resolve()
+    require_guarded_storage_path(
+        guard, root, role="scratch", allow_descendant=True
+    )
     directory = (root / name).resolve()
     if not directory.is_relative_to(root):
         raise ValueError("stage directory escaped window scratch")

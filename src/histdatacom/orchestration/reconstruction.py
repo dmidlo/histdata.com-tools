@@ -22,6 +22,10 @@ from pathlib import Path
 from typing import Any, Protocol, cast
 
 from histdatacom.manifest_store import ManifestStatusStore
+from histdatacom.reconstruction_storage import (
+    ReconstructionStorageRootError,
+    verify_reconstruction_storage_for_execution,
+)
 from histdatacom.runtime_contracts import ArtifactRef, JSONValue
 from histdatacom.synthetic.contracts import canonical_contract_json
 from histdatacom.synthetic.persistence import (
@@ -1314,6 +1318,10 @@ async def execute_reconstruction_stage(
         ),
     ):
         verify_artifact_ref(ref)
+    try:
+        _verify_command_storage(invocation.command)
+    except ReconstructionStorageRootError as err:
+        raise ReconstructionArtifactError(str(err)) from err
     receipt_path = Path(invocation.command.receipt_path).expanduser()
     if receipt_path.exists():
         outcome = _read_stage_receipt(receipt_path)
@@ -1347,8 +1355,17 @@ async def execute_reconstruction_stage(
     if verify_outputs:
         for ref in outcome.output_refs:
             verify_artifact_ref(ref)
+    try:
+        _verify_command_storage(invocation.command)
+    except ReconstructionStorageRootError as err:
+        raise ReconstructionArtifactError(str(err)) from err
     _write_stage_receipt(receipt_path, outcome)
     return outcome
+
+
+def _verify_command_storage(command: ReconstructionStageCommandV1) -> None:
+    for ref in command.configuration_refs:
+        verify_reconstruction_storage_for_execution(ref)
 
 
 class ReconstructionStageExecutor(Protocol):

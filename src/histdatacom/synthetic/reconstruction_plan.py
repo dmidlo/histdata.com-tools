@@ -94,6 +94,12 @@ from histdatacom.reconstruction_science import (
     current_histdata_reconstruction_scientific_ledger,
     read_reconstruction_scientific_ledger,
 )
+from histdatacom.reconstruction_storage import (
+    RECONSTRUCTION_STORAGE_ROOT_GUARD_ROLE,
+    ReconstructionStorageRootError,
+    create_reconstruction_storage_root_guard,
+    verify_reconstruction_storage_for_execution,
+)
 from histdatacom.runtime_contracts import ArtifactRef, JSONValue
 from histdatacom.synthetic.benchmark_corpus import (
     PREDECLARED_GATE_COMMIT,
@@ -2120,6 +2126,7 @@ class ReconstructionPlanExecutionManifestV1:
             "information_audit",
             "ensemble_plan",
             "retention_plan",
+            RECONSTRUCTION_STORAGE_ROOT_GUARD_ROLE,
         }
         if self.delivery_mode is ReconstructionDeliveryMode.BROKER_CONDITIONED:
             required.add("broker_delivery")
@@ -4030,6 +4037,15 @@ def build_synthetic_infill_plan(
         graph["feed_epoch_transition_policy"] = transition_policy_ref
     if broker_ref is not None:
         graph["broker_delivery"] = broker_ref
+    try:
+        _, storage_guard_ref = create_reconstruction_storage_root_guard(
+            output_root=roots["output"],
+            scratch_root=roots["scratch"],
+            artifact_root=artifacts_dir,
+        )
+    except ReconstructionStorageRootError as err:
+        raise ReconstructionPlanCompatibilityError(str(err)) from err
+    graph[RECONSTRUCTION_STORAGE_ROOT_GUARD_ROLE] = storage_guard_ref
     execution_manifest = ReconstructionPlanExecutionManifestV1(
         run_id=ensemble_plan.run.run_id,
         configuration_id=configuration.configuration_id,
@@ -4735,6 +4751,10 @@ def load_reconstruction_stage_plan(
     if verify_artifacts:
         verify_artifact_ref(execution_ref)
     execution = read_reconstruction_plan_execution_manifest(execution_ref.path)
+    try:
+        verify_reconstruction_storage_for_execution(execution_ref)
+    except ReconstructionStorageRootError as err:
+        raise ReconstructionPlanCompatibilityError(str(err)) from err
     configuration_ref = execution.artifacts["configuration"]
     inventory_ref = execution.artifacts["source_inventory"]
     if verify_artifacts:

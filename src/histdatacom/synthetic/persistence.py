@@ -34,6 +34,10 @@ from pathlib import Path, PurePosixPath
 from typing import Any, cast
 from urllib.parse import quote
 
+from histdatacom.reconstruction_storage import (
+    require_guarded_storage_path,
+    verify_reconstruction_storage_root_guard,
+)
 from histdatacom.runtime_contracts import ArtifactRef, JSONValue
 from histdatacom.synthetic.broker_transfer import (
     BrokerRenderedGroupV1,
@@ -3299,6 +3303,7 @@ def stage_delivery_reconstruction_publication(
     retention_plan: ReconstructionRetentionPlanV1,
     storage_policy: ReconstructionStoragePolicyV1,
     staging_root: str | Path,
+    storage_guard_ref: ArtifactRef | None = None,
     experiment_id: str | None = None,
     row_group_size: int = DEFAULT_RECONSTRUCTION_ROW_GROUP_SIZE,
 ) -> StagedReconstructionPublicationV2 | StagedReconstructionPublicationV3:
@@ -3331,6 +3336,14 @@ def stage_delivery_reconstruction_publication(
     anchors = tuple(immutable_source_anchors)
     _validate_immutable_anchors(events, anchors)
     root_path = Path(root).expanduser().resolve()
+    scratch = Path(staging_root).expanduser().resolve()
+    if storage_guard_ref is not None:
+        guard = verify_reconstruction_storage_root_guard(
+            storage_guard_ref, expected_output_root=root_path
+        )
+        require_guarded_storage_path(
+            guard, scratch, role="scratch", allow_descendant=True
+        )
     portable_source_artifacts = (
         _materialize_portable_source_artifacts(
             root_path, immutable_source_artifacts
@@ -3357,9 +3370,16 @@ def stage_delivery_reconstruction_publication(
             else RECONSTRUCTION_PRODUCT_V2_SCHEMA_VERSION
         ),
     )
+    if storage_guard_ref is not None:
+        verify_reconstruction_storage_root_guard(
+            storage_guard_ref, expected_output_root=root_path
+        )
     axis_directory.mkdir(parents=True, exist_ok=True)
-    scratch = Path(staging_root).expanduser().resolve()
     scratch.mkdir(parents=True, exist_ok=True)
+    if storage_guard_ref is not None:
+        verify_reconstruction_storage_root_guard(
+            storage_guard_ref, expected_output_root=root_path
+        )
     if scratch.stat().st_dev != axis_directory.stat().st_dev:
         raise ReconstructionPersistenceError(
             "window scratch and output root are on different filesystems"
@@ -3548,6 +3568,8 @@ def commit_delivery_reconstruction_publication(
     staged: (
         StagedReconstructionPublicationV2 | StagedReconstructionPublicationV3
     ),
+    *,
+    storage_guard_ref: ArtifactRef | None = None,
 ) -> PublishedReconstructionV2 | PublishedReconstructionV3:
     """Atomically promote or recover one generic-delivery publication."""
     if not isinstance(
@@ -3558,6 +3580,16 @@ def commit_delivery_reconstruction_publication(
             "delivery commit requires a staged delivery publication"
         )
     manifest = staged.manifest
+    if storage_guard_ref is not None:
+        guard = verify_reconstruction_storage_root_guard(
+            storage_guard_ref, expected_output_root=staged.root
+        )
+        require_guarded_storage_path(
+            guard,
+            staged.staging_directory,
+            role="scratch",
+            allow_descendant=True,
+        )
     expected_type = type(manifest)
     final_directory = staged.committed_directory
     if final_directory.exists():
@@ -3588,6 +3620,10 @@ def commit_delivery_reconstruction_publication(
             else None
         ),
     )
+    if storage_guard_ref is not None:
+        verify_reconstruction_storage_root_guard(
+            storage_guard_ref, expected_output_root=staged.root
+        )
     final_directory.parent.mkdir(parents=True, exist_ok=True)
     try:
         os.replace(staged.staging_directory, final_directory)
