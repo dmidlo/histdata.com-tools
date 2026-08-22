@@ -24,7 +24,7 @@ The candidate contains strong, local artifact references and stable IDs for:
 | Runtime | Python implementation/version/ABI, OS release, architecture, machine class, critical dependency versions, and compression versions |
 | Schema and source | reconstruction schema-registry ID, complete campaign dataset catalog/revision, exact executable-partition SHA-256 values, and source cutoff |
 | Scientific inputs | scientific training/qualification experiment, ledger, raw feed epoch, raw observation operator, market context, raw CFTC, benchmark, proposal evaluation, powered qualification, and product-selection artifacts |
-| Selected product | selected engine ID, configuration, fit, observation-scenario registry, and the sealed candidate graph |
+| Selected product | selected engine ID, configuration, fit, observation-scenario registry, executable observation-uncertainty and feed-transition policies, and the sealed candidate graph |
 | Policies | adaptive window, alignment, carving, reconciliation, storage, and certification artifacts |
 | Protected evidence | a fresh still-sealed release-holdout manifest used by the candidate graph |
 | Storage | distinct absolute artifact, output, checkpoint, and scratch roots with machine-bound filesystem qualification receipts |
@@ -37,8 +37,9 @@ policy creates another `candidate_id`.
 
 Dependency roles also require the artifact kinds consumed by an executable v2
 plan. Certification-report wrappers cannot replace the raw CFTC corpus, feed
-epoch definition, observation operator, benchmark manifest, proposal config,
-or proposal fit. The `reconciliation_policy` dependency—not the policy-registry
+epoch definition, observation operator, observation-uncertainty policy,
+feed-transition policy, benchmark manifest, proposal config, or proposal fit.
+The `reconciliation_policy` dependency—not the policy-registry
 `alignment_policy` entry—binds the plan's
 `cross_series_constraint_policy` role.
 

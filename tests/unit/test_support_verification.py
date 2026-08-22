@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -319,16 +320,63 @@ def test_final_campaign_request_binds_support_to_every_shard(
         )
 
 
+def test_candidate_source_scope_tracks_requested_months_only() -> None:
+    hashes = {
+        f"{symbol}:{period}": "a" * 64
+        for symbol in _SYMBOLS
+        for period in ("200203", "200204", "200205")
+    }
+    start_ns = int(
+        datetime(2002, 3, 15, tzinfo=timezone.utc).timestamp() * 1_000_000_000
+    )
+    end_ns = int(
+        datetime(2002, 5, 1, tzinfo=timezone.utc).timestamp() * 1_000_000_000
+    )
+
+    selected = support_module._candidate_source_keys_for_bounds(
+        hashes,
+        requested_start_ns=start_ns,
+        requested_end_ns=end_ns,
+    )
+
+    assert selected == {
+        f"{symbol}:{period}"
+        for symbol in _SYMBOLS
+        for period in ("200203", "200204")
+    }
+
+
+@pytest.mark.parametrize(
+    "changed_dependency",
+    (
+        "benchmark_corpus",
+        "cftc_positioning",
+        "dataset_catalog",
+        "feed_epoch_definition",
+        "feed_epoch_transition_policy",
+        "market_context",
+        "observation_operator",
+        "observation_uncertainty_policy",
+        "powered_qualification_dossier",
+        "product_selection_dossier",
+        "proposal_evaluation",
+        "reconciliation_policy",
+        "scientific_ledger",
+    ),
+)
 def test_frozen_context_dependency_mismatch_fails_closed(
     tmp_path: Path,
+    changed_dependency: str,
 ) -> None:
     dependency_to_graph = {
         "benchmark_corpus": "benchmark_manifest",
         "cftc_positioning": "cftc_positioning",
         "dataset_catalog": "dataset_catalog",
         "feed_epoch_definition": "feed_epochs",
+        "feed_epoch_transition_policy": "feed_epoch_transition_policy",
         "market_context": "market_context",
         "observation_operator": "observation_operator",
+        "observation_uncertainty_policy": "observation_uncertainty_policy",
         "powered_qualification_dossier": "powered_qualification_dossier",
         "product_selection_dossier": "hawkes_product_selection_dossier",
         "proposal_evaluation": "proposal_portfolio_evaluation",
@@ -347,10 +395,10 @@ def test_frozen_context_dependency_mismatch_fails_closed(
         graph_role: dependency_refs[dependency]
         for dependency, graph_role in dependency_to_graph.items()
     }
-    graph["market_context"] = _artifact(
-        tmp_path / "different-context.json",
-        "market_context_corpus_v1",
-        artifact_id="market-context:different",
+    graph[dependency_to_graph[changed_dependency]] = _artifact(
+        tmp_path / f"different-{changed_dependency}.json",
+        f"{changed_dependency}_v2",
+        artifact_id=f"{changed_dependency}:different",
     )
     candidate = SimpleNamespace(
         selected_engine_id="histdatacom.marked-hawkes.diagonal_self_excitation",
@@ -361,7 +409,7 @@ def test_frozen_context_dependency_mismatch_fails_closed(
 
     with pytest.raises(
         FinalSupportVerificationError,
-        match="market_context",
+        match=changed_dependency,
     ):
         support_module._verify_release_candidate_dependencies(
             SimpleNamespace(artifact_graph=graph),
@@ -379,8 +427,10 @@ def test_frozen_candidate_binds_executable_roles_and_qualification_chain(
         "cftc_positioning": "cftc_positioning",
         "dataset_catalog": "dataset_catalog",
         "feed_epoch_definition": "feed_epochs",
+        "feed_epoch_transition_policy": "feed_epoch_transition_policy",
         "market_context": "market_context",
         "observation_operator": "observation_operator",
+        "observation_uncertainty_policy": "observation_uncertainty_policy",
         "powered_qualification_dossier": "powered_qualification_dossier",
         "product_selection_dossier": "hawkes_product_selection_dossier",
         "proposal_evaluation": "proposal_portfolio_evaluation",

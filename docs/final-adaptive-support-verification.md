@@ -80,6 +80,12 @@ context/CFTC classification, cardinality, resource, or selected source-row
 change. A one-nanosecond boundary or alignment-recommendation shift therefore
 changes identity and fails comparison with the claimed plan.
 
+The release candidate freezes the complete campaign catalog, while one public
+plan set may intentionally cover a bounded subset. Final verification requires
+every frozen monthly triangle intersecting the plan set's exact half-open time
+range and rejects any missing or changed in-range partition; frozen months
+outside that requested range are not falsely treated as absent plan input.
+
 ## Installed operator surface
 
 Build the claimed support map first, then independently finalize it against the

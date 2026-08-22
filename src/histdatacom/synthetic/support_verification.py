@@ -19,6 +19,7 @@ import tempfile
 from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from itertools import pairwise
 from pathlib import Path
 from typing import Any, cast
@@ -2021,6 +2022,30 @@ def _artifact_identity(ref: ArtifactRef) -> tuple[str, str, int | None]:
     return (ref.kind, ref.sha256, ref.size_bytes)
 
 
+def _candidate_source_keys_for_bounds(
+    source_partition_hashes: Mapping[str, str],
+    *,
+    requested_start_ns: int,
+    requested_end_ns: int,
+) -> set[str]:
+    """Select the frozen monthly inventory intersecting one plan-set range."""
+    if requested_end_ns <= requested_start_ns:
+        raise FinalSupportVerificationError(
+            "release-candidate source selection bounds are invalid"
+        )
+    start_period = datetime.fromtimestamp(
+        requested_start_ns // 1_000_000_000, tz=timezone.utc
+    ).strftime("%Y%m")
+    end_period = datetime.fromtimestamp(
+        (requested_end_ns - 1) // 1_000_000_000, tz=timezone.utc
+    ).strftime("%Y%m")
+    return {
+        key
+        for key in source_partition_hashes
+        if start_period <= key.rsplit(":", 1)[-1] <= end_period
+    }
+
+
 def _verify_release_candidate_dependencies(
     plan: SyntheticInfillPlanV1,
     candidate: ReconstructionReleaseCandidateV1,
@@ -2032,8 +2057,10 @@ def _verify_release_candidate_dependencies(
         "cftc_positioning": "cftc_positioning",
         "dataset_catalog": "dataset_catalog",
         "feed_epoch_definition": "feed_epochs",
+        "feed_epoch_transition_policy": "feed_epoch_transition_policy",
         "market_context": "market_context",
         "observation_operator": "observation_operator",
+        "observation_uncertainty_policy": "observation_uncertainty_policy",
         "powered_qualification_dossier": "powered_qualification_dossier",
         "product_selection_dossier": "hawkes_product_selection_dossier",
         "proposal_evaluation": "proposal_portfolio_evaluation",
@@ -3394,7 +3421,12 @@ def build_final_adaptive_support_map(
                 verification, root / "verification-shards"
             )
         )
-    missing_candidate_keys = set(candidate.source_partition_hashes).difference(
+    expected_candidate_keys = _candidate_source_keys_for_bounds(
+        candidate.source_partition_hashes,
+        requested_start_ns=plan_set.requested_start_ns,
+        requested_end_ns=plan_set.requested_end_ns,
+    )
+    missing_candidate_keys = expected_candidate_keys.difference(
         observed_candidate_hash_keys
     )
     if missing_candidate_keys:
