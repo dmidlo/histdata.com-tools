@@ -828,9 +828,14 @@ def test_plan_projects_bounded_histdata_source_order_fallback(
         plan_module.CftcPositioningQueryStatus.RESTATEMENT_INCOMPLETE,
     ],
 )
+@pytest.mark.parametrize(
+    "engine_id",
+    sorted(plan_module.QUALIFIED_CFTC_UNAVAILABLE_ENGINE_IDS),
+)
 def test_unavailable_cftc_is_explicitly_qualified_or_refused(
     monkeypatch: pytest.MonkeyPatch,
     query_status: plan_module.CftcPositioningQueryStatus,
+    engine_id: str,
 ) -> None:
     start_ns = int(
         datetime(2002, 3, 4, tzinfo=timezone.utc).timestamp() * 1_000_000_000
@@ -859,9 +864,7 @@ def test_unavailable_cftc_is_explicitly_qualified_or_refused(
             powered_qualification_dossier_id="powered-dossier:test",
             powered_engine_decision_id="engine-decision:test",
             carving_constraint_set_id="carving-constraints:test",
-            selected_engine_ids=(
-                plan_module.QUALIFIED_CFTC_UNAVAILABLE_ENGINE_ID,
-            ),
+            selected_engine_ids=(engine_id,),
         )
     )
     monkeypatch.setattr(
@@ -915,6 +918,81 @@ def test_unavailable_cftc_is_explicitly_qualified_or_refused(
         plan_module.ReconstructionCftcConditioningMode.REFUSED
     )
     assert "lacks qualification" in cftc_support[0].reason
+
+
+def test_unavailable_cftc_qualification_rejects_unisolated_engine() -> None:
+    with pytest.raises(ValueError, match="structurally isolated"):
+        plan_module.ReconstructionContextAvailabilityQualificationV1(
+            proposal_portfolio_id="proposal-portfolio:test",
+            powered_qualification_dossier_id="powered-dossier:test",
+            powered_engine_decision_id="engine-decision:test",
+            carving_constraint_set_id="carving-constraints:test",
+            selected_engine_ids=(EMPIRICAL_MOTIF_GENERATOR_ID,),
+        )
+
+
+@pytest.mark.parametrize(
+    "engine_id",
+    sorted(plan_module.QUALIFIED_CFTC_UNAVAILABLE_ENGINE_IDS),
+)
+def test_planner_issues_unavailable_cftc_qualification_for_eligible_hawkes(
+    engine_id: str,
+) -> None:
+    decision = SimpleNamespace(
+        reconstruction_eligible=True,
+        decision_id="engine-decision:test",
+    )
+    qualification = plan_module._build_context_availability_qualification(
+        proposal_portfolio=SimpleNamespace(
+            portfolio_id="proposal-portfolio:test",
+            selected_engine_ids=(engine_id,),
+        ),
+        qualification_dossier=SimpleNamespace(
+            dossier_id="powered-dossier:test",
+            decision=lambda selected: (
+                decision
+                if selected == engine_id
+                else pytest.fail("planner requested the wrong engine decision")
+            ),
+        ),
+        carving_constraints=SimpleNamespace(
+            constraint_set_id="carving-constraints:test",
+            condition_policies=(),
+        ),
+    )
+
+    assert qualification is not None
+    assert qualification.selected_engine_ids == (engine_id,)
+    assert qualification.powered_engine_decision_id == decision.decision_id
+
+
+def test_planner_refuses_unavailable_cftc_with_matching_carving_policy() -> (
+    None
+):
+    engine_id = "histdatacom.marked-hawkes.full_self_cross_excitation"
+
+    with pytest.raises(ReconstructionPlanCompatibilityError, match="carving"):
+        plan_module._build_context_availability_qualification(
+            proposal_portfolio=SimpleNamespace(
+                portfolio_id="proposal-portfolio:test",
+                selected_engine_ids=(engine_id,),
+            ),
+            qualification_dossier=SimpleNamespace(
+                dossier_id="powered-dossier:test",
+                decision=lambda _: SimpleNamespace(
+                    reconstruction_eligible=True,
+                    decision_id="engine-decision:test",
+                ),
+            ),
+            carving_constraints=SimpleNamespace(
+                constraint_set_id="carving-constraints:test",
+                condition_policies=(
+                    SimpleNamespace(
+                        match_tags=("cftc_positioning:legacy:futures_only",)
+                    ),
+                ),
+            ),
+        )
 
 
 def test_transition_cardinality_support_matches_runtime_preflight(

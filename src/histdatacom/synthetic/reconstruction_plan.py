@@ -294,6 +294,12 @@ TICK_ONLY_INPUT_POLICY = (
 QUALIFIED_CFTC_UNAVAILABLE_ENGINE_ID = (
     "histdatacom.marked-hawkes.diagonal_self_excitation"
 )
+QUALIFIED_CFTC_UNAVAILABLE_ENGINE_IDS = frozenset(
+    {
+        QUALIFIED_CFTC_UNAVAILABLE_ENGINE_ID,
+        "histdatacom.marked-hawkes.full_self_cross_excitation",
+    }
+)
 CFTC_UNAVAILABLE_RUNTIME_DEPENDENCY = (
     "lineage-tag-only-not-intensity-mark-or-fit-input-v1"
 )
@@ -1429,10 +1435,13 @@ class ReconstructionContextAvailabilityQualificationV1:
         engines = tuple(
             _required_text(item) for item in self.selected_engine_ids
         )
-        if engines != (QUALIFIED_CFTC_UNAVAILABLE_ENGINE_ID,):
+        if (
+            len(engines) != 1
+            or engines[0] not in QUALIFIED_CFTC_UNAVAILABLE_ENGINE_IDS
+        ):
             raise ValueError(
-                "unavailable-CFTC qualification covers only the selected "
-                "diagonal Hawkes engine"
+                "unavailable-CFTC qualification covers exactly one selected "
+                "structurally isolated marked Hawkes engine"
             )
         object.__setattr__(self, "selected_engine_ids", engines)
         expected = _stable_id(
@@ -1531,6 +1540,47 @@ class ReconstructionContextAvailabilityQualificationV1:
             qualification_id=str(data.get("qualification_id", "")),
             schema_version=str(data.get("schema_version", "")),
         )
+
+
+def _build_context_availability_qualification(
+    *,
+    proposal_portfolio: ProposalEnginePortfolioV1,
+    qualification_dossier: PoweredQualificationDossierV1 | None,
+    carving_constraints: HistoricalCarvingConstraintSetV1,
+) -> ReconstructionContextAvailabilityQualificationV1 | None:
+    """Certify one selected Hawkes runtime with no CFTC model dependency."""
+    selected_engine_ids = tuple(proposal_portfolio.selected_engine_ids)
+    if (
+        qualification_dossier is None
+        or len(selected_engine_ids) != 1
+        or selected_engine_ids[0] not in QUALIFIED_CFTC_UNAVAILABLE_ENGINE_IDS
+    ):
+        return None
+    selected_engine_id = selected_engine_ids[0]
+    decision = qualification_dossier.decision(selected_engine_id)
+    if not decision.reconstruction_eligible:
+        raise ReconstructionPlanCompatibilityError(
+            "unavailable-CFTC mode requires a reconstruction-eligible engine"
+        )
+    cftc_condition_policies = tuple(
+        policy
+        for policy in carving_constraints.condition_policies
+        if any(
+            str(tag).lower().startswith("cftc_positioning:")
+            for tag in policy.match_tags
+        )
+    )
+    if cftc_condition_policies:
+        raise ReconstructionPlanCompatibilityError(
+            "unavailable-CFTC mode conflicts with CFTC-specific carving policies"
+        )
+    return ReconstructionContextAvailabilityQualificationV1(
+        proposal_portfolio_id=proposal_portfolio.portfolio_id,
+        powered_qualification_dossier_id=qualification_dossier.dossier_id,
+        powered_engine_decision_id=decision.decision_id,
+        carving_constraint_set_id=carving_constraints.constraint_set_id,
+        selected_engine_ids=selected_engine_ids,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -3537,45 +3587,15 @@ def build_synthetic_infill_plan(
             "registry_id": proposal_portfolio.registry_id,
         },
     )
-    context_availability_qualification: (
-        ReconstructionContextAvailabilityQualificationV1 | None
-    ) = None
+    context_availability_qualification = (
+        _build_context_availability_qualification(
+            proposal_portfolio=proposal_portfolio,
+            qualification_dossier=qualification_dossier,
+            carving_constraints=selected_carving,
+        )
+    )
     context_availability_ref: ArtifactRef | None = None
-    if qualification_dossier is not None and tuple(
-        proposal_portfolio.selected_engine_ids
-    ) == (QUALIFIED_CFTC_UNAVAILABLE_ENGINE_ID,):
-        decision = qualification_dossier.decision(
-            QUALIFIED_CFTC_UNAVAILABLE_ENGINE_ID
-        )
-        if not decision.reconstruction_eligible:
-            raise ReconstructionPlanCompatibilityError(
-                "unavailable-CFTC mode requires a reconstruction-eligible engine"
-            )
-        cftc_condition_policies = tuple(
-            policy
-            for policy in selected_carving.condition_policies
-            if any(
-                str(tag).lower().startswith("cftc_positioning:")
-                for tag in policy.match_tags
-            )
-        )
-        if cftc_condition_policies:
-            raise ReconstructionPlanCompatibilityError(
-                "unavailable-CFTC mode conflicts with CFTC-specific carving policies"
-            )
-        context_availability_qualification = (
-            ReconstructionContextAvailabilityQualificationV1(
-                proposal_portfolio_id=proposal_portfolio.portfolio_id,
-                powered_qualification_dossier_id=(
-                    qualification_dossier.dossier_id
-                ),
-                powered_engine_decision_id=decision.decision_id,
-                carving_constraint_set_id=selected_carving.constraint_set_id,
-                selected_engine_ids=tuple(
-                    proposal_portfolio.selected_engine_ids
-                ),
-            )
-        )
+    if context_availability_qualification is not None:
         context_availability_ref = _write_contract_artifact(
             context_availability_qualification,
             artifacts_dir,
@@ -4459,7 +4479,7 @@ def validate_synthetic_infill_plan_for_execution(
                     "context-availability qualification binding differs"
                 )
             expected_decision_id = portfolio.qualification_decision_ids.get(
-                QUALIFIED_CFTC_UNAVAILABLE_ENGINE_ID
+                context_qualification.selected_engine_ids[0]
             )
             if (
                 context_qualification.powered_engine_decision_id
