@@ -1517,6 +1517,43 @@ def test_inspect_job_status_treats_legacy_none_run_id_as_absent(
     assert temporal_client.get_handle_calls == [("histdatacom-run-test", "")]
 
 
+def test_inspect_job_status_reconciles_cancelled_temporal_execution(
+    tmp_path: Path,
+) -> None:
+    """Temporal terminal state should supersede a stale workflow query."""
+    config = _config(tmp_path)
+    temporal_client = _FakeTemporalClient(
+        status_payload=_status_payload(
+            stage="window_wave_0",
+            status=WorkStatus.PLANNED,
+        )
+    )
+    handle = temporal_client.get_workflow_handle("histdatacom-run-cancelled")
+    handle.run_id = ""
+
+    async def describe() -> SimpleNamespace:
+        return SimpleNamespace(
+            status=SimpleNamespace(name="CANCELED"),
+            run_id="run-cancelled",
+        )
+
+    handle.describe = describe  # type: ignore[attr-defined]
+
+    snapshot = asyncio.run(
+        client.inspect_job_status(
+            "histdatacom-run-cancelled",
+            config=config,
+            client=temporal_client,
+        )
+    )
+
+    assert snapshot.lifecycle is JobLifecycle.CANCELLED
+    assert snapshot.status is WorkStatus.CANCELLED
+    assert snapshot.run_id == "run-cancelled"
+    assert snapshot.metadata["temporal_execution_status"] == "CANCELED"
+    assert snapshot.controls.cancel.phase.value == "completed"
+
+
 def test_cancel_job_requests_temporal_cancel_and_reports_state(
     tmp_path: Path,
 ) -> None:

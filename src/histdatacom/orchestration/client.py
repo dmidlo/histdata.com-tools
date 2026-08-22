@@ -35,6 +35,7 @@ from histdatacom.runtime_contracts import (
 )
 from histdatacom.verbosity import safe_log_extra
 from histdatacom.orchestration.control import (
+    JobControlStates,
     JobLifecycle,
     JobLogEntry,
     JobProgressSnapshot,
@@ -74,6 +75,14 @@ CONTROL_ATTEMPTS_METADATA_KEY = "control_attempts"
 CONTROL_EXECUTION_METADATA_KEY = "control_execution"
 TEMPORAL_EXECUTION_STATUS_PREFIX = "WORKFLOW_EXECUTION_STATUS_"
 TEMPORAL_EXECUTION_STATUS_METADATA_KEY = "temporal_execution_status"
+_TEMPORAL_TERMINAL_WORK_STATUSES = {
+    "COMPLETED": WorkStatus.COMPLETED,
+    "FAILED": WorkStatus.FAILED,
+    "CANCELED": WorkStatus.CANCELLED,
+    "CANCELLED": WorkStatus.CANCELLED,
+    "TERMINATED": WorkStatus.FAILED,
+    "TIMED_OUT": WorkStatus.FAILED,
+}
 OVERLAP_GUARD_METADATA_KEY = "no_overlap"
 SCHEDULE_KEY_METADATA_KEY = "schedule_key"
 SCHEDULE_FINGERPRINT_METADATA_KEY = "schedule_fingerprint"
@@ -2575,12 +2584,80 @@ async def _inspect_workflow_handle(
         status_payload,
         orchestration_status=orchestration_status,
     )
+    snapshot = await _reconcile_temporal_execution_status(
+        workflow_handle,
+        snapshot=snapshot,
+    )
     if snapshot.progress is None:
         return snapshot
     return replace(
         snapshot,
         logs=_logs_from_progress(snapshot.progress),
     )
+
+
+async def _reconcile_temporal_execution_status(
+    workflow_handle: Any,
+    *,
+    snapshot: OrchestrationJobSnapshot,
+) -> OrchestrationJobSnapshot:
+    """Reconcile a stale query with Temporal's terminal execution state."""
+    if snapshot.status.terminal:
+        return snapshot
+    describe = getattr(workflow_handle, "describe", None)
+    if describe is None:
+        return snapshot
+    try:
+        description = await _maybe_await(describe())
+    except Exception as err:
+        LOGGER.debug(
+            "Temporal workflow description skipped for workflow_id=%s: %s",
+            snapshot.workflow_id,
+            err,
+            extra=safe_log_extra(
+                workflow_id=snapshot.workflow_id,
+                run_id=snapshot.run_id,
+            ),
+        )
+        return snapshot
+    temporal_status = _temporal_description_status(description)
+    work_status = _TEMPORAL_TERMINAL_WORK_STATUSES.get(temporal_status)
+    if work_status is None:
+        return snapshot
+    lifecycle = lifecycle_from_work_status(work_status)
+    metadata = {
+        **snapshot.metadata,
+        TEMPORAL_EXECUTION_STATUS_METADATA_KEY: temporal_status,
+    }
+    run_id = (
+        _normalized_workflow_run_id(getattr(description, "run_id", ""))
+        or snapshot.run_id
+    )
+    if work_status is WorkStatus.CANCELLED:
+        return replace(
+            snapshot.mark_cancelled(
+                message="Temporal workflow cancelled.",
+                metadata={
+                    TEMPORAL_EXECUTION_STATUS_METADATA_KEY: temporal_status,
+                },
+            ),
+            run_id=run_id,
+            metadata=metadata,
+        )
+    return replace(
+        snapshot,
+        run_id=run_id,
+        lifecycle=lifecycle,
+        status=work_status,
+        controls=JobControlStates.for_status(work_status, lifecycle),
+        metadata=metadata,
+    )
+
+
+def _temporal_description_status(description: Any) -> str:
+    status = getattr(description, "status", "")
+    raw_status = str(getattr(status, "name", "") or status)
+    return _normalized_temporal_description(raw_status)
 
 
 async def _query_workflow_status(workflow_handle: Any) -> Mapping[str, Any]:
