@@ -559,10 +559,10 @@ def validate_urls_activity(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 @activity_defn(name="reconstruction_window")
-async def reconstruction_window_activity(
+def reconstruction_window_activity(
     payload: dict[str, Any],
 ) -> dict[str, Any]:
-    """Run or resume one artifact-backed synthetic reconstruction window."""
+    """Run one window in Temporal's thread pool so heartbeats can drain."""
     request = ReconstructionWorkflowRequestV1.from_dict(
         _mapping(payload.get("request", {}))
     )
@@ -575,13 +575,15 @@ async def reconstruction_window_activity(
         _activity_heartbeat(heartbeat.to_dict())
 
     try:
-        state = await run_reconstruction_window(
-            request,
-            task,
-            checkpoint_store=store,
-            stage_executor=RegisteredReconstructionStageExecutor(),
-            heartbeat=emit,
-            cancellation_requested=_activity_cancelled,
+        state = asyncio.run(
+            run_reconstruction_window(
+                request,
+                task,
+                checkpoint_store=store,
+                stage_executor=RegisteredReconstructionStageExecutor(),
+                heartbeat=emit,
+                cancellation_requested=_activity_cancelled,
+            )
         )
     except (Exception, asyncio.CancelledError) as err:
         if not _reconstruction_cancellation_error(err):

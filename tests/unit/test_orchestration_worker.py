@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import logging
 import os
@@ -162,6 +163,12 @@ def test_default_worker_registers_first_party_reconstruction_handlers(
         activity.__name__ == "reconstruction_window_activity"
         for activity in built.activities
     )
+    reconstruction_activity = next(
+        activity
+        for activity in built.activities
+        if activity.__name__ == "reconstruction_window_activity"
+    )
+    assert not inspect.iscoroutinefunction(reconstruction_activity)
 
 
 def test_build_temporal_worker_preserves_explicit_activity_executor(
