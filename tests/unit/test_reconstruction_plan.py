@@ -3329,6 +3329,42 @@ def test_builder_records_a_fully_refused_interval_without_executable_work(
     assert not preflight.executable
 
 
+def test_zero_work_request_is_a_completed_public_operation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    request = ReconstructionExecutionRequestV1(
+        plan_path=str(tmp_path / "plan.json"),
+        plan_id="synthetic-infill-plan:sha256:" + "0" * 64,
+        information_mode=InformationMode.EX_POST_RECONSTRUCTION,
+        scientific_nonclaim_acknowledged=True,
+        allow_refusals=True,
+    )
+    client = ReconstructionClient()
+    monkeypatch.setattr(
+        ReconstructionClient,
+        "_executable_plan",
+        lambda self, supplied: SimpleNamespace(workflow_requests=()),
+    )
+
+    waited = client.submit(request, wait=True)
+    submitted = client.submit(request, wait=False)
+    inspected = client.inspect(waited, offline=True)
+    cancelled = client.cancel(waited, reason="nothing to cancel")
+    local = client.execute_local(request)
+
+    assert waited.status == "completed"
+    assert submitted.status == "completed"
+    assert inspected.status == "completed"
+    assert cancelled.status == "completed"
+    assert local.status == "completed"
+    assert (
+        reconstruction_module.reconstruction_exit_code(waited)
+        == reconstruction_module.ReconstructionExitCode.SUCCESS
+    )
+    assert not waited.handles
+    assert not local.reports
+
+
 def test_broker_only_delivery_requires_the_broker_artifact(
     tmp_path: Path,
 ) -> None:

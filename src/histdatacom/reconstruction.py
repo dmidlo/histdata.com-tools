@@ -4951,7 +4951,7 @@ class ReconstructionClient:
                     cast(Mapping[str, JSONValue], snapshot.to_dict())
                 )
         status = "submitted"
-        if wait:
+        if wait or not handles:
             status = _snapshot_collection_status(snapshots)
         return ReconstructionOperationReceiptV1(
             operation="submit_and_wait" if wait else "submit_only",
@@ -5083,7 +5083,7 @@ class ReconstructionClient:
         return ReconstructionOperationReceiptV1(
             operation="cancel",
             request=receipt.request,
-            status="cancellation_requested",
+            status=("cancellation_requested" if snapshots else "completed"),
             handles=receipt.handles,
             status_store_roots=receipt.status_store_roots,
             execution_attempt_id=receipt.execution_attempt_id,
@@ -6031,6 +6031,8 @@ def _next_resume_attempt(previous: str) -> str:
 def _report_collection_status(
     reports: Sequence[ReconstructionRunReportV1],
 ) -> str:
+    if not reports:
+        return "completed"
     statuses = {report.status for report in reports}
     if statuses == {"committed"} and reports:
         return "committed"
@@ -6047,7 +6049,7 @@ def _snapshot_collection_status(
     snapshots: Sequence[Mapping[str, JSONValue]],
 ) -> str:
     if not snapshots:
-        return "unknown"
+        return "completed"
     values = {
         str(snapshot.get("status", "")).strip().lower()
         for snapshot in snapshots
