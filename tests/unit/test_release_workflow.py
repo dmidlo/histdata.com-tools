@@ -54,11 +54,33 @@ def _pyproject_config() -> dict[str, object]:
     return loaded
 
 
+def _dependabot_config() -> dict[str, object]:
+    """Return the parsed dependency-update routing policy."""
+    config_path = Path(__file__).resolve().parents[2] / ".github/dependabot.yml"
+    loaded = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    assert isinstance(loaded, dict)
+    return loaded
+
+
 def _project_text(relative_path: str) -> str:
     """Return repository file text for release policy assertions."""
     return (Path(__file__).resolve().parents[2] / relative_path).read_text(
         encoding="utf-8"
     )
+
+
+def test_dependabot_routes_every_ecosystem_through_dev() -> None:
+    """Automated dependency changes must enter the development branch."""
+    updates = _dependabot_config()["updates"]
+    assert isinstance(updates, list)
+    assert {str(item["package-ecosystem"]) for item in updates} == {
+        "github-actions",
+        "pip",
+    }
+    for item in updates:
+        assert isinstance(item, dict)
+        assert item["directory"] == "/"
+        assert item["target-branch"] == "dev"
 
 
 def _step_run(job: dict[str, object], step_name: str) -> str:
@@ -394,8 +416,8 @@ def test_package_metadata_advertises_optional_duckdb_query_provider() -> None:
 
     assert optional["query"] == ["duckdb>=1.5.4,<2"]
     assert "duckdb>=1.5.4,<2" in optional["all"]
-    assert "duckdb==1.5.4" in optional["test"]
-    assert "duckdb==1.5.4" in optional["dev"]
+    assert "duckdb==1.5.5" in optional["test"]
+    assert "duckdb==1.5.5" in optional["dev"]
 
 
 def test_runtime_runbook_documents_windows_runtime_support_gap() -> None:

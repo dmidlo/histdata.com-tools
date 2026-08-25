@@ -84,11 +84,11 @@ def test_container_dependency_graph_is_exactly_constrained() -> None:
         re.fullmatch(r"[A-Za-z0-9_.-]+==[^=\s]+", line) for line in constraints
     )
     for required in (
-        "polars==1.42.1",
-        "packaging==26.2",
-        "temporalio==1.30.0",
-        "setuptools==83.0.0",
-        "wheel==0.47.0",
+        "polars==1.43.2",
+        "packaging==26.3",
+        "temporalio==1.31.0",
+        "setuptools==84.0.0",
+        "wheel==0.48.0",
     ):
         assert required in constraints
 
@@ -134,8 +134,8 @@ def test_container_workflow_avoids_dev_pushes_and_publishes_tags_only() -> None:
     assert "provenance: mode=max" in workflow_text
     assert "sbom: true" in workflow_text
     assert "docker/setup-qemu-action@v4.2.0" in workflow_text
-    assert "docker/setup-buildx-action@v4.2.0" in workflow_text
-    assert "docker/login-action@v4.4.0" in workflow_text
+    assert "docker/setup-buildx-action@v4.3.0" in workflow_text
+    assert "docker/login-action@v4.6.0" in workflow_text
     assert "docker/metadata-action@v6.2.0" in workflow_text
     assert "docker/build-push-action@v7.3.0" in workflow_text
 
