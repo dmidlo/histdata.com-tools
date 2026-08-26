@@ -17,7 +17,9 @@ The manifest is sealed and row-free. Its exact-window hashes, partition
 identities, counts, signatures, and 64-bit neighbor sketches replay against
 the local source corpus. Its leakage and coverage audits pass. The companion
 evaluation policy is bound to the predeclared issue-#463 benchmark gate policy
-and commit.
+and commit. Its February 1, 2026 source cutoff is the first exact month
+boundary after the January validation split, binding the candidate catalog to
+every complete monthly triangle through January without exposing June rows.
 
 Reproduce the artifacts with:
 

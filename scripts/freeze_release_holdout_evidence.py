@@ -90,6 +90,32 @@ def _timestamp_ns(value: str) -> int:
     return int(parsed.timestamp()) * 1_000_000_000
 
 
+def _development_source_cutoff_ns(
+    split_periods: Mapping[str, str],
+) -> int:
+    """Return the first month boundary after all development splits."""
+    development_periods = tuple(
+        period
+        for split_kind, period in split_periods.items()
+        if split_kind != "final_holdout"
+    )
+    if not development_periods:
+        raise ValueError("release evidence requires a development split")
+    period = max(development_periods)
+    if len(period) != 6 or not period.isdigit():
+        raise ValueError("development split period must use YYYYMM")
+    year, month = int(period[:4]), int(period[4:])
+    if month < 1 or month > 12:
+        raise ValueError("development split month is invalid")
+    if month == 12:
+        year, month = year + 1, 1
+    else:
+        month += 1
+    return int(datetime(year, month, 1, tzinfo=timezone.utc).timestamp()) * (
+        1_000_000_000
+    )
+
+
 def _predeclared_intervals() -> Mapping[str, tuple[tuple[int, int, str], ...]]:
     return {
         split_kind: tuple(
@@ -275,7 +301,7 @@ def main() -> int:
     access_policy = ReleaseHoldoutAccessPolicyV1(
         required_feed_epochs=("technology_epoch_04",)
     )
-    source_cutoff_ns = max(item.end_ns for item in development)
+    source_cutoff_ns = _development_source_cutoff_ns(profile.split_periods)
     manifest = build_protected_release_holdout_manifest(
         access_policy,
         protected,
