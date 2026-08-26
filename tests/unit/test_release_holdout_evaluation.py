@@ -61,7 +61,7 @@ _TRACE_METRICS = {
 def _artifact(tmp_path: Path, name: str) -> ArtifactRef:
     path = tmp_path / name
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text('{"row_free":true}\n', encoding="utf-8")
+    path.write_bytes(b'{"row_free":true}\n')
     return artifact_ref_for_file(path, kind="row_free_test_evidence")
 
 
@@ -836,7 +836,7 @@ def test_authorization_requires_byte_identical_ancestor_git_evidence(
     assert authorization.evidence_git_commit_sha == evidence_commit
     assert authorization.ensemble_member_ids == members
 
-    Path(corpus_ref.path).write_text('{"changed":true}\n', encoding="utf-8")
+    Path(corpus_ref.path).write_bytes(b'{"changed":true}\n')
     changed_corpus_ref = artifact_ref_for_file(
         corpus_ref.path, kind=corpus_ref.kind
     )
