@@ -1406,6 +1406,9 @@ def build_reverse_degradation_benchmark_corpus(
     cftc_positioning_corpus_path: str | Path,
     profile: ReverseDegradationCorpusProfileV1 | None = None,
     gate_policy_commit: str = PREDECLARED_GATE_COMMIT,
+    predeclared_window_intervals: (
+        Mapping[str, Sequence[tuple[int, int, str]]] | None
+    ) = None,
 ) -> ReverseDegradationBenchmarkCorpusV1:
     """Select and bind synchronized real ASCII tick partitions.
 
@@ -1426,6 +1429,9 @@ def build_reverse_degradation_benchmark_corpus(
     )
 
     selected = profile or ReverseDegradationCorpusProfileV1()
+    predeclared = _validated_predeclared_window_intervals(
+        predeclared_window_intervals, selected
+    )
     started = time.monotonic()
     root = Path(source_root).expanduser().resolve()
     if not root.is_dir():
@@ -1479,31 +1485,52 @@ def build_reverse_degradation_benchmark_corpus(
         ordinary_candidates_by_period: dict[
             str, tuple[tuple[int, int, str], ...]
         ] = {}
-        for period in periods:
-            context_candidates, ordinary_candidates = _candidate_interval_pools(
-                period,
-                duration_seconds=selected.window_duration_seconds,
-                maximum_context_windows=MAX_BENCHMARK_WINDOWS,
-                context_event_times=tuple(
-                    event.event_time_ns
-                    for event in context_corpus.timeline.events
-                    if _period_for_ns(event.event_time_ns) == period
-                ),
+        if predeclared is None:
+            for period in periods:
+                context_candidates, ordinary_candidates = (
+                    _candidate_interval_pools(
+                        period,
+                        duration_seconds=selected.window_duration_seconds,
+                        maximum_context_windows=MAX_BENCHMARK_WINDOWS,
+                        context_event_times=tuple(
+                            event.event_time_ns
+                            for event in context_corpus.timeline.events
+                            if _period_for_ns(event.event_time_ns) == period
+                        ),
+                    )
+                )
+                context_candidates_by_period[period] = context_candidates
+                ordinary_candidates_by_period[period] = ordinary_candidates
+            context_candidates = _interleave_period_candidates(
+                context_candidates_by_period
             )
-            context_candidates_by_period[period] = context_candidates
-            ordinary_candidates_by_period[period] = ordinary_candidates
-        context_candidates = _interleave_period_candidates(
-            context_candidates_by_period
-        )
-        ordinary_candidates = _interleave_period_candidates(
-            ordinary_candidates_by_period
-        )
-        minimum_session_windows = min(
-            4, max(1, selected.synchronized_windows_per_split // 8)
-        )
+            ordinary_candidates = _interleave_period_candidates(
+                ordinary_candidates_by_period
+            )
+            candidates = (*context_candidates, *ordinary_candidates)
+            required_sessions: tuple[str, ...] = (
+                "asia",
+                "london",
+                "new_york",
+            )
+            minimum_session_windows = min(
+                4, max(1, selected.synchronized_windows_per_split // 8)
+            )
+        else:
+            context_candidates = ()
+            ordinary_candidates = ()
+            candidates = predeclared[split_kind]
+            required_sessions = (
+                "asia",
+                "london",
+                "new_york",
+                "overlap_closure",
+            )
+            minimum_session_windows = 1
         selected_session_counts: Counter[str] = Counter()
         selected_period_counts: Counter[str] = Counter()
         selected_windows: list[BenchmarkWindowPartitionV1] = []
+        current_split_kind = split_kind
 
         def try_candidate(
             candidate: tuple[int, int, str],
@@ -1560,7 +1587,7 @@ def build_reverse_degradation_benchmark_corpus(
                 and positioning_query.status is CftcPositioningQueryStatus.READY
             )
             return BenchmarkWindowPartitionV1(
-                split_kind=split_kind,
+                split_kind=current_split_kind,
                 period=period,
                 session=session,
                 start_ns=start_ns,
@@ -1588,7 +1615,7 @@ def build_reverse_degradation_benchmark_corpus(
                 context_supported=context_supported,
             )
 
-        for candidate in (*context_candidates, *ordinary_candidates):
+        for candidate in candidates:
             if len(selected_windows) == selected.synchronized_windows_per_split:
                 break
             start_ns, _end_ns, session = candidate
@@ -1611,6 +1638,11 @@ def build_reverse_degradation_benchmark_corpus(
                     continue
             partition = try_candidate(candidate)
             if partition is None:
+                if predeclared is not None:
+                    raise ValueError(
+                        f"predeclared {split_kind} window lacks synchronized "
+                        "real-data support"
+                    )
                 continue
             selected_windows.append(partition)
             selected_session_counts[partition.session] += 1
@@ -1624,7 +1656,7 @@ def build_reverse_degradation_benchmark_corpus(
             )
         if any(
             selected_session_counts[session] < minimum_session_windows
-            for session in ("asia", "london", "new_york")
+            for session in required_sessions
         ):
             raise ValueError(
                 f"{split_kind} synchronized windows lack minimum session support"
@@ -1706,6 +1738,70 @@ def build_reverse_degradation_benchmark_corpus(
         gate_policy_commit=gate_policy_commit,
         neighbor_leakage_count=leakage_count,
     )
+
+
+def _validated_predeclared_window_intervals(
+    value: Mapping[str, Sequence[tuple[int, int, str]]] | None,
+    profile: ReverseDegradationCorpusProfileV1,
+) -> Mapping[str, tuple[tuple[int, int, str], ...]] | None:
+    """Validate a result-independent, exact benchmark window declaration."""
+    if value is None:
+        return None
+    required_splits = ("calibration", "validation", "final_holdout")
+    if set(value) != set(required_splits):
+        raise ValueError("predeclared benchmark split set differs")
+    allowed_sessions = {
+        "asia",
+        "london",
+        "new_york",
+        "overlap_closure",
+    }
+    result: dict[str, tuple[tuple[int, int, str], ...]] = {}
+    all_intervals: list[tuple[int, int, str, str]] = []
+    for split_kind in required_splits:
+        intervals = tuple(value[split_kind])
+        if len(intervals) != profile.synchronized_windows_per_split:
+            raise ValueError(
+                f"predeclared {split_kind} window count differs from profile"
+            )
+        normalized: list[tuple[int, int, str]] = []
+        for item in intervals:
+            if not isinstance(item, tuple) or len(item) != 3:
+                raise TypeError("predeclared benchmark window is invalid")
+            start_ns, end_ns, session = item
+            if (
+                isinstance(start_ns, bool)
+                or not isinstance(start_ns, int)
+                or isinstance(end_ns, bool)
+                or not isinstance(end_ns, int)
+                or end_ns <= start_ns
+            ):
+                raise ValueError("predeclared benchmark interval is invalid")
+            normalized_session = _required_text(session)
+            if normalized_session not in allowed_sessions:
+                raise ValueError("predeclared benchmark session is invalid")
+            if end_ns - start_ns != (
+                profile.window_duration_seconds * NANOSECONDS_PER_SECOND
+            ):
+                raise ValueError("predeclared benchmark duration differs")
+            period = _period_for_ns(start_ns)
+            if (
+                period not in profile.split_periods[split_kind]
+                or _period_for_ns(end_ns - 1) != period
+            ):
+                raise ValueError("predeclared benchmark period differs")
+            normalized.append((start_ns, end_ns, normalized_session))
+            all_intervals.append(
+                (start_ns, end_ns, split_kind, normalized_session)
+            )
+        result[split_kind] = tuple(sorted(normalized))
+    ordered = sorted(all_intervals)
+    if any(
+        ordered[index][1] > ordered[index + 1][0]
+        for index in range(len(ordered) - 1)
+    ):
+        raise ValueError("predeclared benchmark windows overlap")
+    return result
 
 
 def replay_reverse_degradation_benchmark_corpus(
@@ -5224,6 +5320,40 @@ def write_reverse_degradation_benchmark_artifacts(
             "combined benchmark artifact set exceeds configured bound"
         )
     return artifacts
+
+
+def write_reverse_degradation_benchmark_corpus(
+    corpus: ReverseDegradationBenchmarkCorpusV1,
+    artifact_directory: str | Path,
+) -> ArtifactRef:
+    """Write a sealed row-free corpus before any benchmark campaign runs."""
+    if not isinstance(corpus, ReverseDegradationBenchmarkCorpusV1):
+        raise TypeError("benchmark corpus must use the v1 contract")
+    payload = {
+        "schema_version": "histdatacom.reverse-degradation-manifest.v1",
+        "corpus": corpus.to_dict(),
+        "artifact_contract": {
+            "content_addressed": True,
+            "dense_rows_embedded": False,
+            "holdout_rows_embedded": False,
+            "replay_required": True,
+        },
+    }
+    encoded = canonical_contract_json(payload).encode("utf-8") + b"\n"
+    if len(encoded) > corpus.profile.max_artifact_bytes:
+        raise ValueError("manifest artifact exceeds configured bound")
+    root = Path(artifact_directory).expanduser().resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    digest = hashlib.sha256(encoded).hexdigest()
+    target = root / f"reverse-degradation-manifest-{digest}.json"
+    _write_once(target, encoded)
+    return ArtifactRef(
+        kind="reverse_degradation_manifest_v1",
+        path=str(target),
+        size_bytes=len(encoded),
+        sha256=digest,
+        metadata={"corpus_id": corpus.corpus_id},
+    )
 
 
 def write_benchmark_window_metric_trace(

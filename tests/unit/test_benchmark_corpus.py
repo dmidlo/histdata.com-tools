@@ -25,6 +25,7 @@ from histdatacom.synthetic.benchmark_corpus import (
     read_benchmark_window_metric_trace,
     read_reverse_degradation_benchmark_corpus,
     write_benchmark_window_metric_trace,
+    write_reverse_degradation_benchmark_corpus,
 )
 from histdatacom.synthetic.benchmark_gates import (
     load_default_benchmark_promotion_gate_policy,
@@ -215,6 +216,64 @@ def test_manifest_reader_rejects_tamper(tmp_path: Path) -> None:
     bad.write_bytes(encoded)
     with pytest.raises(ValueError, match="content hash differs"):
         read_reverse_degradation_benchmark_corpus(bad)
+
+
+def test_sealed_corpus_writer_round_trips_before_campaign(
+    tmp_path: Path,
+) -> None:
+    corpus = _corpus()
+
+    artifact = write_reverse_degradation_benchmark_corpus(corpus, tmp_path)
+
+    assert read_reverse_degradation_benchmark_corpus(artifact.path) == corpus
+    assert artifact.metadata == {"corpus_id": corpus.corpus_id}
+    assert artifact.sha256 in Path(artifact.path).name
+
+
+def test_predeclared_window_intervals_are_exact_and_result_independent() -> (
+    None
+):
+    profile = ReverseDegradationCorpusProfileV1(
+        split_periods={
+            "calibration": "202512",
+            "validation": "202601",
+            "final_holdout": "202606",
+        },
+        synchronized_windows_per_split=4,
+    )
+    sessions = ("asia", "london", "new_york", "overlap_closure")
+    starts = {
+        "calibration": 1_764_624_000_000_000_000,
+        "validation": 1_767_225_600_000_000_000,
+        "final_holdout": 1_780_272_000_000_000_000,
+    }
+    declared = {
+        split: tuple(
+            (
+                start + index * 86_400_000_000_000,
+                start + index * 86_400_000_000_000 + 600_000_000_000,
+                session,
+            )
+            for index, session in enumerate(sessions)
+        )
+        for split, start in starts.items()
+    }
+
+    assert (
+        corpus_module._validated_predeclared_window_intervals(declared, profile)
+        == declared
+    )
+
+    overlapping = dict(declared)
+    overlapping["final_holdout"] = (
+        declared["final_holdout"][0],
+        declared["final_holdout"][0],
+        *declared["final_holdout"][2:],
+    )
+    with pytest.raises(ValueError, match="overlap"):
+        corpus_module._validated_predeclared_window_intervals(
+            overlapping, profile
+        )
 
 
 def test_window_metric_trace_is_bounded_row_free_and_content_addressed(

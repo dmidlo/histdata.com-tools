@@ -1540,11 +1540,23 @@ def _holdout_window_map(
         selected_sources = tuple(
             sources[item] for item in corpus_window.source_partition_ids
         )
-        hashes = {item.symbol.lower(): item.sha256 for item in selected_sources}
+        hashes = {
+            key.lower(): value
+            for key, value in corpus_window.symbol_partition_sha256.items()
+        }
         if {
             key.lower(): value for key, value in window.source_hashes.items()
         } != hashes:
-            raise ValueError("release-holdout corpus source hashes differ")
+            raise ValueError("release-holdout corpus window hashes differ")
+        partition_ids = tuple(
+            sorted(
+                f"{item.partition_id}#window:"
+                f"{corpus_window.start_ns}:{corpus_window.end_ns}"
+                for item in selected_sources
+            )
+        )
+        if window.source_partition_ids != partition_ids:
+            raise ValueError("release-holdout corpus window partitions differ")
         mapping[window.window_id] = corpus_window.window_id
     if len(mapping) != len(corpus_windows):
         raise ValueError(

@@ -226,6 +226,7 @@ from histdatacom.synthetic.benchmark_corpus import (
     run_reverse_degradation_benchmark_campaign,
     write_benchmark_window_metric_trace,
     write_reverse_degradation_benchmark_artifacts,
+    write_reverse_degradation_benchmark_corpus,
 )
 from histdatacom.synthetic.benchmark_gates import (
     BENCHMARK_GATE_CHECK_SCHEMA_VERSION,
@@ -2613,6 +2614,7 @@ __all__ = [
     "write_release_holdout_retirement_marker",
     "write_resource_measurement_corpus",
     "write_reverse_degradation_benchmark_artifacts",
+    "write_reverse_degradation_benchmark_corpus",
     "write_storage_qualification",
     "write_synthetic_event_stream_parquet",
     "write_synthetic_infill_plan",

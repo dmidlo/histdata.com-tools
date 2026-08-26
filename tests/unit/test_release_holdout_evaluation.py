@@ -345,6 +345,75 @@ def test_packaged_policy_is_predeclared_and_content_addressed(
     assert read_release_holdout_evaluation_policy(ref.path) == policy
 
 
+def test_holdout_window_map_binds_exact_window_hashes_not_monthly_sources() -> (
+    None
+):
+    start_ns = 1_780_272_000_000_000_000
+    end_ns = start_ns + 600_000_000_000
+    source_hashes = {
+        "EURGBP": "1" * 64,
+        "EURUSD": "2" * 64,
+        "GBPUSD": "3" * 64,
+    }
+    source_ids = {
+        symbol: f"source:{symbol.lower()}" for symbol in source_hashes
+    }
+    corpus_window = SimpleNamespace(
+        split_kind="final_holdout",
+        period="202606",
+        start_ns=start_ns,
+        end_ns=end_ns,
+        session="asia",
+        epoch_label="modern",
+        source_partition_ids=tuple(source_ids.values()),
+        symbol_event_counts=dict.fromkeys(source_hashes, 64),
+        symbol_partition_sha256=source_hashes,
+        window_id="benchmark-window:v1",
+    )
+    corpus = SimpleNamespace(
+        windows=(corpus_window,),
+        sources=tuple(
+            SimpleNamespace(
+                partition_id=source_ids[symbol],
+                symbol=symbol,
+                sha256="f" * 64,
+            )
+            for symbol in source_hashes
+        ),
+    )
+    protected = SimpleNamespace(
+        period="202606",
+        start_ns=start_ns,
+        end_ns=end_ns,
+        session_stratum="asia",
+        epoch_stratum="modern",
+        symbol_event_counts=dict.fromkeys(source_hashes, 64),
+        source_hashes=source_hashes,
+        source_partition_ids=tuple(
+            sorted(
+                f"{source_ids[symbol]}#window:{start_ns}:{end_ns}"
+                for symbol in source_hashes
+            )
+        ),
+        window_id="protected-window:v1",
+    )
+
+    assert evaluation_module._holdout_window_map(
+        SimpleNamespace(windows=(protected,)), corpus  # type: ignore[arg-type]
+    ) == {"protected-window:v1": "benchmark-window:v1"}
+
+    monthly = SimpleNamespace(
+        **{
+            **protected.__dict__,
+            "source_hashes": dict.fromkeys(source_hashes, "f" * 64),
+        }
+    )
+    with pytest.raises(ValueError, match="window hashes differ"):
+        evaluation_module._holdout_window_map(
+            SimpleNamespace(windows=(monthly,)), corpus  # type: ignore[arg-type]
+        )
+
+
 @pytest.mark.parametrize(  # type: ignore[untyped-decorator]
     ("field", "value"),
     (
