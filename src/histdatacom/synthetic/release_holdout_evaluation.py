@@ -1476,7 +1476,7 @@ def _verify_git_evidence(
     if _timestamp_value(graph.frozen_at_utc) <= _timestamp_value(committed_at):
         raise ValueError("candidate graph predates committed holdout evidence")
     for git_path, ref in evidence:
-        payload = _git_bytes(root, "show", f"{commit}:{git_path}")
+        payload = _git_bytes(root, "cat-file", "blob", f"{commit}:{git_path}")
         if (
             len(payload) != ref.size_bytes
             or hashlib.sha256(payload).hexdigest() != ref.sha256
