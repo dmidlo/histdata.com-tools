@@ -1,0 +1,18 @@
+{
+  "schema_version": "histdatacom.release-holdout-evaluation-policy.v1",
+  "policy_name": "v2.5-frozen-candidate-release-holdout",
+  "policy_version": "v1",
+  "issue_number": 512,
+  "benchmark_gate_policy_id": "benchmark-promotion-gates:sha256:f59039526fca4a70b40f836525ca08efc0bb336668a1d6676bc1c6a3ba7a186f",
+  "benchmark_gate_policy_commit": "0caec1480a957528ebefdff062e13012ea11e84d",
+  "required_split_kind": "final_holdout",
+  "minimum_ensemble_member_count": 2,
+  "frozen_fit_required": true,
+  "holdout_only_metrics_required": true,
+  "source_replay_required": true,
+  "manifest_policy_and_corpus_git_commit_required": true,
+  "candidate_selected_without_holdout_results": true,
+  "holdout_selection_role": false,
+  "frozen_before_release_holdout_results": true,
+  "policy_id": ""
+}

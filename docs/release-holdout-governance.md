@@ -119,3 +119,37 @@ frozen release decision. A scientific failure, insufficient result, or
 operational failure forbids tuning on the same holdout and requires a new
 successor manifest. Every outcome ends with a retirement marker, and retired
 holdouts cannot be reused for a later release.
+
+## Exact release-evaluation path
+
+The generic v1 callback and ledger contracts preserve the original sealed
+split API, but a callback-provided outcome is not release evidence. Production
+release decisions use
+`histdatacom.synthetic.release_holdout_evaluation` and its packaged
+`release_holdout_evaluation_policy_v1.json` policy.
+
+That stricter path requires all of the following before authorization:
+
+- the row-free holdout manifest, evaluation policy, and exact benchmark corpus
+  exist as byte-identical blobs in one Git commit;
+- that evidence commit is an ancestor of the installable release candidate;
+- the candidate binds the same scientific graph, protected manifest, product
+  selection dossier, evaluation-policy ID, corpus ID, benchmark-gate ID and
+  commit, and deterministic ensemble-member set;
+- the scientific graph was frozen after the evidence commit; and
+- the authorization is issued after the installable candidate freeze.
+
+The evaluator is invoked only after an atomic opened-and-consumed reservation.
+It must return a content-addressed `ReleaseHoldoutGateReportV1`. The executor
+rebuilds that report from the exact corpus, campaign scorecard, selected
+Marked-Hawkes config and fit, and row-free window metric trace. Only
+`final_holdout` cells whose intervals and source hashes exactly match the
+protected manifest are admitted. Missing candidate/member/window cells count
+as execution failures rather than disappearing from the denominator.
+
+Candidate pass/fail is derived from the predeclared issue-#463 benchmark hard
+gates. A pass requires both the source/campaign decision and the frozen
+candidate's holdout-only decision to be promotion-eligible. Missing hard-gate
+evidence yields `insufficient_evidence`; a measured hard-gate violation yields
+`failed`; and any evaluator or verification exception consumes the holdout as
+`operational_failure`. The callback cannot choose any of those outcomes.
