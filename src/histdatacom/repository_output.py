@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 from rich import box, print
@@ -30,6 +31,12 @@ def print_repository_table(
         table.add_column("Q Findings")
 
     for row, value in repo_data.items():
+        if (
+            not isinstance(value, Mapping)
+            or "start" not in value
+            or "end" not in value
+        ):
+            continue
         start = str(value["start"])
         end = str(value["end"])
         cells = [
