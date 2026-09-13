@@ -2587,7 +2587,11 @@ Economic-release strategies use a narrower provider-neutral
 `as_known_at(t)` protocol. It retains official series/reference-period
 identity, schedule and actual revision chains, previous-as-known, and separate
 observed-consensus and machine-projection vintages without requiring a
-commercial calendar. See
+commercial calendar. The frozen foundation also separates publication stage
+from schedule status, versions series comparability and unit conversion,
+retains DST-aware lexical timestamps, supports bounded lossless Arrow
+round-trips, and computes versioned direction/robust surprises from strictly
+prior releases. See
 [`docs/economic-calendar-contracts.md`](docs/economic-calendar-contracts.md)
 and the audited
 [`calendar-branch migration map`](docs/economic-calendar-branch-migration.md).

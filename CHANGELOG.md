@@ -2,6 +2,11 @@
 
 ### Added
 
+- **market context**: freeze provider-neutral economic event/series identity,
+  publication-stage and schedule-status taxonomies, complete forecast scopes,
+  calendar triplets, DST-aware lexical time evidence, auditable unit
+  conversion, prior-only robust surprise policy, and bounded lossless Arrow
+  interchange (#534).
 - **market context**: salvage immutable economic release/revision,
   previous-as-known, forecast provenance, bounded query, and content-addressed
   replay mechanics behind a provider-neutral `as_known_at(t)` protocol; add an
