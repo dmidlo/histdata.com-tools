@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+from dataclasses import replace
 from pathlib import Path
 
 import polars as pl
@@ -73,6 +74,49 @@ def test_arrow_interval_reader_handles_bounded_source_order_regression(
         (0, start_ms),
         (2, start_ms + 1_000),
         (3, start_ms + 2_000),
+    ]
+
+
+def test_arrow_interval_reader_projects_only_quote_columns(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "wide.data"
+    start_ms = 1_700_000_000_000
+    frame = pl.DataFrame(
+        {
+            "datetime": [start_ms, start_ms + 1_000, start_ms + 2_000],
+            "bid": [1.0, 1.01, 1.02],
+            "ask": [1.001, 1.011, 1.021],
+            **{f"unused_{index}": ["x" * 1_024] * 3 for index in range(128)},
+        }
+    )
+    frame.write_ipc(path)
+    original = corpus_module._projected_arrow_batches
+    projections: list[tuple[str, ...]] = []
+
+    def tracking_projection(source: Path, columns: tuple[str, ...]) -> object:
+        projections.append(tuple(columns))
+        return original(source, columns)
+
+    monkeypatch.setattr(
+        corpus_module, "_projected_arrow_batches", tracking_projection
+    )
+
+    rows = corpus_module._read_arrow_interval(
+        path,
+        start_ns=start_ms * 1_000_000,
+        end_ns=(start_ms + 2_500) * 1_000_000,
+        maximum=8,
+    )
+
+    assert [(item.row_id, item.timestamp_ms) for item in rows] == [
+        (0, start_ms),
+        (1, start_ms + 1_000),
+        (2, start_ms + 2_000),
+    ]
+    assert projections == [
+        ("datetime",),
+        ("datetime", "bid", "ask"),
     ]
 
 
@@ -191,6 +235,32 @@ def test_profile_and_corpus_round_trip_are_content_addressed() -> None:
                 "final_holdout": "202601",
             }
         )
+
+
+def test_corpus_accepts_optional_source_projection_dependency() -> None:
+    corpus = _corpus()
+    dependency = ArtifactRef(
+        kind="benchmark_source_projection_manifest_v1",
+        path="benchmark-source-projection-manifest.json",
+        size_bytes=1024,
+        sha256=hashlib.sha256(b"source-projection").hexdigest(),
+        metadata={"manifest_id": "projection-manifest:one"},
+    )
+
+    projected = replace(
+        corpus,
+        dependency_artifacts={
+            **corpus.dependency_artifacts,
+            "source_projection": dependency,
+        },
+        corpus_id="",
+    )
+
+    assert (
+        ReverseDegradationBenchmarkCorpusV1.from_json(projected.to_json())
+        == projected
+    )
+    assert projected.corpus_id != corpus.corpus_id
 
 
 def test_manifest_reader_rejects_tamper(tmp_path: Path) -> None:

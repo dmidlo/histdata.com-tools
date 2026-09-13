@@ -66,6 +66,11 @@ from histdatacom.synthetic.benchmark_gates import (
     evaluate_benchmark_promotion_gates,
     load_default_benchmark_promotion_gate_policy,
 )
+from histdatacom.synthetic.benchmark_source_projection import (
+    BenchmarkSourceProjectionManifestV1,
+    read_benchmark_source_projection_manifest,
+    validate_benchmark_source_projections,
+)
 from histdatacom.synthetic.contracts import canonical_contract_json
 from histdatacom.synthetic.event_clock import (
     EventClockCalibrationWindowV1,
@@ -728,13 +733,16 @@ class ReverseDegradationBenchmarkCorpusV1:
             )
         object.__setattr__(self, "metric_registry", metrics)
         dependencies = {str(k): v for k, v in self.dependency_artifacts.items()}
-        if set(dependencies) != {
+        required_dependencies = {
             "feed_epochs",
             "observation_campaign",
             "market_context",
             "cftc_positioning",
             "gate_policy",
-        }:
+        }
+        if not required_dependencies.issubset(dependencies) or not set(
+            dependencies
+        ).issubset({*required_dependencies, "source_projection"}):
             raise ValueError("corpus dependency artifact set differs")
         if any(
             not isinstance(value, ArtifactRef)
@@ -1404,6 +1412,7 @@ def build_reverse_degradation_benchmark_corpus(
     observation_campaign_path: str | Path,
     market_context_corpus_path: str | Path,
     cftc_positioning_corpus_path: str | Path,
+    source_projection_manifest_path: str | Path | None = None,
     profile: ReverseDegradationCorpusProfileV1 | None = None,
     gate_policy_commit: str = PREDECLARED_GATE_COMMIT,
     predeclared_window_intervals: (
@@ -1441,6 +1450,11 @@ def build_reverse_degradation_benchmark_corpus(
     observation_path = Path(observation_campaign_path).expanduser().resolve()
     context_path = Path(market_context_corpus_path).expanduser().resolve()
     positioning_path = Path(cftc_positioning_corpus_path).expanduser().resolve()
+    projection_path = (
+        Path(source_projection_manifest_path).expanduser().resolve()
+        if source_projection_manifest_path is not None
+        else None
+    )
     definition = read_active_time_feed_epoch_definition(definition_path)
     calibration = read_observation_calibration_campaign(observation_path)
     context_corpus = read_market_context_corpus(context_path)
@@ -1472,7 +1486,29 @@ def build_reverse_degradation_benchmark_corpus(
             "gate policy commit differs from the predeclared commit"
         )
 
-    sources = _discover_source_partitions(root, selected)
+    projection_manifest: BenchmarkSourceProjectionManifestV1 | None = None
+    if projection_path is not None:
+        projection_manifest = read_benchmark_source_projection_manifest(
+            projection_path
+        )
+        profile_axes = {
+            (symbol, period)
+            for periods in selected.split_periods.values()
+            for period in periods
+            for symbol in selected.symbols
+        }
+        projection_axes = {
+            (item.symbol, item.period)
+            for item in projection_manifest.projections
+        }
+        if not projection_axes.issubset(profile_axes):
+            raise ValueError(
+                "benchmark source projection is outside the profile"
+            )
+        validate_benchmark_source_projections(projection_manifest, root)
+    sources = _discover_source_partitions(
+        root, selected, projection_manifest=projection_manifest
+    )
     if sum(item.size_bytes for item in sources) > selected.max_source_bytes:
         raise ValueError("benchmark source bytes exceed profile bound")
     source_by_axis = {(item.period, item.symbol): item for item in sources}
@@ -1720,6 +1756,12 @@ def build_reverse_degradation_benchmark_corpus(
             },
         ),
     }
+    if projection_path is not None and projection_manifest is not None:
+        dependencies["source_projection"] = _artifact_ref(
+            projection_path,
+            "benchmark_source_projection_manifest_v1",
+            {"manifest_id": projection_manifest.manifest_id},
+        )
     return ReverseDegradationBenchmarkCorpusV1(
         profile=selected,
         sources=tuple(sources),
@@ -1891,28 +1933,53 @@ class _TickRow:
 
 
 def _discover_source_partitions(
-    root: Path, profile: ReverseDegradationCorpusProfileV1
+    root: Path,
+    profile: ReverseDegradationCorpusProfileV1,
+    *,
+    projection_manifest: BenchmarkSourceProjectionManifestV1 | None = None,
 ) -> tuple[BenchmarkSourcePartitionV1, ...]:
     sources: list[BenchmarkSourcePartitionV1] = []
+    projected_by_axis = {
+        (item.period, item.symbol): item
+        for item in (
+            ()
+            if projection_manifest is None
+            else projection_manifest.projections
+        )
+    }
     for period in sorted(
         value for values in profile.split_periods.values() for value in values
     ):
         year, month = int(period[:4]), int(period[4:])
         for symbol in profile.symbols:
-            relative = Path(symbol.lower()) / str(year) / str(month) / ".data"
+            projection = projected_by_axis.get((period, symbol))
+            relative = (
+                Path(symbol.lower()) / str(year) / str(month) / ".data"
+                if projection is None
+                else Path(projection.projected_relative_path)
+            )
             path = root / relative
             if not path.is_file():
                 raise ValueError(
                     f"benchmark source cache is missing: {relative}"
                 )
+            size_bytes = path.stat().st_size
+            row_count = _arrow_row_count(path)
+            sha256 = _file_sha256(path)
+            if projection is not None and (
+                size_bytes != projection.projected_size_bytes
+                or row_count != projection.projected_row_count
+                or sha256 != projection.projected_sha256
+            ):
+                raise ValueError("benchmark source projection lineage differs")
             sources.append(
                 BenchmarkSourcePartitionV1(
                     symbol=symbol,
                     period=period,
                     relative_path=relative.as_posix(),
-                    size_bytes=path.stat().st_size,
-                    row_count=_arrow_row_count(path),
-                    sha256=_file_sha256(path),
+                    size_bytes=size_bytes,
+                    row_count=row_count,
+                    sha256=sha256,
                 )
             )
     return tuple(sources)
@@ -2050,19 +2117,16 @@ def _period_for_ns(value: int) -> str:
 
 
 def _arrow_row_count(path: Path) -> int:
-    pa, ipc = _pyarrow()
-    with pa.memory_map(str(path), "r") as source:
-        reader = ipc.open_file(source)
-        return sum(
-            reader.get_batch(index).num_rows
-            for index in range(reader.num_record_batches)
-        )
+    return sum(
+        batch.num_rows
+        for batch in _projected_arrow_batches(path, ("datetime",))
+    )
 
 
 def _read_arrow_interval(
     path: Path, *, start_ns: int, end_ns: int, maximum: int
 ) -> tuple[_TickRow, ...]:
-    pa, ipc = _pyarrow()
+    pc, _dataset = _pyarrow_projection_modules()
     start_ms = start_ns // NANOSECONDS_PER_MILLISECOND
     end_ms = (end_ns - 1) // NANOSECONDS_PER_MILLISECOND + 1
     rows: list[tuple[int, int, _TickRow]] = []
@@ -2077,40 +2141,43 @@ def _read_arrow_interval(
         stat.st_ctime_ns,
     )
     safe_stop_ms = end_ms + regression_bound_ms
-    with pa.memory_map(str(path), "r") as source:
-        reader = ipc.open_file(source)
-        required = {"datetime", "bid", "ask"}
-        if not required.issubset(set(reader.schema.names)):
-            raise ValueError("benchmark Arrow cache lacks quote columns")
-        for batch_index in range(reader.num_record_batches):
-            batch = reader.get_batch(batch_index)
-            count = batch.num_rows
-            timestamps = batch.column(batch.schema.get_field_index("datetime"))
-            if count == 0:
-                continue
-            bids = batch.column(batch.schema.get_field_index("bid"))
-            asks = batch.column(batch.schema.get_field_index("ask"))
-            for index in range(count):
-                timestamp = int(timestamps[index].as_py())
-                if timestamp >= safe_stop_ms:
-                    return tuple(item[2] for item in rows)
-                if timestamp < start_ms:
-                    continue
-                if timestamp >= end_ms:
-                    continue
-                row = _TickRow(
-                    row_id=row_offset + index,
-                    timestamp_ms=timestamp,
-                    bid=float(bids[index].as_py()),
-                    ask=float(asks[index].as_py()),
-                )
-                key = (row.timestamp_ms, row.row_id, row)
-                insertion = bisect_left(rows, key)
-                if insertion < maximum:
-                    rows.insert(insertion, key)
-                    if len(rows) > maximum:
-                        rows.pop()
-            row_offset += count
+    for batch in _projected_arrow_batches(path, ("datetime", "bid", "ask")):
+        count = batch.num_rows
+        if count == 0:
+            continue
+        timestamps = batch.column(0)
+        bids = batch.column(1)
+        asks = batch.column(2)
+        stop_indices = pc.indices_nonzero(
+            pc.greater_equal(timestamps, safe_stop_ms)
+        ).to_pylist()
+        stop_index = int(stop_indices[0]) if stop_indices else count
+        matching_indices = pc.indices_nonzero(
+            pc.and_(
+                pc.greater_equal(timestamps, start_ms),
+                pc.less(timestamps, end_ms),
+            )
+        ).to_pylist()
+        for raw_index in matching_indices:
+            index = int(raw_index)
+            if index >= stop_index:
+                break
+            timestamp = int(timestamps[index].as_py())
+            row = _TickRow(
+                row_id=row_offset + index,
+                timestamp_ms=timestamp,
+                bid=float(bids[index].as_py()),
+                ask=float(asks[index].as_py()),
+            )
+            key = (row.timestamp_ms, row.row_id, row)
+            insertion = bisect_left(rows, key)
+            if insertion < maximum:
+                rows.insert(insertion, key)
+                if len(rows) > maximum:
+                    rows.pop()
+        if stop_indices:
+            return tuple(item[2] for item in rows)
+        row_offset += count
     return tuple(item[2] for item in rows)
 
 
@@ -2125,22 +2192,27 @@ def _arrow_timestamp_regression_bound(
 ) -> int:
     """Return a validated source-order lookahead bound for one Arrow file."""
     del size_bytes, modified_at_ns, device, inode, changed_at_ns
-    import polars as pl
-
-    differences = pl.col("datetime").cast(pl.Int64).diff()
-    diagnostics = (
-        pl.scan_ipc(path)
-        .select(
-            differences.lt(0).sum().alias("regression_count"),
-            (-differences.filter(differences.lt(0)))
-            .max()
-            .fill_null(0)
-            .alias("maximum_regression_ms"),
+    pc, _dataset = _pyarrow_projection_modules()
+    regression_count = 0
+    maximum_regression = 0
+    previous_ms: int | None = None
+    for batch in _projected_arrow_batches(Path(path), ("datetime",)):
+        timestamps = batch.column(0)
+        if not len(timestamps):
+            continue
+        first_ms = int(timestamps[0].as_py())
+        if previous_ms is not None and first_ms < previous_ms:
+            regression_count += 1
+            maximum_regression = max(maximum_regression, previous_ms - first_ms)
+        differences = pc.pairwise_diff(timestamps)
+        negative_differences = pc.drop_null(
+            pc.filter(differences, pc.less(differences, 0))
         )
-        .collect()
-    )
-    regression_count = int(diagnostics.item(0, "regression_count"))
-    maximum_regression = int(diagnostics.item(0, "maximum_regression_ms"))
+        regression_count += len(negative_differences)
+        if len(negative_differences):
+            minimum_difference = int(pc.min(negative_differences).as_py())
+            maximum_regression = max(maximum_regression, -minimum_difference)
+        previous_ms = int(timestamps[-1].as_py())
     if (
         regression_count > MAX_HISTDATA_SOURCE_ORDER_REGRESSIONS_PER_PARTITION
         or maximum_regression > MAX_HISTDATA_SOURCE_ORDER_REGRESSION_MS
@@ -2149,6 +2221,22 @@ def _arrow_timestamp_regression_bound(
             "benchmark Arrow cache exceeds timestamp regression policy"
         )
     return maximum_regression
+
+
+def _projected_arrow_batches(
+    path: Path, columns: Sequence[str]
+) -> Iterable[Any]:
+    """Yield only requested IPC columns without materializing wide batches."""
+    _compute, dataset_module = _pyarrow_projection_modules()
+    dataset = dataset_module.dataset(str(path), format="ipc")
+    required = tuple(columns)
+    if not set(required).issubset(dataset.schema.names):
+        raise ValueError("benchmark Arrow cache lacks projected columns")
+    yield from dataset.scanner(
+        columns=list(required),
+        batch_size=131_072,
+        use_threads=False,
+    ).to_batches()
 
 
 def _tick_rows_sha256(rows: Sequence[_TickRow]) -> str:
@@ -2187,15 +2275,15 @@ def _tick_event_state_counts(
     return dict(counts)
 
 
-def _pyarrow() -> tuple[Any, Any]:
+def _pyarrow_projection_modules() -> tuple[Any, Any]:
     try:
-        import pyarrow as pa  # pylint: disable=import-outside-toplevel
-        import pyarrow.ipc as ipc  # pylint: disable=import-outside-toplevel
+        import pyarrow.compute as pc  # pylint: disable=import-outside-toplevel
+        import pyarrow.dataset as ds  # pylint: disable=import-outside-toplevel
     except ImportError as exc:
         raise RuntimeError(
             "reverse-degradation corpus building requires histdatacom[arrow]"
         ) from exc
-    return pa, ipc
+    return pc, ds
 
 
 def _degradation_config_names() -> tuple[str, ...]:

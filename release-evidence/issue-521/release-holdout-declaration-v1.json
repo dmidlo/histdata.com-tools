@@ -1,0 +1,70 @@
+{
+  "claim_scope": "v2.5-marked-hawkes-release-decision-successor-2",
+  "resource_bounds": {
+    "max_peak_memory_bytes": 2147483648,
+    "max_runtime_seconds": 3600.0,
+    "max_source_bytes": 4294967296
+  },
+  "schema_version": "histdatacom.release-holdout-declaration.v1",
+  "split_periods": {
+    "calibration": "202512",
+    "final_holdout": "202607",
+    "validation": "202601"
+  },
+  "windows": {
+    "calibration": [
+      {
+        "session": "asia",
+        "start_utc": "2025-12-03T00:00:00Z"
+      },
+      {
+        "session": "london",
+        "start_utc": "2025-12-12T07:00:00Z"
+      },
+      {
+        "session": "new_york",
+        "start_utc": "2025-12-10T19:00:00Z"
+      },
+      {
+        "session": "overlap_closure",
+        "start_utc": "2025-12-23T16:00:00Z"
+      }
+    ],
+    "final_holdout": [
+      {
+        "session": "asia",
+        "start_utc": "2026-07-03T00:00:00Z"
+      },
+      {
+        "session": "london",
+        "start_utc": "2026-07-10T08:00:00Z"
+      },
+      {
+        "session": "new_york",
+        "start_utc": "2026-07-29T18:00:00Z"
+      },
+      {
+        "session": "overlap_closure",
+        "start_utc": "2026-07-20T16:00:00Z"
+      }
+    ],
+    "validation": [
+      {
+        "session": "asia",
+        "start_utc": "2026-01-05T00:00:00Z"
+      },
+      {
+        "session": "london",
+        "start_utc": "2026-01-15T07:00:00Z"
+      },
+      {
+        "session": "new_york",
+        "start_utc": "2026-01-28T19:00:00Z"
+      },
+      {
+        "session": "overlap_closure",
+        "start_utc": "2026-01-22T16:00:00Z"
+      }
+    ]
+  }
+}

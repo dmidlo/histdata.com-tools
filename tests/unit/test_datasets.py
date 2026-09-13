@@ -15,6 +15,9 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
+from histdatacom.histdata_ascii import (
+    MAX_HISTDATA_SOURCE_ORDER_REGRESSIONS_PER_PARTITION,
+)
 from histdatacom.dataset_cli import main as dataset_cli_main
 from histdatacom.datasets import (
     CANONICAL_TICK_PROJECTION_SCHEMA_VERSION,
@@ -92,7 +95,7 @@ def test_histdata_adapter_preserves_and_labels_raw_quote_order_inversions(
         source_root, symbol=_SYMBOL, period=_PERIOD
     )
 
-    assert partition.adapter_version == "1.2.0"
+    assert partition.adapter_version == "1.2.1"
     assert partition.artifact.metadata["raw_negative_spread_count"] == 2
     assert partition.artifact.metadata["raw_negative_spread_rate"] == (
         pytest.approx(2 / 3)
@@ -256,7 +259,7 @@ def test_histdata_adapter_preserves_and_flags_vendor_timestamp_regression(
     direct = adapter.read_partition(partition)
     projected = project_observed_ascii_ticks_v2(adapter, version, partition)
 
-    assert adapter.descriptor.adapter_version == "1.2.0"
+    assert adapter.descriptor.adapter_version == "1.2.1"
     assert direct.equals(regressed)
     assert partition.artifact.metadata["first_timestamp_ms"] == _START_MS
     assert partition.artifact.metadata["last_timestamp_ms"] == (
@@ -278,11 +281,18 @@ def test_histdata_adapter_preserves_and_flags_vendor_timestamp_regression(
     (
         (_START_MS, _START_MS + 3_600_001, _START_MS),
         (
-            _START_MS,
-            _START_MS + 3_600_000,
-            _START_MS + 1_000,
-            _START_MS + 3_600_001,
-            _START_MS + 2_000,
+            (_START_MS,)
+            + tuple(
+                value
+                for index in range(
+                    1,
+                    MAX_HISTDATA_SOURCE_ORDER_REGRESSIONS_PER_PARTITION + 2,
+                )
+                for value in (
+                    _START_MS + index * 2,
+                    _START_MS + index * 2 - 1,
+                )
+            )
         ),
     ),
 )

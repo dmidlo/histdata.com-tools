@@ -100,7 +100,7 @@ class HistDataProviderAdapter:
     def descriptor(self) -> ProviderAdapterDescriptorV1:
         return ProviderAdapterDescriptorV1(
             adapter_id=HISTDATA_ADAPTER_ID,
-            adapter_version="1.2.0",
+            adapter_version="1.2.1",
             source_provider_id=self.provider.source_provider_id,
             formats=("ascii",),
             granularities=("T",),

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Freeze issue-#512 release-holdout evidence before candidate fitting."""
+"""Freeze declared release-holdout evidence before candidate fitting."""
 
 from __future__ import annotations
 
@@ -34,7 +34,19 @@ from histdatacom.synthetic.release_holdout_evaluation import (
 )
 
 _DURATION_NS = 600_000_000_000
-_DECLARATIONS: Mapping[str, tuple[tuple[str, str], ...]] = {
+_DECLARATION_SCHEMA_VERSION = "histdatacom.release-holdout-declaration.v1"
+_DEFAULT_CLAIM_SCOPE = "v2.5-marked-hawkes-release-decision-successor-1"
+_DEFAULT_RESOURCE_BOUNDS: Mapping[str, int | float] = {
+    "max_source_bytes": 4 * 1024**3,
+    "max_runtime_seconds": 3600.0,
+    "max_peak_memory_bytes": 2 * 1024**3,
+}
+_DEFAULT_SPLIT_PERIODS: Mapping[str, str] = {
+    "calibration": "202512",
+    "validation": "202601",
+    "final_holdout": "202606",
+}
+_DEFAULT_DECLARATIONS: Mapping[str, tuple[tuple[str, str], ...]] = {
     "calibration": (
         ("2025-12-03T00:00:00Z", "asia"),
         ("2025-12-12T07:00:00Z", "london"),
@@ -55,6 +67,7 @@ _DECLARATIONS: Mapping[str, tuple[tuple[str, str], ...]] = {
         ("2026-06-26T16:00:00Z", "overlap_closure"),
     ),
 }
+_SPLIT_KINDS = ("calibration", "validation", "final_holdout")
 _HOLDOUT_AXES = {
     "asia": (
         "ordinary",
@@ -91,13 +104,16 @@ def _timestamp_ns(value: str) -> int:
 
 
 def _development_source_cutoff_ns(
-    split_periods: Mapping[str, str],
+    split_periods: Mapping[str, str | Sequence[str]],
 ) -> int:
     """Return the first month boundary after all development splits."""
     development_periods = tuple(
-        period
-        for split_kind, period in split_periods.items()
+        str(period)
+        for split_kind, raw_periods in split_periods.items()
         if split_kind != "final_holdout"
+        for period in (
+            (raw_periods,) if isinstance(raw_periods, str) else raw_periods
+        )
     )
     if not development_periods:
         raise ValueError("release evidence requires a development split")
@@ -116,7 +132,9 @@ def _development_source_cutoff_ns(
     )
 
 
-def _predeclared_intervals() -> Mapping[str, tuple[tuple[int, int, str], ...]]:
+def _predeclared_intervals(
+    declarations: Mapping[str, Sequence[tuple[str, str]]],
+) -> Mapping[str, tuple[tuple[int, int, str], ...]]:
     return {
         split_kind: tuple(
             (
@@ -126,12 +144,146 @@ def _predeclared_intervals() -> Mapping[str, tuple[tuple[int, int, str], ...]]:
             )
             for timestamp, session in values
         )
-        for split_kind, values in _DECLARATIONS.items()
+        for split_kind, values in declarations.items()
     }
 
 
+def _period_for_timestamp_ns(timestamp_ns: int) -> str:
+    timestamp = datetime.fromtimestamp(
+        timestamp_ns / 1_000_000_000, tz=timezone.utc
+    )
+    return f"{timestamp.year:04d}{timestamp.month:02d}"
+
+
+def _validated_period(value: Any, *, field: str) -> str:
+    period = str(value)
+    if len(period) != 6 or not period.isdigit():
+        raise ValueError(f"{field} must use YYYYMM")
+    month = int(period[4:])
+    if month < 1 or month > 12:
+        raise ValueError(f"{field} month is invalid")
+    return period
+
+
+def _load_declaration(
+    path: Path | None,
+) -> tuple[
+    Mapping[str, str],
+    Mapping[str, tuple[tuple[str, str], ...]],
+    str,
+    Mapping[str, int | float],
+]:
+    if path is None:
+        return (
+            dict(_DEFAULT_SPLIT_PERIODS),
+            dict(_DEFAULT_DECLARATIONS),
+            _DEFAULT_CLAIM_SCOPE,
+            dict(_DEFAULT_RESOURCE_BOUNDS),
+        )
+
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, Mapping):
+        raise TypeError("release-holdout declaration must be an object")
+    expected_keys = {
+        "schema_version",
+        "claim_scope",
+        "resource_bounds",
+        "split_periods",
+        "windows",
+    }
+    if set(payload) != expected_keys:
+        raise ValueError(
+            "release-holdout declaration fields differ: "
+            f"expected {sorted(expected_keys)}"
+        )
+    if payload["schema_version"] != _DECLARATION_SCHEMA_VERSION:
+        raise ValueError("release-holdout declaration schema differs")
+    claim_scope = str(payload["claim_scope"]).strip()
+    if not claim_scope:
+        raise ValueError("release-holdout declaration claim_scope is empty")
+
+    resource_values = payload["resource_bounds"]
+    resource_keys = {
+        "max_source_bytes",
+        "max_runtime_seconds",
+        "max_peak_memory_bytes",
+    }
+    if not isinstance(resource_values, Mapping) or set(resource_values) != (
+        resource_keys
+    ):
+        raise ValueError("release-holdout resource_bounds differ")
+    if any(isinstance(resource_values[name], bool) for name in resource_keys):
+        raise TypeError("release-holdout resource bounds must be numeric")
+    resource_bounds: Mapping[str, int | float] = {
+        "max_source_bytes": int(resource_values["max_source_bytes"]),
+        "max_runtime_seconds": float(resource_values["max_runtime_seconds"]),
+        "max_peak_memory_bytes": int(resource_values["max_peak_memory_bytes"]),
+    }
+    if any(value <= 0 for value in resource_bounds.values()):
+        raise ValueError("release-holdout resource bounds must be positive")
+
+    split_values = payload["split_periods"]
+    window_values = payload["windows"]
+    if not isinstance(split_values, Mapping) or set(split_values) != set(
+        _SPLIT_KINDS
+    ):
+        raise ValueError("release-holdout split_periods differ")
+    if not isinstance(window_values, Mapping) or set(window_values) != set(
+        _SPLIT_KINDS
+    ):
+        raise ValueError("release-holdout window splits differ")
+    split_periods = {
+        split_kind: _validated_period(
+            split_values[split_kind], field=f"{split_kind} period"
+        )
+        for split_kind in _SPLIT_KINDS
+    }
+
+    declarations: dict[str, tuple[tuple[str, str], ...]] = {}
+    seen_intervals: list[tuple[int, int]] = []
+    required_sessions = set(_HOLDOUT_AXES)
+    for split_kind in _SPLIT_KINDS:
+        raw_windows = window_values[split_kind]
+        if not isinstance(raw_windows, Sequence) or isinstance(
+            raw_windows, (str, bytes)
+        ):
+            raise TypeError(f"{split_kind} windows must be an array")
+        selected: list[tuple[str, str]] = []
+        for index, raw_window in enumerate(raw_windows):
+            if not isinstance(raw_window, Mapping) or set(raw_window) != {
+                "start_utc",
+                "session",
+            }:
+                raise ValueError(f"{split_kind} window {index} fields differ")
+            start_utc = str(raw_window["start_utc"])
+            session = str(raw_window["session"])
+            start_ns = _timestamp_ns(start_utc)
+            if _period_for_timestamp_ns(start_ns) != split_periods[split_kind]:
+                raise ValueError(
+                    f"{split_kind} window {index} is outside its period"
+                )
+            interval = (start_ns, start_ns + _DURATION_NS)
+            if any(
+                interval[0] < prior_end and prior_start < interval[1]
+                for prior_start, prior_end in seen_intervals
+            ):
+                raise ValueError("release-holdout declaration windows overlap")
+            seen_intervals.append(interval)
+            selected.append((start_utc, session))
+        if len(selected) != 4 or {session for _, session in selected} != (
+            required_sessions
+        ):
+            raise ValueError(
+                f"{split_kind} must declare each required session exactly once"
+            )
+        declarations[split_kind] = tuple(selected)
+    return split_periods, declarations, claim_scope, resource_bounds
+
+
 def _sha256(value: Any) -> str:
-    return hashlib.sha256(canonical_contract_json(value).encode("utf-8")).hexdigest()
+    return hashlib.sha256(
+        canonical_contract_json(value).encode("utf-8")
+    ).hexdigest()
 
 
 def _context_event_ids(
@@ -213,6 +365,11 @@ def _identity_fields(
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source-root", required=True, type=Path)
+    parser.add_argument(
+        "--source-projection-manifest",
+        type=Path,
+        help="optional lineage manifest for canonical projected sources",
+    )
     parser.add_argument("--feed-epoch-definition", required=True, type=Path)
     parser.add_argument("--observation-campaign", required=True, type=Path)
     parser.add_argument("--market-context-corpus", required=True, type=Path)
@@ -220,38 +377,53 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--selection-dossier", required=True, type=Path)
     parser.add_argument("--output-directory", required=True, type=Path)
     parser.add_argument("--frozen-at-utc", required=True)
+    parser.add_argument(
+        "--declaration-file",
+        type=Path,
+        help=(
+            "strict row-free release-holdout declaration JSON; defaults to "
+            "the issue-#512 successor declaration"
+        ),
+    )
     return parser
 
 
 def main() -> int:
     args = _parser().parse_args()
+    split_periods, declarations, claim_scope, resource_bounds = (
+        _load_declaration(args.declaration_file)
+    )
     profile = ReverseDegradationCorpusProfileV1(
-        split_periods={
-            "calibration": "202512",
-            "validation": "202601",
-            "final_holdout": "202606",
-        },
+        split_periods=split_periods,
         synchronized_windows_per_split=4,
         window_duration_seconds=600,
         minimum_events_per_symbol=64,
         max_events_per_symbol=256,
         neighbor_guard_seconds=1800,
-        ensemble_member_ids=tuple(f"member-{index:02d}" for index in range(1, 9)),
-        max_runtime_seconds=3600.0,
+        ensemble_member_ids=tuple(
+            f"member-{index:02d}" for index in range(1, 9)
+        ),
+        max_source_bytes=int(resource_bounds["max_source_bytes"]),
+        max_runtime_seconds=float(resource_bounds["max_runtime_seconds"]),
+        max_peak_memory_bytes=int(resource_bounds["max_peak_memory_bytes"]),
     )
+    source_cutoff_ns = _development_source_cutoff_ns(profile.split_periods)
     corpus = build_reverse_degradation_benchmark_corpus(
         args.source_root,
         feed_epoch_definition_path=args.feed_epoch_definition,
         observation_campaign_path=args.observation_campaign,
         market_context_corpus_path=args.market_context_corpus,
         cftc_positioning_corpus_path=args.cftc_positioning_corpus,
+        source_projection_manifest_path=args.source_projection_manifest,
         profile=profile,
-        predeclared_window_intervals=_predeclared_intervals(),
+        predeclared_window_intervals=_predeclared_intervals(declarations),
     )
     if corpus.neighbor_leakage_count != 0:
         raise RuntimeError("predeclared benchmark corpus has split leakage")
 
-    context_payload = json.loads(args.market_context_corpus.read_text(encoding="utf-8"))
+    context_payload = json.loads(
+        args.market_context_corpus.read_text(encoding="utf-8")
+    )
     timeline = context_payload["timeline"]
     timeline_id = str(timeline["timeline_id"])
     context_events = tuple(timeline["events"])
@@ -291,7 +463,9 @@ def main() -> int:
                 )
             )
 
-    selection_payload = json.loads(args.selection_dossier.read_text(encoding="utf-8"))
+    selection_payload = json.loads(
+        args.selection_dossier.read_text(encoding="utf-8")
+    )
     selection_id = str(selection_payload["dossier_id"])
     selection_ref = artifact_ref_for_file(
         args.selection_dossier,
@@ -301,7 +475,6 @@ def main() -> int:
     access_policy = ReleaseHoldoutAccessPolicyV1(
         required_feed_epochs=("technology_epoch_04",)
     )
-    source_cutoff_ns = _development_source_cutoff_ns(profile.split_periods)
     manifest = build_protected_release_holdout_manifest(
         access_policy,
         protected,
@@ -309,19 +482,29 @@ def main() -> int:
         selection_dossier_id=selection_id,
         selection_dossier_ref=selection_ref,
         source_cutoff_ns=source_cutoff_ns,
-        claim_scope="v2.5-marked-hawkes-release-decision-successor-1",
+        claim_scope=claim_scope,
         frozen_at_utc=args.frozen_at_utc,
     )
     if (
         manifest.leakage_audit.status is not ReleaseHoldoutAuditStatus.PASS
         or manifest.coverage_audit.status is not ReleaseHoldoutAuditStatus.PASS
     ):
-        raise RuntimeError("release-holdout leakage or coverage audit failed")
+        raise RuntimeError(
+            "release-holdout audits failed: "
+            f"leakage={manifest.leakage_audit.status.value} "
+            f"findings={list(manifest.leakage_audit.finding_codes)}; "
+            f"coverage={manifest.coverage_audit.status.value} "
+            f"missing={list(manifest.coverage_audit.missing_strata)}"
+        )
 
     output = args.output_directory.resolve()
     refs = {
-        "access_policy": write_release_holdout_access_policy(access_policy, output),
-        "benchmark_corpus": write_reverse_degradation_benchmark_corpus(corpus, output),
+        "access_policy": write_release_holdout_access_policy(
+            access_policy, output
+        ),
+        "benchmark_corpus": write_reverse_degradation_benchmark_corpus(
+            corpus, output
+        ),
         "evaluation_policy": write_release_holdout_evaluation_policy(
             load_default_release_holdout_evaluation_policy(), output
         ),
