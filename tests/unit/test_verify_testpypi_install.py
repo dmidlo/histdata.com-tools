@@ -193,7 +193,7 @@ def test_download_smoke_uses_bounded_historical_tick_download(
     def fake_run_json(command: list[str], **kwargs: Any) -> dict[str, str]:
         json_commands.append(command)
         captured_envs.append(kwargs["env"])
-        return {"state": "stopped"}
+        return {"state": "running" if "start" in command else "stopped"}
 
     monkeypatch.setattr(module, "_run", fake_run)
     monkeypatch.setattr(module, "_run_json", fake_run_json)
@@ -202,6 +202,8 @@ def test_download_smoke_uses_bounded_historical_tick_download(
         venv_dir=tmp_path / "venv",
         root=tmp_path,
         timeout=30.0,
+        startup_timeout=45.0,
+        stop_timeout=90.0,
     )
 
     command = commands[0]
@@ -216,8 +218,18 @@ def test_download_smoke_uses_bounded_historical_tick_download(
             str(module._script_path(tmp_path / "venv", "histdatacom")),
             "runtime",
             "--json",
+            "start",
+            "--startup-timeout",
+            "45.0",
+        ],
+        [
+            str(module._script_path(tmp_path / "venv", "histdatacom")),
+            "runtime",
+            "--json",
             "stop",
-        ]
+            "--stop-timeout",
+            "90.0",
+        ],
     ]
     assert captured_envs[0]["VIRTUAL_ENV"] == str(tmp_path / "venv")
     assert captured_envs[0]["HISTDATACOM_RUNTIME_HOME"] == str(
@@ -229,8 +241,9 @@ def test_download_smoke_uses_bounded_historical_tick_download(
     assert captured_envs[0]["HISTDATACOM_TEMPORAL_CACHE_DIR"] == str(
         tmp_path / "temporal-runtime-cache"
     )
-    assert captured_envs[1] == captured_envs[0]
+    assert captured_envs[1:] == [captured_envs[0], captured_envs[0]]
     assert report["files"] == ["HISTDATA_COM_ASCII_EURUSD_T202201.zip"]
+    assert report["runtime_start"] == {"state": "running"}
     assert report["runtime_stop"] == {"state": "stopped"}
 
 

@@ -572,6 +572,8 @@ def _download_smoke_probe(
     venv_dir: Path,
     root: Path,
     timeout: float,
+    startup_timeout: float,
+    stop_timeout: float,
 ) -> dict[str, Any]:
     """Run a small live download/extract smoke through installed CLI defaults."""
     data_dir = root / "download-smoke-data"
@@ -596,32 +598,45 @@ def _download_smoke_probe(
         str(data_dir),
         "-D",
     ]
+    runtime_command = [
+        str(_script_path(venv_dir, "histdatacom")),
+        "runtime",
+        "--json",
+    ]
+    runtime_stop_command = [
+        *runtime_command,
+        "stop",
+        "--stop-timeout",
+        str(stop_timeout),
+    ]
+    runtime_start = _run_json(
+        [
+            *runtime_command,
+            "start",
+            "--startup-timeout",
+            str(startup_timeout),
+        ],
+        env=env,
+        timeout=startup_timeout + 60.0,
+    )
+    if runtime_start.get("state") != "running":
+        raise SystemExit(f"download smoke runtime did not start: {runtime_start}")
     try:
         completed = _run(command, env=env, timeout=timeout)
     except BaseException:
         try:
             _run_json(
-                [
-                    str(_script_path(venv_dir, "histdatacom")),
-                    "runtime",
-                    "--json",
-                    "stop",
-                ],
+                runtime_stop_command,
                 env=env,
-                timeout=90.0,
+                timeout=stop_timeout + 60.0,
             )
         except SystemExit:
             pass
         raise
     runtime_stop = _run_json(
-        [
-            str(_script_path(venv_dir, "histdatacom")),
-            "runtime",
-            "--json",
-            "stop",
-        ],
+        runtime_stop_command,
         env=env,
-        timeout=90.0,
+        timeout=stop_timeout + 60.0,
     )
     files = sorted(path.name for path in data_dir.rglob("*") if path.is_file())
     if not files:
@@ -630,6 +645,7 @@ def _download_smoke_probe(
         "returncode": completed.returncode,
         "data_directory": str(data_dir),
         "files": files,
+        "runtime_start": runtime_start,
         "runtime_stop": runtime_stop,
     }
 
@@ -708,6 +724,8 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
                 venv_dir=venv_dir,
                 root=root,
                 timeout=args.download_timeout,
+                startup_timeout=args.live_startup_timeout,
+                stop_timeout=args.live_stop_timeout,
             )
         if args.report:
             args.report.parent.mkdir(parents=True, exist_ok=True)
