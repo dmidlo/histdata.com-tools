@@ -2583,6 +2583,15 @@ the source selection, licenses, artifacts, replay, coverage/preflight,
 timezone and revision rules, information-audit integration, streaming limits,
 and trust gates.
 
+Economic-release strategies use a narrower provider-neutral
+`as_known_at(t)` protocol. It retains official series/reference-period
+identity, schedule and actual revision chains, previous-as-known, and separate
+observed-consensus and machine-projection vintages without requiring a
+commercial calendar. See
+[`docs/economic-calendar-contracts.md`](docs/economic-calendar-contracts.md)
+and the audited
+[`calendar-branch migration map`](docs/economic-calendar-branch-migration.md).
+
 #### CFTC positioning state
 
 CFTC Commitments of Traders is a separate persistent weekly positioning

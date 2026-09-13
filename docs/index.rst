@@ -20,6 +20,8 @@ Data and reconstruction foundations
    observation-operator-contracts
    observation-process-uncertainty
    market-context-contracts
+   economic-calendar-contracts
+   economic-calendar-branch-migration
    cftc-positioning-contracts
    provider-neutral-dataset-catalog
    reconstruction-scientific-ledger

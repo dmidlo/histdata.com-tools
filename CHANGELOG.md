@@ -2,6 +2,11 @@
 
 ### Added
 
+- **market context**: salvage immutable economic release/revision,
+  previous-as-known, forecast provenance, bounded query, and content-addressed
+  replay mechanics behind a provider-neutral `as_known_at(t)` protocol; add an
+  exhaustive migration map that retires the licensed-calendar branch without
+  making it a canonical dependency (#682).
 - **testing**: add commit-bound per-critical-module branch floors, bounded
   generated scientific invariants, exact focused/release mutation profiles,
   retained CI reports, and release-candidate evidence gates (#520).
