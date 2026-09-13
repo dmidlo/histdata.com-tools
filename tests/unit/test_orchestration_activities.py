@@ -14,7 +14,7 @@ import threading
 from types import SimpleNamespace
 import zipfile
 from pathlib import Path
-from typing import Any, get_type_hints
+from typing import Any, Mapping, get_type_hints
 
 import pytest
 from temporalio.exceptions import ApplicationError
@@ -1002,6 +1002,62 @@ def test_build_cache_activity_builds_polars_cache(tmp_path) -> None:
     assert result["work_item"]["cache_filename"] == CACHE_FILENAME
     assert result["work_item"]["cache_line_count"] == "3"
     assert (tmp_path / CACHE_FILENAME).exists()
+
+
+def test_build_cache_activity_repeats_liveness_heartbeat(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """One slow cache item should stay live and stop heartbeating on return."""
+    import histdatacom.orchestration.activities as activities
+
+    observed: list[dict[str, object]] = []
+    repeated = threading.Event()
+    original_build = activities.build_cache_work_item
+
+    def heartbeat(metadata: dict[str, object]) -> None:
+        if (
+            metadata.get("stage") == "build_cache"
+            and metadata.get("phase") == "running"
+        ):
+            observed.append(dict(metadata))
+            if len(observed) >= 2:
+                repeated.set()
+
+    def delayed_build(
+        work_item: WorkItem,
+        *,
+        args: Mapping[str, Any],
+    ) -> Any:
+        assert repeated.wait(timeout=1)
+        return original_build(work_item, args=args)
+
+    monkeypatch.setattr(
+        activities.activity,
+        "heartbeat",
+        heartbeat,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        activities,
+        "_BUILD_CACHE_HEARTBEAT_RELAY_SECONDS",
+        0.01,
+    )
+    monkeypatch.setattr(
+        activities,
+        "build_cache_work_item",
+        delayed_build,
+    )
+
+    result = activities.build_cache_activity(_cache_payload(tmp_path))
+    heartbeat_count = len(observed)
+    threading.Event().wait(0.03)
+
+    assert result["result"]["status"] == WorkStatus.CACHE_READY.value
+    assert heartbeat_count >= 2
+    assert len(observed) == heartbeat_count
+    assert observed[0]["work_ids"] == [result["work_item"]["work_id"]]
+    assert len(json.dumps(observed[0]).encode("utf-8")) < 65_536
 
 
 def test_build_cache_activity_deletes_sources_for_cache_only_mode(

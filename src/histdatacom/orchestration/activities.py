@@ -125,10 +125,11 @@ activity = _load_activity_api()
 _Callable = TypeVar("_Callable", bound=Callable[..., Any])
 _ACTIVITY_LOGGER = logging.getLogger(__name__)
 _RECONSTRUCTION_HEARTBEAT_RELAY_SECONDS = 15.0
+_BUILD_CACHE_HEARTBEAT_RELAY_SECONDS = 15.0
 
 
 class _ReconstructionHeartbeatRelay:
-    """Repeat the latest progress while one scientific interval is running."""
+    """Repeat the latest progress while synchronous activity work is running."""
 
     def __init__(
         self,
@@ -161,10 +162,14 @@ class _ReconstructionHeartbeatRelay:
 
     def emit(self, heartbeat: Any) -> None:
         """Publish semantic progress and retain it for liveness repeats."""
-        metadata = cast(dict[str, JSONValue], heartbeat.to_dict())
+        self.emit_metadata(cast(dict[str, JSONValue], heartbeat.to_dict()))
+
+    def emit_metadata(self, metadata: Mapping[str, JSONValue]) -> None:
+        """Publish and retain an already-serialized heartbeat payload."""
+        payload = dict(metadata)
         with self._lock:
-            self._latest = dict(metadata)
-        _activity_heartbeat(metadata)
+            self._latest = dict(payload)
+        _activity_heartbeat(payload)
 
     def _run(self) -> None:
         while not self._stop.wait(self._interval_seconds):
@@ -175,9 +180,7 @@ class _ReconstructionHeartbeatRelay:
             try:
                 _activity_heartbeat(metadata)
             except Exception:
-                _ACTIVITY_LOGGER.exception(
-                    "Reconstruction liveness heartbeat failed"
-                )
+                _ACTIVITY_LOGGER.exception("Activity liveness heartbeat failed")
                 return
 
 
@@ -830,13 +833,26 @@ def build_cache_activity(
         "default_download_dir": set_working_data_dir(request.data_directory),
         "delete_after_cache": request.build_cache,
     }
-    outputs = _cancellable_outputs(
-        "build_cache",
-        work_items,
-        lambda work_item: build_cache_work_item(work_item, args=args),
-        payload=payload,
-        request=request,
-    )
+    with _ReconstructionHeartbeatRelay(
+        interval_seconds=_BUILD_CACHE_HEARTBEAT_RELAY_SECONDS
+    ) as heartbeat_relay:
+        heartbeat_relay.emit_metadata(
+            {
+                "event_type": "progress",
+                "stage": "build_cache",
+                "phase": "running",
+                "request_id": request.request_id,
+                "work_item_count": len(work_items),
+                "work_ids": [item.work_id for item in work_items],
+            }
+        )
+        outputs = _cancellable_outputs(
+            "build_cache",
+            work_items,
+            lambda work_item: build_cache_work_item(work_item, args=args),
+            payload=payload,
+            request=request,
+        )
     if len(outputs) == 1:
         return _activity_output_payload(outputs[0])
 

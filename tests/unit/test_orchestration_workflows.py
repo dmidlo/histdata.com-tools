@@ -1123,6 +1123,11 @@ def test_workflow_topology_documents_expected_hierarchy() -> None:
         activity_policies["download_archives"]["heartbeat_timeout_seconds"]
         == 60
     )
+    assert (
+        activity_policies["build_cache"]["start_to_close_timeout_seconds"]
+        == 21600
+    )
+    assert activity_policies["build_cache"]["heartbeat_timeout_seconds"] == 30
 
 
 def test_activity_execution_policy_rejects_unknown_activity() -> None:

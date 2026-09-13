@@ -593,7 +593,7 @@ ACTIVITY_EXECUTION_POLICIES = {
     ),
     "build_cache": ActivityExecutionPolicy(
         activity_name="build_cache",
-        start_to_close_timeout_seconds=1800,
+        start_to_close_timeout_seconds=21600,
         heartbeat_timeout_seconds=30,
         retry_policy=NO_RETRY_POLICY,
     ),
