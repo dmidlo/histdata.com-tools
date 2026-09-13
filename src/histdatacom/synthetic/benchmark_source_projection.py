@@ -542,7 +542,9 @@ def _write_projection(parent: Path, temporary: Path) -> _ProjectionScan:
                     yield batch
 
             scanned = _scan_projection_batches(schema, written_batches())
-    with temporary.open("rb") as handle:
+    # Windows maps fsync to the writable-handle-only CRT commit operation.
+    # Reopen without truncation but retain write access across every platform.
+    with temporary.open("rb+") as handle:
         os.fsync(handle.fileno())
     return scanned
 
