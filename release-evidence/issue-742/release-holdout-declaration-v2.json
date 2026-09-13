@@ -1,0 +1,96 @@
+{
+  "claim_scope": "v2.5-marked-hawkes-release-decision-successor-3",
+  "holdout_axes": {
+    "asia": {
+      "alignment_kind": "exact",
+      "deficit_stratum": "high",
+      "event_stratum": "event",
+      "observation_scenario_id": "low_retention_high_infill"
+    },
+    "london": {
+      "alignment_kind": "exact",
+      "deficit_stratum": "low",
+      "event_stratum": "ordinary",
+      "observation_scenario_id": "high_retention_low_infill"
+    },
+    "new_york": {
+      "alignment_kind": "bounded_nearest",
+      "deficit_stratum": "median",
+      "event_stratum": "ordinary",
+      "observation_scenario_id": "central_fitted_retention"
+    },
+    "overlap_closure": {
+      "alignment_kind": "bounded_nearest",
+      "deficit_stratum": "median",
+      "event_stratum": "ordinary",
+      "observation_scenario_id": "central_fitted_retention"
+    }
+  },
+  "resource_bounds": {
+    "max_peak_memory_bytes": 2147483648,
+    "max_runtime_seconds": 3600.0,
+    "max_source_bytes": 4294967296
+  },
+  "schema_version": "histdatacom.release-holdout-declaration.v2",
+  "split_periods": {
+    "calibration": "202512",
+    "final_holdout": "202608",
+    "validation": "202601"
+  },
+  "windows": {
+    "calibration": [
+      {
+        "session": "asia",
+        "start_utc": "2025-12-03T00:00:00Z"
+      },
+      {
+        "session": "london",
+        "start_utc": "2025-12-12T07:00:00Z"
+      },
+      {
+        "session": "new_york",
+        "start_utc": "2025-12-10T19:00:00Z"
+      },
+      {
+        "session": "overlap_closure",
+        "start_utc": "2025-12-23T16:00:00Z"
+      }
+    ],
+    "final_holdout": [
+      {
+        "session": "london",
+        "start_utc": "2026-08-06T08:00:00Z"
+      },
+      {
+        "session": "new_york",
+        "start_utc": "2026-08-13T14:00:00Z"
+      },
+      {
+        "session": "asia",
+        "start_utc": "2026-08-21T06:00:00Z"
+      },
+      {
+        "session": "overlap_closure",
+        "start_utc": "2026-08-28T16:00:00Z"
+      }
+    ],
+    "validation": [
+      {
+        "session": "asia",
+        "start_utc": "2026-01-05T00:00:00Z"
+      },
+      {
+        "session": "london",
+        "start_utc": "2026-01-15T07:00:00Z"
+      },
+      {
+        "session": "new_york",
+        "start_utc": "2026-01-28T19:00:00Z"
+      },
+      {
+        "session": "overlap_closure",
+        "start_utc": "2026-01-22T16:00:00Z"
+      }
+    ]
+  }
+}

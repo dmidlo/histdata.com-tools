@@ -32,7 +32,7 @@ FREEZER = _load_freezer()
 
 def _declaration_payload() -> dict[str, object]:
     return {
-        "schema_version": "histdatacom.release-holdout-declaration.v1",
+        "schema_version": "histdatacom.release-holdout-declaration.v2",
         "claim_scope": "v2.5-marked-hawkes-release-decision-successor-2",
         "resource_bounds": {
             "max_source_bytes": 4 * 1024**3,
@@ -43,6 +43,32 @@ def _declaration_payload() -> dict[str, object]:
             "calibration": "202512",
             "validation": "202601",
             "final_holdout": "202607",
+        },
+        "holdout_axes": {
+            "asia": {
+                "event_stratum": "event",
+                "observation_scenario_id": "low_retention_high_infill",
+                "alignment_kind": "exact",
+                "deficit_stratum": "high",
+            },
+            "london": {
+                "event_stratum": "ordinary",
+                "observation_scenario_id": "high_retention_low_infill",
+                "alignment_kind": "exact",
+                "deficit_stratum": "low",
+            },
+            "new_york": {
+                "event_stratum": "ordinary",
+                "observation_scenario_id": "central_fitted_retention",
+                "alignment_kind": "bounded_nearest",
+                "deficit_stratum": "median",
+            },
+            "overlap_closure": {
+                "event_stratum": "ordinary",
+                "observation_scenario_id": "central_fitted_retention",
+                "alignment_kind": "bounded_nearest",
+                "deficit_stratum": "median",
+            },
         },
         "windows": {
             "calibration": [
@@ -101,8 +127,8 @@ def _write_declaration(tmp_path: Path, payload: object) -> Path:
 
 
 def test_load_declaration_preserves_issue_512_default() -> None:
-    split_periods, windows, claim_scope, resources = FREEZER._load_declaration(
-        None
+    split_periods, windows, claim_scope, resources, axes = (
+        FREEZER._load_declaration(None)
     )
 
     assert split_periods["final_holdout"] == "202606"
@@ -112,13 +138,14 @@ def test_load_declaration_preserves_issue_512_default() -> None:
     )
     assert claim_scope.endswith("successor-1")
     assert resources["max_source_bytes"] == 4 * 1024**3
+    assert axes["new_york"][0] == "event"
 
 
 def test_load_declaration_accepts_strict_successor_file(tmp_path: Path) -> None:
     path = _write_declaration(tmp_path, _declaration_payload())
 
-    split_periods, windows, claim_scope, resources = FREEZER._load_declaration(
-        path
+    split_periods, windows, claim_scope, resources, axes = (
+        FREEZER._load_declaration(path)
     )
 
     assert split_periods["final_holdout"] == "202607"
@@ -134,6 +161,29 @@ def test_load_declaration_accepts_strict_successor_file(tmp_path: Path) -> None:
         "max_runtime_seconds": 3_600.0,
         "max_peak_memory_bytes": 2 * 1024**3,
     }
+    assert axes["asia"][0] == "event"
+
+
+def test_load_declaration_accepts_v1_with_fixed_axes(tmp_path: Path) -> None:
+    payload = _declaration_payload()
+    payload["schema_version"] = "histdatacom.release-holdout-declaration.v1"
+    del payload["holdout_axes"]
+
+    *_, axes = FREEZER._load_declaration(_write_declaration(tmp_path, payload))
+
+    assert axes == FREEZER._HOLDOUT_AXES
+
+
+def test_load_declaration_rejects_relaxed_axis_coverage(tmp_path: Path) -> None:
+    payload = _declaration_payload()
+    axes = payload["holdout_axes"]
+    assert isinstance(axes, dict)
+    asia = axes["asia"]
+    assert isinstance(asia, dict)
+    asia["event_stratum"] = "ordinary"
+
+    with pytest.raises(ValueError, match="event_stratum coverage differs"):
+        FREEZER._load_declaration(_write_declaration(tmp_path, payload))
 
 
 def test_load_declaration_rejects_window_outside_split(tmp_path: Path) -> None:

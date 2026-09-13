@@ -58,6 +58,15 @@ holdout roles. Every release window must begin after the development source
 cutoff. Protected windows must not overlap or fall within the predeclared
 temporal-neighbor guard.
 
+The row-free freezer accepts two declaration contracts. Version 1 retains the
+original fixed session-to-axis assignment for reproducible replay. Version 2
+adds an explicit `holdout_axes` mapping so an official event can remain in its
+actual UTC session. The v2 validator requires exactly the same multiset of
+event, observation-scenario, alignment, and deficit values as v1 across the
+same four sessions. It rejects a missing session, an unexpected value, or any
+coverage relaxation before source rows are read. A window declared with the
+`event` stratum must also have context support in the frozen corpus.
+
 The row-free leakage audit checks:
 
 - repeated source partition identities or source hashes;

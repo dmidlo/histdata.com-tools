@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+from collections import Counter
 from collections.abc import Mapping, Sequence
 from datetime import datetime, timezone
 from pathlib import Path
@@ -34,7 +35,8 @@ from histdatacom.synthetic.release_holdout_evaluation import (
 )
 
 _DURATION_NS = 600_000_000_000
-_DECLARATION_SCHEMA_VERSION = "histdatacom.release-holdout-declaration.v1"
+_DECLARATION_SCHEMA_VERSION_V1 = "histdatacom.release-holdout-declaration.v1"
+_DECLARATION_SCHEMA_VERSION_V2 = "histdatacom.release-holdout-declaration.v2"
 _DEFAULT_CLAIM_SCOPE = "v2.5-marked-hawkes-release-decision-successor-1"
 _DEFAULT_RESOURCE_BOUNDS: Mapping[str, int | float] = {
     "max_source_bytes": 4 * 1024**3,
@@ -94,6 +96,12 @@ _HOLDOUT_AXES = {
         "median",
     ),
 }
+_HOLDOUT_AXIS_FIELDS = (
+    "event_stratum",
+    "observation_scenario_id",
+    "alignment_kind",
+    "deficit_stratum",
+)
 
 
 def _timestamp_ns(value: str) -> int:
@@ -165,6 +173,38 @@ def _validated_period(value: Any, *, field: str) -> str:
     return period
 
 
+def _validated_holdout_axes(
+    value: Any,
+) -> Mapping[str, tuple[str, str, str, str]]:
+    if not isinstance(value, Mapping) or set(value) != set(_HOLDOUT_AXES):
+        raise ValueError("holdout_axes must declare each required session")
+    normalized: dict[str, tuple[str, str, str, str]] = {}
+    for session in _HOLDOUT_AXES:
+        raw = value[session]
+        if not isinstance(raw, Mapping) or set(raw) != set(
+            _HOLDOUT_AXIS_FIELDS
+        ):
+            raise ValueError(f"holdout_axes {session} fields differ")
+        fields = (
+            str(raw["event_stratum"]).strip(),
+            str(raw["observation_scenario_id"]).strip(),
+            str(raw["alignment_kind"]).strip(),
+            str(raw["deficit_stratum"]).strip(),
+        )
+        if any(not field for field in fields):
+            raise ValueError(f"holdout_axes {session} contains an empty value")
+        normalized[session] = fields
+
+    for index, field in enumerate(_HOLDOUT_AXIS_FIELDS):
+        expected = Counter(values[index] for values in _HOLDOUT_AXES.values())
+        observed = Counter(values[index] for values in normalized.values())
+        if observed != expected:
+            raise ValueError(
+                f"holdout_axes {field} coverage differs from established policy"
+            )
+    return normalized
+
+
 def _load_declaration(
     path: Path | None,
 ) -> tuple[
@@ -172,6 +212,7 @@ def _load_declaration(
     Mapping[str, tuple[tuple[str, str], ...]],
     str,
     Mapping[str, int | float],
+    Mapping[str, tuple[str, str, str, str]],
 ]:
     if path is None:
         return (
@@ -179,11 +220,13 @@ def _load_declaration(
             dict(_DEFAULT_DECLARATIONS),
             _DEFAULT_CLAIM_SCOPE,
             dict(_DEFAULT_RESOURCE_BOUNDS),
+            dict(_HOLDOUT_AXES),
         )
 
     payload = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(payload, Mapping):
         raise TypeError("release-holdout declaration must be an object")
+    schema_version = str(payload.get("schema_version", ""))
     expected_keys = {
         "schema_version",
         "claim_scope",
@@ -191,12 +234,17 @@ def _load_declaration(
         "split_periods",
         "windows",
     }
+    if schema_version == _DECLARATION_SCHEMA_VERSION_V2:
+        expected_keys.add("holdout_axes")
     if set(payload) != expected_keys:
         raise ValueError(
             "release-holdout declaration fields differ: "
             f"expected {sorted(expected_keys)}"
         )
-    if payload["schema_version"] != _DECLARATION_SCHEMA_VERSION:
+    if schema_version not in {
+        _DECLARATION_SCHEMA_VERSION_V1,
+        _DECLARATION_SCHEMA_VERSION_V2,
+    }:
         raise ValueError("release-holdout declaration schema differs")
     claim_scope = str(payload["claim_scope"]).strip()
     if not claim_scope:
@@ -277,7 +325,18 @@ def _load_declaration(
                 f"{split_kind} must declare each required session exactly once"
             )
         declarations[split_kind] = tuple(selected)
-    return split_periods, declarations, claim_scope, resource_bounds
+    holdout_axes = (
+        _validated_holdout_axes(payload["holdout_axes"])
+        if schema_version == _DECLARATION_SCHEMA_VERSION_V2
+        else dict(_HOLDOUT_AXES)
+    )
+    return (
+        split_periods,
+        declarations,
+        claim_scope,
+        resource_bounds,
+        holdout_axes,
+    )
 
 
 def _sha256(value: Any) -> str:
@@ -390,7 +449,7 @@ def _parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     args = _parser().parse_args()
-    split_periods, declarations, claim_scope, resource_bounds = (
+    split_periods, declarations, claim_scope, resource_bounds, holdout_axes = (
         _load_declaration(args.declaration_file)
     )
     profile = ReverseDegradationCorpusProfileV1(
@@ -438,7 +497,7 @@ def main() -> int:
             context_events=context_events,
         )
         if window.split_kind == "final_holdout":
-            event, scenario, alignment, deficit = _HOLDOUT_AXES[window.session]
+            event, scenario, alignment, deficit = holdout_axes[window.session]
             if event == "event" and window.context_state.startswith(
                 "market_context:none:"
             ):
