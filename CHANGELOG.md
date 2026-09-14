@@ -2,6 +2,10 @@
 
 ### Added
 
+- **market context**: add a content-addressed 21-economy indicator catalog,
+  versioned methodology and recurrence rules, evidence-backed rename/rebase/
+  split/merge lineage, explicit expected-occurrence states, and fail-closed
+  structural coverage and gap audits (#572).
 - **market context**: add deterministic official-archive release-time
   hierarchy, immutable schedule/publication/revision mutation chains,
   first-actual deltas, fixed previous-as-known cutoffs, difficult-case

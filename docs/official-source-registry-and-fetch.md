@@ -81,6 +81,11 @@ depth, historical publication times, or original vintages. The registry marks
 those series-dependent obligations explicitly so an economy backfill cannot
 close on an institution name alone.
 
+The registry's complete authority matrix feeds the
+[canonical indicator catalog](economic-indicator-catalog.md). The catalog
+adds exact concept, methodology-era, recurrence-rule, and expected-occurrence
+identity while retaining this registry's immutable legal-producer choice.
+
 ## Versioned contracts
 
 | Contract | Responsibility |

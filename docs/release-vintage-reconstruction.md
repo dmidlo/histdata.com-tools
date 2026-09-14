@@ -10,6 +10,9 @@ Source discovery and bounded fetch/replay are governed by the
 [official-source registry](official-source-registry-and-fetch.md). Historical
 schedule acquisition remains #579, and source-specific archive reconstruction
 remains #581. This module supplies the shared rules those adapters must use.
+Expected concepts and occurrences are governed separately by the
+[canonical indicator catalog](economic-indicator-catalog.md), so releases
+found in an archive cannot silently define their own coverage denominator.
 
 ## Contracts
 

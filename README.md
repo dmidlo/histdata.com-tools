@@ -2600,6 +2600,12 @@ publication, and revision chains through the documented
 [`release-vintage reconstruction`](docs/release-vintage-reconstruction.md)
 engine. It retains an explicit publication-time hierarchy, revision deltas,
 fixed previous-as-known cutoffs, and machine-verifiable point-in-time audits.
+The companion
+[`canonical indicator catalog`](docs/economic-indicator-catalog.md) separates
+the events that should exist from the releases found so far. It binds all 21
+economies and 12 families to reviewed legal producers, versions exact
+methodology and schedule rules, retains rename/rebase/split/merge lineage, and
+reports coverage only when the expected-occurrence denominator is qualified.
 Official acquisition is governed by a reviewed 21-economy legal-producer
 matrix plus bounded, conditional, credential-safe request manifests and
 content-addressed raw-response replay. Protocol-specific parsers attach behind

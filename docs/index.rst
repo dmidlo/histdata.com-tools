@@ -21,6 +21,7 @@ Data and reconstruction foundations
    observation-process-uncertainty
    market-context-contracts
    economic-calendar-contracts
+   economic-indicator-catalog
    release-vintage-reconstruction
    official-source-registry-and-fetch
    economic-calendar-branch-migration
