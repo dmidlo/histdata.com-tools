@@ -29,6 +29,7 @@ Data and reconstruction foundations
    official-source-adapters
    monetary-policy-semantics
    inflation-price-semantics
+   labour-market-semantics
    economic-calendar-branch-migration
    cftc-positioning-contracts
    provider-neutral-dataset-catalog

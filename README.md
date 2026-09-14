@@ -2646,6 +2646,12 @@ bases, headline/core/component concepts, and flash/final stages retain distinct
 identities. Derived rates bind the exact input vintages, calendar triplets
 require exact-concept pre-release forecasts, incomplete component tables stay
 explicit, and rebases/reweights cannot silently bridge methodology eras.
+Labour releases use exact
+[`labour-market semantics`](docs/labour-market-semantics.md). Household and
+establishment measures, published changes and level vintages, seasonal bases,
+claims, vacancies, earnings, and hours retain distinct concepts. Release
+packages share publication evidence without merging indicator events, while
+benchmark and methodology changes remain explicit historical breaks.
 
 #### CFTC positioning state
 

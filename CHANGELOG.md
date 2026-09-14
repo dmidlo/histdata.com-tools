@@ -2,6 +2,10 @@
 
 ### Added
 
+- **market context**: add versioned labour concept, observation, derivation,
+  expectation, triplet, release-package, and methodology semantics; preserve
+  exact survey identity and published changes, refuse current-level historical
+  fabrication, and audit difficult cases across all 21 economy profiles (#576).
 - **market context**: add versioned inflation/index concept, observation,
   derivation, expectation, triplet, component, release-stage, and methodology
   semantics; prohibit latest-current rates from masquerading as historical
