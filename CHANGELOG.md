@@ -2,6 +2,12 @@
 
 ### Added
 
+- **market context**: qualify all 319 published PPI headline releases from
+  January 2000 through August 2026 with 320 distinct current/predecessor
+  artifacts, exact 08:30 publication times, legacy text and semantic/fallback
+  HTML parsing, the 2014 finished-goods/final-demand lineage break, 59 observed
+  prior-period revisions, and the explicit October 2025 publication gap
+  (#538).
 - **market context**: qualify all 318 published CPI-U all-items releases from
   January 2000 through July 2026 with current/predecessor artifact hashes,
   exact 08:30 publication times, legacy text and HTML parser eras, an official

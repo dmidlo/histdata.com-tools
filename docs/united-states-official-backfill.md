@@ -29,12 +29,13 @@ and revision requirements, permitted official forecast source, and explicit
 limitations. An archive start date is a route declaration, not a historical
 coverage claim.
 
-The source registry includes separate supplemental entries for DOL/ETA and the
-Philadelphia Fed. This prevents the broad family-level BLS and Census entries
-from being incorrectly named as the producers of weekly claims or regional Fed
-surveys. The Federal Reserve G.17 entry also declares plain text as a real
-archive format. The reusable HTML-release adapter preserves such text as one
-bounded UTF-8 record, including the exact line count and raw-snapshot lineage.
+The source registry includes separate supplemental entries for DOL/ETA, the
+Philadelphia Fed, CPI, and PPI. This prevents broad family-level entries from
+being incorrectly named as the occurrence-specific source for weekly claims,
+regional Fed surveys, or BLS release documents. The Federal Reserve G.17 entry
+also declares plain text as a real archive format. The reusable HTML-release
+adapter preserves such text as one bounded UTF-8 record, including the exact
+line count and raw-snapshot lineage.
 
 ## Retained real release
 
@@ -208,6 +209,66 @@ missing, duplicate, changed, or newly unparseable bytes.
 slice directly from that evidence, with unsupported event forecasts kept as an
 explicit nonblocking gap.
 
+## Complete PPI archive qualification
+
+`histdatacom.market_context.us_ppi_archive` qualifies the seasonally adjusted
+headline change from every official BLS PPI publication in the requested
+window. The dedicated `us.bls.ppi` supplemental source distinguishes those
+occurrence-specific documents from the registry's family-level public-data
+entry and records their exact formats, parser route, minute precision, and
+empirical verification status.
+
+The packaged `us_ppi_archive_v1.json` manifest is observed as of September 14,
+2026 and records:
+
+- 319 published reference periods from January 2000 through August 2026;
+- 320 distinct source artifacts and 237,890,117 bytes, including the December
+  1999 release needed for January 2000's previous-as-known value;
+- 96 plain-text and 223 HTML current releases;
+- 319 distinct normalized triplet hashes and 59 observed prior-period
+  revisions; and
+- one explicitly noncomparable revised-previous value at the January 2014
+  transition from finished-goods to final-demand PPI.
+
+The exact 129,766-byte BLS release-index HTML is retained in
+`us_ppi_release_index_v1.html.b64`. It fixes the published-period denominator,
+publication links, and the explicit October 2025 federal-appropriations-lapse
+gap. The November 2025 release reports a normal monthly change using a
+subsequently calculated October index, while the prior published release and
+previous-as-known value still refer to September. Replay preserves that
+distinction.
+
+Historical parsing follows the observed source eras: Windows-1252 and UTF-8
+text releases, four preformatted-text HTML releases from 2008, and 219
+semantic Table A HTML releases. It accepts bounded prefix and suffix `r`
+revision markers and the official January 2017 header's extra comma. Concrete
+EST and EDT labels must still agree with the publication date. Before January
+2014 the headline is finished-goods PPI; from that release onward it is final
+demand, so replay does not mislabel the transition as a revision of a
+comparable measure. BLS's monthly interim-revision policy beginning with the
+November 2021 data is retained as an explicit historical limitation.
+
+The refresh command can fetch live official bytes or replay an operator's
+retained basename-addressed corpus. Either path can retain the full corpus
+content-addressed outside the wheel:
+
+```console
+uv run python scripts/refresh_us_ppi_archive.py \
+  --as-of 2026-09-14 \
+  --raw-directory /absolute/operator/path/ppi-raw
+
+uv run python scripts/refresh_us_ppi_archive.py \
+  --as-of 2026-09-14 \
+  --source-directory /absolute/operator/path/ppi-source \
+  --raw-directory /absolute/operator/path/ppi-raw
+```
+
+`replay_bls_ppi_archive()` recomputes every current/predecessor pair and
+rejects missing, duplicate, changed, or newly unparseable bytes.
+`bls_ppi_coverage_from_manifest()` derives the complete 319-event inflation
+slice directly from the verified manifest, while the absence of an official
+event-level forecast remains an explicit nonblocking gap.
+
 ## Quantified closure audit
 
 `UnitedStatesProgramCoverageV1` records one exact 2000-present denominator and
@@ -260,8 +321,8 @@ alone is not.
   retain monthly release PDFs; the revised download is not substituted for
   those vintages.
 
-The package preserves the real G.17 and CPI indexes, one representative G.17
-raw release, and both complete raw/normalized manifests. The remaining
+The package preserves the real G.17, CPI, and PPI indexes, one representative
+G.17 raw release, and all three complete raw/normalized manifests. The remaining
 production raw corpora stay external, content addressed, and subject to the
 coverage audit so wheel size does not grow with thousands of federal release
 files.

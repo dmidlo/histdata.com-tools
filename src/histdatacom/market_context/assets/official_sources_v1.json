@@ -3510,6 +3510,93 @@
     },
     {
       "schema_version": "histdatacom.official-source-entry.v1",
+      "source_key": "us.bls.ppi",
+      "economy_code": "US",
+      "economy_name": "United States",
+      "institution": "U.S. Bureau of Labor Statistics",
+      "jurisdiction": "United States of America",
+      "legal_producer": true,
+      "roles": [
+        "official-archive",
+        "release-calendar"
+      ],
+      "event_families": [
+        "inflation-prices"
+      ],
+      "indicator_ids": [
+        "consumer-and-producer-prices"
+      ],
+      "formats": [
+        "text",
+        "html"
+      ],
+      "capabilities": [
+        "historical-observations",
+        "publication-metadata",
+        "schedule-metadata",
+        "revision-metadata",
+        "archive-enumeration"
+      ],
+      "endpoint_uri_template": "https://www.bls.gov/bls/news-release/ppi.htm",
+      "allowed_hosts": [
+        "www.bls.gov"
+      ],
+      "expected_media_types": [
+        "text/plain",
+        "text/html"
+      ],
+      "source_series_ids": [],
+      "source_table_ids": [
+        "PPI Table A"
+      ],
+      "source_release_ids": [
+        "PPI"
+      ],
+      "release_calendar_uri": "https://www.bls.gov/schedule/",
+      "archive_uri": "https://www.bls.gov/bls/news-release/ppi.htm",
+      "source_timezone": "America/New_York",
+      "availability_time_precision": "exact-minute",
+      "dst_convention": "IANA zone database; retain source lexical EST, EDT, or ET and reject a concrete abbreviation that conflicts with the publication date.",
+      "historical_depth": "Occurrence-specific PPI releases are hash-qualified from January 2000 through August 2026, with a December 1999 predecessor artifact.",
+      "known_breaks": [
+        "The headline is finished goods through December 2013 and final demand from January 2014; the transition is explicitly noncomparable.",
+        "Four January-April 2008 HTML releases expose Table A as preformatted text rather than a semantic HTML table.",
+        "BLS began publishing monthly interim revisions with the November 2021 data release; final values remain subject to the four-month revision window.",
+        "October 2025 was not published during the federal appropriations lapse; the November release publishes a monthly change using a subsequently calculated October index."
+      ],
+      "revision_behavior": "PPI values can be revised monthly for four months and seasonally adjusted history can change during annual factor recalculation; occurrence-specific releases retain both previous-as-known and revised-prior values.",
+      "rate_limit": "No stable archive-specific limit is published; refresh uses bounded parallelism, retries, and an identifying contact user agent.",
+      "authentication": "none",
+      "credential_env_name": null,
+      "credential_header_name": null,
+      "credential_parameter_name": null,
+      "terms_uri": "https://www.bls.gov/bls/linksite.htm",
+      "fallback_source_keys": [
+        "us.bls.public-data"
+      ],
+      "parser_id": "official.html.v1",
+      "parser_version": "1",
+      "replay_strategy": "Retain the exact archive index plus every selected release artifact externally; bind current and predecessor SHA-256 digests and recompute the finished-goods or final-demand headline before accepting replay.",
+      "adapter_owner": "market-context/us",
+      "verification_status": "empirically-verified",
+      "reviewed_on": "2026-09-14",
+      "verification_evidence_uris": [
+        "https://www.bls.gov/bls/news-release/ppi.htm",
+        "https://www.bls.gov/news.release/history/ppi_01132000.txt",
+        "https://www.bls.gov/news.release/history/ppi_02172000.txt",
+        "https://www.bls.gov/news.release/archives/ppi_02192014.htm",
+        "https://www.bls.gov/news.release/archives/ppi_12142021.htm",
+        "https://www.bls.gov/news.release/archives/ppi_11252025.htm",
+        "https://www.bls.gov/news.release/archives/ppi_09102026.htm"
+      ],
+      "redistribution_notes": "The package retains only the official index and a compact hash manifest; release documents remain an external operator-owned corpus with BLS attribution.",
+      "limitations": [
+        "The qualification covers the finished-goods and final-demand seasonally adjusted headline changes only; core, component, index-level, and year-over-year series require separate identities.",
+        "No official event-level consensus is published, so forecasts remain explicitly unavailable."
+      ]
+    },
+    {
+      "schema_version": "histdatacom.official-source-entry.v1",
       "source_key": "us.bls.public-data",
       "economy_code": "US",
       "economy_name": "United States",

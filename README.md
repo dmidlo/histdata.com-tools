@@ -2652,6 +2652,11 @@ artifacts. Its mixed text, HTML, and PDF parser preserves exact 08:30 Eastern
 publication evidence, 15 observed prior-period revisions, the unpublished
 October 2025 reference month, November's two-month shutdown measure, and
 December's explicitly noncomparable revised-previous field.
+The U.S. PPI specialization binds 319 published January 2000 through August
+2026 headline releases to 320 distinct current/predecessor source artifacts.
+Its text and HTML parsers preserve exact 08:30 Eastern publication evidence,
+59 observed prior-period revisions, the January 2014 finished-goods to
+final-demand lineage break, and the unpublished October 2025 reference month.
 Central-bank releases additionally use framework-aware
 [`monetary-policy semantics`](docs/monetary-policy-semantics.md). Decisions,
 statements, vote splits, press conferences, minutes, projections, schedules,

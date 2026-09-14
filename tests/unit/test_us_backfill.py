@@ -110,7 +110,7 @@ def _coverage(
 def test_registry_represents_us_specific_legal_producers_and_text() -> None:
     registry = load_packaged_official_source_registry()
     assert registry.reviewed_on == "2026-09-14"
-    assert len(registry.sources) == 55
+    assert len(registry.sources) == 56
 
     dol = registry.source("us.dol.eta-unemployment-insurance")
     assert dol.institution.startswith("U.S. Department of Labor")
@@ -130,6 +130,14 @@ def test_registry_represents_us_specific_legal_producers_and_text() -> None:
     assert OfficialSourceFormat.PDF in cpi.formats
     assert cpi.verification_status.value == "empirically-verified"
 
+    ppi = registry.source("us.bls.ppi")
+    assert ppi.source_release_ids == ("PPI",)
+    assert set(ppi.formats) == {
+        OfficialSourceFormat.HTML,
+        OfficialSourceFormat.TEXT,
+    }
+    assert ppi.verification_status.value == "empirically-verified"
+
 
 def test_builtin_us_profile_covers_every_required_family_and_program() -> None:
     registry = load_packaged_official_source_registry()
@@ -148,6 +156,7 @@ def test_builtin_us_profile_covers_every_required_family_and_program() -> None:
         UnitedStatesForecastStrategy.PRODUCER_OUTLOOK_SURVEY
     )
     assert profile.by_key["us.fomc.sep"].archive_start_date == "2007-10-31"
+    assert profile.by_key["us.bls.ppi"].source_key == "us.bls.ppi"
     assert UnitedStatesBackfillProfileV1.from_json(profile.to_json()) == profile
 
 
