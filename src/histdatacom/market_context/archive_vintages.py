@@ -1462,11 +1462,12 @@ class EconomicArchiveVintageCorpusV1:
                     "vintage gap names an unknown attempted artifact"
                 )
         for check in checks:
-            release = release_by_id.get(check.historical_release_id)
-            artifact = artifact_by_id.get(check.current_artifact_id)
+            cross_check_release = release_by_id.get(check.historical_release_id)
+            cross_check_artifact = artifact_by_id.get(check.current_artifact_id)
             if (
-                release is None
-                or release.logical_event_key != check.logical_event_key
+                cross_check_release is None
+                or cross_check_release.logical_event_key
+                != check.logical_event_key
             ):
                 raise ValueError(
                     "latest-value cross-check changes historical release"
@@ -1476,19 +1477,22 @@ class EconomicArchiveVintageCorpusV1:
                     "latest-value cross-check must use a terminal release"
                 )
             if (
-                artifact is None
-                or artifact.artifact_kind
+                cross_check_artifact is None
+                or cross_check_artifact.artifact_kind
                 is not EconomicArchiveArtifactKind.CURRENT_API
             ):
                 raise ValueError(
                     "latest-value cross-check requires a current API artifact"
                 )
-            if check.checked_at_ns < artifact.retrieved_at_ns:
+            if check.checked_at_ns < cross_check_artifact.retrieved_at_ns:
                 raise ValueError(
                     "latest-value cross-check predates its current artifact"
                 )
             selected = selected_by_record[
-                (release.logical_event_key, release.revision_sequence)
+                (
+                    cross_check_release.logical_event_key,
+                    cross_check_release.revision_sequence,
+                )
             ]
             if (
                 check.historical_normalized_sha256

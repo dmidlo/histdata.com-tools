@@ -2623,10 +2623,14 @@ deterministic precedence, retained snapshots cannot be backdated, and current
 API checks cannot rewrite historical values.
 Official acquisition is governed by a reviewed 21-economy legal-producer
 matrix plus bounded, conditional, credential-safe request manifests and
-content-addressed raw-response replay. Protocol-specific parsers attach behind
-an exact format/version seam, and latest-state APIs cannot silently claim
-historical vintages. See
-[`docs/official-source-registry-and-fetch.md`](docs/official-source-registry-and-fetch.md).
+content-addressed raw-response replay. Exact-version reusable adapters cover
+SDMX 2.1/3.0, JSON-stat, JSON/CSV/TSV, XLS/XLSX, HTML release materials,
+RSS/Atom/ICS, PDF, static archives, and data catalogs. Every normalized record
+retains its raw hash and source locator; schema drift fails explicitly, while
+an encrypted or image-only PDF records the required reacquisition/OCR evidence.
+Latest-state APIs still cannot silently claim historical vintages. See the
+[`official acquisition`](docs/official-source-registry-and-fetch.md) and
+[`protocol adapter`](docs/official-source-adapters.md) guides.
 
 #### CFTC positioning state
 

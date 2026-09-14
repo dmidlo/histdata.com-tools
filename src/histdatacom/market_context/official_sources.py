@@ -1,9 +1,10 @@
 """Authoritative economic-source registry and bounded acquisition contracts.
 
-The module deliberately stops before protocol-specific parsing.  It binds each
-request to a reviewed legal producer, retains the exact response bytes, and
-exposes a typed parser seam so SDMX, JSON-stat, spreadsheet, feed, HTML, and PDF
-adapters can be implemented once without weakening source identity or replay.
+This module binds each request to a reviewed legal producer, retains the exact
+response bytes, and exposes the typed parser seam implemented by
+``market_context.official_adapters``.  Acquisition therefore remains separate
+from SDMX, JSON-stat, spreadsheet, feed, HTML, and PDF interpretation without
+weakening source identity or replay.
 """
 
 from __future__ import annotations

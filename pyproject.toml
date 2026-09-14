@@ -44,6 +44,9 @@ classifiers = [
 ]
 dependencies = [
     "certifi>=2026.6.17",
+    "defusedxml>=0.7.1,<1",
+    "openpyxl>=3.1.5,<4",
+    "pypdf>=6.1,<7",
     "polars>=1.41.2",
     "pytz>=2026.2",
     "PyYAML>=6.0.3",
@@ -52,6 +55,7 @@ dependencies = [
     "Rx>=3.2",
     "temporalio>=1.10,<1.32",
     "tzdata>=2026.3",
+    "xlrd>=2.0.2,<3",
 ]
 
 [project.optional-dependencies]

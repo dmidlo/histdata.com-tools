@@ -26,6 +26,7 @@ Data and reconstruction foundations
    release-schedule-reconstruction
    archive-vintage-reconstruction
    official-source-registry-and-fetch
+   official-source-adapters
    economic-calendar-branch-migration
    cftc-positioning-contracts
    provider-neutral-dataset-catalog

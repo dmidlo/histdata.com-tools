@@ -2,6 +2,11 @@
 
 ### Added
 
+- **market context**: add exact-version reusable SDMX 2.1/3.0, JSON-stat,
+  JSON/CSV/TSV, XLS/XLSX, HTML, RSS/Atom/ICS, PDF, static-archive, and
+  data-catalog adapter packs with raw-to-record provenance, explicit schema
+  drift/reacquisition failures, header versioning, and registry/fixture
+  qualification audits (#584).
 - **market context**: add archive-first historical vintage governance with a
   complete 21-economy/event-family recovery matrix, content-addressed official
   artifact/record bindings, deterministic mirror reconciliation, explicit

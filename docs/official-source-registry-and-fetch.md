@@ -6,10 +6,10 @@ download. The installed `OfficialSourceRegistryV1` freezes that choice before
 an adapter can plan a request. Every request then retains the exact official
 bytes and enough identity to replay parsing without network access.
 
-This is the acquisition foundation for #535. Protocol implementations remain
-owned by #584: this module defines their typed boundary but does not claim that
-an SDMX, spreadsheet, feed, HTML, or PDF parser exists merely because an
-endpoint advertises that format.
+This is the acquisition foundation implemented by #535. The reusable
+[official-source adapters](official-source-adapters.md) implement the typed
+boundary established here. A format declared by an endpoint is still only a
+capability until its first-party fixture qualification passes.
 
 ## Reviewed scope and authority rule
 
@@ -182,7 +182,7 @@ can inject `OfficialHttpTransportV1`. The fetcher:
 The generic signature check catches gross corruption: JSON/JSON-stat must begin
 as JSON, SDMX/feed documents must have a structured opening, PDF and Office
 files must have their binary signatures, ICS must begin as a calendar, and
-text tables cannot contain NUL bytes. #584 parsers add protocol schemas,
+text tables cannot contain NUL bytes. Protocol parsers add schema checks,
 workbook/table versions, codelists, and drift checks.
 
 ## Conditional requests
@@ -262,15 +262,15 @@ tests or retained contemporaneous release artifacts governed by the
 
 ## Closure boundary
 
-#535 establishes the complete reviewed institutional matrix and the reusable
-transport/replay contracts. It deliberately leaves these claims open for
-dependent issues:
+#535 establishes the complete reviewed institutional matrix and reusable
+transport/replay contracts; #584 adds reusable protocol parsing and fixture
+qualification. Together they deliberately leave these claims open for economy
+backfills and dependent issues:
 
-- concrete source-specific series/table/release IDs and empirical coverage
-  (#584 and economy backfills);
+- concrete source-specific series/table/release IDs and empirical coverage in
+  economy backfills;
 - concrete archive parsing and backfills using the implemented release-chain
   and [archive-vintage](archive-vintage-reconstruction.md) contracts;
-- reusable SDMX, JSON-stat, spreadsheet, feed, HTML, and PDF parsers (#584);
 - observed professional or official consensus (#536/#583); and
 - professional calendar materialization and display resolution (#582/#585).
 
