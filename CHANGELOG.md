@@ -2,6 +2,10 @@
 
 ### Added
 
+- **market context**: add content-addressed historical release-schedule
+  corpora, catalog-qualified occurrence binding, immutable reschedule/delay/
+  cancellation/emergency evidence, explicit timezone/holiday/DST versions,
+  scheduled-time point-in-time queries, and no-future replay audits (#579).
 - **market context**: add a content-addressed 21-economy indicator catalog,
   versioned methodology and recurrence rules, evidence-backed rename/rebase/
   split/merge lineage, explicit expected-occurrence states, and fail-closed

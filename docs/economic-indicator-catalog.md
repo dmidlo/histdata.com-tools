@@ -8,8 +8,10 @@ empty archive search from deciding the historical event universe.
 The catalog is the #572 bridge between the provider-neutral calendar contracts
 in #534, the legal-producer registry in #535, and the release-vintage engine in
 #537. Event-family specifications #574–#578 replace conservative family cells
-with exact indicator definitions. Schedule reconstruction #579 emits their
-expected occurrences; archive recovery #581 supplies reconstructed releases.
+with exact indicator definitions. The
+[schedule-reconstruction layer](release-schedule-reconstruction.md) binds
+qualified expected occurrences to as-known schedule vintages; archive recovery
+#581 supplies source-specific reconstructed releases.
 
 ## Contract topology
 

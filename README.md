@@ -2606,6 +2606,13 @@ the events that should exist from the releases found so far. It binds all 21
 economies and 12 families to reviewed legal producers, versions exact
 methodology and schedule rules, retains rename/rebase/split/merge lineage, and
 reports coverage only when the expected-occurrence denominator is qualified.
+The
+[`release-schedule reconstruction`](docs/release-schedule-reconstruction.md)
+layer binds those qualified occurrences to immutable historical schedule
+vintages. Its point-in-time query stays on scheduled time after publication,
+admits reschedules and cancellations only when publicly known, retains
+timezone/holiday/DST rule evidence, and prevents emergency events from gaining
+fictional advance notice.
 Official acquisition is governed by a reviewed 21-economy legal-producer
 matrix plus bounded, conditional, credential-safe request manifests and
 content-addressed raw-response replay. Protocol-specific parsers attach behind
