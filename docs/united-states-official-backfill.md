@@ -30,12 +30,12 @@ limitations. An archive start date is a route declaration, not a historical
 coverage claim.
 
 The source registry includes separate supplemental entries for DOL/ETA, the
-Philadelphia Fed, CPI, and PPI. This prevents broad family-level entries from
-being incorrectly named as the occurrence-specific source for weekly claims,
-regional Fed surveys, or BLS release documents. The Federal Reserve G.17 entry
-also declares plain text as a real archive format. The reusable HTML-release
-adapter preserves such text as one bounded UTF-8 record, including the exact
-line count and raw-snapshot lineage.
+Philadelphia Fed, CPI, PPI, and the Employment Situation. This prevents broad
+family-level entries from being incorrectly named as the occurrence-specific
+source for weekly claims, regional Fed surveys, or BLS release documents. The
+Federal Reserve G.17 entry also declares plain text as a real archive format.
+The reusable HTML-release adapter preserves such text as one bounded UTF-8
+record, including the exact line count and raw-snapshot lineage.
 
 ## Retained real release
 
@@ -269,6 +269,64 @@ rejects missing, duplicate, changed, or newly unparseable bytes.
 slice directly from the verified manifest, while the absence of an official
 event-level forecast remains an explicit nonblocking gap.
 
+## Complete Employment Situation archive qualification
+
+`histdatacom.market_context.us_employment_situation_archive` qualifies three
+separate headline measures from every official BLS Employment Situation
+publication: the CPS all-workers unemployment rate, the CES total-nonfarm
+monthly payroll change, and CES total-private average hourly earnings. The
+dedicated `us.bls.employment-situation` supplemental source gives the
+occurrence-specific release documents their own formats, parser route,
+exact-minute precision, and empirical verification status without displacing
+the family-level BLS public-data source.
+
+The packaged `us_employment_situation_archive_v1.json` manifest is observed as
+of September 14, 2026 and records:
+
+- 319 published reference periods from January 2000 through August 2026;
+- 320 distinct source artifacts and 183,693,130 bytes, including the December
+  1999 publication needed for January 2000's previous-as-known values;
+- 96 fixed-width text, 24 preformatted HTML, and 199 semantic HTML current
+  releases;
+- 957 distinct normalized measure triplets;
+- prior-period revisions in 6 CPS unemployment, 314 CES payroll, and 239 CES
+  earnings occurrences, affecting 316 publication packages overall; and
+- one explicitly noncomparable earnings comparison at the January 2010
+  transition from production/nonsupervisory workers to all employees.
+
+The exact 132,524-byte BLS archive-index HTML is retained in
+`us_employment_situation_release_index_v1.html.b64`. It fixes the denominator,
+selected publication links, and the explicit October 2025 federal-
+appropriations-lapse gap. The November publication keeps September as the
+previous published occurrence while using the subsequently calculated October
+values where the current measure requires them.
+
+Historical parsing keeps CPS and CES evidence separate. Modern summary-table
+row identities select the unemployment rate, published payroll change, and
+all-employee earnings level. The earlier fixed-width table supplies the same
+headlines; its revised prior payroll change is derived only from the two
+occurrence-specific adjacent level columns in that release, never from a
+latest-state database. The December 7, 2012 artifact's erroneous `EDT` label
+is retained as source evidence while timestamp normalization correctly uses
+`America/New_York`. The December 1999 predecessor's URL is dated January 19,
+2000, but its release header establishes the actual January 7 publication.
+
+The refresh command can fetch live official bytes or replay a retained
+basename-addressed corpus:
+
+```console
+uv run python scripts/refresh_us_employment_situation_archive.py \
+  --as-of 2026-09-14 \
+  --source-directory /absolute/operator/path/empsit-source \
+  --raw-directory /absolute/operator/path/empsit-raw
+```
+
+`replay_bls_employment_situation_archive()` recomputes all three triplets from
+every current/predecessor pair and rejects missing, duplicated, changed, or
+newly unparseable evidence. `bls_employment_situation_coverage_from_manifest()`
+derives the complete 319-event labour slice while leaving absent official
+event-level consensus as an explicit nonblocking gap.
+
 ## Quantified closure audit
 
 `UnitedStatesProgramCoverageV1` records one exact 2000-present denominator and
@@ -321,8 +379,8 @@ alone is not.
   retain monthly release PDFs; the revised download is not substituted for
   those vintages.
 
-The package preserves the real G.17, CPI, and PPI indexes, one representative
-G.17 raw release, and all three complete raw/normalized manifests. The remaining
-production raw corpora stay external, content addressed, and subject to the
-coverage audit so wheel size does not grow with thousands of federal release
-files.
+The package preserves the real G.17, CPI, PPI, and Employment Situation
+indexes, one representative G.17 raw release, and all four complete
+raw/normalized manifests. The remaining production raw corpora stay external,
+content addressed, and subject to the coverage audit so wheel size does not
+grow with thousands of federal release files.

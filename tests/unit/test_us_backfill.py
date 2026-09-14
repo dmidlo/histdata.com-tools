@@ -110,7 +110,7 @@ def _coverage(
 def test_registry_represents_us_specific_legal_producers_and_text() -> None:
     registry = load_packaged_official_source_registry()
     assert registry.reviewed_on == "2026-09-14"
-    assert len(registry.sources) == 56
+    assert len(registry.sources) == 57
 
     dol = registry.source("us.dol.eta-unemployment-insurance")
     assert dol.institution.startswith("U.S. Department of Labor")
@@ -138,6 +138,14 @@ def test_registry_represents_us_specific_legal_producers_and_text() -> None:
     }
     assert ppi.verification_status.value == "empirically-verified"
 
+    employment = registry.source("us.bls.employment-situation")
+    assert employment.source_release_ids == ("Employment Situation",)
+    assert set(employment.formats) == {
+        OfficialSourceFormat.HTML,
+        OfficialSourceFormat.TEXT,
+    }
+    assert employment.verification_status.value == "empirically-verified"
+
 
 def test_builtin_us_profile_covers_every_required_family_and_program() -> None:
     registry = load_packaged_official_source_registry()
@@ -157,6 +165,9 @@ def test_builtin_us_profile_covers_every_required_family_and_program() -> None:
     )
     assert profile.by_key["us.fomc.sep"].archive_start_date == "2007-10-31"
     assert profile.by_key["us.bls.ppi"].source_key == "us.bls.ppi"
+    assert profile.by_key["us.bls.employment-situation"].source_key == (
+        "us.bls.employment-situation"
+    )
     assert UnitedStatesBackfillProfileV1.from_json(profile.to_json()) == profile
 
 

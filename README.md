@@ -2657,6 +2657,12 @@ The U.S. PPI specialization binds 319 published January 2000 through August
 Its text and HTML parsers preserve exact 08:30 Eastern publication evidence,
 59 observed prior-period revisions, the January 2014 finished-goods to
 final-demand lineage break, and the unpublished October 2025 reference month.
+The U.S. Employment Situation specialization binds the same 319 published
+reference periods to 320 distinct artifacts and 957 survey-specific triplets.
+It keeps CPS unemployment, CES nonfarm-payroll change, and CES average hourly
+earnings separate; preserves 6, 314, and 239 observed prior-period revisions,
+respectively; and marks the January 2010 production/nonsupervisory-to-all-
+employees earnings transition as noncomparable.
 Central-bank releases additionally use framework-aware
 [`monetary-policy semantics`](docs/monetary-policy-semantics.md). Decisions,
 statements, vote splits, press conferences, minutes, projections, schedules,

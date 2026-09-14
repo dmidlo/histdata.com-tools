@@ -95,6 +95,24 @@ events require old and new control IDs. A claim of comparability across any
 change requires an explicit bridge ID; otherwise the break remains visible to
 downstream models.
 
+## U.S. Employment Situation archive
+
+The U.S. specialization applies these distinctions to every indexed January
+2000 through August 2026 Employment Situation publication. Each release
+package carries three independent raw-backed triplets: CPS all-workers
+unemployment rate, CES total-nonfarm monthly change, and CES total-private
+average hourly earnings. A package identity proves common publication
+evidence; it does not merge their concepts or surprises.
+
+Fixed-width Summary Table A payroll revisions are derived only from the two
+adjacent levels printed in the current occurrence. Semantic Summary Table B
+provides the published change directly. Earlier initial changes remain bound
+to their predecessor artifacts, so annual CES benchmarks cannot rewrite
+history. The January 2010 earnings headline changes from production and
+nonsupervisory workers to all employees and is explicitly noncomparable.
+`replay_bls_employment_situation_archive()` verifies all 957 measure triplets
+against the 320-artifact chain.
+
 ## Economy profiles
 
 `built_in_labour_profiles()` derives one semantic/source profile for all 21
