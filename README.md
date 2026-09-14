@@ -2595,6 +2595,12 @@ prior releases. See
 [`docs/economic-calendar-contracts.md`](docs/economic-calendar-contracts.md)
 and the audited
 [`calendar-branch migration map`](docs/economic-calendar-branch-migration.md).
+Official acquisition is governed by a reviewed 21-economy legal-producer
+matrix plus bounded, conditional, credential-safe request manifests and
+content-addressed raw-response replay. Protocol-specific parsers attach behind
+an exact format/version seam, and latest-state APIs cannot silently claim
+historical vintages. See
+[`docs/official-source-registry-and-fetch.md`](docs/official-source-registry-and-fetch.md).
 
 #### CFTC positioning state
 

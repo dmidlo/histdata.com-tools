@@ -2,6 +2,11 @@
 
 ### Added
 
+- **market context**: add a reviewed authoritative-source matrix covering all
+  21 scoped economies and event families, plus source-bound bounded HTTP,
+  conditional fetches, credential-safe manifests, immutable raw snapshots,
+  content-addressed replay, typed parser seams, and lexical-time preservation
+  (#535).
 - **market context**: freeze provider-neutral economic event/series identity,
   publication-stage and schedule-status taxonomies, complete forecast scopes,
   calendar triplets, DST-aware lexical time evidence, auditable unit

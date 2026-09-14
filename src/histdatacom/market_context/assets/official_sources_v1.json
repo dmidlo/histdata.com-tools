@@ -1,0 +1,4353 @@
+{
+  "schema_version": "histdatacom.official-source-registry.v1",
+  "reviewed_on": "2026-09-13",
+  "scoped_economies": [
+    "AU",
+    "CA",
+    "CH",
+    "CZ",
+    "DE",
+    "DK",
+    "EA",
+    "FR",
+    "GB",
+    "HK",
+    "HU",
+    "JP",
+    "MX",
+    "NO",
+    "NZ",
+    "PL",
+    "SE",
+    "SG",
+    "TR",
+    "US",
+    "ZA"
+  ],
+  "sources": [
+    {
+      "schema_version": "histdatacom.official-source-entry.v1",
+      "source_key": "au.abs.data-api",
+      "economy_code": "AU",
+      "economy_name": "Australia",
+      "institution": "Australian Bureau of Statistics",
+      "jurisdiction": "Commonwealth of Australia",
+      "legal_producer": true,
+      "roles": [
+        "primary-producer",
+        "official-archive",
+        "release-calendar"
+      ],
+      "event_families": [
+        "inflation-prices",
+        "labour-market",
+        "gdp-national-accounts",
+        "retail-consumption",
+        "industrial-production",
+        "trade-external",
+        "housing",
+        "confidence-survey",
+        "fiscal",
+        "other-official"
+      ],
+      "indicator_ids": [
+        "consumer-and-producer-prices",
+        "employment-unemployment-and-earnings",
+        "gdp-and-national-accounts",
+        "retail-sales-and-household-consumption",
+        "industrial-production",
+        "trade-and-external-accounts",
+        "housing-and-construction",
+        "official-confidence-and-tendency-surveys",
+        "government-finance",
+        "other-official-macro"
+      ],
+      "formats": [
+        "sdmx-2.1"
+      ],
+      "capabilities": [
+        "current-values",
+        "historical-observations",
+        "publication-metadata",
+        "schedule-metadata",
+        "revision-metadata",
+        "series-metadata",
+        "archive-enumeration"
+      ],
+      "endpoint_uri_template": "https://data.api.abs.gov.au/rest/",
+      "allowed_hosts": [
+        "data.api.abs.gov.au",
+        "www.abs.gov.au"
+      ],
+      "expected_media_types": [
+        "application/vnd.sdmx.data+csv",
+        "application/vnd.sdmx.data+json",
+        "application/xml",
+        "text/csv"
+      ],
+      "source_series_ids": [],
+      "source_table_ids": [],
+      "source_release_ids": [],
+      "release_calendar_uri": "https://www.abs.gov.au/release-calendar",
+      "archive_uri": "https://www.abs.gov.au/statistics/application-programming-interfaces-apis/data-api-user-guide",
+      "source_timezone": "Australia/Sydney",
+      "availability_time_precision": "scheduled-only",
+      "dst_convention": "IANA zone database; retain source lexical times and require explicit DST-fold evidence.",
+      "historical_depth": "Series-dependent current revised history; contemporaneous release artifacts are required before claiming original vintages.",
+      "known_breaks": [
+        "Series/table identifiers, classifications, seasonal adjustment, rebases, and dissemination endpoints are versioned per adapter."
+      ],
+      "revision_behavior": "Published values may be revised, benchmarked, rebased, or corrected; immutable fetches never overwrite earlier evidence.",
+      "rate_limit": "No stable public limit recorded at review; apply the stricter local request, byte, page, event, retry, and runtime bounds.",
+      "authentication": "none",
+      "credential_env_name": null,
+      "credential_header_name": null,
+      "credential_parameter_name": null,
+      "terms_uri": "https://www.abs.gov.au/website-privacy-copyright-and-disclaimer",
+      "fallback_source_keys": [],
+      "parser_id": "official.sdmx_2.1.v1",
+      "parser_version": "1",
+      "replay_strategy": "Retain exact response bytes, request parameters, endpoint and parser identities, response validators, source clocks, and SHA-256 before normalization.",
+      "adapter_owner": "market-context/au",
+      "verification_status": "reviewed-entrypoint",
+      "reviewed_on": "2026-09-13",
+      "verification_evidence_uris": [
+        "https://www.abs.gov.au/statistics/application-programming-interfaces-apis/data-api-user-guide"
+      ],
+      "redistribution_notes": "Official public-data terms and attribution requirements must be rechecked and retained by the qualifying adapter.",
+      "limitations": [
+        "Registry review proves the official entrypoint and legal producer, not complete per-series coverage or historical-vintage availability.",
+        "Protocol-specific parsing and empirical fixture qualification are owned by issue #584 and the economy backfill."
+      ]
+    },
+    {
+      "schema_version": "histdatacom.official-source-entry.v1",
+      "source_key": "au.rba.statistics",
+      "economy_code": "AU",
+      "economy_name": "Australia",
+      "institution": "Reserve Bank of Australia",
+      "jurisdiction": "Commonwealth of Australia",
+      "legal_producer": true,
+      "roles": [
+        "primary-producer",
+        "official-archive",
+        "release-calendar"
+      ],
+      "event_families": [
+        "monetary-policy",
+        "money-credit"
+      ],
+      "indicator_ids": [
+        "policy-rate-and-decisions",
+        "money-credit-and-financial-statistics"
+      ],
+      "formats": [
+        "html",
+        "xlsx"
+      ],
+      "capabilities": [
+        "current-values",
+        "historical-observations",
+        "publication-metadata",
+        "schedule-metadata",
+        "revision-metadata",
+        "series-metadata",
+        "archive-enumeration"
+      ],
+      "endpoint_uri_template": "https://www.rba.gov.au/statistics/tables/",
+      "allowed_hosts": [
+        "www.rba.gov.au"
+      ],
+      "expected_media_types": [
+        "text/html",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "application/octet-stream"
+      ],
+      "source_series_ids": [],
+      "source_table_ids": [],
+      "source_release_ids": [],
+      "release_calendar_uri": "https://www.rba.gov.au/monetary-policy/rba-board-minutes/",
+      "archive_uri": "https://www.rba.gov.au/statistics/",
+      "source_timezone": "Australia/Sydney",
+      "availability_time_precision": "exact-minute",
+      "dst_convention": "IANA zone database; retain source lexical times and require explicit DST-fold evidence.",
+      "historical_depth": "Series-dependent current revised history; contemporaneous release artifacts are required before claiming original vintages.",
+      "known_breaks": [
+        "Series/table identifiers, classifications, seasonal adjustment, rebases, and dissemination endpoints are versioned per adapter."
+      ],
+      "revision_behavior": "Published values may be revised, benchmarked, rebased, or corrected; immutable fetches never overwrite earlier evidence.",
+      "rate_limit": "No stable public limit recorded at review; apply the stricter local request, byte, page, event, retry, and runtime bounds.",
+      "authentication": "none",
+      "credential_env_name": null,
+      "credential_header_name": null,
+      "credential_parameter_name": null,
+      "terms_uri": null,
+      "fallback_source_keys": [],
+      "parser_id": "official.html.v1",
+      "parser_version": "1",
+      "replay_strategy": "Retain exact response bytes, request parameters, endpoint and parser identities, response validators, source clocks, and SHA-256 before normalization.",
+      "adapter_owner": "market-context/au",
+      "verification_status": "reviewed-entrypoint",
+      "reviewed_on": "2026-09-13",
+      "verification_evidence_uris": [
+        "https://www.rba.gov.au/statistics/"
+      ],
+      "redistribution_notes": "Official public-data terms and attribution requirements must be rechecked and retained by the qualifying adapter.",
+      "limitations": [
+        "Registry review proves the official entrypoint and legal producer, not complete per-series coverage or historical-vintage availability.",
+        "Protocol-specific parsing and empirical fixture qualification are owned by issue #584 and the economy backfill."
+      ]
+    },
+    {
+      "schema_version": "histdatacom.official-source-entry.v1",
+      "source_key": "ca.statcan.wds",
+      "economy_code": "CA",
+      "economy_name": "Canada",
+      "institution": "Statistics Canada",
+      "jurisdiction": "Canada",
+      "legal_producer": true,
+      "roles": [
+        "primary-producer",
+        "official-archive",
+        "release-calendar"
+      ],
+      "event_families": [
+        "inflation-prices",
+        "labour-market",
+        "gdp-national-accounts",
+        "retail-consumption",
+        "industrial-production",
+        "trade-external",
+        "housing",
+        "confidence-survey",
+        "fiscal",
+        "other-official"
+      ],
+      "indicator_ids": [
+        "consumer-and-producer-prices",
+        "employment-unemployment-and-earnings",
+        "gdp-and-national-accounts",
+        "retail-sales-and-household-consumption",
+        "industrial-production",
+        "trade-and-external-accounts",
+        "housing-and-construction",
+        "official-confidence-and-tendency-surveys",
+        "government-finance",
+        "other-official-macro"
+      ],
+      "formats": [
+        "json"
+      ],
+      "capabilities": [
+        "current-values",
+        "historical-observations",
+        "publication-metadata",
+        "schedule-metadata",
+        "revision-metadata",
+        "series-metadata",
+        "archive-enumeration"
+      ],
+      "endpoint_uri_template": "https://www150.statcan.gc.ca/t1/wds/rest/",
+      "allowed_hosts": [
+        "www.statcan.gc.ca",
+        "www150.statcan.gc.ca"
+      ],
+      "expected_media_types": [
+        "application/json"
+      ],
+      "source_series_ids": [],
+      "source_table_ids": [],
+      "source_release_ids": [],
+      "release_calendar_uri": "https://www150.statcan.gc.ca/n1/dai-quo/cal2-eng.htm",
+      "archive_uri": "https://www.statcan.gc.ca/en/developers/wds",
+      "source_timezone": "America/Toronto",
+      "availability_time_precision": "scheduled-only",
+      "dst_convention": "IANA zone database; retain source lexical times and require explicit DST-fold evidence.",
+      "historical_depth": "Series-dependent current revised history; contemporaneous release artifacts are required before claiming original vintages.",
+      "known_breaks": [
+        "Series/table identifiers, classifications, seasonal adjustment, rebases, and dissemination endpoints are versioned per adapter."
+      ],
+      "revision_behavior": "Published values may be revised, benchmarked, rebased, or corrected; immutable fetches never overwrite earlier evidence.",
+      "rate_limit": "No stable public limit recorded at review; apply the stricter local request, byte, page, event, retry, and runtime bounds.",
+      "authentication": "none",
+      "credential_env_name": null,
+      "credential_header_name": null,
+      "credential_parameter_name": null,
+      "terms_uri": "https://www.statcan.gc.ca/en/reference/important-notices",
+      "fallback_source_keys": [],
+      "parser_id": "official.json.v1",
+      "parser_version": "1",
+      "replay_strategy": "Retain exact response bytes, request parameters, endpoint and parser identities, response validators, source clocks, and SHA-256 before normalization.",
+      "adapter_owner": "market-context/ca",
+      "verification_status": "reviewed-entrypoint",
+      "reviewed_on": "2026-09-13",
+      "verification_evidence_uris": [
+        "https://www.statcan.gc.ca/en/developers/wds"
+      ],
+      "redistribution_notes": "Official public-data terms and attribution requirements must be rechecked and retained by the qualifying adapter.",
+      "limitations": [
+        "Registry review proves the official entrypoint and legal producer, not complete per-series coverage or historical-vintage availability.",
+        "Protocol-specific parsing and empirical fixture qualification are owned by issue #584 and the economy backfill."
+      ]
+    },
+    {
+      "schema_version": "histdatacom.official-source-entry.v1",
+      "source_key": "ca.boc.valet",
+      "economy_code": "CA",
+      "economy_name": "Canada",
+      "institution": "Bank of Canada",
+      "jurisdiction": "Canada",
+      "legal_producer": true,
+      "roles": [
+        "primary-producer",
+        "official-archive",
+        "release-calendar"
+      ],
+      "event_families": [
+        "monetary-policy",
+        "money-credit"
+      ],
+      "indicator_ids": [
+        "policy-rate-and-decisions",
+        "money-credit-and-financial-statistics"
+      ],
+      "formats": [
+        "json"
+      ],
+      "capabilities": [
+        "current-values",
+        "historical-observations",
+        "publication-metadata",
+        "schedule-metadata",
+        "revision-metadata",
+        "series-metadata",
+        "archive-enumeration"
+      ],
+      "endpoint_uri_template": "https://www.bankofcanada.ca/valet/",
+      "allowed_hosts": [
+        "www.bankofcanada.ca"
+      ],
+      "expected_media_types": [
+        "application/json"
+      ],
+      "source_series_ids": [],
+      "source_table_ids": [],
+      "source_release_ids": [],
+      "release_calendar_uri": "https://www.bankofcanada.ca/core-functions/monetary-policy/key-interest-rate/",
+      "archive_uri": "https://www.bankofcanada.ca/valet/docs/",
+      "source_timezone": "America/Toronto",
+      "availability_time_precision": "exact-minute",
+      "dst_convention": "IANA zone database; retain source lexical times and require explicit DST-fold evidence.",
+      "historical_depth": "Series-dependent current revised history; contemporaneous release artifacts are required before claiming original vintages.",
+      "known_breaks": [
+        "Series/table identifiers, classifications, seasonal adjustment, rebases, and dissemination endpoints are versioned per adapter."
+      ],
+      "revision_behavior": "Published values may be revised, benchmarked, rebased, or corrected; immutable fetches never overwrite earlier evidence.",
+      "rate_limit": "No stable public limit recorded at review; apply the stricter local request, byte, page, event, retry, and runtime bounds.",
+      "authentication": "none",
+      "credential_env_name": null,
+      "credential_header_name": null,
+      "credential_parameter_name": null,
+      "terms_uri": "https://www.bankofcanada.ca/terms/",
+      "fallback_source_keys": [],
+      "parser_id": "official.json.v1",
+      "parser_version": "1",
+      "replay_strategy": "Retain exact response bytes, request parameters, endpoint and parser identities, response validators, source clocks, and SHA-256 before normalization.",
+      "adapter_owner": "market-context/ca",
+      "verification_status": "reviewed-entrypoint",
+      "reviewed_on": "2026-09-13",
+      "verification_evidence_uris": [
+        "https://www.bankofcanada.ca/valet/docs/"
+      ],
+      "redistribution_notes": "Official public-data terms and attribution requirements must be rechecked and retained by the qualifying adapter.",
+      "limitations": [
+        "Registry review proves the official entrypoint and legal producer, not complete per-series coverage or historical-vintage availability.",
+        "Protocol-specific parsing and empirical fixture qualification are owned by issue #584 and the economy backfill."
+      ]
+    },
+    {
+      "schema_version": "histdatacom.official-source-entry.v1",
+      "source_key": "ch.fso.pxweb",
+      "economy_code": "CH",
+      "economy_name": "Switzerland",
+      "institution": "Swiss Federal Statistical Office",
+      "jurisdiction": "Swiss Confederation",
+      "legal_producer": true,
+      "roles": [
+        "primary-producer",
+        "official-archive",
+        "release-calendar"
+      ],
+      "event_families": [
+        "inflation-prices",
+        "labour-market",
+        "gdp-national-accounts",
+        "retail-consumption",
+        "industrial-production",
+        "trade-external",
+        "housing",
+        "confidence-survey",
+        "fiscal",
+        "other-official"
+      ],
+      "indicator_ids": [
+        "consumer-and-producer-prices",
+        "employment-unemployment-and-earnings",
+        "gdp-and-national-accounts",
+        "retail-sales-and-household-consumption",
+        "industrial-production",
+        "trade-and-external-accounts",
+        "housing-and-construction",
+        "official-confidence-and-tendency-surveys",
+        "government-finance",
+        "other-official-macro"
+      ],
+      "formats": [
+        "json-stat"
+      ],
+      "capabilities": [
+        "current-values",
+        "historical-observations",
+        "publication-metadata",
+        "schedule-metadata",
+        "revision-metadata",
+        "series-metadata",
+        "archive-enumeration"
+      ],
+      "endpoint_uri_template": "https://www.pxweb.bfs.admin.ch/api/v1/en/",
+      "allowed_hosts": [
+        "www.bfs.admin.ch",
+        "www.pxweb.bfs.admin.ch"
+      ],
+      "expected_media_types": [
+        "application/json"
+      ],
+      "source_series_ids": [],
+      "source_table_ids": [],
+      "source_release_ids": [],
+      "release_calendar_uri": "https://www.bfs.admin.ch/bfs/en/home/news/whats-new.html",
+      "archive_uri": "https://www.bfs.admin.ch/bfsstatic/dam/assets/orderNr:do-e-00.00-PXWEB-01/master",
+      "source_timezone": "Europe/Zurich",
+      "availability_time_precision": "scheduled-only",
+      "dst_convention": "IANA zone database; retain source lexical times and require explicit DST-fold evidence.",
+      "historical_depth": "Series-dependent current revised history; contemporaneous release artifacts are required before claiming original vintages.",
+      "known_breaks": [
+        "Series/table identifiers, classifications, seasonal adjustment, rebases, and dissemination endpoints are versioned per adapter."
+      ],
+      "revision_behavior": "Published values may be revised, benchmarked, rebased, or corrected; immutable fetches never overwrite earlier evidence.",
+      "rate_limit": "No stable public limit recorded at review; apply the stricter local request, byte, page, event, retry, and runtime bounds.",
+      "authentication": "none",
+      "credential_env_name": null,
+      "credential_header_name": null,
+      "credential_parameter_name": null,
+      "terms_uri": null,
+      "fallback_source_keys": [],
+      "parser_id": "official.json_stat.v1",
+      "parser_version": "1",
+      "replay_strategy": "Retain exact response bytes, request parameters, endpoint and parser identities, response validators, source clocks, and SHA-256 before normalization.",
+      "adapter_owner": "market-context/ch",
+      "verification_status": "reviewed-entrypoint",
+      "reviewed_on": "2026-09-13",
+      "verification_evidence_uris": [
+        "https://www.bfs.admin.ch/bfsstatic/dam/assets/orderNr:do-e-00.00-PXWEB-01/master"
+      ],
+      "redistribution_notes": "Official public-data terms and attribution requirements must be rechecked and retained by the qualifying adapter.",
+      "limitations": [
+        "Registry review proves the official entrypoint and legal producer, not complete per-series coverage or historical-vintage availability.",
+        "Protocol-specific parsing and empirical fixture qualification are owned by issue #584 and the economy backfill."
+      ]
+    },
+    {
+      "schema_version": "histdatacom.official-source-entry.v1",
+      "source_key": "ch.snb.data",
+      "economy_code": "CH",
+      "economy_name": "Switzerland",
+      "institution": "Swiss National Bank",
+      "jurisdiction": "Swiss Confederation",
+      "legal_producer": true,
+      "roles": [
+        "primary-producer",
+        "official-archive",
+        "release-calendar"
+      ],
+      "event_families": [
+        "monetary-policy",
+        "money-credit"
+      ],
+      "indicator_ids": [
+        "policy-rate-and-decisions",
+        "money-credit-and-financial-statistics"
+      ],
+      "formats": [
+        "json"
+      ],
+      "capabilities": [
+        "current-values",
+        "historical-observations",
+        "publication-metadata",
+        "schedule-metadata",
+        "revision-metadata",
+        "series-metadata",
+        "archive-enumeration"
+      ],
+      "endpoint_uri_template": "https://data.snb.ch/api/cube/",
+      "allowed_hosts": [
+        "data.snb.ch",
+        "www.snb.ch"
+      ],
+      "expected_media_types": [
+        "application/json"
+      ],
+      "source_series_ids": [],
+      "source_table_ids": [],
+      "source_release_ids": [],
+      "release_calendar_uri": "https://www.snb.ch/en/the-snb/mandates-goals/monetary-policy/decisions",
+      "archive_uri": "https://data.snb.ch/en",
+      "source_timezone": "Europe/Zurich",
+      "availability_time_precision": "exact-minute",
+      "dst_convention": "IANA zone database; retain source lexical times and require explicit DST-fold evidence.",
+      "historical_depth": "Series-dependent current revised history; contemporaneous release artifacts are required before claiming original vintages.",
+      "known_breaks": [
+        "Series/table identifiers, classifications, seasonal adjustment, rebases, and dissemination endpoints are versioned per adapter."
+      ],
+      "revision_behavior": "Published values may be revised, benchmarked, rebased, or corrected; immutable fetches never overwrite earlier evidence.",
+      "rate_limit": "No stable public limit recorded at review; apply the stricter local request, byte, page, event, retry, and runtime bounds.",
+      "authentication": "none",
+      "credential_env_name": null,
+      "credential_header_name": null,
+      "credential_parameter_name": null,
+      "terms_uri": null,
+      "fallback_source_keys": [],
+      "parser_id": "official.json.v1",
+      "parser_version": "1",
+      "replay_strategy": "Retain exact response bytes, request parameters, endpoint and parser identities, response validators, source clocks, and SHA-256 before normalization.",
+      "adapter_owner": "market-context/ch",
+      "verification_status": "reviewed-entrypoint",
+      "reviewed_on": "2026-09-13",
+      "verification_evidence_uris": [
+        "https://data.snb.ch/en"
+      ],
+      "redistribution_notes": "Official public-data terms and attribution requirements must be rechecked and retained by the qualifying adapter.",
+      "limitations": [
+        "Registry review proves the official entrypoint and legal producer, not complete per-series coverage or historical-vintage availability.",
+        "Protocol-specific parsing and empirical fixture qualification are owned by issue #584 and the economy backfill."
+      ]
+    },
+    {
+      "schema_version": "histdatacom.official-source-entry.v1",
+      "source_key": "cz.czso.public-database",
+      "economy_code": "CZ",
+      "economy_name": "Czech Republic",
+      "institution": "Czech Statistical Office",
+      "jurisdiction": "Czech Republic",
+      "legal_producer": true,
+      "roles": [
+        "primary-producer",
+        "official-archive",
+        "release-calendar"
+      ],
+      "event_families": [
+        "inflation-prices",
+        "labour-market",
+        "gdp-national-accounts",
+        "retail-consumption",
+        "industrial-production",
+        "trade-external",
+        "housing",
+        "confidence-survey",
+        "fiscal",
+        "other-official"
+      ],
+      "indicator_ids": [
+        "consumer-and-producer-prices",
+        "employment-unemployment-and-earnings",
+        "gdp-and-national-accounts",
+        "retail-sales-and-household-consumption",
+        "industrial-production",
+        "trade-and-external-accounts",
+        "housing-and-construction",
+        "official-confidence-and-tendency-surveys",
+        "government-finance",
+        "other-official-macro"
+      ],
+      "formats": [
+        "html",
+        "xlsx"
+      ],
+      "capabilities": [
+        "current-values",
+        "historical-observations",
+        "publication-metadata",
+        "schedule-metadata",
+        "revision-metadata",
+        "series-metadata",
+        "archive-enumeration"
+      ],
+      "endpoint_uri_template": "https://csu.gov.cz/katalog-produktu",
+      "allowed_hosts": [
+        "csu.gov.cz"
+      ],
+      "expected_media_types": [
+        "text/html",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "application/octet-stream"
+      ],
+      "source_series_ids": [],
+      "source_table_ids": [],
+      "source_release_ids": [],
+      "release_calendar_uri": "https://csu.gov.cz/kalendar-udalosti",
+      "archive_uri": "https://csu.gov.cz/katalog-produktu",
+      "source_timezone": "Europe/Prague",
+      "availability_time_precision": "scheduled-only",
+      "dst_convention": "IANA zone database; retain source lexical times and require explicit DST-fold evidence.",
+      "historical_depth": "Series-dependent current revised history; contemporaneous release artifacts are required before claiming original vintages.",
+      "known_breaks": [
+        "Series/table identifiers, classifications, seasonal adjustment, rebases, and dissemination endpoints are versioned per adapter."
+      ],
+      "revision_behavior": "Published values may be revised, benchmarked, rebased, or corrected; immutable fetches never overwrite earlier evidence.",
+      "rate_limit": "No stable public limit recorded at review; apply the stricter local request, byte, page, event, retry, and runtime bounds.",
+      "authentication": "none",
+      "credential_env_name": null,
+      "credential_header_name": null,
+      "credential_parameter_name": null,
+      "terms_uri": null,
+      "fallback_source_keys": [],
+      "parser_id": "official.html.v1",
+      "parser_version": "1",
+      "replay_strategy": "Retain exact response bytes, request parameters, endpoint and parser identities, response validators, source clocks, and SHA-256 before normalization.",
+      "adapter_owner": "market-context/cz",
+      "verification_status": "reviewed-entrypoint",
+      "reviewed_on": "2026-09-13",
+      "verification_evidence_uris": [
+        "https://csu.gov.cz/katalog-produktu",
+        "https://csu.gov.cz/kalendar-udalosti"
+      ],
+      "redistribution_notes": "Official public-data terms and attribution requirements must be rechecked and retained by the qualifying adapter.",
+      "limitations": [
+        "Registry review proves the official entrypoint and legal producer, not complete per-series coverage or historical-vintage availability.",
+        "Protocol-specific parsing and empirical fixture qualification are owned by issue #584 and the economy backfill."
+      ]
+    },
+    {
+      "schema_version": "histdatacom.official-source-entry.v1",
+      "source_key": "cz.cnb.arad",
+      "economy_code": "CZ",
+      "economy_name": "Czech Republic",
+      "institution": "Czech National Bank",
+      "jurisdiction": "Czech Republic",
+      "legal_producer": true,
+      "roles": [
+        "primary-producer",
+        "official-archive",
+        "release-calendar"
+      ],
+      "event_families": [
+        "monetary-policy",
+        "money-credit"
+      ],
+      "indicator_ids": [
+        "policy-rate-and-decisions",
+        "money-credit-and-financial-statistics"
+      ],
+      "formats": [
+        "csv"
+      ],
+      "capabilities": [
+        "current-values",
+        "historical-observations",
+        "publication-metadata",
+        "schedule-metadata",
+        "revision-metadata",
+        "series-metadata",
+        "archive-enumeration"
+      ],
+      "endpoint_uri_template": "https://www.cnb.cz/aradb/api/v1/data",
+      "allowed_hosts": [
+        "www.cnb.cz"
+      ],
+      "expected_media_types": [
+        "text/csv",
+        "application/octet-stream"
+      ],
+      "source_series_ids": [],
+      "source_table_ids": [],
+      "source_release_ids": [],
+      "release_calendar_uri": "https://www.cnb.cz/en/monetary-policy/bank-board-decisions/",
+      "archive_uri": "https://www.cnb.cz/arad/#/en/home",
+      "source_timezone": "Europe/Prague",
+      "availability_time_precision": "exact-minute",
+      "dst_convention": "IANA zone database; retain source lexical times and require explicit DST-fold evidence.",
+      "historical_depth": "Series-dependent current revised history; contemporaneous release artifacts are required before claiming original vintages.",
+      "known_breaks": [
+        "Series/table identifiers, classifications, seasonal adjustment, rebases, and dissemination endpoints are versioned per adapter."
+      ],
+      "revision_behavior": "Published values may be revised, benchmarked, rebased, or corrected; immutable fetches never overwrite earlier evidence.",
+      "rate_limit": "No stable public limit recorded at review; apply the stricter local request, byte, page, event, retry, and runtime bounds.",
+      "authentication": "required-api-key",
+      "credential_env_name": "HISTDATACOM_CNB_API_KEY",
+      "credential_header_name": null,
+      "credential_parameter_name": "api_key",
+      "terms_uri": null,
+      "fallback_source_keys": [],
+      "parser_id": "official.csv.v1",
+      "parser_version": "1",
+      "replay_strategy": "Retain exact response bytes, request parameters, endpoint and parser identities, response validators, source clocks, and SHA-256 before normalization.",
+      "adapter_owner": "market-context/cz",
+      "verification_status": "reviewed-entrypoint",
+      "reviewed_on": "2026-09-13",
+      "verification_evidence_uris": [
+        "https://www.cnb.cz/docs/arad20/dokumentace/arad_rest_api_cs.pdf",
+        "https://www.cnb.cz/en/statistics/arad-time-series-system/"
+      ],
+      "redistribution_notes": "Official public-data terms and attribution requirements must be rechecked and retained by the qualifying adapter.",
+      "limitations": [
+        "Registry review proves the official entrypoint and legal producer, not complete per-series coverage or historical-vintage availability.",
+        "Protocol-specific parsing and empirical fixture qualification are owned by issue #584 and the economy backfill."
+      ]
+    },
+    {
+      "schema_version": "histdatacom.official-source-entry.v1",
+      "source_key": "dk.dst.statbank",
+      "economy_code": "DK",
+      "economy_name": "Denmark",
+      "institution": "Statistics Denmark",
+      "jurisdiction": "Kingdom of Denmark",
+      "legal_producer": true,
+      "roles": [
+        "primary-producer",
+        "official-archive",
+        "release-calendar"
+      ],
+      "event_families": [
+        "inflation-prices",
+        "labour-market",
+        "gdp-national-accounts",
+        "retail-consumption",
+        "industrial-production",
+        "trade-external",
+        "housing",
+        "confidence-survey",
+        "fiscal",
+        "other-official"
+      ],
+      "indicator_ids": [
+        "consumer-and-producer-prices",
+        "employment-unemployment-and-earnings",
+        "gdp-and-national-accounts",
+        "retail-sales-and-household-consumption",
+        "industrial-production",
+        "trade-and-external-accounts",
+        "housing-and-construction",
+        "official-confidence-and-tendency-surveys",
+        "government-finance",
+        "other-official-macro"
+      ],
+      "formats": [
+        "json",
+        "csv"
+      ],
+      "capabilities": [
+        "current-values",
+        "historical-observations",
+        "publication-metadata",
+        "schedule-metadata",
+        "revision-metadata",
+        "series-metadata",
+        "archive-enumeration"
+      ],
+      "endpoint_uri_template": "https://api.statbank.dk/v1/",
+      "allowed_hosts": [
+        "api.statbank.dk",
+        "www.dst.dk"
+      ],
+      "expected_media_types": [
+        "application/json",
+        "text/csv",
+        "application/octet-stream"
+      ],
+      "source_series_ids": [],
+      "source_table_ids": [],
+      "source_release_ids": [],
+      "release_calendar_uri": "https://www.dst.dk/en/Statistik/planlagte",
+      "archive_uri": "https://www.dst.dk/en/Statistik/hjaelp-til-statistikbanken/api",
+      "source_timezone": "Europe/Copenhagen",
+      "availability_time_precision": "scheduled-only",
+      "dst_convention": "IANA zone database; retain source lexical times and require explicit DST-fold evidence.",
+      "historical_depth": "Series-dependent current revised history; contemporaneous release artifacts are required before claiming original vintages.",
+      "known_breaks": [
+        "Series/table identifiers, classifications, seasonal adjustment, rebases, and dissemination endpoints are versioned per adapter."
+      ],
+      "revision_behavior": "Published values may be revised, benchmarked, rebased, or corrected; immutable fetches never overwrite earlier evidence.",
+      "rate_limit": "StatBank documents service limits per operation; adapters must query conservatively and remain within the local framework bounds.",
+      "authentication": "none",
+      "credential_env_name": null,
+      "credential_header_name": null,
+      "credential_parameter_name": null,
+      "terms_uri": "https://www.dst.dk/en/Statistik/hjaelp-til-statistikbanken/api",
+      "fallback_source_keys": [],
+      "parser_id": "official.json.v1",
+      "parser_version": "1",
+      "replay_strategy": "Retain exact response bytes, request parameters, endpoint and parser identities, response validators, source clocks, and SHA-256 before normalization.",
+      "adapter_owner": "market-context/dk",
+      "verification_status": "reviewed-entrypoint",
+      "reviewed_on": "2026-09-13",
+      "verification_evidence_uris": [
+        "https://www.dst.dk/en/Statistik/hjaelp-til-statistikbanken/api"
+      ],
+      "redistribution_notes": "Official public-data terms and attribution requirements must be rechecked and retained by the qualifying adapter.",
+      "limitations": [
+        "Registry review proves the official entrypoint and legal producer, not complete per-series coverage or historical-vintage availability.",
+        "Protocol-specific parsing and empirical fixture qualification are owned by issue #584 and the economy backfill."
+      ]
+    },
+    {
+      "schema_version": "histdatacom.official-source-entry.v1",
+      "source_key": "dk.nationalbank.statistics",
+      "economy_code": "DK",
+      "economy_name": "Denmark",
+      "institution": "Danmarks Nationalbank",
+      "jurisdiction": "Kingdom of Denmark",
+      "legal_producer": true,
+      "roles": [
+        "primary-producer",
+        "official-archive",
+        "release-calendar"
+      ],
+      "event_families": [
+        "monetary-policy",
+        "money-credit"
+      ],
+      "indicator_ids": [
+        "policy-rate-and-decisions",
+        "money-credit-and-financial-statistics"
+      ],
+      "formats": [
+        "html"
+      ],
+      "capabilities": [
+        "current-values",
+        "historical-observations",
+        "publication-metadata",
+        "schedule-metadata",
+        "revision-metadata",
+        "series-metadata",
+        "archive-enumeration"
+      ],
+      "endpoint_uri_template": "https://www.nationalbanken.dk/en/news-and-knowledge/data-and-statistics",
+      "allowed_hosts": [
+        "www.nationalbanken.dk"
+      ],
+      "expected_media_types": [
+        "text/html"
+      ],
+      "source_series_ids": [],
+      "source_table_ids": [],
+      "source_release_ids": [],
+      "release_calendar_uri": "https://www.nationalbanken.dk/en/news-and-knowledge/calendar",
+      "archive_uri": "https://www.nationalbanken.dk/en/news-and-knowledge/data-and-statistics",
+      "source_timezone": "Europe/Copenhagen",
+      "availability_time_precision": "exact-minute",
+      "dst_convention": "IANA zone database; retain source lexical times and require explicit DST-fold evidence.",
+      "historical_depth": "Series-dependent current revised history; contemporaneous release artifacts are required before claiming original vintages.",
+      "known_breaks": [
+        "Series/table identifiers, classifications, seasonal adjustment, rebases, and dissemination endpoints are versioned per adapter."
+      ],
+      "revision_behavior": "Published values may be revised, benchmarked, rebased, or corrected; immutable fetches never overwrite earlier evidence.",
+      "rate_limit": "No stable public limit recorded at review; apply the stricter local request, byte, page, event, retry, and runtime bounds.",
+      "authentication": "none",
+      "credential_env_name": null,
+      "credential_header_name": null,
+      "credential_parameter_name": null,
+      "terms_uri": null,
+      "fallback_source_keys": [],
+      "parser_id": "official.html.v1",
+      "parser_version": "1",
+      "replay_strategy": "Retain exact response bytes, request parameters, endpoint and parser identities, response validators, source clocks, and SHA-256 before normalization.",
+      "adapter_owner": "market-context/dk",
+      "verification_status": "reviewed-entrypoint",
+      "reviewed_on": "2026-09-13",
+      "verification_evidence_uris": [
+        "https://www.nationalbanken.dk/en/news-and-knowledge/data-and-statistics"
+      ],
+      "redistribution_notes": "Official public-data terms and attribution requirements must be rechecked and retained by the qualifying adapter.",
+      "limitations": [
+        "Registry review proves the official entrypoint and legal producer, not complete per-series coverage or historical-vintage availability.",
+        "Protocol-specific parsing and empirical fixture qualification are owned by issue #584 and the economy backfill."
+      ]
+    },
+    {
+      "schema_version": "histdatacom.official-source-entry.v1",
+      "source_key": "ea.eurostat.dissemination",
+      "economy_code": "EA",
+      "economy_name": "Euro Area",
+      "institution": "Eurostat",
+      "jurisdiction": "European Union / euro area",
+      "legal_producer": true,
+      "roles": [
+        "primary-producer",
+        "official-archive",
+        "release-calendar"
+      ],
+      "event_families": [
+        "inflation-prices",
+        "labour-market",
+        "gdp-national-accounts",
+        "retail-consumption",
+        "industrial-production",
+        "trade-external",
+        "housing",
+        "confidence-survey",
+        "fiscal",
+        "other-official"
+      ],
+      "indicator_ids": [
+        "consumer-and-producer-prices",
+        "employment-unemployment-and-earnings",
+        "gdp-and-national-accounts",
+        "retail-sales-and-household-consumption",
+        "industrial-production",
+        "trade-and-external-accounts",
+        "housing-and-construction",
+        "official-confidence-and-tendency-surveys",
+        "government-finance",
+        "other-official-macro"
+      ],
+      "formats": [
+        "sdmx-3.0",
+        "json-stat"
+      ],
+      "capabilities": [
+        "current-values",
+        "historical-observations",
+        "publication-metadata",
+        "schedule-metadata",
+        "revision-metadata",
+        "series-metadata",
+        "archive-enumeration"
+      ],
+      "endpoint_uri_template": "https://ec.europa.eu/eurostat/api/dissemination/",
+      "allowed_hosts": [
+        "ec.europa.eu"
+      ],
+      "expected_media_types": [
+        "application/vnd.sdmx.data+csv",
+        "application/vnd.sdmx.data+json",
+        "application/xml",
+        "text/csv",
+        "application/json"
+      ],
+      "source_series_ids": [],
+      "source_table_ids": [],
+      "source_release_ids": [],
+      "release_calendar_uri": "https://ec.europa.eu/eurostat/news/release-calendar",
+      "archive_uri": "https://ec.europa.eu/eurostat/web/user-guides/data-browser/api-data-access/api-getting-started",
+      "source_timezone": "Europe/Brussels",
+      "availability_time_precision": "scheduled-only",
+      "dst_convention": "IANA zone database; retain source lexical times and require explicit DST-fold evidence.",
+      "historical_depth": "Series-dependent current revised history; contemporaneous release artifacts are required before claiming original vintages.",
+      "known_breaks": [
+        "Series/table identifiers, classifications, seasonal adjustment, rebases, and dissemination endpoints are versioned per adapter."
+      ],
+      "revision_behavior": "Published values may be revised, benchmarked, rebased, or corrected; immutable fetches never overwrite earlier evidence.",
+      "rate_limit": "No stable public limit recorded at review; apply the stricter local request, byte, page, event, retry, and runtime bounds.",
+      "authentication": "none",
+      "credential_env_name": null,
+      "credential_header_name": null,
+      "credential_parameter_name": null,
+      "terms_uri": "https://ec.europa.eu/eurostat/help/copyright-notice",
+      "fallback_source_keys": [],
+      "parser_id": "official.sdmx_3.0.v1",
+      "parser_version": "1",
+      "replay_strategy": "Retain exact response bytes, request parameters, endpoint and parser identities, response validators, source clocks, and SHA-256 before normalization.",
+      "adapter_owner": "market-context/ea",
+      "verification_status": "reviewed-entrypoint",
+      "reviewed_on": "2026-09-13",
+      "verification_evidence_uris": [
+        "https://ec.europa.eu/eurostat/web/user-guides/data-browser/api-data-access/api-getting-started"
+      ],
+      "redistribution_notes": "Official public-data terms and attribution requirements must be rechecked and retained by the qualifying adapter.",
+      "limitations": [
+        "Registry review proves the official entrypoint and legal producer, not complete per-series coverage or historical-vintage availability.",
+        "Protocol-specific parsing and empirical fixture qualification are owned by issue #584 and the economy backfill."
+      ]
+    },
+    {
+      "schema_version": "histdatacom.official-source-entry.v1",
+      "source_key": "ea.ecb.data-portal",
+      "economy_code": "EA",
+      "economy_name": "Euro Area",
+      "institution": "European Central Bank",
+      "jurisdiction": "European Union / euro area",
+      "legal_producer": true,
+      "roles": [
+        "primary-producer",
+        "official-archive",
+        "release-calendar"
+      ],
+      "event_families": [
+        "monetary-policy",
+        "money-credit"
+      ],
+      "indicator_ids": [
+        "policy-rate-and-decisions",
+        "money-credit-and-financial-statistics"
+      ],
+      "formats": [
+        "sdmx-2.1"
+      ],
+      "capabilities": [
+        "current-values",
+        "historical-observations",
+        "historical-vintages",
+        "publication-metadata",
+        "schedule-metadata",
+        "revision-metadata",
+        "series-metadata",
+        "archive-enumeration"
+      ],
+      "endpoint_uri_template": "https://data-api.ecb.europa.eu/service/",
+      "allowed_hosts": [
+        "data-api.ecb.europa.eu",
+        "data.ecb.europa.eu",
+        "www.ecb.europa.eu"
+      ],
+      "expected_media_types": [
+        "application/vnd.sdmx.data+csv",
+        "application/vnd.sdmx.data+json",
+        "application/xml",
+        "text/csv"
+      ],
+      "source_series_ids": [],
+      "source_table_ids": [],
+      "source_release_ids": [],
+      "release_calendar_uri": "https://www.ecb.europa.eu/press/calendars/mgcgc/html/index.en.html",
+      "archive_uri": "https://data.ecb.europa.eu/help/getting-data-web-services-sdmx-0",
+      "source_timezone": "Europe/Brussels",
+      "availability_time_precision": "exact-minute",
+      "dst_convention": "IANA zone database; retain source lexical times and require explicit DST-fold evidence.",
+      "historical_depth": "Series-dependent current revised history; contemporaneous release artifacts are required before claiming original vintages.",
+      "known_breaks": [
+        "Series/table identifiers, classifications, seasonal adjustment, rebases, and dissemination endpoints are versioned per adapter."
+      ],
+      "revision_behavior": "Published values may be revised, benchmarked, rebased, or corrected; immutable fetches never overwrite earlier evidence.",
+      "rate_limit": "No stable public limit recorded at review; apply the stricter local request, byte, page, event, retry, and runtime bounds.",
+      "authentication": "none",
+      "credential_env_name": null,
+      "credential_header_name": null,
+      "credential_parameter_name": null,
+      "terms_uri": "https://www.ecb.europa.eu/services/disclaimer/html/index.en.html",
+      "fallback_source_keys": [],
+      "parser_id": "official.sdmx_2.1.v1",
+      "parser_version": "1",
+      "replay_strategy": "Retain exact response bytes, request parameters, endpoint and parser identities, response validators, source clocks, and SHA-256 before normalization.",
+      "adapter_owner": "market-context/ea",
+      "verification_status": "reviewed-entrypoint",
+      "reviewed_on": "2026-09-13",
+      "verification_evidence_uris": [
+        "https://data.ecb.europa.eu/help/getting-data-web-services-sdmx-0"
+      ],
+      "redistribution_notes": "Official public-data terms and attribution requirements must be rechecked and retained by the qualifying adapter.",
+      "limitations": [
+        "Registry review proves the official entrypoint and legal producer, not complete per-series coverage or historical-vintage availability.",
+        "Protocol-specific parsing and empirical fixture qualification are owned by issue #584 and the economy backfill."
+      ]
+    },
+    {
+      "schema_version": "histdatacom.official-source-entry.v1",
+      "source_key": "gb.ons.api",
+      "economy_code": "GB",
+      "economy_name": "United Kingdom",
+      "institution": "Office for National Statistics",
+      "jurisdiction": "United Kingdom",
+      "legal_producer": true,
+      "roles": [
+        "primary-producer",
+        "official-archive",
+        "release-calendar"
+      ],
+      "event_families": [
+        "inflation-prices",
+        "labour-market",
+        "gdp-national-accounts",
+        "retail-consumption",
+        "industrial-production",
+        "trade-external",
+        "housing",
+        "confidence-survey",
+        "fiscal",
+        "other-official"
+      ],
+      "indicator_ids": [
+        "consumer-and-producer-prices",
+        "employment-unemployment-and-earnings",
+        "gdp-and-national-accounts",
+        "retail-sales-and-household-consumption",
+        "industrial-production",
+        "trade-and-external-accounts",
+        "housing-and-construction",
+        "official-confidence-and-tendency-surveys",
+        "government-finance",
+        "other-official-macro"
+      ],
+      "formats": [
+        "json"
+      ],
+      "capabilities": [
+        "current-values",
+        "historical-observations",
+        "publication-metadata",
+        "schedule-metadata",
+        "revision-metadata",
+        "series-metadata",
+        "archive-enumeration"
+      ],
+      "endpoint_uri_template": "https://api.beta.ons.gov.uk/v1/",
+      "allowed_hosts": [
+        "api.beta.ons.gov.uk",
+        "developer.ons.gov.uk",
+        "www.ons.gov.uk"
+      ],
+      "expected_media_types": [
+        "application/json"
+      ],
+      "source_series_ids": [],
+      "source_table_ids": [],
+      "source_release_ids": [],
+      "release_calendar_uri": "https://www.ons.gov.uk/releasecalendar",
+      "archive_uri": "https://developer.ons.gov.uk/",
+      "source_timezone": "Europe/London",
+      "availability_time_precision": "scheduled-only",
+      "dst_convention": "IANA zone database; retain source lexical times and require explicit DST-fold evidence.",
+      "historical_depth": "Series-dependent current revised history; contemporaneous release artifacts are required before claiming original vintages.",
+      "known_breaks": [
+        "Series/table identifiers, classifications, seasonal adjustment, rebases, and dissemination endpoints are versioned per adapter."
+      ],
+      "revision_behavior": "Published values may be revised, benchmarked, rebased, or corrected; immutable fetches never overwrite earlier evidence.",
+      "rate_limit": "No stable public limit recorded at review; apply the stricter local request, byte, page, event, retry, and runtime bounds.",
+      "authentication": "none",
+      "credential_env_name": null,
+      "credential_header_name": null,
+      "credential_parameter_name": null,
+      "terms_uri": "https://www.ons.gov.uk/methodology/geography/licences",
+      "fallback_source_keys": [],
+      "parser_id": "official.json.v1",
+      "parser_version": "1",
+      "replay_strategy": "Retain exact response bytes, request parameters, endpoint and parser identities, response validators, source clocks, and SHA-256 before normalization.",
+      "adapter_owner": "market-context/gb",
+      "verification_status": "reviewed-entrypoint",
+      "reviewed_on": "2026-09-13",
+      "verification_evidence_uris": [
+        "https://developer.ons.gov.uk/"
+      ],
+      "redistribution_notes": "Official public-data terms and attribution requirements must be rechecked and retained by the qualifying adapter.",
+      "limitations": [
+        "Registry review proves the official entrypoint and legal producer, not complete per-series coverage or historical-vintage availability.",
+        "Protocol-specific parsing and empirical fixture qualification are owned by issue #584 and the economy backfill."
+      ]
+    },
+    {
+      "schema_version": "histdatacom.official-source-entry.v1",
+      "source_key": "gb.boe.database",
+      "economy_code": "GB",
+      "economy_name": "United Kingdom",
+      "institution": "Bank of England",
+      "jurisdiction": "United Kingdom",
+      "legal_producer": true,
+      "roles": [
+        "primary-producer",
+        "official-archive",
+        "release-calendar"
+      ],
+      "event_families": [
+        "monetary-policy",
+        "money-credit"
+      ],
+      "indicator_ids": [
+        "policy-rate-and-decisions",
+        "money-credit-and-financial-statistics"
+      ],
+      "formats": [
+        "csv",
+        "html"
+      ],
+      "capabilities": [
+        "current-values",
+        "historical-observations",
+        "publication-metadata",
+        "schedule-metadata",
+        "revision-metadata",
+        "series-metadata",
+        "archive-enumeration"
+      ],
+      "endpoint_uri_template": "https://www.bankofengland.co.uk/boeapps/database/",
+      "allowed_hosts": [
+        "www.bankofengland.co.uk"
+      ],
+      "expected_media_types": [
+        "text/csv",
+        "application/octet-stream",
+        "text/html"
+      ],
+      "source_series_ids": [],
+      "source_table_ids": [],
+      "source_release_ids": [],
+      "release_calendar_uri": "https://www.bankofengland.co.uk/monetary-policy/upcoming-mpc-dates",
+      "archive_uri": "https://www.bankofengland.co.uk/boeapps/database/",
+      "source_timezone": "Europe/London",
+      "availability_time_precision": "exact-minute",
+      "dst_convention": "IANA zone database; retain source lexical times and require explicit DST-fold evidence.",
+      "historical_depth": "Series-dependent current revised history; contemporaneous release artifacts are required before claiming original vintages.",
+      "known_breaks": [
+        "Series/table identifiers, classifications, seasonal adjustment, rebases, and dissemination endpoints are versioned per adapter."
+      ],
+      "revision_behavior": "Published values may be revised, benchmarked, rebased, or corrected; immutable fetches never overwrite earlier evidence.",
+      "rate_limit": "No stable public limit recorded at review; apply the stricter local request, byte, page, event, retry, and runtime bounds.",
+      "authentication": "none",
+      "credential_env_name": null,
+      "credential_header_name": null,
+      "credential_parameter_name": null,
+      "terms_uri": null,
+      "fallback_source_keys": [],
+      "parser_id": "official.csv.v1",
+      "parser_version": "1",
+      "replay_strategy": "Retain exact response bytes, request parameters, endpoint and parser identities, response validators, source clocks, and SHA-256 before normalization.",
+      "adapter_owner": "market-context/gb",
+      "verification_status": "reviewed-entrypoint",
+      "reviewed_on": "2026-09-13",
+      "verification_evidence_uris": [
+        "https://www.bankofengland.co.uk/boeapps/database/"
+      ],
+      "redistribution_notes": "Official public-data terms and attribution requirements must be rechecked and retained by the qualifying adapter.",
+      "limitations": [
+        "Registry review proves the official entrypoint and legal producer, not complete per-series coverage or historical-vintage availability.",
+        "Protocol-specific parsing and empirical fixture qualification are owned by issue #584 and the economy backfill."
+      ]
+    },
+    {
+      "schema_version": "histdatacom.official-source-entry.v1",
+      "source_key": "hk.censtatd.api",
+      "economy_code": "HK",
+      "economy_name": "Hong Kong",
+      "institution": "Census and Statistics Department",
+      "jurisdiction": "Hong Kong Special Administrative Region",
+      "legal_producer": true,
+      "roles": [
+        "primary-producer",
+        "official-archive",
+        "release-calendar"
+      ],
+      "event_families": [
+        "inflation-prices",
+        "labour-market",
+        "gdp-national-accounts",
+        "retail-consumption",
+        "industrial-production",
+        "trade-external",
+        "housing",
+        "confidence-survey",
+        "fiscal",
+        "other-official"
+      ],
+      "indicator_ids": [
+        "consumer-and-producer-prices",
+        "employment-unemployment-and-earnings",
+        "gdp-and-national-accounts",
+        "retail-sales-and-household-consumption",
+        "industrial-production",
+        "trade-and-external-accounts",
+        "housing-and-construction",
+        "official-confidence-and-tendency-surveys",
+        "government-finance",
+        "other-official-macro"
+      ],
+      "formats": [
+        "json"
+      ],
+      "capabilities": [
+        "current-values",
+        "historical-observations",
+        "publication-metadata",
+        "schedule-metadata",
+        "revision-metadata",
+        "series-metadata",
+        "archive-enumeration"
+      ],
+      "endpoint_uri_template": "https://www.censtatd.gov.hk/api/",
+      "allowed_hosts": [
+        "www.censtatd.gov.hk"
+      ],
+      "expected_media_types": [
+        "application/json"
+      ],
+      "source_series_ids": [],
+      "source_table_ids": [],
+      "source_release_ids": [],
+      "release_calendar_uri": "https://www.censtatd.gov.hk/FileManager/EN/Common/Schedule_of_Regular_Press_Releases_on_Statistical_Data_in_2026.pdf",
+      "archive_uri": "https://www.censtatd.gov.hk/en/web_table.html",
+      "source_timezone": "Asia/Hong_Kong",
+      "availability_time_precision": "scheduled-only",
+      "dst_convention": "IANA zone database; retain source lexical times and require explicit DST-fold evidence.",
+      "historical_depth": "Series-dependent current revised history; contemporaneous release artifacts are required before claiming original vintages.",
+      "known_breaks": [
+        "Series/table identifiers, classifications, seasonal adjustment, rebases, and dissemination endpoints are versioned per adapter."
+      ],
+      "revision_behavior": "Published values may be revised, benchmarked, rebased, or corrected; immutable fetches never overwrite earlier evidence.",
+      "rate_limit": "No stable public limit recorded at review; apply the stricter local request, byte, page, event, retry, and runtime bounds.",
+      "authentication": "none",
+      "credential_env_name": null,
+      "credential_header_name": null,
+      "credential_parameter_name": null,
+      "terms_uri": null,
+      "fallback_source_keys": [],
+      "parser_id": "official.json.v1",
+      "parser_version": "1",
+      "replay_strategy": "Retain exact response bytes, request parameters, endpoint and parser identities, response validators, source clocks, and SHA-256 before normalization.",
+      "adapter_owner": "market-context/hk",
+      "verification_status": "reviewed-entrypoint",
+      "reviewed_on": "2026-09-13",
+      "verification_evidence_uris": [
+        "https://www.censtatd.gov.hk/en/web_table.html"
+      ],
+      "redistribution_notes": "Official public-data terms and attribution requirements must be rechecked and retained by the qualifying adapter.",
+      "limitations": [
+        "Registry review proves the official entrypoint and legal producer, not complete per-series coverage or historical-vintage availability.",
+        "Protocol-specific parsing and empirical fixture qualification are owned by issue #584 and the economy backfill."
+      ]
+    },
+    {
+      "schema_version": "histdatacom.official-source-entry.v1",
+      "source_key": "hk.hkma.open-api",
+      "economy_code": "HK",
+      "economy_name": "Hong Kong",
+      "institution": "Hong Kong Monetary Authority",
+      "jurisdiction": "Hong Kong Special Administrative Region",
+      "legal_producer": true,
+      "roles": [
+        "primary-producer",
+        "official-archive",
+        "release-calendar"
+      ],
+      "event_families": [
+        "monetary-policy",
+        "money-credit"
+      ],
+      "indicator_ids": [
+        "policy-rate-and-decisions",
+        "money-credit-and-financial-statistics"
+      ],
+      "formats": [
+        "json"
+      ],
+      "capabilities": [
+        "current-values",
+        "historical-observations",
+        "publication-metadata",
+        "schedule-metadata",
+        "revision-metadata",
+        "series-metadata",
+        "archive-enumeration"
+      ],
+      "endpoint_uri_template": "https://api.hkma.gov.hk/public/",
+      "allowed_hosts": [
+        "api.hkma.gov.hk",
+        "apidocs.hkma.gov.hk",
+        "www.hkma.gov.hk"
+      ],
+      "expected_media_types": [
+        "application/json"
+      ],
+      "source_series_ids": [],
+      "source_table_ids": [],
+      "source_release_ids": [],
+      "release_calendar_uri": "https://www.hkma.gov.hk/eng/news-and-media/press-releases/",
+      "archive_uri": "https://apidocs.hkma.gov.hk/abouthkmasapi/",
+      "source_timezone": "Asia/Hong_Kong",
+      "availability_time_precision": "exact-minute",
+      "dst_convention": "IANA zone database; retain source lexical times and require explicit DST-fold evidence.",
+      "historical_depth": "Series-dependent current revised history; contemporaneous release artifacts are required before claiming original vintages.",
+      "known_breaks": [
+        "Series/table identifiers, classifications, seasonal adjustment, rebases, and dissemination endpoints are versioned per adapter."
+      ],
+      "revision_behavior": "Published values may be revised, benchmarked, rebased, or corrected; immutable fetches never overwrite earlier evidence.",
+      "rate_limit": "No stable public limit recorded at review; apply the stricter local request, byte, page, event, retry, and runtime bounds.",
+      "authentication": "none",
+      "credential_env_name": null,
+      "credential_header_name": null,
+      "credential_parameter_name": null,
+      "terms_uri": null,
+      "fallback_source_keys": [],
+      "parser_id": "official.json.v1",
+      "parser_version": "1",
+      "replay_strategy": "Retain exact response bytes, request parameters, endpoint and parser identities, response validators, source clocks, and SHA-256 before normalization.",
+      "adapter_owner": "market-context/hk",
+      "verification_status": "reviewed-entrypoint",
+      "reviewed_on": "2026-09-13",
+      "verification_evidence_uris": [
+        "https://apidocs.hkma.gov.hk/abouthkmasapi/"
+      ],
+      "redistribution_notes": "Official public-data terms and attribution requirements must be rechecked and retained by the qualifying adapter.",
+      "limitations": [
+        "Registry review proves the official entrypoint and legal producer, not complete per-series coverage or historical-vintage availability.",
+        "Protocol-specific parsing and empirical fixture qualification are owned by issue #584 and the economy backfill."
+      ]
+    },
+    {
+      "schema_version": "histdatacom.official-source-entry.v1",
+      "source_key": "hu.ksh.stadat",
+      "economy_code": "HU",
+      "economy_name": "Hungary",
+      "institution": "Hungarian Central Statistical Office",
+      "jurisdiction": "Hungary",
+      "legal_producer": true,
+      "roles": [
+        "primary-producer",
+        "official-archive",
+        "release-calendar"
+      ],
+      "event_families": [
+        "inflation-prices",
+        "labour-market",
+        "gdp-national-accounts",
+        "retail-consumption",
+        "industrial-production",
+        "trade-external",
+        "housing",
+        "confidence-survey",
+        "fiscal",
+        "other-official"
+      ],
+      "indicator_ids": [
+        "consumer-and-producer-prices",
+        "employment-unemployment-and-earnings",
+        "gdp-and-national-accounts",
+        "retail-sales-and-household-consumption",
+        "industrial-production",
+        "trade-and-external-accounts",
+        "housing-and-construction",
+        "official-confidence-and-tendency-surveys",
+        "government-finance",
+        "other-official-macro"
+      ],
+      "formats": [
+        "html",
+        "xlsx"
+      ],
+      "capabilities": [
+        "current-values",
+        "historical-observations",
+        "publication-metadata",
+        "schedule-metadata",
+        "revision-metadata",
+        "series-metadata",
+        "archive-enumeration"
+      ],
+      "endpoint_uri_template": "https://www.ksh.hu/stadat",
+      "allowed_hosts": [
+        "www.ksh.hu"
+      ],
+      "expected_media_types": [
+        "text/html",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "application/octet-stream"
+      ],
+      "source_series_ids": [],
+      "source_table_ids": [],
+      "source_release_ids": [],
+      "release_calendar_uri": "https://www.ksh.hu/katalogus/",
+      "archive_uri": "https://www.ksh.hu/stadat",
+      "source_timezone": "Europe/Budapest",
+      "availability_time_precision": "scheduled-only",
+      "dst_convention": "IANA zone database; retain source lexical times and require explicit DST-fold evidence.",
+      "historical_depth": "Series-dependent current revised history; contemporaneous release artifacts are required before claiming original vintages.",
+      "known_breaks": [
+        "Series/table identifiers, classifications, seasonal adjustment, rebases, and dissemination endpoints are versioned per adapter."
+      ],
+      "revision_behavior": "Published values may be revised, benchmarked, rebased, or corrected; immutable fetches never overwrite earlier evidence.",
+      "rate_limit": "No stable public limit recorded at review; apply the stricter local request, byte, page, event, retry, and runtime bounds.",
+      "authentication": "none",
+      "credential_env_name": null,
+      "credential_header_name": null,
+      "credential_parameter_name": null,
+      "terms_uri": null,
+      "fallback_source_keys": [],
+      "parser_id": "official.html.v1",
+      "parser_version": "1",
+      "replay_strategy": "Retain exact response bytes, request parameters, endpoint and parser identities, response validators, source clocks, and SHA-256 before normalization.",
+      "adapter_owner": "market-context/hu",
+      "verification_status": "reviewed-entrypoint",
+      "reviewed_on": "2026-09-13",
+      "verification_evidence_uris": [
+        "https://www.ksh.hu/stadat"
+      ],
+      "redistribution_notes": "Official public-data terms and attribution requirements must be rechecked and retained by the qualifying adapter.",
+      "limitations": [
+        "Registry review proves the official entrypoint and legal producer, not complete per-series coverage or historical-vintage availability.",
+        "Protocol-specific parsing and empirical fixture qualification are owned by issue #584 and the economy backfill."
+      ]
+    },
+    {
+      "schema_version": "histdatacom.official-source-entry.v1",
+      "source_key": "hu.mnb.statistics",
+      "economy_code": "HU",
+      "economy_name": "Hungary",
+      "institution": "Magyar Nemzeti Bank",
+      "jurisdiction": "Hungary",
+      "legal_producer": true,
+      "roles": [
+        "primary-producer",
+        "official-archive",
+        "release-calendar"
+      ],
+      "event_families": [
+        "monetary-policy",
+        "money-credit"
+      ],
+      "indicator_ids": [
+        "policy-rate-and-decisions",
+        "money-credit-and-financial-statistics"
+      ],
+      "formats": [
+        "html",
+        "xlsx"
+      ],
+      "capabilities": [
+        "current-values",
+        "historical-observations",
+        "publication-metadata",
+        "schedule-metadata",
+        "revision-metadata",
+        "series-metadata",
+        "archive-enumeration"
+      ],
+      "endpoint_uri_template": "https://statisztika.mnb.hu/publikacios-temak",
+      "allowed_hosts": [
+        "statisztika.mnb.hu",
+        "www.mnb.hu"
+      ],
+      "expected_media_types": [
+        "text/html",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "application/octet-stream"
+      ],
+      "source_series_ids": [],
+      "source_table_ids": [],
+      "source_release_ids": [],
+      "release_calendar_uri": "https://www.mnb.hu/en/monetary-policy/the-monetary-council",
+      "archive_uri": "https://statisztika.mnb.hu/publikacios-temak",
+      "source_timezone": "Europe/Budapest",
+      "availability_time_precision": "exact-minute",
+      "dst_convention": "IANA zone database; retain source lexical times and require explicit DST-fold evidence.",
+      "historical_depth": "Series-dependent current revised history; contemporaneous release artifacts are required before claiming original vintages.",
+      "known_breaks": [
+        "Series/table identifiers, classifications, seasonal adjustment, rebases, and dissemination endpoints are versioned per adapter."
+      ],
+      "revision_behavior": "Published values may be revised, benchmarked, rebased, or corrected; immutable fetches never overwrite earlier evidence.",
+      "rate_limit": "No stable public limit recorded at review; apply the stricter local request, byte, page, event, retry, and runtime bounds.",
+      "authentication": "none",
+      "credential_env_name": null,
+      "credential_header_name": null,
+      "credential_parameter_name": null,
+      "terms_uri": null,
+      "fallback_source_keys": [],
+      "parser_id": "official.html.v1",
+      "parser_version": "1",
+      "replay_strategy": "Retain exact response bytes, request parameters, endpoint and parser identities, response validators, source clocks, and SHA-256 before normalization.",
+      "adapter_owner": "market-context/hu",
+      "verification_status": "reviewed-entrypoint",
+      "reviewed_on": "2026-09-13",
+      "verification_evidence_uris": [
+        "https://statisztika.mnb.hu/publikacios-temak"
+      ],
+      "redistribution_notes": "Official public-data terms and attribution requirements must be rechecked and retained by the qualifying adapter.",
+      "limitations": [
+        "Registry review proves the official entrypoint and legal producer, not complete per-series coverage or historical-vintage availability.",
+        "Protocol-specific parsing and empirical fixture qualification are owned by issue #584 and the economy backfill."
+      ]
+    },
+    {
+      "schema_version": "histdatacom.official-source-entry.v1",
+      "source_key": "mx.inegi.indicators",
+      "economy_code": "MX",
+      "economy_name": "Mexico",
+      "institution": "Instituto Nacional de Estadística y Geografía",
+      "jurisdiction": "United Mexican States",
+      "legal_producer": true,
+      "roles": [
+        "primary-producer",
+        "official-archive",
+        "release-calendar"
+      ],
+      "event_families": [
+        "inflation-prices",
+        "labour-market",
+        "gdp-national-accounts",
+        "retail-consumption",
+        "industrial-production",
+        "trade-external",
+        "housing",
+        "confidence-survey",
+        "fiscal",
+        "other-official"
+      ],
+      "indicator_ids": [
+        "consumer-and-producer-prices",
+        "employment-unemployment-and-earnings",
+        "gdp-and-national-accounts",
+        "retail-sales-and-household-consumption",
+        "industrial-production",
+        "trade-and-external-accounts",
+        "housing-and-construction",
+        "official-confidence-and-tendency-surveys",
+        "government-finance",
+        "other-official-macro"
+      ],
+      "formats": [
+        "json"
+      ],
+      "capabilities": [
+        "current-values",
+        "historical-observations",
+        "publication-metadata",
+        "schedule-metadata",
+        "revision-metadata",
+        "series-metadata",
+        "archive-enumeration"
+      ],
+      "endpoint_uri_template": "https://www.inegi.org.mx/app/api/indicadores/desarrolladores/jsonxml/",
+      "allowed_hosts": [
+        "www.inegi.org.mx"
+      ],
+      "expected_media_types": [
+        "application/json"
+      ],
+      "source_series_ids": [],
+      "source_table_ids": [],
+      "source_release_ids": [],
+      "release_calendar_uri": "https://www.inegi.org.mx/app/saladeprensa/calendario/default.html",
+      "archive_uri": "https://www.inegi.org.mx/servicios/api_indicadores.html",
+      "source_timezone": "America/Mexico_City",
+      "availability_time_precision": "scheduled-only",
+      "dst_convention": "IANA zone database; retain source lexical times and require explicit DST-fold evidence.",
+      "historical_depth": "Series-dependent current revised history; contemporaneous release artifacts are required before claiming original vintages.",
+      "known_breaks": [
+        "Series/table identifiers, classifications, seasonal adjustment, rebases, and dissemination endpoints are versioned per adapter."
+      ],
+      "revision_behavior": "Published values may be revised, benchmarked, rebased, or corrected; immutable fetches never overwrite earlier evidence.",
+      "rate_limit": "No stable public limit recorded at review; apply the stricter local request, byte, page, event, retry, and runtime bounds.",
+      "authentication": "required-api-key",
+      "credential_env_name": "HISTDATACOM_INEGI_TOKEN",
+      "credential_header_name": null,
+      "credential_parameter_name": null,
+      "credential_path_placeholder": "{credential}",
+      "terms_uri": null,
+      "fallback_source_keys": [],
+      "parser_id": "official.json.v1",
+      "parser_version": "1",
+      "replay_strategy": "Retain exact response bytes, request parameters, endpoint and parser identities, response validators, source clocks, and SHA-256 before normalization.",
+      "adapter_owner": "market-context/mx",
+      "verification_status": "reviewed-entrypoint",
+      "reviewed_on": "2026-09-13",
+      "verification_evidence_uris": [
+        "https://www.inegi.org.mx/servicios/api_indicadores.html"
+      ],
+      "redistribution_notes": "Official public-data terms and attribution requirements must be rechecked and retained by the qualifying adapter.",
+      "limitations": [
+        "Registry review proves the official entrypoint and legal producer, not complete per-series coverage or historical-vintage availability.",
+        "Protocol-specific parsing and empirical fixture qualification are owned by issue #584 and the economy backfill."
+      ]
+    },
+    {
+      "schema_version": "histdatacom.official-source-entry.v1",
+      "source_key": "mx.banxico.sie",
+      "economy_code": "MX",
+      "economy_name": "Mexico",
+      "institution": "Banco de México",
+      "jurisdiction": "United Mexican States",
+      "legal_producer": true,
+      "roles": [
+        "primary-producer",
+        "official-archive",
+        "release-calendar"
+      ],
+      "event_families": [
+        "monetary-policy",
+        "money-credit"
+      ],
+      "indicator_ids": [
+        "policy-rate-and-decisions",
+        "money-credit-and-financial-statistics"
+      ],
+      "formats": [
+        "json"
+      ],
+      "capabilities": [
+        "current-values",
+        "historical-observations",
+        "publication-metadata",
+        "schedule-metadata",
+        "revision-metadata",
+        "series-metadata",
+        "archive-enumeration"
+      ],
+      "endpoint_uri_template": "https://www.banxico.org.mx/SieAPIRest/service/v1/series/",
+      "allowed_hosts": [
+        "www.banxico.org.mx"
+      ],
+      "expected_media_types": [
+        "application/json"
+      ],
+      "source_series_ids": [],
+      "source_table_ids": [],
+      "source_release_ids": [],
+      "release_calendar_uri": "https://www.banxico.org.mx/monetary-policy/",
+      "archive_uri": "https://www.banxico.org.mx/SieAPIRest/service/v1/doc/catalogoSeries",
+      "source_timezone": "America/Mexico_City",
+      "availability_time_precision": "exact-minute",
+      "dst_convention": "IANA zone database; retain source lexical times and require explicit DST-fold evidence.",
+      "historical_depth": "Series-dependent current revised history; contemporaneous release artifacts are required before claiming original vintages.",
+      "known_breaks": [
+        "Series/table identifiers, classifications, seasonal adjustment, rebases, and dissemination endpoints are versioned per adapter."
+      ],
+      "revision_behavior": "Published values may be revised, benchmarked, rebased, or corrected; immutable fetches never overwrite earlier evidence.",
+      "rate_limit": "No stable public limit recorded at review; apply the stricter local request, byte, page, event, retry, and runtime bounds.",
+      "authentication": "required-api-key",
+      "credential_env_name": "HISTDATACOM_BANXICO_TOKEN",
+      "credential_header_name": "Bmx-Token",
+      "credential_parameter_name": null,
+      "terms_uri": null,
+      "fallback_source_keys": [],
+      "parser_id": "official.json.v1",
+      "parser_version": "1",
+      "replay_strategy": "Retain exact response bytes, request parameters, endpoint and parser identities, response validators, source clocks, and SHA-256 before normalization.",
+      "adapter_owner": "market-context/mx",
+      "verification_status": "reviewed-entrypoint",
+      "reviewed_on": "2026-09-13",
+      "verification_evidence_uris": [
+        "https://www.banxico.org.mx/SieAPIRest/service/v1/doc/catalogoSeries"
+      ],
+      "redistribution_notes": "Official public-data terms and attribution requirements must be rechecked and retained by the qualifying adapter.",
+      "limitations": [
+        "Registry review proves the official entrypoint and legal producer, not complete per-series coverage or historical-vintage availability.",
+        "Protocol-specific parsing and empirical fixture qualification are owned by issue #584 and the economy backfill."
+      ]
+    },
+    {
+      "schema_version": "histdatacom.official-source-entry.v1",
+      "source_key": "no.ssb.pxweb",
+      "economy_code": "NO",
+      "economy_name": "Norway",
+      "institution": "Statistics Norway",
+      "jurisdiction": "Kingdom of Norway",
+      "legal_producer": true,
+      "roles": [
+        "primary-producer",
+        "official-archive",
+        "release-calendar"
+      ],
+      "event_families": [
+        "inflation-prices",
+        "labour-market",
+        "gdp-national-accounts",
+        "retail-consumption",
+        "industrial-production",
+        "trade-external",
+        "housing",
+        "confidence-survey",
+        "fiscal",
+        "other-official"
+      ],
+      "indicator_ids": [
+        "consumer-and-producer-prices",
+        "employment-unemployment-and-earnings",
+        "gdp-and-national-accounts",
+        "retail-sales-and-household-consumption",
+        "industrial-production",
+        "trade-and-external-accounts",
+        "housing-and-construction",
+        "official-confidence-and-tendency-surveys",
+        "government-finance",
+        "other-official-macro"
+      ],
+      "formats": [
+        "json-stat",
+        "csv"
+      ],
+      "capabilities": [
+        "current-values",
+        "historical-observations",
+        "publication-metadata",
+        "schedule-metadata",
+        "revision-metadata",
+        "series-metadata",
+        "archive-enumeration"
+      ],
+      "endpoint_uri_template": "https://data.ssb.no/api/pxwebapi/v2/",
+      "allowed_hosts": [
+        "data.ssb.no",
+        "www.ssb.no"
+      ],
+      "expected_media_types": [
+        "application/json",
+        "text/csv",
+        "application/octet-stream"
+      ],
+      "source_series_ids": [],
+      "source_table_ids": [],
+      "source_release_ids": [],
+      "release_calendar_uri": "https://www.ssb.no/en/kalender",
+      "archive_uri": "https://www.ssb.no/en/api/pxwebapi",
+      "source_timezone": "Europe/Oslo",
+      "availability_time_precision": "scheduled-only",
+      "dst_convention": "IANA zone database; retain source lexical times and require explicit DST-fold evidence.",
+      "historical_depth": "Series-dependent current revised history; contemporaneous release artifacts are required before claiming original vintages.",
+      "known_breaks": [
+        "Series/table identifiers, classifications, seasonal adjustment, rebases, and dissemination endpoints are versioned per adapter."
+      ],
+      "revision_behavior": "Published values may be revised, benchmarked, rebased, or corrected; immutable fetches never overwrite earlier evidence.",
+      "rate_limit": "Statistics Norway documents 800,000 cells per extract and 30 requests per minute; local bounds may be stricter.",
+      "authentication": "none",
+      "credential_env_name": null,
+      "credential_header_name": null,
+      "credential_parameter_name": null,
+      "terms_uri": "https://www.ssb.no/en/api/pxwebapiv2",
+      "fallback_source_keys": [],
+      "parser_id": "official.json_stat.v1",
+      "parser_version": "1",
+      "replay_strategy": "Retain exact response bytes, request parameters, endpoint and parser identities, response validators, source clocks, and SHA-256 before normalization.",
+      "adapter_owner": "market-context/no",
+      "verification_status": "reviewed-entrypoint",
+      "reviewed_on": "2026-09-13",
+      "verification_evidence_uris": [
+        "https://www.ssb.no/en/api/pxwebapi"
+      ],
+      "redistribution_notes": "Official public-data terms and attribution requirements must be rechecked and retained by the qualifying adapter.",
+      "limitations": [
+        "Registry review proves the official entrypoint and legal producer, not complete per-series coverage or historical-vintage availability.",
+        "Protocol-specific parsing and empirical fixture qualification are owned by issue #584 and the economy backfill."
+      ]
+    },
+    {
+      "schema_version": "histdatacom.official-source-entry.v1",
+      "source_key": "no.norges-bank.data",
+      "economy_code": "NO",
+      "economy_name": "Norway",
+      "institution": "Norges Bank",
+      "jurisdiction": "Kingdom of Norway",
+      "legal_producer": true,
+      "roles": [
+        "primary-producer",
+        "official-archive",
+        "release-calendar"
+      ],
+      "event_families": [
+        "monetary-policy",
+        "money-credit"
+      ],
+      "indicator_ids": [
+        "policy-rate-and-decisions",
+        "money-credit-and-financial-statistics"
+      ],
+      "formats": [
+        "sdmx-2.1"
+      ],
+      "capabilities": [
+        "current-values",
+        "historical-observations",
+        "publication-metadata",
+        "schedule-metadata",
+        "revision-metadata",
+        "series-metadata",
+        "archive-enumeration"
+      ],
+      "endpoint_uri_template": "https://data.norges-bank.no/api/data/",
+      "allowed_hosts": [
+        "data.norges-bank.no",
+        "www.norges-bank.no"
+      ],
+      "expected_media_types": [
+        "application/vnd.sdmx.data+csv",
+        "application/vnd.sdmx.data+json",
+        "application/xml",
+        "text/csv"
+      ],
+      "source_series_ids": [],
+      "source_table_ids": [],
+      "source_release_ids": [],
+      "release_calendar_uri": "https://www.norges-bank.no/en/topics/Monetary-policy/Monetary-policy-meetings/",
+      "archive_uri": "https://www.norges-bank.no/en/topics/Statistics/",
+      "source_timezone": "Europe/Oslo",
+      "availability_time_precision": "exact-minute",
+      "dst_convention": "IANA zone database; retain source lexical times and require explicit DST-fold evidence.",
+      "historical_depth": "Series-dependent current revised history; contemporaneous release artifacts are required before claiming original vintages.",
+      "known_breaks": [
+        "Series/table identifiers, classifications, seasonal adjustment, rebases, and dissemination endpoints are versioned per adapter."
+      ],
+      "revision_behavior": "Published values may be revised, benchmarked, rebased, or corrected; immutable fetches never overwrite earlier evidence.",
+      "rate_limit": "No stable public limit recorded at review; apply the stricter local request, byte, page, event, retry, and runtime bounds.",
+      "authentication": "none",
+      "credential_env_name": null,
+      "credential_header_name": null,
+      "credential_parameter_name": null,
+      "terms_uri": null,
+      "fallback_source_keys": [],
+      "parser_id": "official.sdmx_2.1.v1",
+      "parser_version": "1",
+      "replay_strategy": "Retain exact response bytes, request parameters, endpoint and parser identities, response validators, source clocks, and SHA-256 before normalization.",
+      "adapter_owner": "market-context/no",
+      "verification_status": "reviewed-entrypoint",
+      "reviewed_on": "2026-09-13",
+      "verification_evidence_uris": [
+        "https://www.norges-bank.no/en/topics/Statistics/"
+      ],
+      "redistribution_notes": "Official public-data terms and attribution requirements must be rechecked and retained by the qualifying adapter.",
+      "limitations": [
+        "Registry review proves the official entrypoint and legal producer, not complete per-series coverage or historical-vintage availability.",
+        "Protocol-specific parsing and empirical fixture qualification are owned by issue #584 and the economy backfill."
+      ]
+    },
+    {
+      "schema_version": "histdatacom.official-source-entry.v1",
+      "source_key": "nz.stats-api",
+      "economy_code": "NZ",
+      "economy_name": "New Zealand",
+      "institution": "Stats NZ Tatauranga Aotearoa",
+      "jurisdiction": "New Zealand",
+      "legal_producer": true,
+      "roles": [
+        "primary-producer",
+        "official-archive",
+        "release-calendar"
+      ],
+      "event_families": [
+        "inflation-prices",
+        "labour-market",
+        "gdp-national-accounts",
+        "retail-consumption",
+        "industrial-production",
+        "trade-external",
+        "housing",
+        "confidence-survey",
+        "fiscal",
+        "other-official"
+      ],
+      "indicator_ids": [
+        "consumer-and-producer-prices",
+        "employment-unemployment-and-earnings",
+        "gdp-and-national-accounts",
+        "retail-sales-and-household-consumption",
+        "industrial-production",
+        "trade-and-external-accounts",
+        "housing-and-construction",
+        "official-confidence-and-tendency-surveys",
+        "government-finance",
+        "other-official-macro"
+      ],
+      "formats": [
+        "json"
+      ],
+      "capabilities": [
+        "current-values",
+        "historical-observations",
+        "publication-metadata",
+        "schedule-metadata",
+        "revision-metadata",
+        "series-metadata",
+        "archive-enumeration"
+      ],
+      "endpoint_uri_template": "https://api.stats.govt.nz/",
+      "allowed_hosts": [
+        "api.stats.govt.nz",
+        "portal.apis.stats.govt.nz",
+        "www.stats.govt.nz"
+      ],
+      "expected_media_types": [
+        "application/json"
+      ],
+      "source_series_ids": [],
+      "source_table_ids": [],
+      "source_release_ids": [],
+      "release_calendar_uri": "https://www.stats.govt.nz/release-calendar/",
+      "archive_uri": "https://portal.apis.stats.govt.nz/",
+      "source_timezone": "Pacific/Auckland",
+      "availability_time_precision": "scheduled-only",
+      "dst_convention": "IANA zone database; retain source lexical times and require explicit DST-fold evidence.",
+      "historical_depth": "Series-dependent current revised history; contemporaneous release artifacts are required before claiming original vintages.",
+      "known_breaks": [
+        "Series/table identifiers, classifications, seasonal adjustment, rebases, and dissemination endpoints are versioned per adapter."
+      ],
+      "revision_behavior": "Published values may be revised, benchmarked, rebased, or corrected; immutable fetches never overwrite earlier evidence.",
+      "rate_limit": "No stable public limit recorded at review; apply the stricter local request, byte, page, event, retry, and runtime bounds.",
+      "authentication": "required-api-key",
+      "credential_env_name": "HISTDATACOM_STATS_NZ_TOKEN",
+      "credential_header_name": "Ocp-Apim-Subscription-Key",
+      "credential_parameter_name": null,
+      "terms_uri": null,
+      "fallback_source_keys": [],
+      "parser_id": "official.json.v1",
+      "parser_version": "1",
+      "replay_strategy": "Retain exact response bytes, request parameters, endpoint and parser identities, response validators, source clocks, and SHA-256 before normalization.",
+      "adapter_owner": "market-context/nz",
+      "verification_status": "reviewed-entrypoint",
+      "reviewed_on": "2026-09-13",
+      "verification_evidence_uris": [
+        "https://portal.apis.stats.govt.nz/"
+      ],
+      "redistribution_notes": "Official public-data terms and attribution requirements must be rechecked and retained by the qualifying adapter.",
+      "limitations": [
+        "Registry review proves the official entrypoint and legal producer, not complete per-series coverage or historical-vintage availability.",
+        "Protocol-specific parsing and empirical fixture qualification are owned by issue #584 and the economy backfill."
+      ]
+    },
+    {
+      "schema_version": "histdatacom.official-source-entry.v1",
+      "source_key": "nz.rbnz.statistics",
+      "economy_code": "NZ",
+      "economy_name": "New Zealand",
+      "institution": "Reserve Bank of New Zealand",
+      "jurisdiction": "New Zealand",
+      "legal_producer": true,
+      "roles": [
+        "primary-producer",
+        "official-archive",
+        "release-calendar"
+      ],
+      "event_families": [
+        "monetary-policy",
+        "money-credit"
+      ],
+      "indicator_ids": [
+        "policy-rate-and-decisions",
+        "money-credit-and-financial-statistics"
+      ],
+      "formats": [
+        "xlsx",
+        "csv"
+      ],
+      "capabilities": [
+        "current-values",
+        "historical-observations",
+        "publication-metadata",
+        "schedule-metadata",
+        "revision-metadata",
+        "series-metadata",
+        "archive-enumeration"
+      ],
+      "endpoint_uri_template": "https://www.rbnz.govt.nz/statistics/series",
+      "allowed_hosts": [
+        "www.rbnz.govt.nz"
+      ],
+      "expected_media_types": [
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "application/octet-stream",
+        "text/csv"
+      ],
+      "source_series_ids": [],
+      "source_table_ids": [],
+      "source_release_ids": [],
+      "release_calendar_uri": "https://www.rbnz.govt.nz/monetary-policy/about-monetary-policy/monetary-policy-announcements",
+      "archive_uri": "https://www.rbnz.govt.nz/statistics",
+      "source_timezone": "Pacific/Auckland",
+      "availability_time_precision": "exact-minute",
+      "dst_convention": "IANA zone database; retain source lexical times and require explicit DST-fold evidence.",
+      "historical_depth": "Series-dependent current revised history; contemporaneous release artifacts are required before claiming original vintages.",
+      "known_breaks": [
+        "Series/table identifiers, classifications, seasonal adjustment, rebases, and dissemination endpoints are versioned per adapter."
+      ],
+      "revision_behavior": "Published values may be revised, benchmarked, rebased, or corrected; immutable fetches never overwrite earlier evidence.",
+      "rate_limit": "No stable public limit recorded at review; apply the stricter local request, byte, page, event, retry, and runtime bounds.",
+      "authentication": "none",
+      "credential_env_name": null,
+      "credential_header_name": null,
+      "credential_parameter_name": null,
+      "terms_uri": null,
+      "fallback_source_keys": [],
+      "parser_id": "official.xlsx.v1",
+      "parser_version": "1",
+      "replay_strategy": "Retain exact response bytes, request parameters, endpoint and parser identities, response validators, source clocks, and SHA-256 before normalization.",
+      "adapter_owner": "market-context/nz",
+      "verification_status": "reviewed-entrypoint",
+      "reviewed_on": "2026-09-13",
+      "verification_evidence_uris": [
+        "https://www.rbnz.govt.nz/statistics"
+      ],
+      "redistribution_notes": "Official public-data terms and attribution requirements must be rechecked and retained by the qualifying adapter.",
+      "limitations": [
+        "Registry review proves the official entrypoint and legal producer, not complete per-series coverage or historical-vintage availability.",
+        "Protocol-specific parsing and empirical fixture qualification are owned by issue #584 and the economy backfill."
+      ]
+    },
+    {
+      "schema_version": "histdatacom.official-source-entry.v1",
+      "source_key": "pl.gus.sdp",
+      "economy_code": "PL",
+      "economy_name": "Poland",
+      "institution": "Statistics Poland",
+      "jurisdiction": "Republic of Poland",
+      "legal_producer": true,
+      "roles": [
+        "primary-producer",
+        "official-archive",
+        "release-calendar"
+      ],
+      "event_families": [
+        "inflation-prices",
+        "labour-market",
+        "gdp-national-accounts",
+        "retail-consumption",
+        "industrial-production",
+        "trade-external",
+        "housing",
+        "confidence-survey",
+        "fiscal",
+        "other-official"
+      ],
+      "indicator_ids": [
+        "consumer-and-producer-prices",
+        "employment-unemployment-and-earnings",
+        "gdp-and-national-accounts",
+        "retail-sales-and-household-consumption",
+        "industrial-production",
+        "trade-and-external-accounts",
+        "housing-and-construction",
+        "official-confidence-and-tendency-surveys",
+        "government-finance",
+        "other-official-macro"
+      ],
+      "formats": [
+        "json"
+      ],
+      "capabilities": [
+        "current-values",
+        "historical-observations",
+        "publication-metadata",
+        "schedule-metadata",
+        "revision-metadata",
+        "series-metadata",
+        "archive-enumeration"
+      ],
+      "endpoint_uri_template": "https://api.stat.gov.pl/",
+      "allowed_hosts": [
+        "api.stat.gov.pl",
+        "stat.gov.pl"
+      ],
+      "expected_media_types": [
+        "application/json"
+      ],
+      "source_series_ids": [],
+      "source_table_ids": [],
+      "source_release_ids": [],
+      "release_calendar_uri": "https://stat.gov.pl/en/release-calendar/",
+      "archive_uri": "https://api.stat.gov.pl/?lang=en",
+      "source_timezone": "Europe/Warsaw",
+      "availability_time_precision": "scheduled-only",
+      "dst_convention": "IANA zone database; retain source lexical times and require explicit DST-fold evidence.",
+      "historical_depth": "Series-dependent current revised history; contemporaneous release artifacts are required before claiming original vintages.",
+      "known_breaks": [
+        "Series/table identifiers, classifications, seasonal adjustment, rebases, and dissemination endpoints are versioned per adapter."
+      ],
+      "revision_behavior": "Published values may be revised, benchmarked, rebased, or corrected; immutable fetches never overwrite earlier evidence.",
+      "rate_limit": "Anonymous Statistics Poland APIs document 5 requests/second and longer-window quotas; local bounds may be stricter.",
+      "authentication": "none",
+      "credential_env_name": null,
+      "credential_header_name": null,
+      "credential_parameter_name": null,
+      "terms_uri": "https://api.stat.gov.pl/Home/BdlApi?lang=en",
+      "fallback_source_keys": [],
+      "parser_id": "official.json.v1",
+      "parser_version": "1",
+      "replay_strategy": "Retain exact response bytes, request parameters, endpoint and parser identities, response validators, source clocks, and SHA-256 before normalization.",
+      "adapter_owner": "market-context/pl",
+      "verification_status": "reviewed-entrypoint",
+      "reviewed_on": "2026-09-13",
+      "verification_evidence_uris": [
+        "https://api.stat.gov.pl/?lang=en"
+      ],
+      "redistribution_notes": "Official public-data terms and attribution requirements must be rechecked and retained by the qualifying adapter.",
+      "limitations": [
+        "Registry review proves the official entrypoint and legal producer, not complete per-series coverage or historical-vintage availability.",
+        "Protocol-specific parsing and empirical fixture qualification are owned by issue #584 and the economy backfill."
+      ]
+    },
+    {
+      "schema_version": "histdatacom.official-source-entry.v1",
+      "source_key": "pl.nbp.statistics",
+      "economy_code": "PL",
+      "economy_name": "Poland",
+      "institution": "Narodowy Bank Polski",
+      "jurisdiction": "Republic of Poland",
+      "legal_producer": true,
+      "roles": [
+        "primary-producer",
+        "official-archive",
+        "release-calendar"
+      ],
+      "event_families": [
+        "monetary-policy",
+        "money-credit"
+      ],
+      "indicator_ids": [
+        "policy-rate-and-decisions",
+        "money-credit-and-financial-statistics"
+      ],
+      "formats": [
+        "html",
+        "xlsx"
+      ],
+      "capabilities": [
+        "current-values",
+        "historical-observations",
+        "publication-metadata",
+        "schedule-metadata",
+        "revision-metadata",
+        "series-metadata",
+        "archive-enumeration"
+      ],
+      "endpoint_uri_template": "https://nbp.pl/en/statistic-and-financial-reporting/",
+      "allowed_hosts": [
+        "nbp.pl"
+      ],
+      "expected_media_types": [
+        "text/html",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "application/octet-stream"
+      ],
+      "source_series_ids": [],
+      "source_table_ids": [],
+      "source_release_ids": [],
+      "release_calendar_uri": "https://nbp.pl/en/monetary-policy/mpc-meetings/decision-making-schedule/",
+      "archive_uri": "https://nbp.pl/en/statistic-and-financial-reporting/",
+      "source_timezone": "Europe/Warsaw",
+      "availability_time_precision": "exact-minute",
+      "dst_convention": "IANA zone database; retain source lexical times and require explicit DST-fold evidence.",
+      "historical_depth": "Series-dependent current revised history; contemporaneous release artifacts are required before claiming original vintages.",
+      "known_breaks": [
+        "Series/table identifiers, classifications, seasonal adjustment, rebases, and dissemination endpoints are versioned per adapter."
+      ],
+      "revision_behavior": "Published values may be revised, benchmarked, rebased, or corrected; immutable fetches never overwrite earlier evidence.",
+      "rate_limit": "No stable public limit recorded at review; apply the stricter local request, byte, page, event, retry, and runtime bounds.",
+      "authentication": "none",
+      "credential_env_name": null,
+      "credential_header_name": null,
+      "credential_parameter_name": null,
+      "terms_uri": null,
+      "fallback_source_keys": [],
+      "parser_id": "official.html.v1",
+      "parser_version": "1",
+      "replay_strategy": "Retain exact response bytes, request parameters, endpoint and parser identities, response validators, source clocks, and SHA-256 before normalization.",
+      "adapter_owner": "market-context/pl",
+      "verification_status": "reviewed-entrypoint",
+      "reviewed_on": "2026-09-13",
+      "verification_evidence_uris": [
+        "https://nbp.pl/en/statistic-and-financial-reporting/"
+      ],
+      "redistribution_notes": "Official public-data terms and attribution requirements must be rechecked and retained by the qualifying adapter.",
+      "limitations": [
+        "Registry review proves the official entrypoint and legal producer, not complete per-series coverage or historical-vintage availability.",
+        "Protocol-specific parsing and empirical fixture qualification are owned by issue #584 and the economy backfill."
+      ]
+    },
+    {
+      "schema_version": "histdatacom.official-source-entry.v1",
+      "source_key": "se.scb.pxweb",
+      "economy_code": "SE",
+      "economy_name": "Sweden",
+      "institution": "Statistics Sweden",
+      "jurisdiction": "Kingdom of Sweden",
+      "legal_producer": true,
+      "roles": [
+        "primary-producer",
+        "official-archive",
+        "release-calendar"
+      ],
+      "event_families": [
+        "inflation-prices",
+        "labour-market",
+        "gdp-national-accounts",
+        "retail-consumption",
+        "industrial-production",
+        "trade-external",
+        "housing",
+        "confidence-survey",
+        "fiscal",
+        "other-official"
+      ],
+      "indicator_ids": [
+        "consumer-and-producer-prices",
+        "employment-unemployment-and-earnings",
+        "gdp-and-national-accounts",
+        "retail-sales-and-household-consumption",
+        "industrial-production",
+        "trade-and-external-accounts",
+        "housing-and-construction",
+        "official-confidence-and-tendency-surveys",
+        "government-finance",
+        "other-official-macro"
+      ],
+      "formats": [
+        "json-stat"
+      ],
+      "capabilities": [
+        "current-values",
+        "historical-observations",
+        "publication-metadata",
+        "schedule-metadata",
+        "revision-metadata",
+        "series-metadata",
+        "archive-enumeration"
+      ],
+      "endpoint_uri_template": "https://api.scb.se/OV0104/v2beta/api/v2/",
+      "allowed_hosts": [
+        "api.scb.se",
+        "www.scb.se"
+      ],
+      "expected_media_types": [
+        "application/json"
+      ],
+      "source_series_ids": [],
+      "source_table_ids": [],
+      "source_release_ids": [],
+      "release_calendar_uri": "https://www.scb.se/en/finding-statistics/publishing-calendar/",
+      "archive_uri": "https://www.scb.se/en/services/open-data-api/pxwebapi/pxwebapi-2.0",
+      "source_timezone": "Europe/Stockholm",
+      "availability_time_precision": "scheduled-only",
+      "dst_convention": "IANA zone database; retain source lexical times and require explicit DST-fold evidence.",
+      "historical_depth": "Series-dependent current revised history; contemporaneous release artifacts are required before claiming original vintages.",
+      "known_breaks": [
+        "Series/table identifiers, classifications, seasonal adjustment, rebases, and dissemination endpoints are versioned per adapter."
+      ],
+      "revision_behavior": "Published values may be revised, benchmarked, rebased, or corrected; immutable fetches never overwrite earlier evidence.",
+      "rate_limit": "Statistics Sweden documents 150,000 cells per extract and 30 requests per 10 seconds; local bounds may be stricter.",
+      "authentication": "none",
+      "credential_env_name": null,
+      "credential_header_name": null,
+      "credential_parameter_name": null,
+      "terms_uri": null,
+      "fallback_source_keys": [],
+      "parser_id": "official.json_stat.v1",
+      "parser_version": "1",
+      "replay_strategy": "Retain exact response bytes, request parameters, endpoint and parser identities, response validators, source clocks, and SHA-256 before normalization.",
+      "adapter_owner": "market-context/se",
+      "verification_status": "reviewed-entrypoint",
+      "reviewed_on": "2026-09-13",
+      "verification_evidence_uris": [
+        "https://www.scb.se/en/services/open-data-api/pxwebapi/pxwebapi-2.0"
+      ],
+      "redistribution_notes": "Official public-data terms and attribution requirements must be rechecked and retained by the qualifying adapter.",
+      "limitations": [
+        "Registry review proves the official entrypoint and legal producer, not complete per-series coverage or historical-vintage availability.",
+        "Protocol-specific parsing and empirical fixture qualification are owned by issue #584 and the economy backfill."
+      ]
+    },
+    {
+      "schema_version": "histdatacom.official-source-entry.v1",
+      "source_key": "se.riksbank.swea",
+      "economy_code": "SE",
+      "economy_name": "Sweden",
+      "institution": "Sveriges Riksbank",
+      "jurisdiction": "Kingdom of Sweden",
+      "legal_producer": true,
+      "roles": [
+        "primary-producer",
+        "official-archive",
+        "release-calendar"
+      ],
+      "event_families": [
+        "monetary-policy",
+        "money-credit"
+      ],
+      "indicator_ids": [
+        "policy-rate-and-decisions",
+        "money-credit-and-financial-statistics"
+      ],
+      "formats": [
+        "json"
+      ],
+      "capabilities": [
+        "current-values",
+        "historical-observations",
+        "publication-metadata",
+        "schedule-metadata",
+        "revision-metadata",
+        "series-metadata",
+        "archive-enumeration"
+      ],
+      "endpoint_uri_template": "https://api.riksbank.se/swea/v1/",
+      "allowed_hosts": [
+        "api.riksbank.se",
+        "www.riksbank.se"
+      ],
+      "expected_media_types": [
+        "application/json"
+      ],
+      "source_series_ids": [],
+      "source_table_ids": [],
+      "source_release_ids": [],
+      "release_calendar_uri": "https://www.riksbank.se/en-gb/press-and-published/calendar/",
+      "archive_uri": "https://www.riksbank.se/en-gb/statistics/search-interest--exchange-rates/",
+      "source_timezone": "Europe/Stockholm",
+      "availability_time_precision": "exact-minute",
+      "dst_convention": "IANA zone database; retain source lexical times and require explicit DST-fold evidence.",
+      "historical_depth": "Series-dependent current revised history; contemporaneous release artifacts are required before claiming original vintages.",
+      "known_breaks": [
+        "Series/table identifiers, classifications, seasonal adjustment, rebases, and dissemination endpoints are versioned per adapter."
+      ],
+      "revision_behavior": "Published values may be revised, benchmarked, rebased, or corrected; immutable fetches never overwrite earlier evidence.",
+      "rate_limit": "No stable public limit recorded at review; apply the stricter local request, byte, page, event, retry, and runtime bounds.",
+      "authentication": "none",
+      "credential_env_name": null,
+      "credential_header_name": null,
+      "credential_parameter_name": null,
+      "terms_uri": null,
+      "fallback_source_keys": [],
+      "parser_id": "official.json.v1",
+      "parser_version": "1",
+      "replay_strategy": "Retain exact response bytes, request parameters, endpoint and parser identities, response validators, source clocks, and SHA-256 before normalization.",
+      "adapter_owner": "market-context/se",
+      "verification_status": "reviewed-entrypoint",
+      "reviewed_on": "2026-09-13",
+      "verification_evidence_uris": [
+        "https://www.riksbank.se/en-gb/statistics/search-interest--exchange-rates/"
+      ],
+      "redistribution_notes": "Official public-data terms and attribution requirements must be rechecked and retained by the qualifying adapter.",
+      "limitations": [
+        "Registry review proves the official entrypoint and legal producer, not complete per-series coverage or historical-vintage availability.",
+        "Protocol-specific parsing and empirical fixture qualification are owned by issue #584 and the economy backfill."
+      ]
+    },
+    {
+      "schema_version": "histdatacom.official-source-entry.v1",
+      "source_key": "sg.singstat.tablebuilder",
+      "economy_code": "SG",
+      "economy_name": "Singapore",
+      "institution": "Singapore Department of Statistics",
+      "jurisdiction": "Republic of Singapore",
+      "legal_producer": true,
+      "roles": [
+        "primary-producer",
+        "official-archive",
+        "release-calendar"
+      ],
+      "event_families": [
+        "inflation-prices",
+        "labour-market",
+        "gdp-national-accounts",
+        "retail-consumption",
+        "industrial-production",
+        "trade-external",
+        "housing",
+        "confidence-survey",
+        "fiscal",
+        "other-official"
+      ],
+      "indicator_ids": [
+        "consumer-and-producer-prices",
+        "employment-unemployment-and-earnings",
+        "gdp-and-national-accounts",
+        "retail-sales-and-household-consumption",
+        "industrial-production",
+        "trade-and-external-accounts",
+        "housing-and-construction",
+        "official-confidence-and-tendency-surveys",
+        "government-finance",
+        "other-official-macro"
+      ],
+      "formats": [
+        "json",
+        "csv"
+      ],
+      "capabilities": [
+        "current-values",
+        "historical-observations",
+        "publication-metadata",
+        "schedule-metadata",
+        "revision-metadata",
+        "series-metadata",
+        "archive-enumeration"
+      ],
+      "endpoint_uri_template": "https://tablebuilder.singstat.gov.sg/api/table/",
+      "allowed_hosts": [
+        "tablebuilder.singstat.gov.sg",
+        "www.singstat.gov.sg"
+      ],
+      "expected_media_types": [
+        "application/json",
+        "text/csv",
+        "application/octet-stream"
+      ],
+      "source_series_ids": [],
+      "source_table_ids": [],
+      "source_release_ids": [],
+      "release_calendar_uri": "https://www.singstat.gov.sg/data-tools-services/advance-release-calendar",
+      "archive_uri": "https://tablebuilder.singstat.gov.sg/view-api/for-developers",
+      "source_timezone": "Asia/Singapore",
+      "availability_time_precision": "scheduled-only",
+      "dst_convention": "IANA zone database; retain source lexical times and require explicit DST-fold evidence.",
+      "historical_depth": "Series-dependent current revised history; contemporaneous release artifacts are required before claiming original vintages.",
+      "known_breaks": [
+        "Series/table identifiers, classifications, seasonal adjustment, rebases, and dissemination endpoints are versioned per adapter."
+      ],
+      "revision_behavior": "Published values may be revised, benchmarked, rebased, or corrected; immutable fetches never overwrite earlier evidence.",
+      "rate_limit": "No stable public limit recorded at review; apply the stricter local request, byte, page, event, retry, and runtime bounds.",
+      "authentication": "none",
+      "credential_env_name": null,
+      "credential_header_name": null,
+      "credential_parameter_name": null,
+      "terms_uri": "https://tablebuilder.singstat.gov.sg/terms-of-use",
+      "fallback_source_keys": [],
+      "parser_id": "official.json.v1",
+      "parser_version": "1",
+      "replay_strategy": "Retain exact response bytes, request parameters, endpoint and parser identities, response validators, source clocks, and SHA-256 before normalization.",
+      "adapter_owner": "market-context/sg",
+      "verification_status": "reviewed-entrypoint",
+      "reviewed_on": "2026-09-13",
+      "verification_evidence_uris": [
+        "https://tablebuilder.singstat.gov.sg/view-api/for-developers"
+      ],
+      "redistribution_notes": "Official public-data terms and attribution requirements must be rechecked and retained by the qualifying adapter.",
+      "limitations": [
+        "Registry review proves the official entrypoint and legal producer, not complete per-series coverage or historical-vintage availability.",
+        "Protocol-specific parsing and empirical fixture qualification are owned by issue #584 and the economy backfill."
+      ]
+    },
+    {
+      "schema_version": "histdatacom.official-source-entry.v1",
+      "source_key": "sg.mas.data-api",
+      "economy_code": "SG",
+      "economy_name": "Singapore",
+      "institution": "Monetary Authority of Singapore",
+      "jurisdiction": "Republic of Singapore",
+      "legal_producer": true,
+      "roles": [
+        "primary-producer",
+        "official-archive",
+        "release-calendar"
+      ],
+      "event_families": [
+        "monetary-policy",
+        "money-credit"
+      ],
+      "indicator_ids": [
+        "policy-rate-and-decisions",
+        "money-credit-and-financial-statistics"
+      ],
+      "formats": [
+        "json"
+      ],
+      "capabilities": [
+        "current-values",
+        "historical-observations",
+        "publication-metadata",
+        "schedule-metadata",
+        "revision-metadata",
+        "series-metadata",
+        "archive-enumeration"
+      ],
+      "endpoint_uri_template": "https://eservices.mas.gov.sg/api/action/datastore/",
+      "allowed_hosts": [
+        "eservices.mas.gov.sg",
+        "www.mas.gov.sg"
+      ],
+      "expected_media_types": [
+        "application/json"
+      ],
+      "source_series_ids": [],
+      "source_table_ids": [],
+      "source_release_ids": [],
+      "release_calendar_uri": "https://www.mas.gov.sg/news/monetary-policy-statements",
+      "archive_uri": "https://eservices.mas.gov.sg/statistics/",
+      "source_timezone": "Asia/Singapore",
+      "availability_time_precision": "exact-minute",
+      "dst_convention": "IANA zone database; retain source lexical times and require explicit DST-fold evidence.",
+      "historical_depth": "Series-dependent current revised history; contemporaneous release artifacts are required before claiming original vintages.",
+      "known_breaks": [
+        "Series/table identifiers, classifications, seasonal adjustment, rebases, and dissemination endpoints are versioned per adapter."
+      ],
+      "revision_behavior": "Published values may be revised, benchmarked, rebased, or corrected; immutable fetches never overwrite earlier evidence.",
+      "rate_limit": "No stable public limit recorded at review; apply the stricter local request, byte, page, event, retry, and runtime bounds.",
+      "authentication": "none",
+      "credential_env_name": null,
+      "credential_header_name": null,
+      "credential_parameter_name": null,
+      "terms_uri": null,
+      "fallback_source_keys": [],
+      "parser_id": "official.json.v1",
+      "parser_version": "1",
+      "replay_strategy": "Retain exact response bytes, request parameters, endpoint and parser identities, response validators, source clocks, and SHA-256 before normalization.",
+      "adapter_owner": "market-context/sg",
+      "verification_status": "reviewed-entrypoint",
+      "reviewed_on": "2026-09-13",
+      "verification_evidence_uris": [
+        "https://eservices.mas.gov.sg/statistics/"
+      ],
+      "redistribution_notes": "Official public-data terms and attribution requirements must be rechecked and retained by the qualifying adapter.",
+      "limitations": [
+        "Registry review proves the official entrypoint and legal producer, not complete per-series coverage or historical-vintage availability.",
+        "Protocol-specific parsing and empirical fixture qualification are owned by issue #584 and the economy backfill."
+      ]
+    },
+    {
+      "schema_version": "histdatacom.official-source-entry.v1",
+      "source_key": "tr.turkstat.sdmx",
+      "economy_code": "TR",
+      "economy_name": "Türkiye",
+      "institution": "Turkish Statistical Institute",
+      "jurisdiction": "Republic of Türkiye",
+      "legal_producer": true,
+      "roles": [
+        "primary-producer",
+        "official-archive",
+        "release-calendar"
+      ],
+      "event_families": [
+        "inflation-prices",
+        "labour-market",
+        "gdp-national-accounts",
+        "retail-consumption",
+        "industrial-production",
+        "trade-external",
+        "housing",
+        "confidence-survey",
+        "fiscal",
+        "other-official"
+      ],
+      "indicator_ids": [
+        "consumer-and-producer-prices",
+        "employment-unemployment-and-earnings",
+        "gdp-and-national-accounts",
+        "retail-sales-and-household-consumption",
+        "industrial-production",
+        "trade-and-external-accounts",
+        "housing-and-construction",
+        "official-confidence-and-tendency-surveys",
+        "government-finance",
+        "other-official-macro"
+      ],
+      "formats": [
+        "sdmx-2.1"
+      ],
+      "capabilities": [
+        "current-values",
+        "historical-observations",
+        "publication-metadata",
+        "schedule-metadata",
+        "revision-metadata",
+        "series-metadata",
+        "archive-enumeration"
+      ],
+      "endpoint_uri_template": "https://veriportali.tuik.gov.tr/api/",
+      "allowed_hosts": [
+        "veriportali.tuik.gov.tr",
+        "www.tuik.gov.tr"
+      ],
+      "expected_media_types": [
+        "application/vnd.sdmx.data+csv",
+        "application/vnd.sdmx.data+json",
+        "application/xml",
+        "text/csv"
+      ],
+      "source_series_ids": [],
+      "source_table_ids": [],
+      "source_release_ids": [],
+      "release_calendar_uri": "https://www.tuik.gov.tr/Kurumsal/Veri_Takvimi",
+      "archive_uri": "https://veriportali.tuik.gov.tr/en/",
+      "source_timezone": "Europe/Istanbul",
+      "availability_time_precision": "scheduled-only",
+      "dst_convention": "IANA zone database; retain source lexical times and require explicit DST-fold evidence.",
+      "historical_depth": "Series-dependent current revised history; contemporaneous release artifacts are required before claiming original vintages.",
+      "known_breaks": [
+        "Series/table identifiers, classifications, seasonal adjustment, rebases, and dissemination endpoints are versioned per adapter."
+      ],
+      "revision_behavior": "Published values may be revised, benchmarked, rebased, or corrected; immutable fetches never overwrite earlier evidence.",
+      "rate_limit": "No stable public limit recorded at review; apply the stricter local request, byte, page, event, retry, and runtime bounds.",
+      "authentication": "none",
+      "credential_env_name": null,
+      "credential_header_name": null,
+      "credential_parameter_name": null,
+      "terms_uri": null,
+      "fallback_source_keys": [],
+      "parser_id": "official.sdmx_2.1.v1",
+      "parser_version": "1",
+      "replay_strategy": "Retain exact response bytes, request parameters, endpoint and parser identities, response validators, source clocks, and SHA-256 before normalization.",
+      "adapter_owner": "market-context/tr",
+      "verification_status": "series-qualification-required",
+      "reviewed_on": "2026-09-13",
+      "verification_evidence_uris": [
+        "https://veriportali.tuik.gov.tr/en/"
+      ],
+      "redistribution_notes": "Official public-data terms and attribution requirements must be rechecked and retained by the qualifying adapter.",
+      "limitations": [
+        "Registry review proves the official entrypoint and legal producer, not complete per-series coverage or historical-vintage availability.",
+        "Protocol-specific parsing and empirical fixture qualification are owned by issue #584 and the economy backfill."
+      ]
+    },
+    {
+      "schema_version": "histdatacom.official-source-entry.v1",
+      "source_key": "tr.cbrt.evds",
+      "economy_code": "TR",
+      "economy_name": "Türkiye",
+      "institution": "Central Bank of the Republic of Türkiye",
+      "jurisdiction": "Republic of Türkiye",
+      "legal_producer": true,
+      "roles": [
+        "primary-producer",
+        "official-archive",
+        "release-calendar"
+      ],
+      "event_families": [
+        "monetary-policy",
+        "money-credit"
+      ],
+      "indicator_ids": [
+        "policy-rate-and-decisions",
+        "money-credit-and-financial-statistics"
+      ],
+      "formats": [
+        "json",
+        "csv"
+      ],
+      "capabilities": [
+        "current-values",
+        "historical-observations",
+        "publication-metadata",
+        "schedule-metadata",
+        "revision-metadata",
+        "series-metadata",
+        "archive-enumeration"
+      ],
+      "endpoint_uri_template": "https://evds3.tcmb.gov.tr/igmevdsms-dis/",
+      "allowed_hosts": [
+        "evds3.tcmb.gov.tr"
+      ],
+      "expected_media_types": [
+        "application/json",
+        "text/csv",
+        "text/plain",
+        "application/octet-stream"
+      ],
+      "source_series_ids": [],
+      "source_table_ids": [],
+      "source_release_ids": [],
+      "release_calendar_uri": "https://evds3.tcmb.gov.tr/veriTakvimi",
+      "archive_uri": "https://evds3.tcmb.gov.tr/arsiv",
+      "source_timezone": "Europe/Istanbul",
+      "availability_time_precision": "exact-minute",
+      "dst_convention": "IANA zone database; retain source lexical times and require explicit DST-fold evidence.",
+      "historical_depth": "Series-dependent current revised history; contemporaneous release artifacts are required before claiming original vintages.",
+      "known_breaks": [
+        "Series/table identifiers, classifications, seasonal adjustment, rebases, and dissemination endpoints are versioned per adapter.",
+        "EVDS 3 entered beta in January 2026 and replaced the EVDS 2 web-service host; adapters must bind the EVDS 3 path and current guide."
+      ],
+      "revision_behavior": "Published values may be revised, benchmarked, rebased, or corrected; immutable fetches never overwrite earlier evidence.",
+      "rate_limit": "The current EVDS 3 guide caps a date-range response at 1,000 observation values; local request, byte, page, event, retry, and runtime bounds may be stricter.",
+      "authentication": "required-api-key",
+      "credential_env_name": "HISTDATACOM_CBRT_EVDS_KEY",
+      "credential_header_name": "key",
+      "credential_parameter_name": null,
+      "terms_uri": "https://evds3.tcmb.gov.tr/igmevdsms-dis/documents/showDocument?docId=21",
+      "fallback_source_keys": [],
+      "parser_id": "official.json.v1",
+      "parser_version": "1",
+      "replay_strategy": "Retain exact response bytes, request parameters, endpoint and parser identities, response validators, source clocks, and SHA-256 before normalization.",
+      "adapter_owner": "market-context/tr",
+      "verification_status": "reviewed-entrypoint",
+      "reviewed_on": "2026-09-13",
+      "verification_evidence_uris": [
+        "https://evds3.tcmb.gov.tr/igmevdsms-dis/documents/showDocument?docId=16",
+        "https://www.tcmb.gov.tr/wps/wcm/connect/EN/TCMB%2BEN/Main%2BMenu/Announcements/Press%2BReleases/2026/ANO2026-03"
+      ],
+      "redistribution_notes": "The current EVDS 3 Terms of Use document must be rechecked and its applicable attribution and redistribution conditions retained by the qualifying adapter.",
+      "limitations": [
+        "Registry review proves the official entrypoint and legal producer, not complete per-series coverage or historical-vintage availability.",
+        "Protocol-specific parsing and empirical fixture qualification are owned by issue #584 and the economy backfill."
+      ]
+    },
+    {
+      "schema_version": "histdatacom.official-source-entry.v1",
+      "source_key": "za.statssa.publications",
+      "economy_code": "ZA",
+      "economy_name": "South Africa",
+      "institution": "Statistics South Africa",
+      "jurisdiction": "Republic of South Africa",
+      "legal_producer": true,
+      "roles": [
+        "primary-producer",
+        "official-archive",
+        "release-calendar"
+      ],
+      "event_families": [
+        "inflation-prices",
+        "labour-market",
+        "gdp-national-accounts",
+        "retail-consumption",
+        "industrial-production",
+        "trade-external",
+        "housing",
+        "confidence-survey",
+        "fiscal",
+        "other-official"
+      ],
+      "indicator_ids": [
+        "consumer-and-producer-prices",
+        "employment-unemployment-and-earnings",
+        "gdp-and-national-accounts",
+        "retail-sales-and-household-consumption",
+        "industrial-production",
+        "trade-and-external-accounts",
+        "housing-and-construction",
+        "official-confidence-and-tendency-surveys",
+        "government-finance",
+        "other-official-macro"
+      ],
+      "formats": [
+        "html",
+        "xlsx"
+      ],
+      "capabilities": [
+        "current-values",
+        "historical-observations",
+        "publication-metadata",
+        "schedule-metadata",
+        "revision-metadata",
+        "series-metadata",
+        "archive-enumeration"
+      ],
+      "endpoint_uri_template": "https://www.statssa.gov.za/publications/",
+      "allowed_hosts": [
+        "www.statssa.gov.za"
+      ],
+      "expected_media_types": [
+        "text/html",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "application/octet-stream"
+      ],
+      "source_series_ids": [],
+      "source_table_ids": [],
+      "source_release_ids": [],
+      "release_calendar_uri": "https://www.statssa.gov.za/?page_id=1307",
+      "archive_uri": "https://www.statssa.gov.za/publications/",
+      "source_timezone": "Africa/Johannesburg",
+      "availability_time_precision": "scheduled-only",
+      "dst_convention": "IANA zone database; retain source lexical times and require explicit DST-fold evidence.",
+      "historical_depth": "Series-dependent current revised history; contemporaneous release artifacts are required before claiming original vintages.",
+      "known_breaks": [
+        "Series/table identifiers, classifications, seasonal adjustment, rebases, and dissemination endpoints are versioned per adapter."
+      ],
+      "revision_behavior": "Published values may be revised, benchmarked, rebased, or corrected; immutable fetches never overwrite earlier evidence.",
+      "rate_limit": "No stable public limit recorded at review; apply the stricter local request, byte, page, event, retry, and runtime bounds.",
+      "authentication": "none",
+      "credential_env_name": null,
+      "credential_header_name": null,
+      "credential_parameter_name": null,
+      "terms_uri": null,
+      "fallback_source_keys": [],
+      "parser_id": "official.html.v1",
+      "parser_version": "1",
+      "replay_strategy": "Retain exact response bytes, request parameters, endpoint and parser identities, response validators, source clocks, and SHA-256 before normalization.",
+      "adapter_owner": "market-context/za",
+      "verification_status": "reviewed-entrypoint",
+      "reviewed_on": "2026-09-13",
+      "verification_evidence_uris": [
+        "https://www.statssa.gov.za/publications/"
+      ],
+      "redistribution_notes": "Official public-data terms and attribution requirements must be rechecked and retained by the qualifying adapter.",
+      "limitations": [
+        "Registry review proves the official entrypoint and legal producer, not complete per-series coverage or historical-vintage availability.",
+        "Protocol-specific parsing and empirical fixture qualification are owned by issue #584 and the economy backfill."
+      ]
+    },
+    {
+      "schema_version": "histdatacom.official-source-entry.v1",
+      "source_key": "za.sarb.web-api",
+      "economy_code": "ZA",
+      "economy_name": "South Africa",
+      "institution": "South African Reserve Bank",
+      "jurisdiction": "Republic of South Africa",
+      "legal_producer": true,
+      "roles": [
+        "primary-producer",
+        "official-archive",
+        "release-calendar"
+      ],
+      "event_families": [
+        "monetary-policy",
+        "money-credit"
+      ],
+      "indicator_ids": [
+        "policy-rate-and-decisions",
+        "money-credit-and-financial-statistics"
+      ],
+      "formats": [
+        "json"
+      ],
+      "capabilities": [
+        "current-values",
+        "historical-observations",
+        "publication-metadata",
+        "schedule-metadata",
+        "revision-metadata",
+        "series-metadata",
+        "archive-enumeration"
+      ],
+      "endpoint_uri_template": "https://custom.resbank.co.za/SarbWebApi/api/",
+      "allowed_hosts": [
+        "custom.resbank.co.za",
+        "www.resbank.co.za"
+      ],
+      "expected_media_types": [
+        "application/json"
+      ],
+      "source_series_ids": [],
+      "source_table_ids": [],
+      "source_release_ids": [],
+      "release_calendar_uri": "https://www.resbank.co.za/en/home/what-we-do/monetary-policy/monetary-policy-committee",
+      "archive_uri": "https://custom.resbank.co.za/SarbWebApi/swagger/index.html",
+      "source_timezone": "Africa/Johannesburg",
+      "availability_time_precision": "exact-minute",
+      "dst_convention": "IANA zone database; retain source lexical times and require explicit DST-fold evidence.",
+      "historical_depth": "Series-dependent current revised history; contemporaneous release artifacts are required before claiming original vintages.",
+      "known_breaks": [
+        "Series/table identifiers, classifications, seasonal adjustment, rebases, and dissemination endpoints are versioned per adapter."
+      ],
+      "revision_behavior": "Published values may be revised, benchmarked, rebased, or corrected; immutable fetches never overwrite earlier evidence.",
+      "rate_limit": "No stable public limit recorded at review; apply the stricter local request, byte, page, event, retry, and runtime bounds.",
+      "authentication": "none",
+      "credential_env_name": null,
+      "credential_header_name": null,
+      "credential_parameter_name": null,
+      "terms_uri": null,
+      "fallback_source_keys": [],
+      "parser_id": "official.json.v1",
+      "parser_version": "1",
+      "replay_strategy": "Retain exact response bytes, request parameters, endpoint and parser identities, response validators, source clocks, and SHA-256 before normalization.",
+      "adapter_owner": "market-context/za",
+      "verification_status": "reviewed-entrypoint",
+      "reviewed_on": "2026-09-13",
+      "verification_evidence_uris": [
+        "https://custom.resbank.co.za/SarbWebApi/swagger/index.html"
+      ],
+      "redistribution_notes": "Official public-data terms and attribution requirements must be rechecked and retained by the qualifying adapter.",
+      "limitations": [
+        "Registry review proves the official entrypoint and legal producer, not complete per-series coverage or historical-vintage availability.",
+        "Protocol-specific parsing and empirical fixture qualification are owned by issue #584 and the economy backfill."
+      ]
+    },
+    {
+      "schema_version": "histdatacom.official-source-entry.v1",
+      "source_key": "de.destatis.genesis",
+      "economy_code": "DE",
+      "economy_name": "Germany",
+      "institution": "Federal Statistical Office (Destatis)",
+      "jurisdiction": "Federal Republic of Germany",
+      "legal_producer": true,
+      "roles": [
+        "primary-producer",
+        "official-archive",
+        "release-calendar"
+      ],
+      "event_families": [
+        "inflation-prices",
+        "labour-market",
+        "gdp-national-accounts",
+        "retail-consumption",
+        "industrial-production",
+        "trade-external",
+        "housing",
+        "confidence-survey",
+        "fiscal",
+        "other-official"
+      ],
+      "indicator_ids": [
+        "consumer-and-producer-prices",
+        "employment-unemployment-and-earnings",
+        "gdp-and-national-accounts",
+        "retail-sales-and-household-consumption",
+        "industrial-production",
+        "trade-and-external-accounts",
+        "housing-and-construction",
+        "official-confidence-and-tendency-surveys",
+        "government-finance",
+        "other-official-macro"
+      ],
+      "formats": [
+        "json"
+      ],
+      "capabilities": [
+        "current-values",
+        "historical-observations",
+        "publication-metadata",
+        "schedule-metadata",
+        "revision-metadata",
+        "series-metadata",
+        "archive-enumeration"
+      ],
+      "endpoint_uri_template": "https://genesis.destatis.de/genesisWS/rest/2020/",
+      "allowed_hosts": [
+        "genesis.destatis.de",
+        "www-genesis.destatis.de",
+        "www.destatis.de"
+      ],
+      "expected_media_types": [
+        "application/json"
+      ],
+      "source_series_ids": [],
+      "source_table_ids": [],
+      "source_release_ids": [],
+      "release_calendar_uri": "https://www.destatis.de/EN/Press/Dates/Weekly-Preview/_node.html",
+      "archive_uri": "https://genesis.destatis.de/datenbank/online",
+      "source_timezone": "Europe/Berlin",
+      "availability_time_precision": "scheduled-only",
+      "dst_convention": "IANA zone database; retain source lexical times and require explicit DST-fold evidence.",
+      "historical_depth": "Series-dependent current revised history; contemporaneous release artifacts are required before claiming original vintages.",
+      "known_breaks": [
+        "Series/table identifiers, classifications, seasonal adjustment, rebases, and dissemination endpoints are versioned per adapter.",
+        "REST GET and SOAP methods were retired in July 2025 in favor of REST POST methods; the service moved to genesis.destatis.de in May 2026."
+      ],
+      "revision_behavior": "Published values may be revised, benchmarked, rebased, or corrected; immutable fetches never overwrite earlier evidence.",
+      "rate_limit": "GENESIS reports capacity-dependent simultaneous-request limits through logincheck; adapters must query conservatively within that live limit and the stricter local bounds.",
+      "authentication": "required-api-key",
+      "credential_env_name": "HISTDATACOM_DESTATIS_TOKEN",
+      "credential_header_name": "username",
+      "credential_parameter_name": null,
+      "terms_uri": "https://www.destatis.de/EN/Service/OpenData/api-webservice.html",
+      "fallback_source_keys": [],
+      "parser_id": "official.json.v1",
+      "parser_version": "1",
+      "replay_strategy": "Retain exact response bytes, request parameters, endpoint and parser identities, response validators, source clocks, and SHA-256 before normalization.",
+      "adapter_owner": "market-context/de",
+      "verification_status": "reviewed-entrypoint",
+      "reviewed_on": "2026-09-13",
+      "verification_evidence_uris": [
+        "https://www.destatis.de/EN/Service/OpenData/api-webservice.html",
+        "https://genesis.destatis.de/datenbank/online/docs/GENESIS-Webservices_Introduction.pdf"
+      ],
+      "redistribution_notes": "Destatis identifies GENESIS data as licensed under Data Licence Germany – Attribution 2.0; preserve the required source attribution and recheck the linked licence at qualification time.",
+      "limitations": [
+        "Registry review proves the official entrypoint and legal producer, not complete per-series coverage or historical-vintage availability.",
+        "Protocol-specific parsing and empirical fixture qualification are owned by issue #584 and the economy backfill."
+      ]
+    },
+    {
+      "schema_version": "histdatacom.official-source-entry.v1",
+      "source_key": "de.ecb.monetary-policy",
+      "economy_code": "DE",
+      "economy_name": "Germany",
+      "institution": "European Central Bank",
+      "jurisdiction": "Federal Republic of Germany",
+      "legal_producer": true,
+      "roles": [
+        "primary-producer",
+        "official-archive",
+        "release-calendar"
+      ],
+      "event_families": [
+        "monetary-policy"
+      ],
+      "indicator_ids": [
+        "policy-rate-and-decisions"
+      ],
+      "formats": [
+        "html"
+      ],
+      "capabilities": [
+        "current-values",
+        "historical-observations",
+        "publication-metadata",
+        "schedule-metadata",
+        "revision-metadata",
+        "series-metadata",
+        "archive-enumeration"
+      ],
+      "endpoint_uri_template": "https://www.ecb.europa.eu/press/calendars/mgcgc/html/index.en.html",
+      "allowed_hosts": [
+        "www.ecb.europa.eu"
+      ],
+      "expected_media_types": [
+        "text/html"
+      ],
+      "source_series_ids": [],
+      "source_table_ids": [],
+      "source_release_ids": [],
+      "release_calendar_uri": "https://www.ecb.europa.eu/press/calendars/mgcgc/html/index.en.html",
+      "archive_uri": "https://www.ecb.europa.eu/press/calendars/mgcgc/html/index.en.html",
+      "source_timezone": "Europe/Berlin",
+      "availability_time_precision": "exact-minute",
+      "dst_convention": "IANA zone database; retain source lexical times and require explicit DST-fold evidence.",
+      "historical_depth": "Series-dependent current revised history; contemporaneous release artifacts are required before claiming original vintages.",
+      "known_breaks": [
+        "Series/table identifiers, classifications, seasonal adjustment, rebases, and dissemination endpoints are versioned per adapter."
+      ],
+      "revision_behavior": "Published values may be revised, benchmarked, rebased, or corrected; immutable fetches never overwrite earlier evidence.",
+      "rate_limit": "No stable public limit recorded at review; apply the stricter local request, byte, page, event, retry, and runtime bounds.",
+      "authentication": "none",
+      "credential_env_name": null,
+      "credential_header_name": null,
+      "credential_parameter_name": null,
+      "terms_uri": null,
+      "fallback_source_keys": [],
+      "parser_id": "official.html.v1",
+      "parser_version": "1",
+      "replay_strategy": "Retain exact response bytes, request parameters, endpoint and parser identities, response validators, source clocks, and SHA-256 before normalization.",
+      "adapter_owner": "market-context/de",
+      "verification_status": "reviewed-entrypoint",
+      "reviewed_on": "2026-09-13",
+      "verification_evidence_uris": [
+        "https://www.ecb.europa.eu/press/calendars/mgcgc/html/index.en.html"
+      ],
+      "redistribution_notes": "Official public-data terms and attribution requirements must be rechecked and retained by the qualifying adapter.",
+      "limitations": [
+        "Registry review proves the official entrypoint and legal producer, not complete per-series coverage or historical-vintage availability.",
+        "Protocol-specific parsing and empirical fixture qualification are owned by issue #584 and the economy backfill."
+      ]
+    },
+    {
+      "schema_version": "histdatacom.official-source-entry.v1",
+      "source_key": "de.bundesbank.sdmx",
+      "economy_code": "DE",
+      "economy_name": "Germany",
+      "institution": "Deutsche Bundesbank",
+      "jurisdiction": "Federal Republic of Germany",
+      "legal_producer": true,
+      "roles": [
+        "primary-producer",
+        "official-archive",
+        "release-calendar"
+      ],
+      "event_families": [
+        "money-credit"
+      ],
+      "indicator_ids": [
+        "money-credit-and-financial-statistics"
+      ],
+      "formats": [
+        "sdmx-2.1"
+      ],
+      "capabilities": [
+        "current-values",
+        "historical-observations",
+        "publication-metadata",
+        "schedule-metadata",
+        "revision-metadata",
+        "series-metadata",
+        "archive-enumeration"
+      ],
+      "endpoint_uri_template": "https://api.statistiken.bundesbank.de/rest/",
+      "allowed_hosts": [
+        "api.statistiken.bundesbank.de",
+        "statistiken.bundesbank.de",
+        "www.bundesbank.de"
+      ],
+      "expected_media_types": [
+        "application/vnd.sdmx.data+csv",
+        "application/vnd.sdmx.data+json",
+        "application/xml",
+        "text/csv"
+      ],
+      "source_series_ids": [],
+      "source_table_ids": [],
+      "source_release_ids": [],
+      "release_calendar_uri": "https://www.bundesbank.de/en/press/dates",
+      "archive_uri": "https://statistiken.bundesbank.de/statistiken-en/help-991452?article=bundesbank-sdmx-web-service-api-991448",
+      "source_timezone": "Europe/Berlin",
+      "availability_time_precision": "exact-minute",
+      "dst_convention": "IANA zone database; retain source lexical times and require explicit DST-fold evidence.",
+      "historical_depth": "Series-dependent current revised history; contemporaneous release artifacts are required before claiming original vintages.",
+      "known_breaks": [
+        "Series/table identifiers, classifications, seasonal adjustment, rebases, and dissemination endpoints are versioned per adapter."
+      ],
+      "revision_behavior": "Published values may be revised, benchmarked, rebased, or corrected; immutable fetches never overwrite earlier evidence.",
+      "rate_limit": "No stable public limit recorded at review; apply the stricter local request, byte, page, event, retry, and runtime bounds.",
+      "authentication": "none",
+      "credential_env_name": null,
+      "credential_header_name": null,
+      "credential_parameter_name": null,
+      "terms_uri": null,
+      "fallback_source_keys": [],
+      "parser_id": "official.sdmx_2.1.v1",
+      "parser_version": "1",
+      "replay_strategy": "Retain exact response bytes, request parameters, endpoint and parser identities, response validators, source clocks, and SHA-256 before normalization.",
+      "adapter_owner": "market-context/de",
+      "verification_status": "reviewed-entrypoint",
+      "reviewed_on": "2026-09-13",
+      "verification_evidence_uris": [
+        "https://statistiken.bundesbank.de/statistiken-en/help-991452?article=bundesbank-sdmx-web-service-api-991448",
+        "https://api.statistiken.bundesbank.de/doc/index.html"
+      ],
+      "redistribution_notes": "Official public-data terms and attribution requirements must be rechecked and retained by the qualifying adapter.",
+      "limitations": [
+        "Registry review proves the official entrypoint and legal producer, not complete per-series coverage or historical-vintage availability.",
+        "Protocol-specific parsing and empirical fixture qualification are owned by issue #584 and the economy backfill."
+      ]
+    },
+    {
+      "schema_version": "histdatacom.official-source-entry.v1",
+      "source_key": "fr.insee.bdm",
+      "economy_code": "FR",
+      "economy_name": "France",
+      "institution": "Institut national de la statistique et des études économiques",
+      "jurisdiction": "French Republic",
+      "legal_producer": true,
+      "roles": [
+        "primary-producer",
+        "official-archive",
+        "release-calendar"
+      ],
+      "event_families": [
+        "inflation-prices",
+        "labour-market",
+        "gdp-national-accounts",
+        "retail-consumption",
+        "industrial-production",
+        "trade-external",
+        "housing",
+        "confidence-survey",
+        "fiscal",
+        "other-official"
+      ],
+      "indicator_ids": [
+        "consumer-and-producer-prices",
+        "employment-unemployment-and-earnings",
+        "gdp-and-national-accounts",
+        "retail-sales-and-household-consumption",
+        "industrial-production",
+        "trade-and-external-accounts",
+        "housing-and-construction",
+        "official-confidence-and-tendency-surveys",
+        "government-finance",
+        "other-official-macro"
+      ],
+      "formats": [
+        "sdmx-2.1"
+      ],
+      "capabilities": [
+        "current-values",
+        "historical-observations",
+        "publication-metadata",
+        "schedule-metadata",
+        "revision-metadata",
+        "series-metadata",
+        "archive-enumeration"
+      ],
+      "endpoint_uri_template": "https://bdm.insee.fr/series/sdmx/",
+      "allowed_hosts": [
+        "bdm.insee.fr",
+        "www.insee.fr"
+      ],
+      "expected_media_types": [
+        "application/vnd.sdmx.data+csv",
+        "application/vnd.sdmx.data+json",
+        "application/xml",
+        "text/csv"
+      ],
+      "source_series_ids": [],
+      "source_table_ids": [],
+      "source_release_ids": [],
+      "release_calendar_uri": "https://www.insee.fr/en/information/2107811",
+      "archive_uri": "https://www.insee.fr/en/information/2868055",
+      "source_timezone": "Europe/Paris",
+      "availability_time_precision": "scheduled-only",
+      "dst_convention": "IANA zone database; retain source lexical times and require explicit DST-fold evidence.",
+      "historical_depth": "Series-dependent current revised history; contemporaneous release artifacts are required before claiming original vintages.",
+      "known_breaks": [
+        "Series/table identifiers, classifications, seasonal adjustment, rebases, and dissemination endpoints are versioned per adapter."
+      ],
+      "revision_behavior": "Published values may be revised, benchmarked, rebased, or corrected; immutable fetches never overwrite earlier evidence.",
+      "rate_limit": "No stable public limit recorded at review; apply the stricter local request, byte, page, event, retry, and runtime bounds.",
+      "authentication": "none",
+      "credential_env_name": null,
+      "credential_header_name": null,
+      "credential_parameter_name": null,
+      "terms_uri": null,
+      "fallback_source_keys": [],
+      "parser_id": "official.sdmx_2.1.v1",
+      "parser_version": "1",
+      "replay_strategy": "Retain exact response bytes, request parameters, endpoint and parser identities, response validators, source clocks, and SHA-256 before normalization.",
+      "adapter_owner": "market-context/fr",
+      "verification_status": "reviewed-entrypoint",
+      "reviewed_on": "2026-09-13",
+      "verification_evidence_uris": [
+        "https://www.insee.fr/en/information/2868055"
+      ],
+      "redistribution_notes": "Official public-data terms and attribution requirements must be rechecked and retained by the qualifying adapter.",
+      "limitations": [
+        "Registry review proves the official entrypoint and legal producer, not complete per-series coverage or historical-vintage availability.",
+        "Protocol-specific parsing and empirical fixture qualification are owned by issue #584 and the economy backfill."
+      ]
+    },
+    {
+      "schema_version": "histdatacom.official-source-entry.v1",
+      "source_key": "fr.ecb.monetary-policy",
+      "economy_code": "FR",
+      "economy_name": "France",
+      "institution": "European Central Bank",
+      "jurisdiction": "French Republic",
+      "legal_producer": true,
+      "roles": [
+        "primary-producer",
+        "official-archive",
+        "release-calendar"
+      ],
+      "event_families": [
+        "monetary-policy"
+      ],
+      "indicator_ids": [
+        "policy-rate-and-decisions"
+      ],
+      "formats": [
+        "html"
+      ],
+      "capabilities": [
+        "current-values",
+        "historical-observations",
+        "publication-metadata",
+        "schedule-metadata",
+        "revision-metadata",
+        "series-metadata",
+        "archive-enumeration"
+      ],
+      "endpoint_uri_template": "https://www.ecb.europa.eu/press/calendars/mgcgc/html/index.en.html",
+      "allowed_hosts": [
+        "www.ecb.europa.eu"
+      ],
+      "expected_media_types": [
+        "text/html"
+      ],
+      "source_series_ids": [],
+      "source_table_ids": [],
+      "source_release_ids": [],
+      "release_calendar_uri": "https://www.ecb.europa.eu/press/calendars/mgcgc/html/index.en.html",
+      "archive_uri": "https://www.ecb.europa.eu/press/calendars/mgcgc/html/index.en.html",
+      "source_timezone": "Europe/Paris",
+      "availability_time_precision": "exact-minute",
+      "dst_convention": "IANA zone database; retain source lexical times and require explicit DST-fold evidence.",
+      "historical_depth": "Series-dependent current revised history; contemporaneous release artifacts are required before claiming original vintages.",
+      "known_breaks": [
+        "Series/table identifiers, classifications, seasonal adjustment, rebases, and dissemination endpoints are versioned per adapter."
+      ],
+      "revision_behavior": "Published values may be revised, benchmarked, rebased, or corrected; immutable fetches never overwrite earlier evidence.",
+      "rate_limit": "No stable public limit recorded at review; apply the stricter local request, byte, page, event, retry, and runtime bounds.",
+      "authentication": "none",
+      "credential_env_name": null,
+      "credential_header_name": null,
+      "credential_parameter_name": null,
+      "terms_uri": null,
+      "fallback_source_keys": [],
+      "parser_id": "official.html.v1",
+      "parser_version": "1",
+      "replay_strategy": "Retain exact response bytes, request parameters, endpoint and parser identities, response validators, source clocks, and SHA-256 before normalization.",
+      "adapter_owner": "market-context/fr",
+      "verification_status": "reviewed-entrypoint",
+      "reviewed_on": "2026-09-13",
+      "verification_evidence_uris": [
+        "https://www.ecb.europa.eu/press/calendars/mgcgc/html/index.en.html"
+      ],
+      "redistribution_notes": "Official public-data terms and attribution requirements must be rechecked and retained by the qualifying adapter.",
+      "limitations": [
+        "Registry review proves the official entrypoint and legal producer, not complete per-series coverage or historical-vintage availability.",
+        "Protocol-specific parsing and empirical fixture qualification are owned by issue #584 and the economy backfill."
+      ]
+    },
+    {
+      "schema_version": "histdatacom.official-source-entry.v1",
+      "source_key": "fr.banque-france.webstat",
+      "economy_code": "FR",
+      "economy_name": "France",
+      "institution": "Banque de France",
+      "jurisdiction": "French Republic",
+      "legal_producer": true,
+      "roles": [
+        "primary-producer",
+        "official-archive",
+        "release-calendar"
+      ],
+      "event_families": [
+        "money-credit"
+      ],
+      "indicator_ids": [
+        "money-credit-and-financial-statistics"
+      ],
+      "formats": [
+        "json"
+      ],
+      "capabilities": [
+        "current-values",
+        "historical-observations",
+        "publication-metadata",
+        "schedule-metadata",
+        "revision-metadata",
+        "series-metadata",
+        "archive-enumeration"
+      ],
+      "endpoint_uri_template": "https://webstat.banque-france.fr/api/explore/v2.1/",
+      "allowed_hosts": [
+        "webstat.banque-france.fr",
+        "www.banque-france.fr"
+      ],
+      "expected_media_types": [
+        "application/json"
+      ],
+      "source_series_ids": [],
+      "source_table_ids": [],
+      "source_release_ids": [],
+      "release_calendar_uri": "https://www.banque-france.fr/fr/espace-presse",
+      "archive_uri": "https://webstat.banque-france.fr/pages/guide-migration-api/",
+      "source_timezone": "Europe/Paris",
+      "availability_time_precision": "exact-minute",
+      "dst_convention": "IANA zone database; retain source lexical times and require explicit DST-fold evidence.",
+      "historical_depth": "Series-dependent current revised history; contemporaneous release artifacts are required before claiming original vintages.",
+      "known_breaks": [
+        "Series/table identifiers, classifications, seasonal adjustment, rebases, and dissemination endpoints are versioned per adapter."
+      ],
+      "revision_behavior": "Published values may be revised, benchmarked, rebased, or corrected; immutable fetches never overwrite earlier evidence.",
+      "rate_limit": "No stable public limit recorded at review; apply the stricter local request, byte, page, event, retry, and runtime bounds.",
+      "authentication": "none",
+      "credential_env_name": null,
+      "credential_header_name": null,
+      "credential_parameter_name": null,
+      "terms_uri": null,
+      "fallback_source_keys": [],
+      "parser_id": "official.json.v1",
+      "parser_version": "1",
+      "replay_strategy": "Retain exact response bytes, request parameters, endpoint and parser identities, response validators, source clocks, and SHA-256 before normalization.",
+      "adapter_owner": "market-context/fr",
+      "verification_status": "reviewed-entrypoint",
+      "reviewed_on": "2026-09-13",
+      "verification_evidence_uris": [
+        "https://webstat.banque-france.fr/pages/guide-migration-api/"
+      ],
+      "redistribution_notes": "Official public-data terms and attribution requirements must be rechecked and retained by the qualifying adapter.",
+      "limitations": [
+        "Registry review proves the official entrypoint and legal producer, not complete per-series coverage or historical-vintage availability.",
+        "Protocol-specific parsing and empirical fixture qualification are owned by issue #584 and the economy backfill."
+      ]
+    },
+    {
+      "schema_version": "histdatacom.official-source-entry.v1",
+      "source_key": "us.bls.public-data",
+      "economy_code": "US",
+      "economy_name": "United States",
+      "institution": "U.S. Bureau of Labor Statistics",
+      "jurisdiction": "United States of America",
+      "legal_producer": true,
+      "roles": [
+        "primary-producer",
+        "official-archive",
+        "release-calendar"
+      ],
+      "event_families": [
+        "inflation-prices",
+        "labour-market"
+      ],
+      "indicator_ids": [
+        "consumer-and-producer-prices",
+        "employment-unemployment-and-earnings"
+      ],
+      "formats": [
+        "json"
+      ],
+      "capabilities": [
+        "current-values",
+        "historical-observations",
+        "publication-metadata",
+        "schedule-metadata",
+        "revision-metadata",
+        "series-metadata",
+        "archive-enumeration"
+      ],
+      "endpoint_uri_template": "https://api.bls.gov/publicAPI/v2/timeseries/data/",
+      "allowed_hosts": [
+        "api.bls.gov",
+        "www.bls.gov"
+      ],
+      "expected_media_types": [
+        "application/json"
+      ],
+      "source_series_ids": [],
+      "source_table_ids": [],
+      "source_release_ids": [],
+      "release_calendar_uri": "https://www.bls.gov/schedule/",
+      "archive_uri": "https://www.bls.gov/developers/",
+      "source_timezone": "America/New_York",
+      "availability_time_precision": "scheduled-only",
+      "dst_convention": "IANA zone database; retain source lexical times and require explicit DST-fold evidence.",
+      "historical_depth": "Series-dependent current revised history; contemporaneous release artifacts are required before claiming original vintages.",
+      "known_breaks": [
+        "Series/table identifiers, classifications, seasonal adjustment, rebases, and dissemination endpoints are versioned per adapter."
+      ],
+      "revision_behavior": "Published values may be revised, benchmarked, rebased, or corrected; immutable fetches never overwrite earlier evidence.",
+      "rate_limit": "BLS publishes registered and unregistered daily/query limits; adapters use the applicable stricter limit.",
+      "authentication": "none",
+      "credential_env_name": null,
+      "credential_header_name": null,
+      "credential_parameter_name": null,
+      "terms_uri": "https://www.bls.gov/bls/linksite.htm",
+      "fallback_source_keys": [],
+      "parser_id": "official.json.v1",
+      "parser_version": "1",
+      "replay_strategy": "Retain exact response bytes, request parameters, endpoint and parser identities, response validators, source clocks, and SHA-256 before normalization.",
+      "adapter_owner": "market-context/us",
+      "verification_status": "reviewed-entrypoint",
+      "reviewed_on": "2026-09-13",
+      "verification_evidence_uris": [
+        "https://www.bls.gov/developers/"
+      ],
+      "redistribution_notes": "Official public-data terms and attribution requirements must be rechecked and retained by the qualifying adapter.",
+      "limitations": [
+        "Registry review proves the official entrypoint and legal producer, not complete per-series coverage or historical-vintage availability.",
+        "Protocol-specific parsing and empirical fixture qualification are owned by issue #584 and the economy backfill."
+      ]
+    },
+    {
+      "schema_version": "histdatacom.official-source-entry.v1",
+      "source_key": "us.bea.api",
+      "economy_code": "US",
+      "economy_name": "United States",
+      "institution": "U.S. Bureau of Economic Analysis",
+      "jurisdiction": "United States of America",
+      "legal_producer": true,
+      "roles": [
+        "primary-producer",
+        "official-archive",
+        "release-calendar"
+      ],
+      "event_families": [
+        "gdp-national-accounts"
+      ],
+      "indicator_ids": [
+        "gdp-and-national-accounts"
+      ],
+      "formats": [
+        "json"
+      ],
+      "capabilities": [
+        "current-values",
+        "historical-observations",
+        "publication-metadata",
+        "schedule-metadata",
+        "revision-metadata",
+        "series-metadata",
+        "archive-enumeration"
+      ],
+      "endpoint_uri_template": "https://apps.bea.gov/api/data/",
+      "allowed_hosts": [
+        "apps.bea.gov",
+        "www.bea.gov"
+      ],
+      "expected_media_types": [
+        "application/json"
+      ],
+      "source_series_ids": [],
+      "source_table_ids": [],
+      "source_release_ids": [],
+      "release_calendar_uri": "https://www.bea.gov/news/schedule",
+      "archive_uri": "https://apps.bea.gov/api/signup/",
+      "source_timezone": "America/New_York",
+      "availability_time_precision": "scheduled-only",
+      "dst_convention": "IANA zone database; retain source lexical times and require explicit DST-fold evidence.",
+      "historical_depth": "Series-dependent current revised history; contemporaneous release artifacts are required before claiming original vintages.",
+      "known_breaks": [
+        "Series/table identifiers, classifications, seasonal adjustment, rebases, and dissemination endpoints are versioned per adapter."
+      ],
+      "revision_behavior": "Published values may be revised, benchmarked, rebased, or corrected; immutable fetches never overwrite earlier evidence.",
+      "rate_limit": "No stable public limit recorded at review; apply the stricter local request, byte, page, event, retry, and runtime bounds.",
+      "authentication": "required-api-key",
+      "credential_env_name": "HISTDATACOM_BEA_API_KEY",
+      "credential_header_name": null,
+      "credential_parameter_name": "UserID",
+      "terms_uri": null,
+      "fallback_source_keys": [],
+      "parser_id": "official.json.v1",
+      "parser_version": "1",
+      "replay_strategy": "Retain exact response bytes, request parameters, endpoint and parser identities, response validators, source clocks, and SHA-256 before normalization.",
+      "adapter_owner": "market-context/us",
+      "verification_status": "reviewed-entrypoint",
+      "reviewed_on": "2026-09-13",
+      "verification_evidence_uris": [
+        "https://apps.bea.gov/api/signup/"
+      ],
+      "redistribution_notes": "Official public-data terms and attribution requirements must be rechecked and retained by the qualifying adapter.",
+      "limitations": [
+        "Registry review proves the official entrypoint and legal producer, not complete per-series coverage or historical-vintage availability.",
+        "Protocol-specific parsing and empirical fixture qualification are owned by issue #584 and the economy backfill."
+      ]
+    },
+    {
+      "schema_version": "histdatacom.official-source-entry.v1",
+      "source_key": "us.census.eits",
+      "economy_code": "US",
+      "economy_name": "United States",
+      "institution": "U.S. Census Bureau",
+      "jurisdiction": "United States of America",
+      "legal_producer": true,
+      "roles": [
+        "primary-producer",
+        "official-archive",
+        "release-calendar"
+      ],
+      "event_families": [
+        "retail-consumption",
+        "trade-external",
+        "housing",
+        "confidence-survey",
+        "other-official"
+      ],
+      "indicator_ids": [
+        "retail-sales-and-household-consumption",
+        "trade-and-external-accounts",
+        "housing-and-construction",
+        "official-confidence-and-tendency-surveys",
+        "other-official-macro"
+      ],
+      "formats": [
+        "json"
+      ],
+      "capabilities": [
+        "current-values",
+        "historical-observations",
+        "publication-metadata",
+        "schedule-metadata",
+        "revision-metadata",
+        "series-metadata",
+        "archive-enumeration"
+      ],
+      "endpoint_uri_template": "https://api.census.gov/data/timeseries/eits/",
+      "allowed_hosts": [
+        "api.census.gov",
+        "www.census.gov"
+      ],
+      "expected_media_types": [
+        "application/json"
+      ],
+      "source_series_ids": [],
+      "source_table_ids": [],
+      "source_release_ids": [],
+      "release_calendar_uri": "https://www.census.gov/economic-indicators/calendar-listview.html",
+      "archive_uri": "https://www.census.gov/data/developers/data-sets/economic-indicators.html",
+      "source_timezone": "America/New_York",
+      "availability_time_precision": "scheduled-only",
+      "dst_convention": "IANA zone database; retain source lexical times and require explicit DST-fold evidence.",
+      "historical_depth": "Series-dependent current revised history; contemporaneous release artifacts are required before claiming original vintages.",
+      "known_breaks": [
+        "Series/table identifiers, classifications, seasonal adjustment, rebases, and dissemination endpoints are versioned per adapter."
+      ],
+      "revision_behavior": "Published values may be revised, benchmarked, rebased, or corrected; immutable fetches never overwrite earlier evidence.",
+      "rate_limit": "No stable public limit recorded at review; apply the stricter local request, byte, page, event, retry, and runtime bounds.",
+      "authentication": "required-api-key",
+      "credential_env_name": "HISTDATACOM_CENSUS_API_KEY",
+      "credential_header_name": null,
+      "credential_parameter_name": "key",
+      "terms_uri": null,
+      "fallback_source_keys": [],
+      "parser_id": "official.json.v1",
+      "parser_version": "1",
+      "replay_strategy": "Retain exact response bytes, request parameters, endpoint and parser identities, response validators, source clocks, and SHA-256 before normalization.",
+      "adapter_owner": "market-context/us",
+      "verification_status": "reviewed-entrypoint",
+      "reviewed_on": "2026-09-13",
+      "verification_evidence_uris": [
+        "https://www.census.gov/data/developers/data-sets/economic-indicators.html"
+      ],
+      "redistribution_notes": "Official public-data terms and attribution requirements must be rechecked and retained by the qualifying adapter.",
+      "limitations": [
+        "Registry review proves the official entrypoint and legal producer, not complete per-series coverage or historical-vintage availability.",
+        "Protocol-specific parsing and empirical fixture qualification are owned by issue #584 and the economy backfill."
+      ]
+    },
+    {
+      "schema_version": "histdatacom.official-source-entry.v1",
+      "source_key": "us.frb.industrial-production",
+      "economy_code": "US",
+      "economy_name": "United States",
+      "institution": "Board of Governors of the Federal Reserve System",
+      "jurisdiction": "United States of America",
+      "legal_producer": true,
+      "roles": [
+        "primary-producer",
+        "official-archive",
+        "release-calendar"
+      ],
+      "event_families": [
+        "industrial-production"
+      ],
+      "indicator_ids": [
+        "industrial-production"
+      ],
+      "formats": [
+        "html",
+        "csv"
+      ],
+      "capabilities": [
+        "current-values",
+        "historical-observations",
+        "publication-metadata",
+        "schedule-metadata",
+        "revision-metadata",
+        "series-metadata",
+        "archive-enumeration"
+      ],
+      "endpoint_uri_template": "https://www.federalreserve.gov/releases/g17/",
+      "allowed_hosts": [
+        "www.federalreserve.gov"
+      ],
+      "expected_media_types": [
+        "text/html",
+        "text/csv",
+        "application/octet-stream"
+      ],
+      "source_series_ids": [],
+      "source_table_ids": [],
+      "source_release_ids": [],
+      "release_calendar_uri": "https://www.federalreserve.gov/releases/g17/current/",
+      "archive_uri": "https://www.federalreserve.gov/releases/g17/",
+      "source_timezone": "America/New_York",
+      "availability_time_precision": "scheduled-only",
+      "dst_convention": "IANA zone database; retain source lexical times and require explicit DST-fold evidence.",
+      "historical_depth": "Series-dependent current revised history; contemporaneous release artifacts are required before claiming original vintages.",
+      "known_breaks": [
+        "Series/table identifiers, classifications, seasonal adjustment, rebases, and dissemination endpoints are versioned per adapter."
+      ],
+      "revision_behavior": "Published values may be revised, benchmarked, rebased, or corrected; immutable fetches never overwrite earlier evidence.",
+      "rate_limit": "No stable public limit recorded at review; apply the stricter local request, byte, page, event, retry, and runtime bounds.",
+      "authentication": "none",
+      "credential_env_name": null,
+      "credential_header_name": null,
+      "credential_parameter_name": null,
+      "terms_uri": null,
+      "fallback_source_keys": [],
+      "parser_id": "official.html.v1",
+      "parser_version": "1",
+      "replay_strategy": "Retain exact response bytes, request parameters, endpoint and parser identities, response validators, source clocks, and SHA-256 before normalization.",
+      "adapter_owner": "market-context/us",
+      "verification_status": "reviewed-entrypoint",
+      "reviewed_on": "2026-09-13",
+      "verification_evidence_uris": [
+        "https://www.federalreserve.gov/releases/g17/"
+      ],
+      "redistribution_notes": "Official public-data terms and attribution requirements must be rechecked and retained by the qualifying adapter.",
+      "limitations": [
+        "Registry review proves the official entrypoint and legal producer, not complete per-series coverage or historical-vintage availability.",
+        "Protocol-specific parsing and empirical fixture qualification are owned by issue #584 and the economy backfill."
+      ]
+    },
+    {
+      "schema_version": "histdatacom.official-source-entry.v1",
+      "source_key": "us.treasury.fiscal-data",
+      "economy_code": "US",
+      "economy_name": "United States",
+      "institution": "U.S. Department of the Treasury",
+      "jurisdiction": "United States of America",
+      "legal_producer": true,
+      "roles": [
+        "primary-producer",
+        "official-archive",
+        "release-calendar"
+      ],
+      "event_families": [
+        "fiscal"
+      ],
+      "indicator_ids": [
+        "government-finance"
+      ],
+      "formats": [
+        "json"
+      ],
+      "capabilities": [
+        "current-values",
+        "historical-observations",
+        "publication-metadata",
+        "schedule-metadata",
+        "revision-metadata",
+        "series-metadata",
+        "archive-enumeration"
+      ],
+      "endpoint_uri_template": "https://api.fiscaldata.treasury.gov/services/api/fiscal_service/",
+      "allowed_hosts": [
+        "api.fiscaldata.treasury.gov",
+        "fiscaldata.treasury.gov"
+      ],
+      "expected_media_types": [
+        "application/json"
+      ],
+      "source_series_ids": [],
+      "source_table_ids": [],
+      "source_release_ids": [],
+      "release_calendar_uri": "https://fiscaldata.treasury.gov/datasets/",
+      "archive_uri": "https://fiscaldata.treasury.gov/api-documentation/",
+      "source_timezone": "America/New_York",
+      "availability_time_precision": "scheduled-only",
+      "dst_convention": "IANA zone database; retain source lexical times and require explicit DST-fold evidence.",
+      "historical_depth": "Series-dependent current revised history; contemporaneous release artifacts are required before claiming original vintages.",
+      "known_breaks": [
+        "Series/table identifiers, classifications, seasonal adjustment, rebases, and dissemination endpoints are versioned per adapter."
+      ],
+      "revision_behavior": "Published values may be revised, benchmarked, rebased, or corrected; immutable fetches never overwrite earlier evidence.",
+      "rate_limit": "No stable public limit recorded at review; apply the stricter local request, byte, page, event, retry, and runtime bounds.",
+      "authentication": "none",
+      "credential_env_name": null,
+      "credential_header_name": null,
+      "credential_parameter_name": null,
+      "terms_uri": null,
+      "fallback_source_keys": [],
+      "parser_id": "official.json.v1",
+      "parser_version": "1",
+      "replay_strategy": "Retain exact response bytes, request parameters, endpoint and parser identities, response validators, source clocks, and SHA-256 before normalization.",
+      "adapter_owner": "market-context/us",
+      "verification_status": "reviewed-entrypoint",
+      "reviewed_on": "2026-09-13",
+      "verification_evidence_uris": [
+        "https://fiscaldata.treasury.gov/api-documentation/"
+      ],
+      "redistribution_notes": "Official public-data terms and attribution requirements must be rechecked and retained by the qualifying adapter.",
+      "limitations": [
+        "Registry review proves the official entrypoint and legal producer, not complete per-series coverage or historical-vintage availability.",
+        "Protocol-specific parsing and empirical fixture qualification are owned by issue #584 and the economy backfill."
+      ]
+    },
+    {
+      "schema_version": "histdatacom.official-source-entry.v1",
+      "source_key": "us.frb.fomc",
+      "economy_code": "US",
+      "economy_name": "United States",
+      "institution": "Board of Governors of the Federal Reserve System",
+      "jurisdiction": "United States of America",
+      "legal_producer": true,
+      "roles": [
+        "primary-producer",
+        "official-archive",
+        "release-calendar"
+      ],
+      "event_families": [
+        "monetary-policy",
+        "money-credit"
+      ],
+      "indicator_ids": [
+        "policy-rate-and-decisions",
+        "money-credit-and-financial-statistics"
+      ],
+      "formats": [
+        "html",
+        "pdf"
+      ],
+      "capabilities": [
+        "current-values",
+        "historical-observations",
+        "publication-metadata",
+        "schedule-metadata",
+        "revision-metadata",
+        "series-metadata",
+        "archive-enumeration"
+      ],
+      "endpoint_uri_template": "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm",
+      "allowed_hosts": [
+        "www.federalreserve.gov"
+      ],
+      "expected_media_types": [
+        "text/html",
+        "application/pdf"
+      ],
+      "source_series_ids": [],
+      "source_table_ids": [],
+      "source_release_ids": [],
+      "release_calendar_uri": "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm",
+      "archive_uri": "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm",
+      "source_timezone": "America/New_York",
+      "availability_time_precision": "exact-minute",
+      "dst_convention": "IANA zone database; retain source lexical times and require explicit DST-fold evidence.",
+      "historical_depth": "Series-dependent current revised history; contemporaneous release artifacts are required before claiming original vintages.",
+      "known_breaks": [
+        "Series/table identifiers, classifications, seasonal adjustment, rebases, and dissemination endpoints are versioned per adapter."
+      ],
+      "revision_behavior": "Published values may be revised, benchmarked, rebased, or corrected; immutable fetches never overwrite earlier evidence.",
+      "rate_limit": "No stable public limit recorded at review; apply the stricter local request, byte, page, event, retry, and runtime bounds.",
+      "authentication": "none",
+      "credential_env_name": null,
+      "credential_header_name": null,
+      "credential_parameter_name": null,
+      "terms_uri": null,
+      "fallback_source_keys": [],
+      "parser_id": "official.html.v1",
+      "parser_version": "1",
+      "replay_strategy": "Retain exact response bytes, request parameters, endpoint and parser identities, response validators, source clocks, and SHA-256 before normalization.",
+      "adapter_owner": "market-context/us",
+      "verification_status": "reviewed-entrypoint",
+      "reviewed_on": "2026-09-13",
+      "verification_evidence_uris": [
+        "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm"
+      ],
+      "redistribution_notes": "Official public-data terms and attribution requirements must be rechecked and retained by the qualifying adapter.",
+      "limitations": [
+        "Registry review proves the official entrypoint and legal producer, not complete per-series coverage or historical-vintage availability.",
+        "Protocol-specific parsing and empirical fixture qualification are owned by issue #584 and the economy backfill."
+      ]
+    },
+    {
+      "schema_version": "histdatacom.official-source-entry.v1",
+      "source_key": "jp.statistics-bureau.estat",
+      "economy_code": "JP",
+      "economy_name": "Japan",
+      "institution": "Statistics Bureau of Japan",
+      "jurisdiction": "Japan",
+      "legal_producer": true,
+      "roles": [
+        "primary-producer",
+        "official-archive",
+        "release-calendar"
+      ],
+      "event_families": [
+        "inflation-prices",
+        "labour-market",
+        "retail-consumption",
+        "other-official"
+      ],
+      "indicator_ids": [
+        "consumer-and-producer-prices",
+        "employment-unemployment-and-earnings",
+        "retail-sales-and-household-consumption",
+        "other-official-macro"
+      ],
+      "formats": [
+        "json"
+      ],
+      "capabilities": [
+        "current-values",
+        "historical-observations",
+        "publication-metadata",
+        "schedule-metadata",
+        "revision-metadata",
+        "series-metadata",
+        "archive-enumeration"
+      ],
+      "endpoint_uri_template": "https://api.e-stat.go.jp/rest/3.0/app/json/getStatsData",
+      "allowed_hosts": [
+        "api.e-stat.go.jp",
+        "www.e-stat.go.jp",
+        "www.stat.go.jp"
+      ],
+      "expected_media_types": [
+        "application/json"
+      ],
+      "source_series_ids": [],
+      "source_table_ids": [],
+      "source_release_ids": [],
+      "release_calendar_uri": "https://www.stat.go.jp/english/data/cpi/1582.html",
+      "archive_uri": "https://www.e-stat.go.jp/api/en",
+      "source_timezone": "Asia/Tokyo",
+      "availability_time_precision": "scheduled-only",
+      "dst_convention": "IANA zone database; retain source lexical times and require explicit DST-fold evidence.",
+      "historical_depth": "Series-dependent current revised history; contemporaneous release artifacts are required before claiming original vintages.",
+      "known_breaks": [
+        "Series/table identifiers, classifications, seasonal adjustment, rebases, and dissemination endpoints are versioned per adapter."
+      ],
+      "revision_behavior": "Published values may be revised, benchmarked, rebased, or corrected; immutable fetches never overwrite earlier evidence.",
+      "rate_limit": "No stable public limit recorded at review; apply the stricter local request, byte, page, event, retry, and runtime bounds.",
+      "authentication": "required-api-key",
+      "credential_env_name": "HISTDATACOM_ESTAT_APP_ID",
+      "credential_header_name": null,
+      "credential_parameter_name": "appId",
+      "terms_uri": null,
+      "fallback_source_keys": [],
+      "parser_id": "official.json.v1",
+      "parser_version": "1",
+      "replay_strategy": "Retain exact response bytes, request parameters, endpoint and parser identities, response validators, source clocks, and SHA-256 before normalization.",
+      "adapter_owner": "market-context/jp",
+      "verification_status": "reviewed-entrypoint",
+      "reviewed_on": "2026-09-13",
+      "verification_evidence_uris": [
+        "https://www.e-stat.go.jp/api/en"
+      ],
+      "redistribution_notes": "Official public-data terms and attribution requirements must be rechecked and retained by the qualifying adapter.",
+      "limitations": [
+        "Registry review proves the official entrypoint and legal producer, not complete per-series coverage or historical-vintage availability.",
+        "Protocol-specific parsing and empirical fixture qualification are owned by issue #584 and the economy backfill."
+      ]
+    },
+    {
+      "schema_version": "histdatacom.official-source-entry.v1",
+      "source_key": "jp.cabinet-office.estat",
+      "economy_code": "JP",
+      "economy_name": "Japan",
+      "institution": "Cabinet Office, Economic and Social Research Institute",
+      "jurisdiction": "Japan",
+      "legal_producer": true,
+      "roles": [
+        "primary-producer",
+        "official-archive",
+        "release-calendar"
+      ],
+      "event_families": [
+        "gdp-national-accounts",
+        "confidence-survey"
+      ],
+      "indicator_ids": [
+        "gdp-and-national-accounts",
+        "official-confidence-and-tendency-surveys"
+      ],
+      "formats": [
+        "json"
+      ],
+      "capabilities": [
+        "current-values",
+        "historical-observations",
+        "publication-metadata",
+        "schedule-metadata",
+        "revision-metadata",
+        "series-metadata",
+        "archive-enumeration"
+      ],
+      "endpoint_uri_template": "https://api.e-stat.go.jp/rest/3.0/app/json/getStatsData",
+      "allowed_hosts": [
+        "api.e-stat.go.jp",
+        "www.e-stat.go.jp",
+        "www.esri.cao.go.jp"
+      ],
+      "expected_media_types": [
+        "application/json"
+      ],
+      "source_series_ids": [],
+      "source_table_ids": [],
+      "source_release_ids": [],
+      "release_calendar_uri": "https://www.esri.cao.go.jp/en/stat/stat-schedule-e.html",
+      "archive_uri": "https://www.e-stat.go.jp/api/en",
+      "source_timezone": "Asia/Tokyo",
+      "availability_time_precision": "scheduled-only",
+      "dst_convention": "IANA zone database; retain source lexical times and require explicit DST-fold evidence.",
+      "historical_depth": "Series-dependent current revised history; contemporaneous release artifacts are required before claiming original vintages.",
+      "known_breaks": [
+        "Series/table identifiers, classifications, seasonal adjustment, rebases, and dissemination endpoints are versioned per adapter."
+      ],
+      "revision_behavior": "Published values may be revised, benchmarked, rebased, or corrected; immutable fetches never overwrite earlier evidence.",
+      "rate_limit": "No stable public limit recorded at review; apply the stricter local request, byte, page, event, retry, and runtime bounds.",
+      "authentication": "required-api-key",
+      "credential_env_name": "HISTDATACOM_ESTAT_APP_ID",
+      "credential_header_name": null,
+      "credential_parameter_name": "appId",
+      "terms_uri": null,
+      "fallback_source_keys": [],
+      "parser_id": "official.json.v1",
+      "parser_version": "1",
+      "replay_strategy": "Retain exact response bytes, request parameters, endpoint and parser identities, response validators, source clocks, and SHA-256 before normalization.",
+      "adapter_owner": "market-context/jp",
+      "verification_status": "reviewed-entrypoint",
+      "reviewed_on": "2026-09-13",
+      "verification_evidence_uris": [
+        "https://www.e-stat.go.jp/api/en"
+      ],
+      "redistribution_notes": "Official public-data terms and attribution requirements must be rechecked and retained by the qualifying adapter.",
+      "limitations": [
+        "Registry review proves the official entrypoint and legal producer, not complete per-series coverage or historical-vintage availability.",
+        "Protocol-specific parsing and empirical fixture qualification are owned by issue #584 and the economy backfill."
+      ]
+    },
+    {
+      "schema_version": "histdatacom.official-source-entry.v1",
+      "source_key": "jp.meti.estat",
+      "economy_code": "JP",
+      "economy_name": "Japan",
+      "institution": "Ministry of Economy, Trade and Industry",
+      "jurisdiction": "Japan",
+      "legal_producer": true,
+      "roles": [
+        "primary-producer",
+        "official-archive",
+        "release-calendar"
+      ],
+      "event_families": [
+        "industrial-production"
+      ],
+      "indicator_ids": [
+        "industrial-production"
+      ],
+      "formats": [
+        "json"
+      ],
+      "capabilities": [
+        "current-values",
+        "historical-observations",
+        "publication-metadata",
+        "schedule-metadata",
+        "revision-metadata",
+        "series-metadata",
+        "archive-enumeration"
+      ],
+      "endpoint_uri_template": "https://api.e-stat.go.jp/rest/3.0/app/json/getStatsData",
+      "allowed_hosts": [
+        "api.e-stat.go.jp",
+        "www.e-stat.go.jp",
+        "www.meti.go.jp"
+      ],
+      "expected_media_types": [
+        "application/json"
+      ],
+      "source_series_ids": [],
+      "source_table_ids": [],
+      "source_release_ids": [],
+      "release_calendar_uri": "https://www.meti.go.jp/statistics/toppage/kohyo.html",
+      "archive_uri": "https://www.e-stat.go.jp/api/en",
+      "source_timezone": "Asia/Tokyo",
+      "availability_time_precision": "scheduled-only",
+      "dst_convention": "IANA zone database; retain source lexical times and require explicit DST-fold evidence.",
+      "historical_depth": "Series-dependent current revised history; contemporaneous release artifacts are required before claiming original vintages.",
+      "known_breaks": [
+        "Series/table identifiers, classifications, seasonal adjustment, rebases, and dissemination endpoints are versioned per adapter."
+      ],
+      "revision_behavior": "Published values may be revised, benchmarked, rebased, or corrected; immutable fetches never overwrite earlier evidence.",
+      "rate_limit": "No stable public limit recorded at review; apply the stricter local request, byte, page, event, retry, and runtime bounds.",
+      "authentication": "required-api-key",
+      "credential_env_name": "HISTDATACOM_ESTAT_APP_ID",
+      "credential_header_name": null,
+      "credential_parameter_name": "appId",
+      "terms_uri": null,
+      "fallback_source_keys": [],
+      "parser_id": "official.json.v1",
+      "parser_version": "1",
+      "replay_strategy": "Retain exact response bytes, request parameters, endpoint and parser identities, response validators, source clocks, and SHA-256 before normalization.",
+      "adapter_owner": "market-context/jp",
+      "verification_status": "reviewed-entrypoint",
+      "reviewed_on": "2026-09-13",
+      "verification_evidence_uris": [
+        "https://www.e-stat.go.jp/api/en"
+      ],
+      "redistribution_notes": "Official public-data terms and attribution requirements must be rechecked and retained by the qualifying adapter.",
+      "limitations": [
+        "Registry review proves the official entrypoint and legal producer, not complete per-series coverage or historical-vintage availability.",
+        "Protocol-specific parsing and empirical fixture qualification are owned by issue #584 and the economy backfill."
+      ]
+    },
+    {
+      "schema_version": "histdatacom.official-source-entry.v1",
+      "source_key": "jp.mof.estat",
+      "economy_code": "JP",
+      "economy_name": "Japan",
+      "institution": "Ministry of Finance Japan",
+      "jurisdiction": "Japan",
+      "legal_producer": true,
+      "roles": [
+        "primary-producer",
+        "official-archive",
+        "release-calendar"
+      ],
+      "event_families": [
+        "trade-external",
+        "fiscal"
+      ],
+      "indicator_ids": [
+        "trade-and-external-accounts",
+        "government-finance"
+      ],
+      "formats": [
+        "json"
+      ],
+      "capabilities": [
+        "current-values",
+        "historical-observations",
+        "publication-metadata",
+        "schedule-metadata",
+        "revision-metadata",
+        "series-metadata",
+        "archive-enumeration"
+      ],
+      "endpoint_uri_template": "https://api.e-stat.go.jp/rest/3.0/app/json/getStatsData",
+      "allowed_hosts": [
+        "api.e-stat.go.jp",
+        "www.e-stat.go.jp",
+        "www.mof.go.jp"
+      ],
+      "expected_media_types": [
+        "application/json"
+      ],
+      "source_series_ids": [],
+      "source_table_ids": [],
+      "source_release_ids": [],
+      "release_calendar_uri": "https://www.mof.go.jp/english/public_relations/weekly_schedule/index.htm",
+      "archive_uri": "https://www.e-stat.go.jp/api/en",
+      "source_timezone": "Asia/Tokyo",
+      "availability_time_precision": "scheduled-only",
+      "dst_convention": "IANA zone database; retain source lexical times and require explicit DST-fold evidence.",
+      "historical_depth": "Series-dependent current revised history; contemporaneous release artifacts are required before claiming original vintages.",
+      "known_breaks": [
+        "Series/table identifiers, classifications, seasonal adjustment, rebases, and dissemination endpoints are versioned per adapter."
+      ],
+      "revision_behavior": "Published values may be revised, benchmarked, rebased, or corrected; immutable fetches never overwrite earlier evidence.",
+      "rate_limit": "No stable public limit recorded at review; apply the stricter local request, byte, page, event, retry, and runtime bounds.",
+      "authentication": "required-api-key",
+      "credential_env_name": "HISTDATACOM_ESTAT_APP_ID",
+      "credential_header_name": null,
+      "credential_parameter_name": "appId",
+      "terms_uri": null,
+      "fallback_source_keys": [],
+      "parser_id": "official.json.v1",
+      "parser_version": "1",
+      "replay_strategy": "Retain exact response bytes, request parameters, endpoint and parser identities, response validators, source clocks, and SHA-256 before normalization.",
+      "adapter_owner": "market-context/jp",
+      "verification_status": "reviewed-entrypoint",
+      "reviewed_on": "2026-09-13",
+      "verification_evidence_uris": [
+        "https://www.e-stat.go.jp/api/en"
+      ],
+      "redistribution_notes": "Official public-data terms and attribution requirements must be rechecked and retained by the qualifying adapter.",
+      "limitations": [
+        "Registry review proves the official entrypoint and legal producer, not complete per-series coverage or historical-vintage availability.",
+        "Protocol-specific parsing and empirical fixture qualification are owned by issue #584 and the economy backfill."
+      ]
+    },
+    {
+      "schema_version": "histdatacom.official-source-entry.v1",
+      "source_key": "jp.mlit.estat",
+      "economy_code": "JP",
+      "economy_name": "Japan",
+      "institution": "Ministry of Land, Infrastructure, Transport and Tourism",
+      "jurisdiction": "Japan",
+      "legal_producer": true,
+      "roles": [
+        "primary-producer",
+        "official-archive",
+        "release-calendar"
+      ],
+      "event_families": [
+        "housing"
+      ],
+      "indicator_ids": [
+        "housing-and-construction"
+      ],
+      "formats": [
+        "json"
+      ],
+      "capabilities": [
+        "current-values",
+        "historical-observations",
+        "publication-metadata",
+        "schedule-metadata",
+        "revision-metadata",
+        "series-metadata",
+        "archive-enumeration"
+      ],
+      "endpoint_uri_template": "https://api.e-stat.go.jp/rest/3.0/app/json/getStatsData",
+      "allowed_hosts": [
+        "api.e-stat.go.jp",
+        "www.e-stat.go.jp",
+        "www.mlit.go.jp"
+      ],
+      "expected_media_types": [
+        "application/json"
+      ],
+      "source_series_ids": [],
+      "source_table_ids": [],
+      "source_release_ids": [],
+      "release_calendar_uri": "https://www.mlit.go.jp/statistics/details/index.html",
+      "archive_uri": "https://www.e-stat.go.jp/api/en",
+      "source_timezone": "Asia/Tokyo",
+      "availability_time_precision": "scheduled-only",
+      "dst_convention": "IANA zone database; retain source lexical times and require explicit DST-fold evidence.",
+      "historical_depth": "Series-dependent current revised history; contemporaneous release artifacts are required before claiming original vintages.",
+      "known_breaks": [
+        "Series/table identifiers, classifications, seasonal adjustment, rebases, and dissemination endpoints are versioned per adapter."
+      ],
+      "revision_behavior": "Published values may be revised, benchmarked, rebased, or corrected; immutable fetches never overwrite earlier evidence.",
+      "rate_limit": "No stable public limit recorded at review; apply the stricter local request, byte, page, event, retry, and runtime bounds.",
+      "authentication": "required-api-key",
+      "credential_env_name": "HISTDATACOM_ESTAT_APP_ID",
+      "credential_header_name": null,
+      "credential_parameter_name": "appId",
+      "terms_uri": null,
+      "fallback_source_keys": [],
+      "parser_id": "official.json.v1",
+      "parser_version": "1",
+      "replay_strategy": "Retain exact response bytes, request parameters, endpoint and parser identities, response validators, source clocks, and SHA-256 before normalization.",
+      "adapter_owner": "market-context/jp",
+      "verification_status": "reviewed-entrypoint",
+      "reviewed_on": "2026-09-13",
+      "verification_evidence_uris": [
+        "https://www.e-stat.go.jp/api/en"
+      ],
+      "redistribution_notes": "Official public-data terms and attribution requirements must be rechecked and retained by the qualifying adapter.",
+      "limitations": [
+        "Registry review proves the official entrypoint and legal producer, not complete per-series coverage or historical-vintage availability.",
+        "Protocol-specific parsing and empirical fixture qualification are owned by issue #584 and the economy backfill."
+      ]
+    },
+    {
+      "schema_version": "histdatacom.official-source-entry.v1",
+      "source_key": "jp.boj.time-series",
+      "economy_code": "JP",
+      "economy_name": "Japan",
+      "institution": "Bank of Japan",
+      "jurisdiction": "Japan",
+      "legal_producer": true,
+      "roles": [
+        "primary-producer",
+        "official-archive",
+        "release-calendar"
+      ],
+      "event_families": [
+        "monetary-policy",
+        "money-credit"
+      ],
+      "indicator_ids": [
+        "policy-rate-and-decisions",
+        "money-credit-and-financial-statistics"
+      ],
+      "formats": [
+        "json",
+        "csv"
+      ],
+      "capabilities": [
+        "current-values",
+        "historical-observations",
+        "publication-metadata",
+        "schedule-metadata",
+        "revision-metadata",
+        "series-metadata",
+        "archive-enumeration"
+      ],
+      "endpoint_uri_template": "https://www.stat-search.boj.or.jp/api/v1/",
+      "allowed_hosts": [
+        "www.boj.or.jp",
+        "www.stat-search.boj.or.jp"
+      ],
+      "expected_media_types": [
+        "application/json",
+        "text/csv",
+        "application/octet-stream"
+      ],
+      "source_series_ids": [],
+      "source_table_ids": [],
+      "source_release_ids": [],
+      "release_calendar_uri": "https://www.boj.or.jp/en/mopo/mpmsche_minu/index.htm",
+      "archive_uri": "https://www.stat-search.boj.or.jp/info/api_manual_en.pdf",
+      "source_timezone": "Asia/Tokyo",
+      "availability_time_precision": "exact-minute",
+      "dst_convention": "IANA zone database; retain source lexical times and require explicit DST-fold evidence.",
+      "historical_depth": "Series-dependent current revised history; contemporaneous release artifacts are required before claiming original vintages.",
+      "known_breaks": [
+        "Series/table identifiers, classifications, seasonal adjustment, rebases, and dissemination endpoints are versioned per adapter."
+      ],
+      "revision_behavior": "Published values may be revised, benchmarked, rebased, or corrected; immutable fetches never overwrite earlier evidence.",
+      "rate_limit": "No stable public limit recorded at review; apply the stricter local request, byte, page, event, retry, and runtime bounds.",
+      "authentication": "none",
+      "credential_env_name": null,
+      "credential_header_name": null,
+      "credential_parameter_name": null,
+      "terms_uri": null,
+      "fallback_source_keys": [],
+      "parser_id": "official.json.v1",
+      "parser_version": "1",
+      "replay_strategy": "Retain exact response bytes, request parameters, endpoint and parser identities, response validators, source clocks, and SHA-256 before normalization.",
+      "adapter_owner": "market-context/jp",
+      "verification_status": "reviewed-entrypoint",
+      "reviewed_on": "2026-09-13",
+      "verification_evidence_uris": [
+        "https://www.stat-search.boj.or.jp/info/api_manual_en.pdf"
+      ],
+      "redistribution_notes": "Official public-data terms and attribution requirements must be rechecked and retained by the qualifying adapter.",
+      "limitations": [
+        "Registry review proves the official entrypoint and legal producer, not complete per-series coverage or historical-vintage availability.",
+        "Protocol-specific parsing and empirical fixture qualification are owned by issue #584 and the economy backfill."
+      ]
+    }
+  ],
+  "limitations": [
+    "This registry identifies reviewed legal-producer entrypoints and primary economy/event-family ownership; it does not by itself qualify every indicator series.",
+    "Latest-state APIs are not historical-vintage evidence unless the endpoint capability and retained contemporaneous artifacts prove that claim.",
+    "Source-series, table, release, calendar, break, and terms details are frozen by each economy adapter before its backfill issue can close.",
+    "Central-bank mirrors never replace the registered legal statistical producer silently."
+  ]
+}
