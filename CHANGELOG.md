@@ -2,6 +2,11 @@
 
 ### Added
 
+- **market context**: add archive-first historical vintage governance with a
+  complete 21-economy/event-family recovery matrix, content-addressed official
+  artifact/record bindings, deterministic mirror reconciliation, explicit
+  source eras and gaps, immutable latest-value cross-checks, and benchmark/
+  simultaneous-revision audits (#581).
 - **market context**: add content-addressed historical release-schedule
   corpora, catalog-qualified occurrence binding, immutable reschedule/delay/
   cancellation/emergency evidence, explicit timezone/holiday/DST versions,

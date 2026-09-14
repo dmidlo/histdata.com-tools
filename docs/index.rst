@@ -24,6 +24,7 @@ Data and reconstruction foundations
    economic-indicator-catalog
    release-vintage-reconstruction
    release-schedule-reconstruction
+   archive-vintage-reconstruction
    official-source-registry-and-fetch
    economic-calendar-branch-migration
    cftc-positioning-contracts

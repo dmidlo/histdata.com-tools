@@ -257,7 +257,8 @@ clock evidence, not automatically an economic release time. Likewise,
 historical observations from a current revised database are not historical
 vintages. `HISTORICAL_VINTAGES` may be declared only where the official
 interface exposes prior versions; economy adapters still require empirical
-tests or retained contemporaneous release artifacts under #581.
+tests or retained contemporaneous release artifacts governed by the
+[archive-first vintage layer](archive-vintage-reconstruction.md).
 
 ## Closure boundary
 
@@ -267,7 +268,8 @@ dependent issues:
 
 - concrete source-specific series/table/release IDs and empirical coverage
   (#584 and economy backfills);
-- correct initial values, previous-as-known, and revision chains (#537/#581);
+- concrete archive parsing and backfills using the implemented release-chain
+  and [archive-vintage](archive-vintage-reconstruction.md) contracts;
 - reusable SDMX, JSON-stat, spreadsheet, feed, HTML, and PDF parsers (#584);
 - observed professional or official consensus (#536/#583); and
 - professional calendar materialization and display resolution (#582/#585).

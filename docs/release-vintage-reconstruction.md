@@ -10,8 +10,10 @@ Source discovery and bounded fetch/replay are governed by the
 [official-source registry](official-source-registry-and-fetch.md). Historical
 schedule state is reconstructed by the companion
 [schedule-reconstruction layer](release-schedule-reconstruction.md), while
-source-specific archive reconstruction remains #581. This module supplies the
-shared release-time and immutable-mutation rules those adapters must use.
+the [archive-first reconstruction layer](archive-vintage-reconstruction.md)
+binds source-specific artifacts and parsed records to these chains. This
+module supplies the shared release-time and immutable-mutation rules those
+adapters must use.
 Expected concepts and occurrences are governed separately by the
 [canonical indicator catalog](economic-indicator-catalog.md), so releases
 found in an archive cannot silently define their own coverage denominator.
@@ -157,4 +159,5 @@ decides whether that explicit gap is admissible.
 
 The audit does not prove that an upstream archive is complete or historically
 truthful. That claim requires source-specific acquisition evidence, retained
-raw bytes, archive coverage diagnostics, and replay under #581.
+raw bytes, archive coverage declarations and diagnostics, and replay through
+the [archive-first reconstruction layer](archive-vintage-reconstruction.md).

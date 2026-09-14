@@ -2613,6 +2613,14 @@ vintages. Its point-in-time query stays on scheduled time after publication,
 admits reschedules and cancellations only when publicly known, retains
 timezone/holiday/DST rule evidence, and prevents emergency events from gaining
 fictional advance notice.
+The
+[`archive-first vintage reconstruction`](docs/archive-vintage-reconstruction.md)
+layer then binds exact official snapshots and parsed record hashes to those
+release chains. Every economy/family adapter declares API-vintage-complete,
+archive-reconstructed, snapshot-dependent, or historically-incomplete
+coverage; missing artifacts remain explicit gaps, duplicate mirrors use
+deterministic precedence, retained snapshots cannot be backdated, and current
+API checks cannot rewrite historical values.
 Official acquisition is governed by a reviewed 21-economy legal-producer
 matrix plus bounded, conditional, credential-safe request manifests and
 content-addressed raw-response replay. Protocol-specific parsers attach behind
