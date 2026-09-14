@@ -2,6 +2,11 @@
 
 ### Added
 
+- **market context**: add versioned monetary-policy meeting, phase, setting,
+  decision, expectation, vote, and surprise semantics; preserve ranges, rate
+  sets, yield targets, currency-board and exchange-rate frameworks; refuse
+  retrospective emergency scheduling and scalarized text surprise; and audit
+  all 21 official monetary-source profiles (#574).
 - **market context**: add exact-version reusable SDMX 2.1/3.0, JSON-stat,
   JSON/CSV/TSV, XLS/XLSX, HTML, RSS/Atom/ICS, PDF, static-archive, and
   data-catalog adapter packs with raw-to-record provenance, explicit schema

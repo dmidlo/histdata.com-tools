@@ -2631,6 +2631,14 @@ an encrypted or image-only PDF records the required reacquisition/OCR evidence.
 Latest-state APIs still cannot silently claim historical vintages. See the
 [`official acquisition`](docs/official-source-registry-and-fetch.md) and
 [`protocol adapter`](docs/official-source-adapters.md) guides.
+Central-bank releases additionally use framework-aware
+[`monetary-policy semantics`](docs/monetary-policy-semantics.md). Decisions,
+statements, vote splits, press conferences, minutes, projections, schedules,
+and emergency actions remain distinct meeting-linked phases; scalar rates,
+target ranges, facility sets, yield targets, currency-board mechanics, and
+exchange-rate regimes retain their actual shapes. Only exact pre-decision
+expectations can produce rate surprises, while statement/press surprise stays
+a separately typed textual or latent score.
 
 #### CFTC positioning state
 

@@ -27,6 +27,7 @@ Data and reconstruction foundations
    archive-vintage-reconstruction
    official-source-registry-and-fetch
    official-source-adapters
+   monetary-policy-semantics
    economic-calendar-branch-migration
    cftc-positioning-contracts
    provider-neutral-dataset-catalog
