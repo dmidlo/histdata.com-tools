@@ -2663,6 +2663,12 @@ It keeps CPS unemployment, CES nonfarm-payroll change, and CES average hourly
 earnings separate; preserves 6, 314, and 239 observed prior-period revisions,
 respectively; and marks the January 2010 production/nonsupervisory-to-all-
 employees earnings transition as noncomparable.
+The U.S. JOLTS specialization binds 268 published March 2004 through July 2026
+reference periods to 269 distinct current/predecessor artifacts and 804
+measure-specific triplets. It keeps total-nonfarm seasonally adjusted job
+openings, hires, and total separations separate; preserves 22 annual benchmark
+editions; and explicitly marks all three October 2025 comparisons
+noncomparable because no September publication exists.
 Central-bank releases additionally use framework-aware
 [`monetary-policy semantics`](docs/monetary-policy-semantics.md). Decisions,
 statements, vote splits, press conferences, minutes, projections, schedules,

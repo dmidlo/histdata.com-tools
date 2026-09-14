@@ -3603,6 +3603,99 @@
     },
     {
       "schema_version": "histdatacom.official-source-entry.v1",
+      "source_key": "us.bls.jolts",
+      "economy_code": "US",
+      "economy_name": "United States",
+      "institution": "U.S. Bureau of Labor Statistics",
+      "jurisdiction": "United States of America",
+      "legal_producer": true,
+      "roles": [
+        "official-archive",
+        "release-calendar"
+      ],
+      "event_families": [
+        "labour-market"
+      ],
+      "indicator_ids": [
+        "employment-unemployment-and-earnings"
+      ],
+      "formats": [
+        "text",
+        "html"
+      ],
+      "capabilities": [
+        "historical-observations",
+        "publication-metadata",
+        "schedule-metadata",
+        "revision-metadata",
+        "archive-enumeration"
+      ],
+      "endpoint_uri_template": "https://www.bls.gov/bls/news-release/jolts.htm",
+      "allowed_hosts": [
+        "www.bls.gov"
+      ],
+      "expected_media_types": [
+        "text/plain",
+        "text/html"
+      ],
+      "source_series_ids": [
+        "total nonfarm job openings",
+        "total nonfarm hires",
+        "total nonfarm total separations"
+      ],
+      "source_table_ids": [
+        "JOLTS Table A"
+      ],
+      "source_release_ids": [
+        "Job Openings and Labor Turnover"
+      ],
+      "release_calendar_uri": "https://www.bls.gov/schedule/",
+      "archive_uri": "https://www.bls.gov/bls/news-release/jolts.htm",
+      "source_timezone": "America/New_York",
+      "availability_time_precision": "exact-minute",
+      "dst_convention": "IANA zone database; retain source lexical EST, EDT, or ET and reject a concrete abbreviation that conflicts with the publication date.",
+      "historical_depth": "Occurrence-specific monthly JOLTS releases are hash-qualified from February 2004 through July 2026; March 2004 is the first release with independent predecessor evidence.",
+      "known_breaks": [
+        "The July 2002 inaugural release was not seasonally adjusted; the selected monthly seasonally adjusted archive begins with February 2004 predecessor evidence.",
+        "The retained corpus contains 46 fixed-width text releases, 77 preformatted HTML releases, and 146 semantic HTML Table A releases; annual benchmark editions continue to use preformatted tables after semantic HTML begins.",
+        "Annual benchmark editions restate historical estimates; occurrence-specific raw artifacts and current-versus-predecessor triplets remain distinct rather than rewriting earlier vintages.",
+        "The archive index labels the jolts_02122013 artifact as December 2013 under its 2012 heading; the artifact URI and release title establish December 2012.",
+        "September 2025 was not published during the federal appropriations lapse; the October release follows August as the previous published occurrence."
+      ],
+      "revision_behavior": "The current month is preliminary and the prior month is final; annual benchmark releases can revise the full historical series. Each occurrence retains initial, previous-as-known, and current-release revised-prior values with both raw artifact hashes.",
+      "rate_limit": "No stable archive-specific limit is published; refresh uses bounded parallelism, retries, and an identifying contact user agent.",
+      "authentication": "none",
+      "credential_env_name": null,
+      "credential_header_name": null,
+      "credential_parameter_name": null,
+      "terms_uri": "https://www.bls.gov/bls/linksite.htm",
+      "fallback_source_keys": [
+        "us.bls.public-data"
+      ],
+      "parser_id": "official.html.v1",
+      "parser_version": "1",
+      "replay_strategy": "Retain the exact archive index plus every selected release artifact externally; bind each current and predecessor SHA-256 digest and recompute the job-openings, hires, and total-separations triplets before accepting replay.",
+      "adapter_owner": "market-context/us",
+      "verification_status": "empirically-verified",
+      "reviewed_on": "2026-09-14",
+      "verification_evidence_uris": [
+        "https://www.bls.gov/bls/news-release/jolts.htm",
+        "https://www.bls.gov/news.release/history/jolts_04152004.txt",
+        "https://www.bls.gov/news.release/archives/jolts_02122008.htm",
+        "https://www.bls.gov/news.release/archives/jolts_06112013.htm",
+        "https://www.bls.gov/news.release/archives/jolts_12092025.htm",
+        "https://www.bls.gov/news.release/archives/jolts_03132026.htm",
+        "https://www.bls.gov/news.release/archives/jolts_09012026.htm"
+      ],
+      "redistribution_notes": "The package retains only the official index and a compact hash manifest; release documents remain an external operator-owned corpus with BLS attribution.",
+      "limitations": [
+        "The qualification covers total-nonfarm seasonally adjusted job openings, hires, and total separations levels only; rates, quits, layoffs, industries, regions, and establishment sizes require separate identities.",
+        "The archive supports triplet qualification from March 2004, not the January 2000 profile boundary.",
+        "No official event-level consensus is published, so forecasts remain explicitly unavailable."
+      ]
+    },
+    {
+      "schema_version": "histdatacom.official-source-entry.v1",
       "source_key": "us.bls.ppi",
       "economy_code": "US",
       "economy_name": "United States",

@@ -113,6 +113,25 @@ nonsupervisory workers to all employees and is explicitly noncomparable.
 `replay_bls_employment_situation_archive()` verifies all 957 measure triplets
 against the 320-artifact chain.
 
+## U.S. JOLTS archive
+
+The JOLTS specialization retains 269 official BLS artifacts and reconstructs
+268 publication packages from March 2004 through July 2026. Each package keeps
+three independent total-nonfarm, seasonally adjusted level measures in
+thousands of persons: job openings on the last business day, hires over the
+month, and total separations over the month. A shared publication does not
+collapse those concepts into one event identity.
+
+Occurrence-specific current and predecessor documents establish initial,
+previous-as-known, and revised-prior values. The parser qualifies 45
+fixed-width text, 77 preformatted HTML, and 146 semantic Table A current
+releases. Twenty-two January-reference publications are marked as annual
+benchmark/revision editions, so their restated history never overwrites an
+earlier vintage. The September 2025 release was not published; October retains
+August as its last published predecessor and marks the three unlike-period
+revision fields noncomparable. `replay_bls_jolts_archive()` recomputes all 804
+measure triplets and their raw and normalized hashes.
+
 ## Economy profiles
 
 `built_in_labour_profiles()` derives one semantic/source profile for all 21

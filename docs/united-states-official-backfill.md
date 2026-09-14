@@ -30,10 +30,11 @@ limitations. An archive start date is a route declaration, not a historical
 coverage claim.
 
 The source registry includes separate supplemental entries for DOL/ETA, the
-Philadelphia Fed, CPI, PPI, and the Employment Situation. This prevents broad
-family-level entries from being incorrectly named as the occurrence-specific
-source for weekly claims, regional Fed surveys, or BLS release documents. The
-Federal Reserve G.17 entry also declares plain text as a real archive format.
+Philadelphia Fed, CPI, PPI, the Employment Situation, and JOLTS. This prevents
+broad family-level entries from being incorrectly named as the occurrence-
+specific source for weekly claims, regional Fed surveys, or BLS release
+documents. The Federal Reserve G.17 entry also declares plain text as a real
+archive format.
 The reusable HTML-release adapter preserves such text as one bounded UTF-8
 record, including the exact line count and raw-snapshot lineage.
 
@@ -327,6 +328,61 @@ newly unparseable evidence. `bls_employment_situation_coverage_from_manifest()`
 derives the complete 319-event labour slice while leaving absent official
 event-level consensus as an explicit nonblocking gap.
 
+## Complete JOLTS archive qualification
+
+`histdatacom.market_context.us_jolts_archive` qualifies the total-nonfarm,
+seasonally adjusted levels for job openings, hires, and total separations from
+the official Job Openings and Labor Turnover Survey archive. The dedicated
+`us.bls.jolts` source declares the occurrence-specific text and HTML formats,
+archive enumeration, exact 10:00 Eastern release time, revision behavior, and
+empirically verified parser route.
+
+The packaged `us_jolts_archive_v1.json` manifest is observed as of September
+14, 2026 and records:
+
+- 268 qualified reference periods from March 2004 through July 2026;
+- 269 distinct source artifacts and 99,093,148 bytes, including February 2004
+  predecessor evidence;
+- 45 fixed-width text, 77 preformatted HTML, and 146 semantic HTML Table A
+  current releases;
+- 804 distinct normalized measure triplets and 267 publication packages with
+  at least one comparable prior-period revision;
+- 266 job-openings, 267 hires, and 266 total-separations revision occurrences;
+  and
+- 22 annual benchmark/revision releases plus three explicitly noncomparable
+  October 2025 measures.
+
+The retained 89,112-byte BLS index fixes all 269 selected artifact URIs and the
+explicit unpublished September 2025 period. It also resolves the index's 2012
+heading typo: `jolts_02122013.htm` and the document header establish December
+2012, not December 2013. The October publication contains September estimates,
+but those are not comparable to August's last published occurrence; replay
+therefore retains August as previous-as-known without inventing a September
+release.
+
+Historical parsing preserves 46 text artifacts including the predecessor, 77
+preformatted HTML editions, and 146 semantic Table A editions. Annual
+benchmark releases remain preformatted after semantic tables first appear.
+Concrete EST and EDT labels must agree with the publication date, while the
+later source-neutral `ET` label is retained lexically and normalized through
+`America/New_York`.
+
+The refresh command can fetch live official bytes or replay a retained
+basename-addressed corpus:
+
+```console
+uv run python scripts/refresh_us_jolts_archive.py \
+  --as-of 2026-09-14 \
+  --source-directory /absolute/operator/path/jolts-source \
+  --raw-directory /absolute/operator/path/jolts-raw
+```
+
+`replay_bls_jolts_archive()` recomputes all three measures from every
+current/predecessor pair and rejects missing, duplicated, changed, or newly
+unparseable evidence. `bls_jolts_coverage_from_manifest()` derives the complete
+268-event labour slice while retaining pre-program years and absent official
+event-level consensus as explicit nonblocking gaps.
+
 ## Quantified closure audit
 
 `UnitedStatesProgramCoverageV1` records one exact 2000-present denominator and
@@ -379,8 +435,8 @@ alone is not.
   retain monthly release PDFs; the revised download is not substituted for
   those vintages.
 
-The package preserves the real G.17, CPI, PPI, and Employment Situation
-indexes, one representative G.17 raw release, and all four complete
+The package preserves the real G.17, CPI, PPI, Employment Situation, and JOLTS
+indexes, one representative G.17 raw release, and all five complete
 raw/normalized manifests. The remaining production raw corpora stay external,
 content addressed, and subject to the coverage audit so wheel size does not
 grow with thousands of federal release files.

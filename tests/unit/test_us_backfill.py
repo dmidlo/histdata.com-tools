@@ -110,7 +110,7 @@ def _coverage(
 def test_registry_represents_us_specific_legal_producers_and_text() -> None:
     registry = load_packaged_official_source_registry()
     assert registry.reviewed_on == "2026-09-14"
-    assert len(registry.sources) == 57
+    assert len(registry.sources) == 58
 
     dol = registry.source("us.dol.eta-unemployment-insurance")
     assert dol.institution.startswith("U.S. Department of Labor")
@@ -146,6 +146,14 @@ def test_registry_represents_us_specific_legal_producers_and_text() -> None:
     }
     assert employment.verification_status.value == "empirically-verified"
 
+    jolts = registry.source("us.bls.jolts")
+    assert jolts.source_release_ids == ("Job Openings and Labor Turnover",)
+    assert set(jolts.formats) == {
+        OfficialSourceFormat.HTML,
+        OfficialSourceFormat.TEXT,
+    }
+    assert jolts.verification_status.value == "empirically-verified"
+
 
 def test_builtin_us_profile_covers_every_required_family_and_program() -> None:
     registry = load_packaged_official_source_registry()
@@ -168,6 +176,7 @@ def test_builtin_us_profile_covers_every_required_family_and_program() -> None:
     assert profile.by_key["us.bls.employment-situation"].source_key == (
         "us.bls.employment-situation"
     )
+    assert profile.by_key["us.bls.jolts"].source_key == "us.bls.jolts"
     assert UnitedStatesBackfillProfileV1.from_json(profile.to_json()) == profile
 
 
