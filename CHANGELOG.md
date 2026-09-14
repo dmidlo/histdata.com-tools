@@ -2,6 +2,10 @@
 
 ### Added
 
+- **market context**: add versioned GDP/national-accounts concept, stage,
+  observation, growth derivation, triplet, component reconciliation, release
+  sequence, benchmark, and methodology semantics; preserve first-published
+  stage actuals and audit difficult cases across 21 economy profiles (#577).
 - **market context**: add versioned labour concept, observation, derivation,
   expectation, triplet, release-package, and methodology semantics; preserve
   exact survey identity and published changes, refuse current-level historical

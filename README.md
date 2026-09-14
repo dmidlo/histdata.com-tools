@@ -2652,6 +2652,13 @@ establishment measures, published changes and level vintages, seasonal bases,
 claims, vacancies, earnings, and hours retain distinct concepts. Release
 packages share publication evidence without merging indicator events, while
 benchmark and methodology changes remain explicit historical breaks.
+GDP releases use lossless
+[`national-accounts semantics`](docs/national-accounts-semantics.md). Advance,
+preliminary, second, final, and revision stages retain their first-published
+actuals; real/nominal, simple/annualized growth, valuation, and base/linking
+identities remain distinct. Official component tables reconcile only when
+their accounting basis permits it, and benchmark revisions extend vintage
+graphs without rewriting earlier calendar snapshots.
 
 #### CFTC positioning state
 
