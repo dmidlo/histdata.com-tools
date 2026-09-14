@@ -81,6 +81,13 @@ depth, historical publication times, or original vintages. The registry marks
 those series-dependent obligations explicitly so an economy backfill cannot
 close on an institution name alone.
 
+The Federal Reserve G.17 industrial-production entry is the first route raised
+to `empirically-verified`: its official release index and all 319 enumerated
+plain-text publications through August 2026 have content-addressed manifest
+evidence and parser replay. That status is deliberately limited to the total
+industrial-production headline; it does not qualify capacity utilization,
+component series, current revised databases, or another source entry.
+
 The registry's complete authority matrix feeds the
 [canonical indicator catalog](economic-indicator-catalog.md). The catalog
 adds exact concept, methodology-era, recurrence-rule, and expected-occurrence

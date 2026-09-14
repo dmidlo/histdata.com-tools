@@ -97,6 +97,58 @@ federal_reserve_g17_2002_artifact_lock().verify(triplet)
 release = economic_calendar_release_from_g17_triplet(triplet, snapshot)
 ```
 
+## Complete G.17 archive qualification
+
+`histdatacom.market_context.us_g17_archive` extends the single retained
+qualification fixture to every publication enumerated by the official G.17
+release-date index. The packaged `us_g17_archive_v1.json` manifest is observed
+as of September 14, 2026 and records:
+
+- 319 releases from January 14, 2000 through August 18, 2026;
+- 49,791,597 exact source bytes and 319 distinct raw SHA-256 digests;
+- 319 distinct normalized triplet digests;
+- 261 releases that changed the previously published prior-month estimate and
+  58 that legitimately left that estimate unchanged;
+- two official `NA` schedule rows in October and November 2025, followed by
+  two December 2025 releases; and
+- one preserved source discrepancy: archive directory `20000215` contains a
+  release whose own header says February 16, 2000.
+
+The exact 117,098-byte release-date HTML used to derive that denominator is
+retained in `us_g17_release_dates_v1.html.b64`. Its content hash, the
+parsed historical/future/NA dates, every release URI, byte count, raw hash,
+reference period, lexical and numeric triplet values, release time, normalized
+hash, and all nested identities contribute to the manifest identity.
+
+Historical parser behavior is evidence-driven rather than inferred from the
+current format. It recognizes the four- and six-month summary layouts,
+case changes in the summary heading, revision markers in month labels,
+UTF-8 and Windows-1252 source text, equal prior/revised estimates, and the
+official 2026 `AM`/`PM` parenthetical header defects. A real `EST` or `EDT`
+label that conflicts with the release date still fails closed.
+
+The refresh command requires an explicit observation boundary. Supplying a raw
+directory retains the full content-addressed corpus outside the wheel:
+
+```console
+uv run python scripts/refresh_us_g17_archive.py \
+  --as-of 2026-09-14 \
+  --raw-directory /absolute/operator/path/g17-raw
+```
+
+The live index contains volatile CDN worker and challenge tokens. When its
+published, future, and unavailable inventories are unchanged, refresh keeps
+the already validated packaged HTML while retaining the newly downloaded raw
+page externally. This makes repeated generation stable without treating
+presentation-layer churn as a new release schedule.
+
+`replay_federal_reserve_g17_archive()` accepts those retained snapshots and
+recomputes every manifest entry. Any missing, duplicate, changed, or newly
+unparseable occurrence rejects the replay.
+`federal_reserve_g17_coverage_from_manifest()` derives a complete 319-event
+coverage slice directly from the verified manifest; route declarations or
+current revised databases cannot influence the counts.
+
 ## Quantified closure audit
 
 `UnitedStatesProgramCoverageV1` records one exact 2000-present denominator and
@@ -149,7 +201,7 @@ alone is not.
   retain monthly release PDFs; the revised download is not substituted for
   those vintages.
 
-The package preserves one real raw qualification artifact. A production
-2000-present corpus remains external, content addressed, and subject to the
-coverage audit so wheel size does not grow with thousands of federal release
-files.
+The package preserves the real G.17 index, one representative raw release, and
+the complete G.17 raw/normalized manifest. The remaining production raw corpora
+stay external, content addressed, and subject to the coverage audit so wheel
+size does not grow with thousands of federal release files.

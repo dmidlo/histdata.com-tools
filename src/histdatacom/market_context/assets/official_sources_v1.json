@@ -3777,13 +3777,15 @@
       ],
       "source_series_ids": [],
       "source_table_ids": [],
-      "source_release_ids": [],
+      "source_release_ids": [
+        "G.17"
+      ],
       "release_calendar_uri": "https://www.federalreserve.gov/releases/g17/current/",
       "archive_uri": "https://www.federalreserve.gov/releases/g17/",
       "source_timezone": "America/New_York",
-      "availability_time_precision": "scheduled-only",
+      "availability_time_precision": "exact-minute",
       "dst_convention": "IANA zone database; retain source lexical times and require explicit DST-fold evidence.",
-      "historical_depth": "Series-dependent current revised history; contemporaneous release artifacts are required before claiming original vintages.",
+      "historical_depth": "Occurrence-specific plain-text releases and the official release index are hash-qualified from January 2000 through August 2026 for the total industrial-production headline.",
       "known_breaks": [
         "Series/table identifiers, classifications, seasonal adjustment, rebases, and dissemination endpoints are versioned per adapter."
       ],
@@ -3799,16 +3801,19 @@
       "parser_version": "1",
       "replay_strategy": "Retain exact response bytes, request parameters, endpoint and parser identities, response validators, source clocks, and SHA-256 before normalization.",
       "adapter_owner": "market-context/us",
-      "verification_status": "reviewed-entrypoint",
+      "verification_status": "empirically-verified",
       "reviewed_on": "2026-09-14",
       "verification_evidence_uris": [
         "https://www.federalreserve.gov/releases/g17/",
-        "https://www.federalreserve.gov/releases/g17/20021217/g17.txt"
+        "https://www.federalreserve.gov/releases/g17/release_dates.htm",
+        "https://www.federalreserve.gov/releases/g17/20000114/g17.txt",
+        "https://www.federalreserve.gov/releases/g17/20021217/g17.txt",
+        "https://www.federalreserve.gov/releases/g17/20260818/g17.txt"
       ],
       "redistribution_notes": "Official public-data terms and attribution requirements must be rechecked and retained by the qualifying adapter.",
       "limitations": [
-        "Registry review proves the official entrypoint and legal producer, not complete per-series coverage or historical-vintage availability.",
-        "Protocol-specific parsing and empirical fixture qualification are owned by issue #584 and the economy backfill."
+        "The total industrial-production monthly percent-change headline is complete through the declared as-of boundary; capacity utilization and component series remain separate qualifications.",
+        "CSV and current revised-series routes do not establish historical initial values without the occurrence-specific text manifest."
       ]
     },
     {

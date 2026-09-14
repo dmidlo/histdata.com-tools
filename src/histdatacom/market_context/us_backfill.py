@@ -76,6 +76,13 @@ _MONTHS.update(
         if name
     }
 )
+_MONTHS["sept"] = 9
+_G17_MONTH_RE = re.compile(
+    r"\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|"
+    r"jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|"
+    r"oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?\b",
+    re.IGNORECASE,
+)
 
 
 class UnitedStatesArchiveStrategy(str, Enum):
@@ -1884,12 +1891,19 @@ def parse_federal_reserve_g17_release(
         raise ValueError("G.17 parser received a different official source")
     try:
         text = snapshot.content.decode("utf-8-sig")
-    except UnicodeDecodeError as exc:
-        raise ValueError("G.17 release is not UTF-8 text") from exc
+        source_encoding = "utf-8"
+    except UnicodeDecodeError:
+        try:
+            text = snapshot.content.decode("windows-1252")
+            source_encoding = "windows-1252"
+        except UnicodeDecodeError as exc:
+            raise ValueError(
+                "G.17 release is neither UTF-8 nor Windows-1252 text"
+            ) from exc
     normalized = text.replace("\r\n", "\n").replace("\r", "\n")
     release_match = re.search(
         r"For release at\s+(?P<hour>\d{1,2}):(?P<minute>\d{2})\s+"
-        r"(?P<meridiem>[ap])\.m\.\s+\((?P<zone>EST|EDT)\)\s+"
+        r"(?P<meridiem>[ap])\.m\.\s+\((?P<zone>EST|EDT|AM|PM)\)\s+"
         r"(?P<date>[A-Z][a-z]+\s+\d{1,2},\s+\d{4})",
         normalized,
     )
@@ -1918,7 +1932,7 @@ def parse_federal_reserve_g17_release(
         "America/New_York",
         EconomicTimePrecision.EXACT_MINUTE,
     )
-    abbreviation = release_match.group("zone")
+    reported_zone = release_match.group("zone")
     expected_abbreviation = (
         datetime.fromtimestamp(
             timestamp.utc_ns / 1_000_000_000, tz=timezone.utc
@@ -1926,7 +1940,10 @@ def parse_federal_reserve_g17_release(
         .astimezone(ZoneInfo("America/New_York"))
         .tzname()
     )
-    if abbreviation != expected_abbreviation:
+    if (
+        reported_zone in {"EST", "EDT"}
+        and reported_zone != expected_abbreviation
+    ):
         raise ValueError(
             "G.17 release timezone abbreviation conflicts with date"
         )
@@ -1936,8 +1953,8 @@ def parse_federal_reserve_g17_release(
         (
             index
             for index, line in enumerate(lines)
-            if "INDUSTRIAL PRODUCTION AND CAPACITY UTILIZATION:  SUMMARY"
-            in line
+            if "industrial production and capacity utilization:  summary"
+            in line.lower()
         ),
         None,
     )
@@ -1948,7 +1965,7 @@ def parse_federal_reserve_g17_release(
         (
             index
             for index, line in enumerate(table_lines)
-            if "Industrial production" in line and line.count("|") >= 2
+            if "industrial production" in line.lower() and line.count("|") >= 2
         ),
         None,
     )
@@ -1956,7 +1973,7 @@ def parse_federal_reserve_g17_release(
         raise ValueError("G.17 industrial-production month header is missing")
     month_line = table_lines[month_offset]
     first_month_segment = month_line.split("|")[1]
-    month_names = re.findall(r"[A-Za-z]{3,9}\.?", first_month_segment)
+    month_names = _G17_MONTH_RE.findall(first_month_segment)
     if len(month_names) < 2:
         raise ValueError("G.17 month header has fewer than two periods")
     try:
@@ -2020,13 +2037,35 @@ def parse_federal_reserve_g17_release(
         previous_tokens[-1],
         f"line:{summary_index + previous_offset + 1}:change:previous",
     )
-    if math.isclose(previous, revised, rel_tol=0.0, abs_tol=1e-15):
-        raise ValueError(
-            "G.17 fixture does not contain a previous-value revision"
-        )
     release_line_number = normalized[: release_match.start()].count("\n") + 1
     total_line_number = summary_index + total_offset + 1
     previous_line_number = summary_index + previous_offset + 1
+    parser_limitations: tuple[str, ...] = (
+        (
+            "This parser qualifies the total industrial-production monthly "
+            "percent change only."
+        ),
+        (
+            "Capacity utilization and component rows require separate series "
+            "identities."
+        ),
+        (
+            f"The official header reports {reported_zone}; timezone "
+            "normalization uses America/New_York."
+        ),
+    )
+    if source_encoding != "utf-8":
+        parser_limitations += (
+            f"The retained source text decodes as {source_encoding}.",
+        )
+    if reported_zone not in {"EST", "EDT"}:
+        parser_limitations += (
+            (
+                "The parenthetical header label is not a timezone "
+                f"abbreviation; the release date resolves to "
+                f"{expected_abbreviation}."
+            ),
+        )
     return UnitedStatesReleaseTripletV1(
         program_key="us.frb.industrial-production",
         logical_event_key=(
@@ -2061,11 +2100,7 @@ def parse_federal_reserve_g17_release(
         revision_locator=(
             f"line:{total_line_number}:total-index:penultimate-change"
         ),
-        limitations=(
-            "This parser qualifies the total industrial-production monthly percent change only.",
-            "Capacity utilization and component rows require separate series identities.",
-            f"The official header reports {abbreviation}; timezone normalization uses America/New_York.",
-        ),
+        limitations=parser_limitations,
     )
 
 

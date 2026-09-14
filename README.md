@@ -2640,6 +2640,12 @@ independently reproduces its actual, previous-as-known, and revised-previous
 values. Per-program audits quantify the full 2000-present denominator and
 refuse completion when schedules, release artifacts, initial values, previous
 values, revisions, or time precision are missing.
+The G.17 specialization additionally ships a compact manifest for every 2000
+through August 2026 Industrial Production and Capacity Utilization release:
+319 official text artifacts, 49,791,597 source bytes, exact raw and normalized
+hashes, 261 observed prior-period revisions, and exact publication-time
+evidence. The raw corpus remains external, but the checked-in release index and
+manifest make every byte and normalized triplet independently verifiable.
 Central-bank releases additionally use framework-aware
 [`monetary-policy semantics`](docs/monetary-policy-semantics.md). Decisions,
 statements, vote splits, press conferences, minutes, projections, schedules,

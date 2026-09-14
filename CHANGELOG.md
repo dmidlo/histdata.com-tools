@@ -2,6 +2,11 @@
 
 ### Added
 
+- **market context**: qualify all 319 Federal Reserve G.17 releases from
+  January 2000 through August 2026 with a retained official release index,
+  unique raw and normalized hashes, independently replayed headline triplets,
+  explicit historical encoding/header eras, and a complete quantified
+  industrial-production coverage slice (#538).
 - **market context**: add a 22-program, 12-family U.S. official macro backfill
   profile; DOL/ETA and Philadelphia Fed source entries; bounded plain-text
   replay; a retained real 2002 Federal Reserve G.17 artifact with independently
