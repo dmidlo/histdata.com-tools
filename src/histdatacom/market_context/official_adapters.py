@@ -825,11 +825,12 @@ def parse_with_built_in_official_adapter(
     """Resolve and run the exact built-in parser for a retained snapshot."""
     if source.source_key != snapshot.request.source_key:
         raise ValueError("official source differs from snapshot request")
-    return parse_official_snapshot(
+    records: tuple[Mapping[str, JSONValue], ...] = parse_official_snapshot(
         snapshot,
         resolve_official_source_parser(source, parsers=parsers),
         max_events=max_events,
     )
+    return records
 
 
 def required_official_adapter_packs(
@@ -964,7 +965,7 @@ def verify_official_adapter_fixture(
     if qualification.content_sha256 != snapshot.content_sha256:
         raise ValueError("official qualification raw fixture drifted")
     selected = parser or resolve_official_source_parser(source, parsers=parsers)
-    records = parse_official_snapshot(
+    records: tuple[Mapping[str, JSONValue], ...] = parse_official_snapshot(
         snapshot,
         selected,
         max_events=qualification.expected_record_count,
@@ -1194,14 +1195,20 @@ def _json_stat_dataset_records(
             "JSON-stat id, size, dimension, or value shape is invalid",
             pointer,
         )
-    if any(item <= 0 for item in sizes):
+    dimension_ids = [item for item in ids if isinstance(item, str)]
+    dimension_sizes = [
+        item
+        for item in sizes
+        if isinstance(item, int) and not isinstance(item, bool)
+    ]
+    if any(item <= 0 for item in dimension_sizes):
         raise parser.error(
             snapshot,
             OfficialParserFailureCode.SCHEMA_DRIFT,
             "JSON-stat dimensions must be non-empty",
             pointer,
         )
-    total = math.prod(sizes)
+    total = math.prod(dimension_sizes)
     if total > MAX_OFFICIAL_EVENTS:
         raise parser.error(
             snapshot,
@@ -1218,7 +1225,7 @@ def _json_stat_dataset_records(
             size=size,
             pointer=pointer,
         )
-        for name, size in zip(ids, sizes)
+        for name, size in zip(dimension_ids, dimension_sizes)
     ]
     dense_values: list[JSONValue] = [None] * total
     if isinstance(raw_values, list):
@@ -1251,10 +1258,12 @@ def _json_stat_dataset_records(
             dense_values[index] = value
     statuses = dataset.get("status")
     for flat_index, value in enumerate(dense_values):
-        offsets = _unravel_index(flat_index, sizes)
-        coordinates = {
+        offsets = _unravel_index(flat_index, dimension_sizes)
+        coordinates: dict[str, JSONValue] = {
             name: categories[dimension_index][offset]
-            for dimension_index, (name, offset) in enumerate(zip(ids, offsets))
+            for dimension_index, (name, offset) in enumerate(
+                zip(dimension_ids, offsets)
+            )
         }
         status: JSONValue = None
         if isinstance(statuses, list) and flat_index < len(statuses):
@@ -1661,10 +1670,11 @@ def _sdmx_xml_records(
             values.update(_sdmx_element_values(observation, "ObsDimension"))
             values.update(_sdmx_element_values(observation, "ObsValue"))
             values.update(_sdmx_element_values(observation, "Attributes"))
+            json_dimensions = _json_text_mapping(values)
             yield (
                 OfficialAdapterRecordKind.SDMX_OBSERVATION,
                 f"/Series[{series_count}]/Obs[{observation_count}]",
-                {"dimensions": values},
+                {"dimensions": json_dimensions},
             )
     if observation_count:
         return
@@ -1734,7 +1744,7 @@ def _xml_named_fields(element: ElementTree.Element) -> dict[str, JSONValue]:
     ]
     names = [item for item in names if item]
     if names:
-        result["names"] = names
+        result["names"] = _json_text_list(names)
     return result
 
 
@@ -2062,14 +2072,19 @@ def _parse_html(
     ):
         document_text = _normalized_text(" ".join(collector.document_parts))
         if document_text:
+            headings = _json_text_list(collector.headings)
+            times: list[JSONValue] = [
+                _json_text_mapping(item) for item in collector.times
+            ]
+            metadata = _json_text_mapping(collector.meta)
             yield (
                 OfficialAdapterRecordKind.HTML_DOCUMENT,
                 "/html",
                 {
                     "title": _normalized_text(" ".join(collector.title_parts)),
-                    "headings": collector.headings,
-                    "times": collector.times,
-                    "metadata": collector.meta,
+                    "headings": headings,
+                    "times": times,
+                    "metadata": metadata,
                     "text": document_text,
                 },
             )
@@ -2241,7 +2256,7 @@ def _parse_ics(
             left, value = line.split(":", 1)
             parts = left.split(";")
             name = parts[0].lower()
-            parameters = {
+            parameters: dict[str, JSONValue] = {
                 key.lower(): item
                 for part in parts[1:]
                 if "=" in part
@@ -2358,7 +2373,7 @@ def _parse_pdf(
                 {
                     "page_number": page_number,
                     "text": text,
-                    "table_rows": table_rows,
+                    "table_rows": _json_text_rows(table_rows),
                 },
             )
         if not extracted:
@@ -2539,11 +2554,11 @@ def _json_catalog_records(
             OfficialParserFailureCode.SCHEMA_DRIFT,
             "JSON catalogue contains no dataset-shaped records",
         )
-    for pointer, value in candidates:
+    for pointer, candidate in candidates:
         yield (
             OfficialAdapterRecordKind.DATASET_CATALOG_ITEM,
             pointer,
-            dict(value),
+            dict(candidate),
         )
 
 
@@ -2700,6 +2715,24 @@ def _header_version(headers: Sequence[str]) -> str:
     return hashlib.sha256(
         canonical_contract_json(list(headers)).encode("utf-8")
     ).hexdigest()
+
+
+def _json_text_list(values: Iterable[str]) -> list[JSONValue]:
+    return list(values)
+
+
+def _json_text_mapping(values: Mapping[str, str]) -> dict[str, JSONValue]:
+    result: dict[str, JSONValue] = {}
+    for key, value in values.items():
+        result[key] = value
+    return result
+
+
+def _json_text_rows(values: Iterable[Iterable[str]]) -> list[JSONValue]:
+    result: list[JSONValue] = []
+    for row in values:
+        result.append(_json_text_list(row))
+    return result
 
 
 def _json_mapping(
