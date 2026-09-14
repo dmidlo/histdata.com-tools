@@ -2,6 +2,11 @@
 
 ### Added
 
+- **market context**: add versioned inflation/index concept, observation,
+  derivation, expectation, triplet, component, release-stage, and methodology
+  semantics; prohibit latest-current rates from masquerading as historical
+  initial actuals; and audit legal-producer ownership and difficult cases for
+  all 21 economy profiles (#575).
 - **market context**: add versioned monetary-policy meeting, phase, setting,
   decision, expectation, vote, and surprise semantics; preserve ranges, rate
   sets, yield targets, currency-board and exchange-rate frameworks; refuse

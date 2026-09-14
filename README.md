@@ -2639,6 +2639,13 @@ target ranges, facility sets, yield targets, currency-board mechanics, and
 exchange-rate regimes retain their actual shapes. Only exact pre-decision
 expectations can produce rate surprises, while statement/press surprise stays
 a separately typed textual or latent score.
+Inflation releases additionally use lossless
+[`inflation and price-index semantics`](docs/inflation-price-semantics.md).
+CPI, HICP, PPI, PCE/GDP deflators, index levels, MoM/QoQ/YoY rates, seasonal
+bases, headline/core/component concepts, and flash/final stages retain distinct
+identities. Derived rates bind the exact input vintages, calendar triplets
+require exact-concept pre-release forecasts, incomplete component tables stay
+explicit, and rebases/reweights cannot silently bridge methodology eras.
 
 #### CFTC positioning state
 
