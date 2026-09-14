@@ -2,6 +2,11 @@
 
 ### Added
 
+- **market context**: add deterministic official-archive release-time
+  hierarchy, immutable schedule/publication/revision mutation chains,
+  first-actual deltas, fixed previous-as-known cutoffs, difficult-case
+  diagnostics, and machine-verifiable point-in-time reconstruction audits
+  (#537).
 - **market context**: add a reviewed authoritative-source matrix covering all
   21 scoped economies and event families, plus source-bound bounded HTTP,
   conditional fetches, credential-safe manifests, immutable raw snapshots,

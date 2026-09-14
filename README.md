@@ -2595,6 +2595,11 @@ prior releases. See
 [`docs/economic-calendar-contracts.md`](docs/economic-calendar-contracts.md)
 and the audited
 [`calendar-branch migration map`](docs/economic-calendar-branch-migration.md).
+Official archive observations are converted into immutable status, schedule,
+publication, and revision chains through the documented
+[`release-vintage reconstruction`](docs/release-vintage-reconstruction.md)
+engine. It retains an explicit publication-time hierarchy, revision deltas,
+fixed previous-as-known cutoffs, and machine-verifiable point-in-time audits.
 Official acquisition is governed by a reviewed 21-economy legal-producer
 matrix plus bounded, conditional, credential-safe request manifests and
 content-addressed raw-response replay. Protocol-specific parsers attach behind

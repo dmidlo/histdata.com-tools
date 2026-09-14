@@ -31,6 +31,13 @@ checks that every emitted source names the adapter and version that produced
 it. This makes two official producers interchangeable at the query boundary
 without pretending their upstream schemas are identical.
 
+The companion
+[`release-vintage reconstruction`](release-vintage-reconstruction.md) layer
+turns retained official archive observations into these immutable releases.
+It provides the publication-time evidence hierarchy, ordered mutation replay,
+revision-kind diagnostics, corpus assembly, and point-in-time audit without
+adding acquisition behavior to the neutral contracts.
+
 ## Identity and source precedence
 
 A logical release names an economy code and display name, currency set,
@@ -182,9 +189,10 @@ semantic source of truth.
 
 Raw acquisition replay is intentionally not part of the neutral module. Each
 official adapter remains responsible for bounded acquisition and exact raw
-snapshot replay under the shared source registry planned in #535. Coverage
-diagnostics and archived-vintage completeness continue under #537, #581, and
-related source-specific issues.
+snapshot replay under the shared source registry implemented in #535. Generic
+release-time and vintage reconstruction is implemented in #537; historical
+schedule acquisition, archive completeness, and source-specific backfills
+continue under #579, #581, and the regional source issues.
 
 The audited disposition of every symbol on the superseded branch is recorded
 in [`economic-calendar-branch-migration.md`](economic-calendar-branch-migration.md).

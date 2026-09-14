@@ -637,7 +637,10 @@ class EconomicSurprisePolicyV1:
             "minimum_observations": self.minimum_observations,
             "epsilon": self.epsilon,
             "scale_estimator": "1.4826 * median_absolute_deviation",
-            "history_rule": "release.event_time_ns < current.event_time_ns",
+            "history_rule": (
+                "first_actual_publication_ns < "
+                "current.first_actual_publication_ns"
+            ),
         }
 
     def to_dict(self) -> dict[str, JSONValue]:
@@ -798,12 +801,12 @@ class EconomicCalendarReleaseV1:
             self.first_observed_at_ns, "first_observed_at_ns"
         )
         available = _bounded_ns(self.available_at_ns, "available_at_ns")
-        if first_observed > available:
-            raise ValueError("first observed time follows availability")
         if not isinstance(self.source, MarketContextSourceV1):
             raise TypeError("source must use MarketContextSourceV1")
-        if self.source.retrieved_at_ns < available:
-            raise ValueError("source retrieval precedes release availability")
+        if self.source.retrieved_at_ns < max(first_observed, available):
+            raise ValueError(
+                "source retrieval precedes release availability or observation"
+            )
         if status in {
             EconomicReleaseStatus.RELEASED,
             EconomicReleaseStatus.UNSCHEDULED,
@@ -1543,10 +1546,13 @@ class EconomicCalendarEventStateV1:
             ):
                 raise ValueError("previous vintages span multiple periods")
         previous = self.previous_as_known
+        initial_release_time = (
+            actuals[0].event_time_ns if actuals else self.release.event_time_ns
+        )
         previous_as_known_vintages = tuple(
             item
             for item in previous_vintages
-            if item.available_at_ns < self.release.event_time_ns
+            if item.available_at_ns < initial_release_time
         )
         if previous is not None:
             if previous.series_id != self.release.series_id:
@@ -1556,7 +1562,7 @@ class EconomicCalendarEventStateV1:
                 >= self.release.reference_period_end_ns
             ):
                 raise ValueError("previous-as-known is not an earlier period")
-            if previous.available_at_ns >= self.release.event_time_ns:
+            if previous.available_at_ns >= initial_release_time:
                 raise ValueError(
                     "previous-as-known was not known before release"
                 )
@@ -1576,7 +1582,7 @@ class EconomicCalendarEventStateV1:
                 raise ValueError("forecast belongs to another logical event")
             if forecast.available_at_ns > decision:
                 raise ValueError("state exposes a forecast after decision time")
-            if forecast.available_at_ns >= self.release.event_time_ns:
+            if forecast.available_at_ns >= initial_release_time:
                 raise ValueError(
                     "forecast must be available strictly before release"
                 )
@@ -1623,6 +1629,29 @@ class EconomicCalendarEventStateV1:
         if not self.visible_actual_vintages:
             return None
         return self.visible_actual_vintages[-1].actual_value
+
+    @property
+    def initial_release_time_ns(self) -> int:
+        """Return the first-publication time, never a later revision time."""
+        if self.visible_actual_vintages:
+            return self.visible_actual_vintages[0].event_time_ns
+        return self.release.event_time_ns
+
+    @property
+    def event_time_ns(self) -> int:
+        """Return the stable logical-event occurrence at this decision time."""
+        return self.initial_release_time_ns
+
+    @property
+    def actual_revision_deltas(self) -> tuple[tuple[str, float], ...]:
+        """Return each visible revision delta from the initial actual."""
+        initial = self.actual_initial
+        if initial is None:
+            return ()
+        return tuple(
+            (item.release_id, cast(float, item.actual_value) - initial)
+            for item in self.visible_actual_vintages[1:]
+        )
 
     @property
     def previous_value(self) -> float | None:
@@ -1690,8 +1719,13 @@ class EconomicCalendarEventStateV1:
                 else self.machine_projection.to_dict()
             ),
             "decision_at_ns": self.decision_at_ns,
+            "initial_release_time_ns": self.initial_release_time_ns,
             "actual_initial": self.actual_initial,
             "actual_latest": self.actual_latest,
+            "actual_revision_deltas": [
+                {"release_id": release_id, "delta": delta}
+                for release_id, delta in self.actual_revision_deltas
+            ],
             "previous_value": self.previous_value,
             "previous_initial": self.previous_initial,
             "previous_latest": self.previous_latest,
@@ -1947,9 +1981,7 @@ class EconomicCalendarQueryV1:
             raise ValueError("economic calendar query exceeds event bound")
         if any(item.decision_at_ns != decision for item in events):
             raise ValueError("query events use another decision time")
-        if any(
-            not start <= item.release.event_time_ns < end for item in events
-        ):
+        if any(not start <= item.event_time_ns < end for item in events):
             raise ValueError("query event lies outside the requested interval")
         object.__setattr__(self, "start_ns", start)
         object.__setattr__(self, "end_ns", end)
@@ -1963,7 +1995,7 @@ class EconomicCalendarQueryV1:
                 sorted(
                     events,
                     key=lambda item: (
-                        item.release.event_time_ns,
+                        item.event_time_ns,
                         item.release.logical_event_key,
                     ),
                 )
@@ -2553,16 +2585,31 @@ def query_economic_calendar_as_known(
             forecast
         )
     latest_visible: list[EconomicCalendarReleaseV1] = []
+    candidate_times: dict[str, int] = {}
     for values in releases_by_event.values():
         visible = [item for item in values if item.available_at_ns <= decision]
         if visible:
-            latest_visible.append(
-                max(visible, key=lambda item: item.revision_sequence)
+            latest = max(visible, key=lambda item: item.revision_sequence)
+            latest_visible.append(latest)
+            visible_actuals = tuple(
+                item
+                for item in visible
+                if item.status
+                in {
+                    EconomicReleaseStatus.RELEASED,
+                    EconomicReleaseStatus.UNSCHEDULED,
+                }
+                and item.actual_value is not None
+            )
+            candidate_times[latest.release_id] = (
+                visible_actuals[0].event_time_ns
+                if visible_actuals
+                else latest.event_time_ns
             )
     candidates = [
         item
         for item in latest_visible
-        if start <= item.event_time_ns < end
+        if start <= candidate_times[item.release_id] < end
         and (
             not requested_currencies
             or bool(set(requested_currencies) & set(item.affected_currencies))
@@ -2577,7 +2624,10 @@ def query_economic_calendar_as_known(
         )
     ]
     candidates.sort(
-        key=lambda item: (item.event_time_ns, item.logical_event_key)
+        key=lambda item: (
+            candidate_times[item.release_id],
+            item.logical_event_key,
+        )
     )
     if len(candidates) > max_events:
         raise ValueError(
@@ -2595,6 +2645,9 @@ def query_economic_calendar_as_known(
             }
             and item.actual_value is not None
             and item.available_at_ns <= decision
+        )
+        initial_release_time = (
+            actuals[0].event_time_ns if actuals else release.event_time_ns
         )
         prior_series_vintages = [
             item
@@ -2621,7 +2674,7 @@ def query_economic_calendar_as_known(
             previous_as_known = tuple(
                 item
                 for item in previous_vintages
-                if item.available_at_ns < release.event_time_ns
+                if item.available_at_ns < initial_release_time
             )
             if previous_as_known:
                 previous = previous_as_known[-1]
@@ -2636,13 +2689,13 @@ def query_economic_calendar_as_known(
                     forecasts,
                     kind=EconomicForecastKind.OBSERVED_CONSENSUS,
                     decision_at_ns=decision,
-                    release_time_ns=release.event_time_ns,
+                    release_time_ns=initial_release_time,
                 ),
                 machine_projection=_latest_forecast(
                     forecasts,
                     kind=EconomicForecastKind.MACHINE_PROJECTION,
                     decision_at_ns=decision,
-                    release_time_ns=release.event_time_ns,
+                    release_time_ns=initial_release_time,
                 ),
                 decision_at_ns=decision,
             )
@@ -2688,7 +2741,7 @@ def compute_economic_calendar_surprises(
         sorted(
             values,
             key=lambda item: (
-                item.release.event_time_ns,
+                item.event_time_ns,
                 item.release.logical_event_key,
             ),
         )
@@ -2697,12 +2750,9 @@ def compute_economic_calendar_surprises(
     results: list[EconomicCalendarSurpriseV1] = []
     offset = 0
     while offset < len(ordered):
-        event_time = ordered[offset].release.event_time_ns
+        event_time = ordered[offset].event_time_ns
         end = offset
-        while (
-            end < len(ordered)
-            and ordered[end].release.event_time_ns == event_time
-        ):
+        while end < len(ordered) and ordered[end].event_time_ns == event_time:
             end += 1
         pending: list[tuple[str, float]] = []
         for state in ordered[offset:end]:
@@ -2856,16 +2906,21 @@ def project_economic_calendar_state(
         else f"projection:{forecast.kind.value}"
     )
     release = state.release
+    occurrence = (
+        state.visible_actual_vintages[0]
+        if state.visible_actual_vintages
+        else release
+    )
     return MarketContextEventV1(
         canonical_key=release.logical_event_key,
         kind=release.market_context_kind,
         title=release.title,
         source=release.source,
         source_event_time=(
-            release.released_lexical or release.scheduled_lexical
+            occurrence.released_lexical or occurrence.scheduled_lexical
         ),
         source_timezone=release.source_timezone,
-        event_time_ns=release.event_time_ns,
+        event_time_ns=state.event_time_ns,
         first_known_at_ns=release.first_observed_at_ns,
         available_at_ns=release.available_at_ns,
         pre_event_ns=pre_event_ns,
