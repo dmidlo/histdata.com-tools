@@ -2646,6 +2646,12 @@ through August 2026 Industrial Production and Capacity Utilization release:
 hashes, 261 observed prior-period revisions, and exact publication-time
 evidence. The raw corpus remains external, but the checked-in release index and
 manifest make every byte and normalized triplet independently verifiable.
+The U.S. CPI specialization likewise binds 318 published January 2000 through
+July 2026 CPI-U all-items releases to 319 distinct current/predecessor source
+artifacts. Its mixed text, HTML, and PDF parser preserves exact 08:30 Eastern
+publication evidence, 15 observed prior-period revisions, the unpublished
+October 2025 reference month, November's two-month shutdown measure, and
+December's explicitly noncomparable revised-previous field.
 Central-bank releases additionally use framework-aware
 [`monetary-policy semantics`](docs/monetary-policy-semantics.md). Decisions,
 statements, vote splits, press conferences, minutes, projections, schedules,

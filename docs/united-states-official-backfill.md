@@ -149,6 +149,65 @@ unparseable occurrence rejects the replay.
 coverage slice directly from the verified manifest; route declarations or
 current revised databases cannot influence the counts.
 
+## Complete CPI archive qualification
+
+`histdatacom.market_context.us_cpi_archive` qualifies the CPI-U all-items,
+seasonally adjusted headline from the official BLS archive. The dedicated
+`us.bls.cpi` supplemental source leaves `us.bls.public-data` as the registry's
+single primary inflation source while giving occurrence-specific release
+documents their own formats, parser route, exact-minute precision, and
+empirical verification status.
+
+The packaged `us_cpi_archive_v1.json` manifest is observed as of September 14,
+2026 and records:
+
+- 318 published reference periods from January 2000 through July 2026;
+- 319 distinct source artifacts and 214,928,540 bytes, including the December
+  1999 release needed to recover January 2000's previous-as-known value;
+- 96 plain-text releases, 221 HTML releases, and one official PDF;
+- 318 distinct normalized triplet hashes and 15 observed prior-period
+  revisions; and
+- one explicitly noncomparable revised-previous value in December 2025.
+
+The exact 128,354-byte BLS release-index HTML is retained in
+`us_cpi_release_index_v1.html.b64`. It supplies the reference-period
+denominator, publication links, and the explicit statement that October 2025
+was not published because of the federal appropriations lapse. The next
+release reports November as a September-to-November two-month change because
+October data were not collected. December returns to a monthly change, but
+its release cannot restate a comparable November two-month measure; replay
+therefore retains the November value as known and marks the comparison
+unavailable instead of inventing a revision.
+
+BLS's indexed May 2016 HTML artifact currently returns a zero-byte HTTP 200
+response. The index contract preserves that indexed URI and records the
+bounded substitution of BLS's official `cpi_06162016.pdf`. The PDF parser uses
+Table 1's all-items seasonally adjusted columns and fails if extractable text,
+the release header, title, or table shape changes.
+
+Historical parsing is driven by the observed source eras. It handles
+Windows-1252 and UTF-8 text, plain-text Table A rows with three-month annualized
+columns and `r` revision markers, preformatted HTML, recent semantic
+`table#cpi_pressa` rows, and source headers labeled EST, EDT, or ET. A concrete
+EST/EDT label that conflicts with the publication date fails closed. Every
+normalized triplet binds both the current artifact and its immediately prior
+published predecessor; a current revised BLS series cannot satisfy replay.
+
+The refresh command requires an explicit observation boundary. Supplying a
+raw directory retains the full content-addressed corpus outside the wheel:
+
+```console
+uv run python scripts/refresh_us_cpi_archive.py \
+  --as-of 2026-09-14 \
+  --raw-directory /absolute/operator/path/cpi-raw
+```
+
+`replay_bls_cpi_archive()` recomputes every current/predecessor pair and rejects
+missing, duplicate, changed, or newly unparseable bytes.
+`bls_cpi_coverage_from_manifest()` derives the complete 318-event inflation
+slice directly from that evidence, with unsupported event forecasts kept as an
+explicit nonblocking gap.
+
 ## Quantified closure audit
 
 `UnitedStatesProgramCoverageV1` records one exact 2000-present denominator and
@@ -201,7 +260,8 @@ alone is not.
   retain monthly release PDFs; the revised download is not substituted for
   those vintages.
 
-The package preserves the real G.17 index, one representative raw release, and
-the complete G.17 raw/normalized manifest. The remaining production raw corpora
-stay external, content addressed, and subject to the coverage audit so wheel
-size does not grow with thousands of federal release files.
+The package preserves the real G.17 and CPI indexes, one representative G.17
+raw release, and both complete raw/normalized manifests. The remaining
+production raw corpora stay external, content addressed, and subject to the
+coverage audit so wheel size does not grow with thousands of federal release
+files.

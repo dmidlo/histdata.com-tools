@@ -2,6 +2,12 @@
 
 ### Added
 
+- **market context**: qualify all 318 published CPI-U all-items releases from
+  January 2000 through July 2026 with current/predecessor artifact hashes,
+  exact 08:30 publication times, legacy text and HTML parser eras, an official
+  PDF substitution for the empty May 2016 HTML response, explicit 2025
+  appropriations-lapse semantics, and a complete inflation coverage slice
+  (#538).
 - **market context**: qualify all 319 Federal Reserve G.17 releases from
   January 2000 through August 2026 with a retained official release index,
   unique raw and normalized hashes, independently replayed headline triplets,

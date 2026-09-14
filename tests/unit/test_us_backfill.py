@@ -110,7 +110,7 @@ def _coverage(
 def test_registry_represents_us_specific_legal_producers_and_text() -> None:
     registry = load_packaged_official_source_registry()
     assert registry.reviewed_on == "2026-09-14"
-    assert len(registry.sources) == 54
+    assert len(registry.sources) == 55
 
     dol = registry.source("us.dol.eta-unemployment-insurance")
     assert dol.institution.startswith("U.S. Department of Labor")
@@ -124,6 +124,11 @@ def test_registry_represents_us_specific_legal_producers_and_text() -> None:
     g17 = registry.source("us.frb.industrial-production")
     assert OfficialSourceFormat.TEXT in g17.formats
     assert "text/plain" in g17.expected_media_types
+
+    cpi = registry.source("us.bls.cpi")
+    assert cpi.source_release_ids == ("CPI",)
+    assert OfficialSourceFormat.PDF in cpi.formats
+    assert cpi.verification_status.value == "empirically-verified"
 
 
 def test_builtin_us_profile_covers_every_required_family_and_program() -> None:
