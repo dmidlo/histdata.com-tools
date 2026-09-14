@@ -1,6 +1,6 @@
 {
   "schema_version": "histdatacom.official-source-registry.v1",
-  "reviewed_on": "2026-09-13",
+  "reviewed_on": "2026-09-14",
   "scoped_economies": [
     "AU",
     "CA",
@@ -3654,6 +3654,86 @@
     },
     {
       "schema_version": "histdatacom.official-source-entry.v1",
+      "source_key": "us.dol.eta-unemployment-insurance",
+      "economy_code": "US",
+      "economy_name": "United States",
+      "institution": "U.S. Department of Labor Employment and Training Administration",
+      "jurisdiction": "United States of America",
+      "legal_producer": true,
+      "roles": [
+        "official-archive",
+        "release-calendar"
+      ],
+      "event_families": [
+        "labour-market"
+      ],
+      "indicator_ids": [
+        "employment-unemployment-and-earnings"
+      ],
+      "formats": [
+        "html",
+        "pdf"
+      ],
+      "capabilities": [
+        "current-values",
+        "historical-observations",
+        "publication-metadata",
+        "schedule-metadata",
+        "revision-metadata",
+        "series-metadata",
+        "archive-enumeration"
+      ],
+      "endpoint_uri_template": "https://oui.doleta.gov/unemploy/claims.asp",
+      "allowed_hosts": [
+        "oui.doleta.gov",
+        "www.dol.gov"
+      ],
+      "expected_media_types": [
+        "text/html",
+        "application/pdf"
+      ],
+      "source_series_ids": [
+        "ETA-538"
+      ],
+      "source_table_ids": [],
+      "source_release_ids": [
+        "weekly-unemployment-insurance-claims"
+      ],
+      "release_calendar_uri": "https://www.dol.gov/ui/data.pdf",
+      "archive_uri": "https://oui.doleta.gov/unemploy/claims.asp",
+      "source_timezone": "America/New_York",
+      "availability_time_precision": "exact-minute",
+      "dst_convention": "IANA zone database; retain source lexical times and require explicit DST-fold evidence.",
+      "historical_depth": "ETA weekly claims tables and official news releases identify the administrative series; occurrence-specific releases remain required for as-known values.",
+      "known_breaks": [
+        "Pandemic-era programs and state revisions must remain distinct from regular state initial and continued claims."
+      ],
+      "revision_behavior": "States revise claims; retain every weekly publication and do not overwrite the previous-as-known estimate.",
+      "rate_limit": "No stable public limit recorded at review; apply the stricter local request, byte, page, event, retry, and runtime bounds.",
+      "authentication": "none",
+      "credential_env_name": null,
+      "credential_header_name": null,
+      "credential_parameter_name": null,
+      "terms_uri": null,
+      "fallback_source_keys": [],
+      "parser_id": "official.html.v1",
+      "parser_version": "1",
+      "replay_strategy": "Retain exact release and table bytes, source locators, parser identity, response clocks, and SHA-256 before normalization.",
+      "adapter_owner": "market-context/us",
+      "verification_status": "reviewed-entrypoint",
+      "reviewed_on": "2026-09-14",
+      "verification_evidence_uris": [
+        "https://oui.doleta.gov/unemploy/claims.asp",
+        "https://www.dol.gov/ui/data.pdf"
+      ],
+      "redistribution_notes": "Public federal statistics; retain agency attribution and recheck publication terms when packaging raw releases.",
+      "limitations": [
+        "A current ETA table is not evidence of its historical initial publication.",
+        "State revisions and pandemic-program claims require occurrence-specific release artifacts."
+      ]
+    },
+    {
+      "schema_version": "histdatacom.official-source-entry.v1",
       "source_key": "us.frb.industrial-production",
       "economy_code": "US",
       "economy_name": "United States",
@@ -3672,6 +3752,7 @@
         "industrial-production"
       ],
       "formats": [
+        "text",
         "html",
         "csv"
       ],
@@ -3689,6 +3770,7 @@
         "www.federalreserve.gov"
       ],
       "expected_media_types": [
+        "text/plain",
         "text/html",
         "text/csv",
         "application/octet-stream"
@@ -3718,14 +3800,107 @@
       "replay_strategy": "Retain exact response bytes, request parameters, endpoint and parser identities, response validators, source clocks, and SHA-256 before normalization.",
       "adapter_owner": "market-context/us",
       "verification_status": "reviewed-entrypoint",
-      "reviewed_on": "2026-09-13",
+      "reviewed_on": "2026-09-14",
       "verification_evidence_uris": [
-        "https://www.federalreserve.gov/releases/g17/"
+        "https://www.federalreserve.gov/releases/g17/",
+        "https://www.federalreserve.gov/releases/g17/20021217/g17.txt"
       ],
       "redistribution_notes": "Official public-data terms and attribution requirements must be rechecked and retained by the qualifying adapter.",
       "limitations": [
         "Registry review proves the official entrypoint and legal producer, not complete per-series coverage or historical-vintage availability.",
         "Protocol-specific parsing and empirical fixture qualification are owned by issue #584 and the economy backfill."
+      ]
+    },
+    {
+      "schema_version": "histdatacom.official-source-entry.v1",
+      "source_key": "us.frb.philadelphia-surveys",
+      "economy_code": "US",
+      "economy_name": "United States",
+      "institution": "Federal Reserve Bank of Philadelphia",
+      "jurisdiction": "United States of America",
+      "legal_producer": true,
+      "roles": [
+        "official-archive",
+        "release-calendar",
+        "independent-official-cross-check"
+      ],
+      "event_families": [
+        "confidence-survey"
+      ],
+      "indicator_ids": [
+        "official-confidence-and-tendency-surveys"
+      ],
+      "formats": [
+        "html",
+        "csv",
+        "xls",
+        "pdf"
+      ],
+      "capabilities": [
+        "current-values",
+        "historical-observations",
+        "publication-metadata",
+        "schedule-metadata",
+        "revision-metadata",
+        "series-metadata",
+        "forecast-survey",
+        "archive-enumeration"
+      ],
+      "endpoint_uri_template": "https://www.philadelphiafed.org/surveys-and-data/regional-economic-analysis/manufacturing-business-outlook-survey",
+      "allowed_hosts": [
+        "www.philadelphiafed.org"
+      ],
+      "expected_media_types": [
+        "text/html",
+        "text/csv",
+        "application/vnd.ms-excel",
+        "application/pdf",
+        "application/zip"
+      ],
+      "source_series_ids": [
+        "MBOS-GENERAL-ACTIVITY-CURRENT",
+        "MBOS-GENERAL-ACTIVITY-FUTURE",
+        "SPF"
+      ],
+      "source_table_ids": [
+        "bos_difx",
+        "hos_historyx"
+      ],
+      "source_release_ids": [
+        "manufacturing-business-outlook-survey",
+        "survey-of-professional-forecasters"
+      ],
+      "release_calendar_uri": "https://www.philadelphiafed.org/surveys-and-data/regional-economic-analysis/manufacturing-business-outlook-survey",
+      "archive_uri": "https://www.philadelphiafed.org/surveys-and-data/mbos-archives",
+      "source_timezone": "America/New_York",
+      "availability_time_precision": "exact-minute",
+      "dst_convention": "IANA zone database; retain source lexical times and require explicit DST-fold evidence.",
+      "historical_depth": "Monthly MBOS release PDFs are archived from 1968; downloadable time series are revised and therefore do not replace contemporaneous releases.",
+      "known_breaks": [
+        "Annual seasonal-factor revisions change the downloadable history; the release PDFs remain the vintage evidence."
+      ],
+      "revision_behavior": "Downloadable histories are revised annually; retain contemporaneous monthly releases for initial values.",
+      "rate_limit": "No stable public limit recorded at review; apply the stricter local request, byte, page, event, retry, and runtime bounds.",
+      "authentication": "none",
+      "credential_env_name": null,
+      "credential_header_name": null,
+      "credential_parameter_name": null,
+      "terms_uri": null,
+      "fallback_source_keys": [],
+      "parser_id": "official.html.v1",
+      "parser_version": "1",
+      "replay_strategy": "Retain each release PDF or table download, exact request and parser identity, source clocks, and SHA-256 before normalization.",
+      "adapter_owner": "market-context/us",
+      "verification_status": "reviewed-entrypoint",
+      "reviewed_on": "2026-09-14",
+      "verification_evidence_uris": [
+        "https://www.philadelphiafed.org/surveys-and-data/mbos-archives",
+        "https://www.philadelphiafed.org/surveys-and-data/real-time-data-research/survey-of-professional-forecasters"
+      ],
+      "redistribution_notes": "Federal Reserve Bank research data; retain source attribution and recheck download terms when packaging raw artifacts.",
+      "limitations": [
+        "MBOS measures one Federal Reserve District and must not be relabeled as a national manufacturing statistic.",
+        "SPF quarterly forecasts are not monthly event-consensus observations."
       ]
     },
     {

@@ -2631,6 +2631,15 @@ an encrypted or image-only PDF records the required reacquisition/OCR evidence.
 Latest-state APIs still cannot silently claim historical vintages. See the
 [`official acquisition`](docs/official-source-registry-and-fetch.md) and
 [`protocol adapter`](docs/official-source-adapters.md) guides.
+The first regional specialization is the
+[`United States official backfill`](docs/united-states-official-backfill.md):
+22 legal-producer programs cover all 12 event families, DOL/ETA and the
+Philadelphia Fed remain correctly attributed, plain-text releases replay
+without HTML coercion, and a retained 2002 Federal Reserve G.17 publication
+independently reproduces its actual, previous-as-known, and revised-previous
+values. Per-program audits quantify the full 2000-present denominator and
+refuse completion when schedules, release artifacts, initial values, previous
+values, revisions, or time precision are missing.
 Central-bank releases additionally use framework-aware
 [`monetary-policy semantics`](docs/monetary-policy-semantics.md). Decisions,
 statements, vote splits, press conferences, minutes, projections, schedules,

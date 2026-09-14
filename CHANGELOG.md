@@ -2,6 +2,11 @@
 
 ### Added
 
+- **market context**: add a 22-program, 12-family U.S. official macro backfill
+  profile; DOL/ETA and Philadelphia Fed source entries; bounded plain-text
+  replay; a retained real 2002 Federal Reserve G.17 artifact with independently
+  recomputable actual/previous/revised triplet; and fail-closed quantified
+  2000-present coverage audits (#538).
 - **market context**: add versioned retail, production, capital-goods, trade,
   housing, confidence, and official-survey concept, window, observation,
   triplet, release-package, revision, and unsupported-gap semantics; preserve

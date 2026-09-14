@@ -106,6 +106,7 @@ class OfficialAdapterRecordKind(str, Enum):
     SDMX_CODE = "sdmx-code"
     JSON_STAT_OBSERVATION = "json-stat-observation"
     SPREADSHEET_ROW = "spreadsheet-row"
+    TEXT_DOCUMENT = "text-document"
     HTML_DOCUMENT = "html-document"
     HTML_TABLE_ROW = "html-table-row"
     HTML_LINK = "html-link"
@@ -662,6 +663,7 @@ class OfficialHtmlParserV1(_BaseOfficialParser):
 
     parser_id = "official.html.v1"
     supported_formats = (
+        OfficialSourceFormat.TEXT,
         OfficialSourceFormat.HTML,
         OfficialSourceFormat.CSV,
         OfficialSourceFormat.XLS,
@@ -679,6 +681,8 @@ class OfficialHtmlParserV1(_BaseOfficialParser):
         self, snapshot: OfficialRawSnapshotV1, *, max_events: int
     ) -> Sequence[Mapping[str, JSONValue]]:
         source_format = snapshot.request.source_format
+        if source_format is OfficialSourceFormat.TEXT:
+            return _parse_text(self, snapshot, max_events=max_events)
         if source_format is OfficialSourceFormat.HTML:
             return _parse_html(self, snapshot, max_events=max_events)
         if source_format in {
@@ -852,6 +856,7 @@ def required_official_adapter_packs(
         OfficialSourceFormat.RSS: OfficialAdapterPack.RELEASE_FEED,
         OfficialSourceFormat.ATOM: OfficialAdapterPack.RELEASE_FEED,
         OfficialSourceFormat.ICS: OfficialAdapterPack.RELEASE_FEED,
+        OfficialSourceFormat.TEXT: OfficialAdapterPack.HTML_RELEASE,
         OfficialSourceFormat.PDF: OfficialAdapterPack.PDF,
         OfficialSourceFormat.ARCHIVE: OfficialAdapterPack.STATIC_ARCHIVE,
         OfficialSourceFormat.DATA_CATALOG: OfficialAdapterPack.DATA_CATALOG,
@@ -2047,6 +2052,44 @@ class _OfficialHtmlCollector(HTMLParser):
             self._cell_parts.append(value)
         if self._time is not None:
             self._time_parts.append(value)
+
+
+def _parse_text(
+    parser: _BaseOfficialParser,
+    snapshot: OfficialRawSnapshotV1,
+    *,
+    max_events: int,
+) -> tuple[Mapping[str, JSONValue], ...]:
+    """Retain one bounded UTF-8 official plain-text document as a record."""
+    try:
+        text = snapshot.content.decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise parser.error(
+            snapshot,
+            OfficialParserFailureCode.MALFORMED_DOCUMENT,
+            "text response is not UTF-8",
+        ) from exc
+    normalized = text.replace("\r\n", "\n").replace("\r", "\n").strip()
+    if not normalized:
+        raise parser.error(
+            snapshot,
+            OfficialParserFailureCode.SCHEMA_DRIFT,
+            "text response is empty",
+        )
+    return parser.records(
+        snapshot,
+        (
+            (
+                OfficialAdapterRecordKind.TEXT_DOCUMENT,
+                "/text",
+                {
+                    "line_count": normalized.count("\n") + 1,
+                    "text": normalized,
+                },
+            ),
+        ),
+        max_events=max_events,
+    )
 
 
 def _parse_html(

@@ -32,6 +32,7 @@ Data and reconstruction foundations
    labour-market-semantics
    national-accounts-semantics
    activity-indicator-semantics
+   united-states-official-backfill
    economic-calendar-branch-migration
    cftc-positioning-contracts
    provider-neutral-dataset-catalog

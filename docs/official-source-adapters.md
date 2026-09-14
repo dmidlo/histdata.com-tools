@@ -21,7 +21,7 @@ parser or endpoint after a failure.
 | JSON-stat | Dense or sparse JSON-stat datasets | One record per declared coordinate, including null values and status; exact dimension/category/shape validation. |
 | Generic structured | JSON, CSV, and TSV | Deterministic JSON Pointers for record arrays; strict UTF-8 delimited headers and row widths; header fingerprints. |
 | Spreadsheet | XLS and XLSX | Sheet/row locators, replayable configured or automatic header selection, header fingerprints, bounded sheets/columns/cells, and formula-preserving XLSX reads. |
-| HTML release | Official indexes and press releases | Document title, metadata, headings, time elements and text; strict table rows; resolved links. Registered HTML sources can delegate their CSV, XLS/XLSX, or PDF variants without changing parser identity. |
+| HTML/text release | Official indexes and press releases | Plain text is retained as one bounded UTF-8 document; HTML retains document title, metadata, headings, time elements and text, strict table rows, and resolved links. Registered release sources can delegate their text, CSV, XLS/XLSX, or PDF variants without changing parser identity. |
 | Release feed | RSS, Atom, and ICS | Feed item/event properties, Atom link attributes, iCalendar parameters and unfolded lines; required title or UID/start fields. |
 | PDF | Official text-bearing PDFs | Page text and conservative whitespace-delimited table rows. Encrypted or image-only documents emit an explicit reacquisition/OCR requirement rather than empty success. |
 | Static archive | HTML/JSON directories and ZIP files | Resolved download links or ZIP member name, sizes, CRC, and directory state without extraction. |

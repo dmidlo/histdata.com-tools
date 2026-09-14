@@ -160,6 +160,7 @@ class OfficialSourceFormat(str, Enum):
     RSS = "rss"
     ATOM = "atom"
     ICS = "ics"
+    TEXT = "text"
     HTML = "html"
     PDF = "pdf"
     ARCHIVE = "archive"
