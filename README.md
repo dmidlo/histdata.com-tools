@@ -2659,6 +2659,14 @@ actuals; real/nominal, simple/annualized growth, valuation, and base/linking
 identities remain distinct. Official component tables reconcile only when
 their accounting basis permits it, and benchmark revisions extend vintage
 graphs without rewriting earlier calendar snapshots.
+Retail, production, trade, housing, and official survey releases use exact
+[`activity-indicator semantics`](docs/activity-indicator-semantics.md).
+Balance values and growth rates, levels and rolling or cumulative windows,
+headline and component concepts, and diffusion points and percentages remain
+distinct. Multi-indicator publications share evidence without collapsing
+events, simultaneous previous revisions stay point-in-time, and proprietary
+PMI or confidence products remain explicit unsupported gaps unless a future
+source is legally qualified.
 
 #### CFTC positioning state
 

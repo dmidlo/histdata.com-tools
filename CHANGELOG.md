@@ -2,6 +2,11 @@
 
 ### Added
 
+- **market context**: add versioned retail, production, capital-goods, trade,
+  housing, confidence, and official-survey concept, window, observation,
+  triplet, release-package, revision, and unsupported-gap semantics; preserve
+  exact units and published transformations and audit legal-producer ownership
+  and difficult cases across all 21 economy profiles (#578).
 - **market context**: add versioned GDP/national-accounts concept, stage,
   observation, growth derivation, triplet, component reconciliation, release
   sequence, benchmark, and methodology semantics; preserve first-published

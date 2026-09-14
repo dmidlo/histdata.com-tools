@@ -31,6 +31,7 @@ Data and reconstruction foundations
    inflation-price-semantics
    labour-market-semantics
    national-accounts-semantics
+   activity-indicator-semantics
    economic-calendar-branch-migration
    cftc-positioning-contracts
    provider-neutral-dataset-catalog
