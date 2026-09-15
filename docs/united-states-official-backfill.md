@@ -30,10 +30,10 @@ limitations. An archive start date is a route declaration, not a historical
 coverage claim.
 
 The source registry includes separate supplemental entries for DOL/ETA, the
-Philadelphia Fed, CPI, PPI, the Employment Situation, JOLTS, and Productivity
-and Costs. This prevents broad family-level entries from being incorrectly
+Philadelphia Fed, CPI, PPI, the Employment Situation, JOLTS, Productivity and
+Costs, and GDP. This prevents broad family-level entries from being incorrectly
 named as the occurrence-specific source for weekly claims, regional Fed
-surveys, or BLS release documents. The Federal Reserve G.17 entry also
+surveys, or statistical release documents. The Federal Reserve G.17 entry also
 declares plain text as a real archive format.
 The reusable HTML-release adapter preserves such text as one bounded UTF-8
 record, including the exact line count and raw-snapshot lineage.
@@ -445,6 +445,69 @@ between an artifact and the next comparison table.
 qualified 214-stage labour slice while counting the one official unavailable
 stage explicitly.
 
+## Complete Gross Domestic Product archive qualification
+
+`histdatacom.market_context.us_gdp_archive` qualifies the headline real-GDP
+annualized quarter-over-quarter percent change from every BEA national GDP
+publication in the requested window. The dedicated `us.bea.gdp` source keeps
+the occurrence-specific HTML/PDF archive, exact 08:30 Eastern evidence, and
+release-stage behavior separate from the current-series BEA API.
+
+The packaged `us_gdp_archive_v1.json` manifest is observed as of September 14,
+2026 and records:
+
+- 318 stage-specific releases from the fourth-quarter 1999 advance estimate
+  through the second estimate for second-quarter 2026;
+- 107 advance, 105 second/preliminary, and 106 third/final stages;
+- 320 distinct release/support artifacts and 27,626,013 exact source bytes,
+  including the final third-quarter 1999 predecessor and one release-time
+  support PDF;
+- 213 fixed-width preformatted, 86 narrative, and 19 comparison-table HTML
+  layouts;
+- 192 nonzero revision lineages: 17 at advance, 92 at second, and 83 at final
+  stages; and
+- 15 title-declared annual/comprehensive/historical updates plus one corrected
+  release.
+
+For a second/preliminary or third/final publication, the preceding stage for
+the same reference quarter is `previous_as_known` and the new headline is the
+revised value. For an advance publication, the prior quarter's last artifact
+is `previous_as_known`, while the prior-quarter value printed in the advance
+release is the revised value. This exposes annual or comprehensive updates
+that occur alongside 17 advance estimates instead of silently replacing the
+older quarter.
+
+The source has several bounded irregularities. Fourth-quarter 2018 and
+third-quarter 2025 each omit a standard second-stage publication after a
+federal shutdown; their initial and following final/updated releases remain
+the actual source inventory. The August 26, 2026 second estimate is retained
+as an explicit direct-release supplement because the 18-page product-filtered
+archive had not yet indexed it. The March 29, 2001 imported HTML omits its
+embargo line, so its exact time comes only from the hash-bound official PDF.
+
+Five source headers print a seasonally incorrect EST or EDT abbreviation, and
+the archive lists two advance releases one day before their embargo-header
+dates. Both lexical and archive metadata remain explicit; the artifact header
+and `America/New_York` control normalized occurrence time. The corrected July
+2000 artifact remains a correction rather than being treated as the original
+uncorrected release.
+
+The refresh command can fetch live official bytes or replay a retained
+basename-addressed corpus:
+
+```console
+uv run python scripts/refresh_us_gdp_archive.py \
+  --as-of 2026-09-14 \
+  --source-directory /absolute/operator/path/gdp-source \
+  --raw-directory /absolute/operator/path/gdp-raw
+```
+
+`replay_bea_gdp_archive()` reparses all 318 occurrences from the complete
+320-artifact release chain and all 18 retained archive pages. It rejects
+missing, changed, duplicated, newly unparseable, or differently normalized
+evidence. `bea_gdp_coverage_from_manifest()` derives the complete qualified
+318-occurrence national-accounts slice.
+
 ## Quantified closure audit
 
 `UnitedStatesProgramCoverageV1` records one exact 2000-present denominator and
@@ -500,8 +563,8 @@ alone is not.
   retain monthly release PDFs; the revised download is not substituted for
   those vintages.
 
-The package preserves the real G.17, CPI, PPI, Employment Situation, JOLTS, and
-Productivity and Costs indexes, one representative G.17 raw release, and all
-six complete raw/normalized manifests. The remaining production raw corpora
-stay external, content addressed, and subject to the coverage audit so wheel
-size does not grow with thousands of federal release files.
+The package preserves the real G.17, CPI, PPI, Employment Situation, JOLTS,
+Productivity and Costs, and GDP indexes, one representative G.17 raw release,
+and all seven complete raw/normalized manifests. The remaining production raw
+corpora stay external, content addressed, and subject to the coverage audit so
+wheel size does not grow with thousands of federal release files.

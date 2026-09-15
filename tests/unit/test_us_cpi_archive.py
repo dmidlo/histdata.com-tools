@@ -385,5 +385,8 @@ def test_archive_contracts_reject_tampering() -> None:
         replace(manifest, total_content_bytes=manifest.total_content_bytes + 1)
     with pytest.raises(ValueError, match="identity differs"):
         BlsCpiArchiveManifestV1.from_dict(
-            {**manifest.to_dict(), "profile_id": manifest.profile_id[:-1] + "0"}
+            {
+                **manifest.to_dict(),
+                "profile_id": manifest.profile_id + "-tampered",
+            }
         )

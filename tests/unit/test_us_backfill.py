@@ -110,7 +110,7 @@ def _coverage(
 def test_registry_represents_us_specific_legal_producers_and_text() -> None:
     registry = load_packaged_official_source_registry()
     assert registry.reviewed_on == "2026-09-14"
-    assert len(registry.sources) == 59
+    assert len(registry.sources) == 60
 
     dol = registry.source("us.dol.eta-unemployment-insurance")
     assert dol.institution.startswith("U.S. Department of Labor")
@@ -162,6 +162,15 @@ def test_registry_represents_us_specific_legal_producers_and_text() -> None:
     }
     assert productivity.verification_status.value == "empirically-verified"
 
+    gdp = registry.source("us.bea.gdp")
+    assert gdp.source_release_ids == ("Gross Domestic Product",)
+    assert set(gdp.formats) == {
+        OfficialSourceFormat.HTML,
+        OfficialSourceFormat.PDF,
+    }
+    assert gdp.availability_time_precision.value == "exact-minute"
+    assert gdp.verification_status.value == "empirically-verified"
+
 
 def test_builtin_us_profile_covers_every_required_family_and_program() -> None:
     registry = load_packaged_official_source_registry()
@@ -188,6 +197,7 @@ def test_builtin_us_profile_covers_every_required_family_and_program() -> None:
     assert profile.by_key["us.bls.productivity-costs"].source_key == (
         "us.bls.productivity-costs"
     )
+    assert profile.by_key["us.bea.gdp"].source_key == "us.bea.gdp"
     assert UnitedStatesBackfillProfileV1.from_json(profile.to_json()) == profile
 
 

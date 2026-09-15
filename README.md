@@ -2676,6 +2676,12 @@ nonfarm-business productivity and unit-labor-cost values, 426 numeric
 comparison-table revisions, the February 2019 source-authored `N.A.` headline
 stage, and the March/May 2024 correction-lineage discrepancy without filling
 or smoothing either break.
+The U.S. GDP specialization binds 318 advance, second/preliminary, and
+third/final quarterly releases to 320 release/support artifacts from the final
+third-quarter 1999 predecessor through the second estimate for second-quarter
+2026. It preserves 192 nonzero revision lineages, two shutdown-compressed stage
+sequences, five erroneous source DST abbreviations, two archive-date errors,
+and the corrected July 2000 release without rewriting any prior vintage.
 Central-bank releases additionally use framework-aware
 [`monetary-policy semantics`](docs/monetary-policy-semantics.md). Decisions,
 statements, vote splits, press conferences, minutes, projections, schedules,

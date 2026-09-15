@@ -49,6 +49,33 @@ simultaneous-previous, benchmark, methodology, and seasonal revisions retain
 their immediate predecessor and become visible only from their availability
 time.
 
+## U.S. Gross Domestic Product archive
+
+The GDP specialization reconstructs 318 official BEA release occurrences from
+the fourth-quarter 1999 advance estimate through the second estimate for
+second-quarter 2026. Its one headline concept is real GDP, seasonally adjusted,
+annualized quarter-over-quarter percent change. The 107 advance, 105
+second/preliminary, and 106 third/final estimates remain separate stage
+identities.
+
+Every second or final estimate compares with the immediately preceding stage
+for the same quarter. Every advance estimate compares the prior quarter's last
+published value with the value printed in the new artifact, exposing 17
+concurrent annual/comprehensive-update revisions. Across all stages, 192 of
+318 comparison lineages change numerically. The final third-quarter 1999 PDF
+anchors the first prior-quarter comparison, and the official March 2001 PDF
+supplies the exact embargo header omitted from its imported HTML page.
+
+The source's irregular evidence remains explicit. Fourth-quarter 2018 and
+third-quarter 2025 each omit the standard second-stage publication after a
+federal shutdown. The archive lists two advance releases one day before their
+artifact headers, and five releases print EST/EDT abbreviations inconsistent
+with their dates. The parser preserves those lexical values while the artifact
+header and `America/New_York` control occurrence time. It also retains the
+corrected July 2000 advance artifact and 15 title-declared historical updates.
+The 18-page archive inventory, one bounded current-release supplement, all 318
+release hashes, and both supporting PDF hashes replay deterministically.
+
 ## Published and derived growth
 
 Source-published growth takes precedence. When it is genuinely unavailable,

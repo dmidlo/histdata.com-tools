@@ -4029,6 +4029,101 @@
     },
     {
       "schema_version": "histdatacom.official-source-entry.v1",
+      "source_key": "us.bea.gdp",
+      "economy_code": "US",
+      "economy_name": "United States",
+      "institution": "U.S. Bureau of Economic Analysis",
+      "jurisdiction": "United States of America",
+      "legal_producer": true,
+      "roles": [
+        "official-archive",
+        "release-calendar"
+      ],
+      "event_families": [
+        "gdp-national-accounts"
+      ],
+      "indicator_ids": [
+        "gdp-and-national-accounts"
+      ],
+      "formats": [
+        "html",
+        "pdf"
+      ],
+      "capabilities": [
+        "historical-observations",
+        "historical-vintages",
+        "publication-metadata",
+        "schedule-metadata",
+        "revision-metadata",
+        "archive-enumeration"
+      ],
+      "endpoint_uri_template": "https://www.bea.gov/news/archive?created_1=All&field_related_product_target_id=451&title=",
+      "allowed_hosts": [
+        "www.bea.gov"
+      ],
+      "expected_media_types": [
+        "text/html",
+        "application/pdf"
+      ],
+      "source_series_ids": [
+        "real gross domestic product"
+      ],
+      "source_table_ids": [
+        "NIPA Table 1.1.1",
+        "Real GDP and Related Measures"
+      ],
+      "source_release_ids": [
+        "Gross Domestic Product"
+      ],
+      "release_calendar_uri": "https://www.bea.gov/news/schedule",
+      "archive_uri": "https://www.bea.gov/news/archive?created_1=All&field_related_product_target_id=451&title=",
+      "source_timezone": "America/New_York",
+      "availability_time_precision": "exact-minute",
+      "dst_convention": "IANA zone database controls normalization; retain the source lexical EST or EDT plus an explicit consistency flag when the printed abbreviation conflicts with the publication date.",
+      "historical_depth": "The complete post-2000 release archive contains 318 occurrence-specific GDP estimates through the second estimate for second-quarter 2026, plus the final third-quarter 1999 predecessor.",
+      "known_breaks": [
+        "Older preliminary and final labels correspond to the modern second and third estimate stages.",
+        "The fourth-quarter 2018 and third-quarter 2025 shutdown sequences each omit the standard second-stage publication: both begin with an initial estimate, followed respectively by a third estimate and an updated estimate.",
+        "The August 26, 2026 second estimate was published but had not yet appeared in the product-filtered archive inventory as of September 14, 2026; the direct official release is retained as an explicit bounded supplement.",
+        "The March 29, 2001 imported HTML page omits its embargo line, so the exact time is bound to the official companion PDF.",
+        "Five releases print a seasonally inconsistent EST or EDT abbreviation; the exact 08:30 local time is normalized with America/New_York while the erroneous source lexical zone remains explicit.",
+        "The archive lists the October 2009 and October 2018 advance releases one day before the embargo-header dates; both metadata values remain explicit and the release header controls occurrence time.",
+        "Annual and comprehensive updates can revise the preceding quarter inside an advance-stage publication."
+      ],
+      "revision_behavior": "Advance releases compare the prior quarter's last published value with the value printed after any concurrent update. Second/preliminary and third/final releases compare the immediately preceding estimate for the same quarter.",
+      "rate_limit": "No stable archive-specific limit is published; refresh uses bounded parallelism, retries, and an identifying contact user agent.",
+      "authentication": "none",
+      "credential_env_name": null,
+      "credential_header_name": null,
+      "credential_parameter_name": null,
+      "terms_uri": null,
+      "fallback_source_keys": [
+        "us.bea.api"
+      ],
+      "parser_id": "official.html.v1",
+      "parser_version": "1",
+      "replay_strategy": "Retain every archive page, current release, the predecessor PDF, and the one release-time support PDF; bind their byte lengths and SHA-256 digests and recompute every headline and revision lineage before accepting replay.",
+      "adapter_owner": "market-context/us",
+      "verification_status": "empirically-verified",
+      "reviewed_on": "2026-09-14",
+      "verification_evidence_uris": [
+        "https://www.bea.gov/news/archive?created_1=All&field_related_product_target_id=451&title=",
+        "https://www.bea.gov/sites/default/files/2019-04/gdp399f.pdf",
+        "https://www.bea.gov/news/2000/corrected-gross-domestic-product-second-quarter-2000-advance-estimate-and-revised",
+        "https://www.bea.gov/sites/default/files/newsreleases/national/gdp/2001/pdf/gdp400f.pdf",
+        "https://www.bea.gov/news/2019/initial-gross-domestic-product-4th-quarter-and-annual-2018",
+        "https://www.bea.gov/news/2025/gross-domestic-product-3rd-quarter-2025-initial-estimate-and-corporate-profits",
+        "https://www.bea.gov/news/2026/gross-domestic-product-3rd-quarter-2025-updated-estimate-gdp-industry-and-corporate",
+        "https://www.bea.gov/news/2026/gdp-second-estimate-and-corporate-profits-2nd-quarter-2026"
+      ],
+      "redistribution_notes": "The package retains the official archive pages and a compact hash manifest; release documents remain an external operator-owned corpus with BEA attribution.",
+      "limitations": [
+        "The qualification covers the headline seasonally adjusted annualized quarter-over-quarter percent change in real GDP only; component contributions, levels, prices, GDI, profits, industries, states, and annual rates require separate identities.",
+        "The quarterly SPF remains a separate forecast product and is not projected into an event-level consensus."
+      ]
+    },
+    {
+      "schema_version": "histdatacom.official-source-entry.v1",
       "source_key": "us.census.eits",
       "economy_code": "US",
       "economy_name": "United States",

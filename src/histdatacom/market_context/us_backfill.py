@@ -1434,6 +1434,10 @@ def built_in_united_states_backfill_profile(
         raise TypeError("U.S. backfill profile requires a v1 source registry")
     bls_schedule = "https://www.bls.gov/schedule/"
     bea_archive = "https://www.bea.gov/news/archive"
+    bea_gdp_archive = (
+        "https://www.bea.gov/news/archive?created_1=All&"
+        "field_related_product_target_id=451&title="
+    )
     bea_schedule = "https://www.bea.gov/news/schedule"
     census_schedule = (
         "https://www.census.gov/economic-indicators/calendar-listview.html"
@@ -1625,8 +1629,8 @@ def built_in_united_states_backfill_profile(
             "gross-domestic-product",
             "Gross Domestic Product",
             "U.S. Bureau of Economic Analysis",
-            "us.bea.api",
-            bea_archive,
+            "us.bea.gdp",
+            bea_gdp_archive,
             bea_schedule,
             frequency="quarterly",
             archive_strategy=UnitedStatesArchiveStrategy.RELEASE_AND_VINTAGE_TABLE,
@@ -1638,10 +1642,12 @@ def built_in_united_states_backfill_profile(
                 EconomicReleaseStage.ADVANCE,
                 EconomicReleaseStage.SECOND,
                 EconomicReleaseStage.FINAL,
-                EconomicReleaseStage.REVISION,
             ),
             limitations=(
-                "Advance, second, third, annual-update, and comprehensive-update vintages remain distinct.",
+                "Use the complete occurrence-specific GDP release archive for headline real-GDP growth.",
+                "Advance, second/preliminary, and third/final vintages remain distinct; concurrent annual and comprehensive updates preserve prior-quarter revisions.",
+                "The 2018-Q4 and 2025-Q3 shutdown sequences retain their source-authored initial and updated stage labels.",
+                "The March 2001 HTML omission is resolved only by its hash-bound official companion PDF.",
                 "SPF is quarterly and cannot be projected into a monthly event consensus.",
             ),
         ),
