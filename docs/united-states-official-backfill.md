@@ -31,9 +31,10 @@ coverage claim.
 
 The source registry includes separate supplemental entries for DOL/ETA, the
 Philadelphia Fed, CPI, PPI, the Employment Situation, JOLTS, Productivity and
-Costs, GDP, and Personal Income and Outlays. This prevents broad family-level
-entries from being incorrectly named as the occurrence-specific source for
-weekly claims, regional Fed surveys, or statistical release documents. The
+Costs, GDP, Personal Income and Outlays, and Advance Monthly Retail Sales. This
+prevents broad family-level entries from being incorrectly named as the
+occurrence-specific source for weekly claims, regional Fed surveys, or
+statistical release documents. The
 Federal Reserve G.17 entry also declares plain text as a real archive format.
 The reusable HTML-release adapter preserves such text as one bounded UTF-8
 record, including the exact line count and raw-snapshot lineage.
@@ -550,6 +551,62 @@ duplicated, newly unparseable, or differently normalized evidence.
 `bea_pio_coverage_from_manifest()` derives the complete 319-publication
 national-accounts slice.
 
+## Complete Advance Monthly Retail Sales archive qualification
+
+`histdatacom.market_context.us_retail_sales_archive` qualifies four distinct
+Census measures for every monthly reference period from December 1999 through
+July 2026: retail and food services total, total excluding autos, total
+excluding gasoline, and the retail control group. The dedicated
+`us.census.retail-sales` source remains separate from the broader EITS source
+and binds both the monthly MARTS archive and the annual revision archive.
+
+The packaged `us_retail_sales_archive_v1.json` manifest is observed as of
+September 14, 2026. It records 320 publications and 1,280 measure occurrences
+from exactly 512 raw artifacts containing 174,591,370 source bytes: two archive
+indexes, the November 1999 predecessor, 320 monthly PDFs, 163 spreadsheet
+companions, and 26 annual benchmark artifacts. All 320 releases retain their
+exact 08:30 Eastern publication minute. Thirty-seven target PDFs and the
+predecessor are image-only, so reviewed page-aware Tesseract text is bound to
+each original PDF hash; 120 later publications use native PDF tables, 108 use
+XLS, and 55 use XLSX.
+
+Previous-as-known lineage uses the last official state available before each
+publication. Normally that is the preceding monthly release. For 24 releases
+from 2002 through 2025, however, an intervening annual revision publishes a
+new adjusted terminal month; those benchmark rates become the next release's
+prior state. The 2000 and 2001 annual reports do not overlap the required
+month, so they remain retained evidence without becoming an override. The 2023
+workbook's terminal header says `Mar. 2022(a)` on its 2023 sheet; the parser
+accepts only that exact source-authored typo while preserving the raw bytes.
+
+The corpus also preserves the May 2001 SIC-to-NAICS boundary as noncomparable,
+six broken July–December 2020 spreadsheet links as bounded `adv`-to-`rs`
+corrections, two malformed Strict OOXML external-link records normalized only
+in memory, and nine shutdown-delayed publications. Ex-gasoline levels before
+May 2018 and all control-group levels are derived strictly from adjusted
+components in the same occurrence. The 163 support files provide 850 exact
+checks between reported Table 2 percentages and rates recomputed from Table 1
+levels.
+
+The refresh command can fetch official bytes or replay the two retained
+corpora:
+
+```console
+uv run python scripts/refresh_us_retail_sales_archive.py \
+  --as-of 2026-09-14 \
+  --source-directory /absolute/operator/path/retail-monthly \
+  --benchmark-source-directory /absolute/operator/path/retail-annual \
+  --ocr-page-directory /absolute/operator/path/retail-reviewed-ocr \
+  --raw-directory /absolute/operator/path/retail-raw
+```
+
+`replay_census_retail_archive()` recomputes both indexes, all annual terminal
+states, all monthly publications, and every measure lineage. It rejects a
+missing, changed, duplicated, newly unparseable, differently normalized, or
+unused artifact. `census_retail_coverage_from_manifest()` derives the complete
+320-publication retail-consumption slice without manufacturing historical
+event-level consensus.
+
 ## Quantified closure audit
 
 `UnitedStatesProgramCoverageV1` records one exact 2000-present denominator and
@@ -607,8 +664,8 @@ alone is not.
   those vintages.
 
 The package preserves the real G.17, CPI, PPI, Employment Situation, JOLTS,
-Productivity and Costs, GDP, and Personal Income and Outlays indexes, one
-representative G.17 raw release, and all eight complete raw/normalized
-manifests. The remaining production raw corpora stay external, content
-addressed, and subject to the coverage audit so wheel size does not grow with
-thousands of federal release files.
+Productivity and Costs, GDP, Personal Income and Outlays, and Advance Monthly
+Retail Sales indexes, one representative G.17 raw release, and all nine
+complete raw/normalized manifests. The remaining production raw corpora stay
+external, content addressed, and subject to the coverage audit so wheel size
+does not grow with thousands of federal release files.

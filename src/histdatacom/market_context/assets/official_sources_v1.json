@@ -4308,6 +4308,111 @@
     },
     {
       "schema_version": "histdatacom.official-source-entry.v1",
+      "source_key": "us.census.retail-sales",
+      "economy_code": "US",
+      "economy_name": "United States",
+      "institution": "U.S. Census Bureau",
+      "jurisdiction": "United States of America",
+      "legal_producer": true,
+      "roles": [
+        "official-archive",
+        "release-calendar"
+      ],
+      "event_families": [
+        "retail-consumption"
+      ],
+      "indicator_ids": [
+        "retail-sales-and-household-consumption"
+      ],
+      "formats": [
+        "xls",
+        "xlsx",
+        "html",
+        "pdf"
+      ],
+      "capabilities": [
+        "historical-observations",
+        "historical-vintages",
+        "publication-metadata",
+        "schedule-metadata",
+        "revision-metadata",
+        "archive-enumeration"
+      ],
+      "endpoint_uri_template": "https://www.census.gov/retail/marts/historic_releases.html",
+      "allowed_hosts": [
+        "www.census.gov",
+        "www2.census.gov"
+      ],
+      "expected_media_types": [
+        "application/pdf",
+        "application/vnd.ms-excel",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "text/html"
+      ],
+      "source_series_ids": [
+        "Retail and food services total",
+        "Total excluding motor vehicle and parts dealers",
+        "Total excluding gasoline stations",
+        "Retail control group"
+      ],
+      "source_table_ids": [
+        "MARTS Table 1",
+        "MARTS Table 2"
+      ],
+      "source_release_ids": [
+        "Advance Monthly Sales for Retail and Food Services"
+      ],
+      "release_calendar_uri": "https://www.census.gov/economic-indicators/calendar-listview.html",
+      "archive_uri": "https://www.census.gov/retail/marts/historic_releases.html",
+      "source_timezone": "America/New_York",
+      "availability_time_precision": "exact-minute",
+      "dst_convention": "IANA zone database controls normalization; retain source-authored ET, EST, or EDT and validate every explicit abbreviation against the release date.",
+      "historical_depth": "The qualified occurrence corpus covers every monthly reference period from December 1999 through July 2026, with the November 1999 predecessor retained for the first previous-as-known comparison and every annual revision report from 2000 through 2025 retained from the official benchmark archive.",
+      "known_breaks": [
+        "The May 2001 publication adopts NAICS retail-and-food-services definitions and restates earlier levels; its comparison with the preceding SIC publication remains explicitly noncomparable.",
+        "The official archive contains 37 image-only target PDFs plus the image-only November 1999 predecessor; reviewed page-aware OCR is bound to each original PDF SHA-256.",
+        "Official XLS companions begin in January 2013 and change to XLSX in January 2022; the January 2025 and January 2026 Strict OOXML files contain malformed external-link metadata and are normalized only in memory.",
+        "Six July-December 2020 archive links incorrectly use an adv prefix for spreadsheet files; the verified rs-prefixed official files are retained as bounded corrections.",
+        "Annual reports for 2002-2025 publish an adjusted terminal month that supersedes the preceding monthly occurrence before the next advance release; those 24 benchmark states become the next occurrence's previous-as-known values, while the non-overlapping 2000-2001 reports remain retained evidence.",
+        "The 2023 annual workbook labels its terminal column Mar. 2022(a) on the 2023 sheet; the sheet title, adjacent columns, values, and archive placement establish March 2023, so the exact typo is accepted without changing the retained workbook.",
+        "Source-published ex-gasoline aggregate rows begin in May 2018; earlier ex-gasoline values and all retail-control values are derived from contemporaneous adjusted component levels.",
+        "The December 2018-February 2019 and September 2025-February 2026 publications were delayed by federal government shutdowns without creating reference-period gaps.",
+        "The July 2026 publication had not yet entered the historical index as of September 14, 2026 and is retained from the mutable current-release URLs as a hash-bound supplement."
+      ],
+      "revision_behavior": "Each monthly measure compares the latest rate known immediately before publication (normally the preceding monthly release, but the intervening annual benchmark state in 24 occurrences) with the prior-period rate recomputed from levels in the current occurrence; no earlier vintage is rewritten.",
+      "rate_limit": "No stable archive-specific limit is published; refresh uses bounded parallelism, retries, and an identifying contact user agent.",
+      "authentication": "none",
+      "credential_env_name": null,
+      "credential_header_name": null,
+      "credential_parameter_name": null,
+      "terms_uri": null,
+      "fallback_source_keys": [
+        "us.census.eits"
+      ],
+      "parser_id": "official.census-marts.v1",
+      "parser_version": "1",
+      "replay_strategy": "Retain the exact monthly and annual archive pages, every release PDF, every available XLS/XLSX table, all 26 annual benchmark artifacts, the predecessor PDF, and reviewed OCR; bind byte lengths and SHA-256 digests and recompute all four measure histories before accepting replay.",
+      "adapter_owner": "market-context/us",
+      "verification_status": "empirically-verified",
+      "reviewed_on": "2026-09-14",
+      "verification_evidence_uris": [
+        "https://www.census.gov/retail/marts/historic_releases.html",
+        "https://www.census.gov/retail/mrts/historic_releases.html",
+        "https://www2.census.gov/retail/releases/historical/marts/adv9911.pdf",
+        "https://www2.census.gov/retail/releases/historical/marts/adv0105.pdf",
+        "https://www2.census.gov/retail/releases/historical/marts/rs1805.xls",
+        "https://www.census.gov/retail/mrts/www/benchmark/2018/excel/benchsales18.xls",
+        "https://www.census.gov/retail/marts/www/marts_current.pdf",
+        "https://www.census.gov/retail/marts/www/marts_current.xlsx"
+      ],
+      "redistribution_notes": "The package retains both official archive pages, reviewed OCR text, and a compact hash manifest; monthly release documents, spreadsheet companions, and annual benchmark artifacts remain an external operator-owned corpus with Census attribution.",
+      "limitations": [
+        "Qualification covers seasonally adjusted monthly percentage changes for total, ex-autos, ex-gasoline, and the retail control group only; component, unadjusted, year-over-year, level, confidence-interval, and inventory measures require separate identities.",
+        "No monthly event-level historical consensus is manufactured from another survey."
+      ]
+    },
+    {
+      "schema_version": "histdatacom.official-source-entry.v1",
       "source_key": "us.dol.eta-unemployment-insurance",
       "economy_code": "US",
       "economy_name": "United States",

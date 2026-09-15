@@ -2688,6 +2688,13 @@ release/support artifacts. It preserves 626 comparable nonzero revisions, the
 2019 and 2025 shutdown publication shapes, one date-only legacy release, four
 source DST errors, one archive-date error, and 42 early PCE-price occurrences
 derived only from contemporaneous source-published index levels.
+The U.S. Advance Monthly Retail Sales specialization binds 320 publications
+and 1,280 total, ex-autos, ex-gasoline, and control-group occurrences to 512
+monthly, spreadsheet, OCR, index, and annual-benchmark artifacts. It preserves
+24 intervening annual prior-state overrides, 1,067 comparable nonzero
+revisions, the May 2001 SIC-to-NAICS boundary, six broken archive links, two
+Strict OOXML defects, and nine shutdown-delayed publications without rewriting
+earlier vintages.
 Central-bank releases additionally use framework-aware
 [`monetary-policy semantics`](docs/monetary-policy-semantics.md). Decisions,
 statements, vote splits, press conferences, minutes, projections, schedules,

@@ -110,7 +110,7 @@ def _coverage(
 def test_registry_represents_us_specific_legal_producers_and_text() -> None:
     registry = load_packaged_official_source_registry()
     assert registry.reviewed_on == "2026-09-14"
-    assert len(registry.sources) == 61
+    assert len(registry.sources) == 62
 
     dol = registry.source("us.dol.eta-unemployment-insurance")
     assert dol.institution.startswith("U.S. Department of Labor")
@@ -171,6 +171,19 @@ def test_registry_represents_us_specific_legal_producers_and_text() -> None:
     assert gdp.availability_time_precision.value == "exact-minute"
     assert gdp.verification_status.value == "empirically-verified"
 
+    retail = registry.source("us.census.retail-sales")
+    assert retail.source_release_ids == (
+        "Advance Monthly Sales for Retail and Food Services",
+    )
+    assert set(retail.formats) == {
+        OfficialSourceFormat.HTML,
+        OfficialSourceFormat.PDF,
+        OfficialSourceFormat.XLS,
+        OfficialSourceFormat.XLSX,
+    }
+    assert retail.availability_time_precision.value == "exact-minute"
+    assert retail.verification_status.value == "empirically-verified"
+
 
 def test_builtin_us_profile_covers_every_required_family_and_program() -> None:
     registry = load_packaged_official_source_registry()
@@ -198,6 +211,9 @@ def test_builtin_us_profile_covers_every_required_family_and_program() -> None:
         "us.bls.productivity-costs"
     )
     assert profile.by_key["us.bea.gdp"].source_key == "us.bea.gdp"
+    assert profile.by_key["us.census.retail-sales"].source_key == (
+        "us.census.retail-sales"
+    )
     assert UnitedStatesBackfillProfileV1.from_json(profile.to_json()) == profile
 
 

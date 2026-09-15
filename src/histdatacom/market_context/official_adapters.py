@@ -662,7 +662,7 @@ class OfficialHtmlParserV1(_BaseOfficialParser):
     """Release-index/press-release parser plus registered file delegates."""
 
     parser_id = "official.html.v1"
-    supported_formats = (
+    supported_formats: tuple[OfficialSourceFormat, ...] = (
         OfficialSourceFormat.TEXT,
         OfficialSourceFormat.HTML,
         OfficialSourceFormat.CSV,
@@ -696,6 +696,18 @@ class OfficialHtmlParserV1(_BaseOfficialParser):
         }:
             return _parse_spreadsheet(self, snapshot, max_events=max_events)
         return _parse_pdf(self, snapshot, max_events=max_events)
+
+
+class OfficialCensusMartsParserV1(OfficialHtmlParserV1):
+    """Parse Census MARTS archive envelopes with an exact registry identity."""
+
+    parser_id = "official.census-marts.v1"
+    supported_formats: tuple[OfficialSourceFormat, ...] = (
+        OfficialSourceFormat.XLS,
+        OfficialSourceFormat.XLSX,
+        OfficialSourceFormat.HTML,
+        OfficialSourceFormat.PDF,
+    )
 
 
 class OfficialReleaseFeedParserV1(_BaseOfficialParser):
@@ -773,6 +785,7 @@ _BUILT_IN_PARSER_TYPES: tuple[type[_BaseOfficialParser], ...] = (
     OfficialSdmx30ParserV1,
     OfficialSpreadsheetParserV1,
     OfficialHtmlParserV1,
+    OfficialCensusMartsParserV1,
     OfficialReleaseFeedParserV1,
     OfficialPdfParserV1,
     OfficialArchiveParserV1,
@@ -2868,6 +2881,7 @@ __all__ = [
     "OfficialAdapterRecordKind",
     "OfficialAdapterRecordV1",
     "OfficialArchiveParserV1",
+    "OfficialCensusMartsParserV1",
     "OfficialCsvParserV1",
     "OfficialDataCatalogParserV1",
     "OfficialHtmlParserV1",
