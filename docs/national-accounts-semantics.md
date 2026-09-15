@@ -76,6 +76,23 @@ corrected July 2000 advance artifact and 15 title-declared historical updates.
 The 18-page archive inventory, one bounded current-release supplement, all 318
 release hashes, and both supporting PDF hashes replay deterministically.
 
+## U.S. Personal Income and Outlays archive
+
+The Personal Income and Outlays specialization reconstructs 319 official BEA
+publications and keeps four monthly concepts separate: current-dollar personal
+income, current-dollar PCE, headline PCE-price change, and core PCE-price
+change. Income and spending cover December 1999 through July 2026; both price
+series cover June 2000 through July 2026. Price changes through January 2002
+are derived only from the index levels printed in those same publications.
+
+Each measure retains its preceding period as previously known and any value
+restated in the new publication. The 2019 shutdown's split and catch-up
+releases, the 2025 revision-only workbook, and the combined October-November
+2025 release remain their actual source-authored occurrence shapes. PDF, text,
+and workbook support artifacts are hash-bound where HTML omits the required
+table or time evidence. One date-only release and all source-authored zone/date
+discrepancies remain explicit rather than being inferred away.
+
 ## Published and derived growth
 
 Source-published growth takes precedence. When it is genuinely unavailable,

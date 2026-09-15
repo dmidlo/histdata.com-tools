@@ -31,10 +31,10 @@ coverage claim.
 
 The source registry includes separate supplemental entries for DOL/ETA, the
 Philadelphia Fed, CPI, PPI, the Employment Situation, JOLTS, Productivity and
-Costs, and GDP. This prevents broad family-level entries from being incorrectly
-named as the occurrence-specific source for weekly claims, regional Fed
-surveys, or statistical release documents. The Federal Reserve G.17 entry also
-declares plain text as a real archive format.
+Costs, GDP, and Personal Income and Outlays. This prevents broad family-level
+entries from being incorrectly named as the occurrence-specific source for
+weekly claims, regional Fed surveys, or statistical release documents. The
+Federal Reserve G.17 entry also declares plain text as a real archive format.
 The reusable HTML-release adapter preserves such text as one bounded UTF-8
 record, including the exact line count and raw-snapshot lineage.
 
@@ -508,6 +508,48 @@ missing, changed, duplicated, newly unparseable, or differently normalized
 evidence. `bea_gdp_coverage_from_manifest()` derives the complete qualified
 318-occurrence national-accounts slice.
 
+## Complete Personal Income and Outlays archive qualification
+
+`histdatacom.market_context.us_personal_income_outlays_archive` qualifies four
+separate monthly BEA measures: current-dollar personal income, current-dollar
+personal consumption expenditures, the headline PCE price index, and the PCE
+price index excluding food and energy. The dedicated
+`us.bea.personal-income-outlays` source is separate from the latest-state BEA
+API and declares the HTML, PDF, text, and XLSX formats present in the retained
+archive.
+
+The packaged `us_pio_archive_v1.json` manifest is observed as of September 14,
+2026. It binds 319 publications and 1,280 measure occurrences to 334 distinct
+raw artifacts containing 21,699,009 source bytes. Income and spending have 320
+gap-free initial monthly values from December 1999 through July 2026. Headline
+and core prices have 314 each from June 2000 through July 2026; the first 42
+price occurrences are derived from contemporaneous index levels, and the
+source-published monthly rate becomes authoritative in February 2002.
+
+The archive retains its irregular publication history. Three 2019 shutdown
+publications split and then caught up income and outlays. The 2025 shutdown
+produced ten workbook-backed releases, a revision-only July-through-September
+data update, and a combined October-November publication. Fourteen releases
+therefore bind official PDF, text, or XLSX support artifacts. The parser also
+preserves nine title-declared historical updates, four incorrect source DST
+abbreviations, the archive/header date conflict for the December 2018 release,
+and the date-only February 2000 artifact without inventing an exact time.
+
+The refresh command can fetch official bytes or replay the retained corpus:
+
+```console
+uv run python scripts/refresh_us_pio_archive.py \
+  --as-of 2026-09-14 \
+  --source-directory /absolute/operator/path/pio-source \
+  --raw-directory /absolute/operator/path/pio-raw
+```
+
+`replay_bea_pio_archive()` recomputes the inventory, all four measure histories,
+and 626 comparable nonzero revision lineages. It rejects missing, changed,
+duplicated, newly unparseable, or differently normalized evidence.
+`bea_pio_coverage_from_manifest()` derives the complete 319-publication
+national-accounts slice.
+
 ## Quantified closure audit
 
 `UnitedStatesProgramCoverageV1` records one exact 2000-present denominator and
@@ -548,8 +590,9 @@ alone is not.
 
 - [BLS archived releases](https://www.bls.gov/bls/news-release/) retain
   occurrence-specific CPI, PPI, employment, JOLTS, and productivity documents.
-- [BEA release archive](https://www.bea.gov/news/archive) and its GDP vintage
-  tables retain superseded estimates and publication stages.
+- [BEA release archive](https://www.bea.gov/news/archive), GDP vintage tables,
+  and Personal Income and Outlays tables retain superseded estimates and
+  publication stages.
 - [Census economic-indicator schedule](https://www.census.gov/economic-indicators/calendar-listview.html)
   retains release/reference identifiers and scheduled times; program archives
   retain the value-bearing releases.
@@ -564,7 +607,8 @@ alone is not.
   those vintages.
 
 The package preserves the real G.17, CPI, PPI, Employment Situation, JOLTS,
-Productivity and Costs, and GDP indexes, one representative G.17 raw release,
-and all seven complete raw/normalized manifests. The remaining production raw
-corpora stay external, content addressed, and subject to the coverage audit so
-wheel size does not grow with thousands of federal release files.
+Productivity and Costs, GDP, and Personal Income and Outlays indexes, one
+representative G.17 raw release, and all eight complete raw/normalized
+manifests. The remaining production raw corpora stay external, content
+addressed, and subject to the coverage audit so wheel size does not grow with
+thousands of federal release files.

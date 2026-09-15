@@ -4124,6 +4124,108 @@
     },
     {
       "schema_version": "histdatacom.official-source-entry.v1",
+      "source_key": "us.bea.personal-income-outlays",
+      "economy_code": "US",
+      "economy_name": "United States",
+      "institution": "U.S. Bureau of Economic Analysis",
+      "jurisdiction": "United States of America",
+      "legal_producer": true,
+      "roles": [
+        "official-archive",
+        "release-calendar"
+      ],
+      "event_families": [
+        "gdp-national-accounts"
+      ],
+      "indicator_ids": [
+        "gdp-and-national-accounts"
+      ],
+      "formats": [
+        "xlsx",
+        "text",
+        "html",
+        "pdf"
+      ],
+      "capabilities": [
+        "historical-observations",
+        "historical-vintages",
+        "publication-metadata",
+        "schedule-metadata",
+        "revision-metadata",
+        "archive-enumeration"
+      ],
+      "endpoint_uri_template": "https://www.bea.gov/news/archive?created_1=All&field_related_product_target_id=476&title=",
+      "allowed_hosts": [
+        "www.bea.gov"
+      ],
+      "expected_media_types": [
+        "application/pdf",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "text/html",
+        "text/plain"
+      ],
+      "source_series_ids": [
+        "current-dollar personal income",
+        "current-dollar personal consumption expenditures",
+        "PCE price index",
+        "PCE price index excluding food and energy"
+      ],
+      "source_table_ids": [
+        "NIPA Table 2.1",
+        "Personal Income and Related Measures",
+        "Table 3",
+        "Table 5"
+      ],
+      "source_release_ids": [
+        "Personal Income and Outlays"
+      ],
+      "release_calendar_uri": "https://www.bea.gov/news/schedule",
+      "archive_uri": "https://www.bea.gov/news/archive?created_1=All&field_related_product_target_id=476&title=",
+      "source_timezone": "America/New_York",
+      "availability_time_precision": "date-only",
+      "dst_convention": "IANA zone database controls normalization; retain source-authored EST or EDT plus an explicit consistency flag and preserve the one date-only legacy publication.",
+      "historical_depth": "The qualified corpus covers every monthly reference period from December 1999 through July 2026 for income and spending, and June 2000 through July 2026 for headline and core PCE prices.",
+      "known_breaks": [
+        "The February 28, 2000 publication exposes only its release date; exact-minute coverage begins with the remaining corpus.",
+        "Monthly PCE price changes from June 2000 through January 2002 are derived from contemporaneous source-published index levels because the releases do not print monthly rates.",
+        "The 2019 shutdown split income and outlays across three nonstandard publications; the 2025 shutdown added a revision-only workbook and a combined October-November publication.",
+        "The December 2018 archive row is dated February 19, 2019, while the release header identifies March 1, 2019; both values remain explicit and the release header controls.",
+        "Four publications print a seasonally inconsistent EST or EDT abbreviation; local wall time is normalized with America/New_York and the source lexical zone remains explicit.",
+        "The July 2026 publication had not yet appeared in the product-filtered archive as of September 14, 2026 and is retained as a bounded direct-release supplement.",
+        "Fourteen publications require a hash-bound official PDF, text, or XLSX support artifact for omitted time or table evidence."
+      ],
+      "revision_behavior": "Each monthly measure compares the preceding period's last-known release value with any restated value in the current publication; the December 2025 data update revises July through September 2025 in place.",
+      "rate_limit": "No stable archive-specific limit is published; refresh uses bounded parallelism, retries, and an identifying contact user agent.",
+      "authentication": "none",
+      "credential_env_name": null,
+      "credential_header_name": null,
+      "credential_parameter_name": null,
+      "terms_uri": null,
+      "fallback_source_keys": [
+        "us.bea.api"
+      ],
+      "parser_id": "official.html.v1",
+      "parser_version": "1",
+      "replay_strategy": "Retain all 19 archive pages, every release document, the predecessor PDF, and each required support artifact; bind byte lengths and SHA-256 digests and recompute all four measure histories before accepting replay.",
+      "adapter_owner": "market-context/us",
+      "verification_status": "empirically-verified",
+      "reviewed_on": "2026-09-14",
+      "verification_evidence_uris": [
+        "https://www.bea.gov/news/archive?created_1=All&field_related_product_target_id=476&title=",
+        "https://www.bea.gov/sites/default/files/2018-03/bea99-38.pdf",
+        "https://www.bea.gov/news/2019/personal-income-and-outlays-december-2018-personal-income-january-2019",
+        "https://www.bea.gov/sites/default/files/2025-12/pi0925-updated.xlsx",
+        "https://www.bea.gov/news/2026/personal-income-and-outlays-october-and-november-2025",
+        "https://www.bea.gov/news/2026/personal-income-and-outlays-july-2026"
+      ],
+      "redistribution_notes": "The package retains official archive pages and a compact hash manifest; release documents remain an external operator-owned corpus with BEA attribution.",
+      "limitations": [
+        "Qualification covers monthly percent changes for current-dollar income, current-dollar PCE, headline PCE prices, and core PCE prices only; levels, components, real measures, annual rates, and quarterly aggregates require separate identities.",
+        "No monthly event-level historical consensus is manufactured from unrelated survey products."
+      ]
+    },
+    {
+      "schema_version": "histdatacom.official-source-entry.v1",
       "source_key": "us.census.eits",
       "economy_code": "US",
       "economy_name": "United States",

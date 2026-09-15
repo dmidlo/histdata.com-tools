@@ -1433,10 +1433,13 @@ def built_in_united_states_backfill_profile(
     if not isinstance(registry, OfficialSourceRegistryV1):
         raise TypeError("U.S. backfill profile requires a v1 source registry")
     bls_schedule = "https://www.bls.gov/schedule/"
-    bea_archive = "https://www.bea.gov/news/archive"
     bea_gdp_archive = (
         "https://www.bea.gov/news/archive?created_1=All&"
         "field_related_product_target_id=451&title="
+    )
+    bea_pio_archive = (
+        "https://www.bea.gov/news/archive?created_1=All&"
+        "field_related_product_target_id=476&title="
     )
     bea_schedule = "https://www.bea.gov/news/schedule"
     census_schedule = (
@@ -1657,12 +1660,17 @@ def built_in_united_states_backfill_profile(
             "personal-income-and-outlays",
             "Personal Income and Outlays",
             "U.S. Bureau of Economic Analysis",
-            "us.bea.api",
-            bea_archive,
+            "us.bea.personal-income-outlays",
+            bea_pio_archive,
             bea_schedule,
+            time_precision=EconomicTimePrecision.DATE_ONLY,
             archive_strategy=UnitedStatesArchiveStrategy.RELEASE_AND_VINTAGE_TABLE,
             limitations=(
-                "Income, spending, headline PCE, and core PCE retain separate concepts and transformations.",
+                "Use the complete occurrence-specific Personal Income and Outlays archive for current-dollar income, current-dollar PCE, headline PCE prices, and core PCE prices.",
+                "The February 2000 publication retains date-only precision; 318 other publications retain exact local release minutes.",
+                "Monthly PCE price changes before February 2002 are derived only from contemporaneous source-published index levels.",
+                "The 2019 and 2025 shutdown sequences retain split, catch-up, combined, and revision-only publication identities.",
+                "No event-level historical consensus is manufactured from an unrelated survey series.",
                 *no_monthly_consensus,
             ),
         ),
