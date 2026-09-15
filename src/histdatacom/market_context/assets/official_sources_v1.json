@@ -3783,6 +3783,102 @@
     },
     {
       "schema_version": "histdatacom.official-source-entry.v1",
+      "source_key": "us.bls.productivity-costs",
+      "economy_code": "US",
+      "economy_name": "United States",
+      "institution": "U.S. Bureau of Labor Statistics",
+      "jurisdiction": "United States of America",
+      "legal_producer": true,
+      "roles": [
+        "official-archive",
+        "release-calendar"
+      ],
+      "event_families": [
+        "labour-market"
+      ],
+      "indicator_ids": [
+        "employment-unemployment-and-earnings"
+      ],
+      "formats": [
+        "text",
+        "html"
+      ],
+      "capabilities": [
+        "historical-observations",
+        "historical-vintages",
+        "publication-metadata",
+        "schedule-metadata",
+        "revision-metadata",
+        "archive-enumeration"
+      ],
+      "endpoint_uri_template": "https://www.bls.gov/bls/news-release/prod.htm",
+      "allowed_hosts": [
+        "www.bls.gov"
+      ],
+      "expected_media_types": [
+        "text/plain",
+        "text/html"
+      ],
+      "source_series_ids": [
+        "nonfarm business sector labor productivity",
+        "nonfarm business sector unit labor costs"
+      ],
+      "source_table_ids": [
+        "Productivity and Costs Table A",
+        "Productivity and Costs Table A1",
+        "Productivity and Costs comparison table"
+      ],
+      "source_release_ids": [
+        "Productivity and Costs"
+      ],
+      "release_calendar_uri": "https://www.bls.gov/schedule/",
+      "archive_uri": "https://www.bls.gov/bls/news-release/prod.htm",
+      "source_timezone": "America/New_York",
+      "availability_time_precision": "exact-minute",
+      "dst_convention": "IANA zone database; retain source lexical EST, EDT, or ET and reject a concrete abbreviation that conflicts with the publication date.",
+      "historical_depth": "The complete post-2000 archive contains 214 stage-specific quarterly releases from preliminary fourth-quarter 1999 through revised second-quarter 2026, plus the revised third-quarter 1999 predecessor.",
+      "known_breaks": [
+        "The retained corpus contains 65 fixed-width text artifacts including the predecessor and 150 preformatted HTML artifacts; Table A changes from sector rows to measure rows and back to sector rows across the archive.",
+        "Each preliminary publication includes a new-quarter first estimate and a comparison-table third estimate for the preceding quarter; each revised publication includes the current-quarter second estimate.",
+        "The February 6, 2019 preliminary fourth-quarter 2018 release reports nonfarm-business productivity and unit labor costs as N.A. because underlying BEA data were unavailable during the federal shutdown.",
+        "The March 7, 2024 release was reissued with an official error notice but its estimates were not corrected in the artifact; the May 2, 2024 comparison table carries corrected prior-quarter productivity and is explicitly noncomparable to the prior artifact.",
+        "Annual benchmark, comprehensive, and historical revisions remain bound to the occurrence-specific artifacts that published them instead of rewriting earlier vintages."
+      ],
+      "revision_behavior": "Current and immediately preceding artifacts are joined to each release's previous-versus-revised comparison table. Preliminary and revised stages remain distinct, comparison-period revisions are retained, and unavailable or corrected predecessor lineage is explicit.",
+      "rate_limit": "No stable archive-specific limit is published; refresh uses bounded parallelism, retries, and an identifying contact user agent.",
+      "authentication": "none",
+      "credential_env_name": null,
+      "credential_header_name": null,
+      "credential_parameter_name": null,
+      "terms_uri": "https://www.bls.gov/bls/linksite.htm",
+      "fallback_source_keys": [
+        "us.bls.public-data"
+      ],
+      "parser_id": "official.html.v1",
+      "parser_version": "1",
+      "replay_strategy": "Retain the exact archive index plus every selected release artifact externally; bind each current and predecessor SHA-256 digest and recompute both headline measures and their comparison-table revisions before accepting replay.",
+      "adapter_owner": "market-context/us",
+      "verification_status": "empirically-verified",
+      "reviewed_on": "2026-09-14",
+      "verification_evidence_uris": [
+        "https://www.bls.gov/bls/news-release/prod.htm",
+        "https://www.bls.gov/news.release/history/prod2_12071999.txt",
+        "https://www.bls.gov/news.release/history/prod2_02082000.txt",
+        "https://www.bls.gov/news.release/archives/prod2_05062010.htm",
+        "https://www.bls.gov/news.release/archives/prod2_05042017.htm",
+        "https://www.bls.gov/news.release/archives/prod2_02062019.htm",
+        "https://www.bls.gov/news.release/archives/prod2_03072024.htm",
+        "https://www.bls.gov/news.release/archives/prod2_05022024.htm",
+        "https://www.bls.gov/news.release/archives/prod2_09032026.htm"
+      ],
+      "redistribution_notes": "The package retains only the official index and a compact hash manifest; release documents remain an external operator-owned corpus with BLS attribution.",
+      "limitations": [
+        "The qualification covers nonfarm-business labor productivity and unit labor costs at seasonally adjusted annualized quarter-over-quarter rates only; other sectors, components, annual averages, levels, and year-over-year rates require separate identities.",
+        "No official event-level consensus is published, so forecasts remain explicitly unavailable."
+      ]
+    },
+    {
+      "schema_version": "histdatacom.official-source-entry.v1",
       "source_key": "us.bls.public-data",
       "economy_code": "US",
       "economy_name": "United States",

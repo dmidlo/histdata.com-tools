@@ -30,11 +30,11 @@ limitations. An archive start date is a route declaration, not a historical
 coverage claim.
 
 The source registry includes separate supplemental entries for DOL/ETA, the
-Philadelphia Fed, CPI, PPI, the Employment Situation, and JOLTS. This prevents
-broad family-level entries from being incorrectly named as the occurrence-
-specific source for weekly claims, regional Fed surveys, or BLS release
-documents. The Federal Reserve G.17 entry also declares plain text as a real
-archive format.
+Philadelphia Fed, CPI, PPI, the Employment Situation, JOLTS, and Productivity
+and Costs. This prevents broad family-level entries from being incorrectly
+named as the occurrence-specific source for weekly claims, regional Fed
+surveys, or BLS release documents. The Federal Reserve G.17 entry also
+declares plain text as a real archive format.
 The reusable HTML-release adapter preserves such text as one bounded UTF-8
 record, including the exact line count and raw-snapshot lineage.
 
@@ -383,6 +383,68 @@ unparseable evidence. `bls_jolts_coverage_from_manifest()` derives the complete
 268-event labour slice while retaining pre-program years and absent official
 event-level consensus as explicit nonblocking gaps.
 
+## Complete Productivity and Costs archive qualification
+
+`histdatacom.market_context.us_productivity_costs_archive` qualifies two
+nonfarm-business headline measures from every indexed BLS Productivity and
+Costs publication in the requested window: labor productivity and unit labor
+costs, both seasonally adjusted quarter-over-quarter percent changes at annual
+rates. The dedicated `us.bls.productivity-costs` source records the stage-
+specific archive, exact 08:30 Eastern release time, formats, revision behavior,
+and empirical parser evidence separately from the broad BLS public-data API.
+
+The packaged `us_productivity_costs_archive_v1.json` manifest is observed as
+of September 14, 2026 and records:
+
+- 214 stage-specific releases: 107 preliminary and 107 revised publications
+  from fourth-quarter 1999 through second-quarter 2026;
+- 215 distinct artifacts and 21,086,013 exact source bytes, including the
+  revised third-quarter 1999 predecessor;
+- 64 text and 150 preformatted HTML current artifacts;
+- 155 sector-row and 59 measure-row Table A layouts;
+- 426 numeric comparison-table revisions across the two measures, with 191
+  nonzero productivity revisions and 202 nonzero unit-labor-cost revisions;
+  and
+- 76 releases containing an annual-benchmark, comprehensive, or historical-
+  revision notice.
+
+The retained 117,331-byte archive index fixes all stage labels, reference
+quarters, release dates, formats, and artifact URIs. Every quarter has a
+preliminary/revised pair. A preliminary release carries both the new quarter's
+first estimate and a comparison-table revision of the preceding quarter; a
+revised release carries the current quarter's second estimate. Replay retains
+those identities instead of collapsing two publications into one quarterly
+row.
+
+Two official discontinuities fail closed rather than receiving synthetic
+values. The February 6, 2019 preliminary fourth-quarter 2018 publication
+reports both selected headline measures as `N.A.` because underlying BEA data
+were unavailable during the federal shutdown. Its comparison table still
+revises third-quarter 2018, while the following revised publication has no
+numeric preliminary value to compare. Separately, BLS reissued the March 7,
+2024 artifact with notice that its estimates would not be corrected in that
+document. The May 2 comparison table carries corrected prior-quarter
+productivity (`3.3`) that differs from the prior artifact (`3.2`); both values
+and the noncomparable predecessor lineage remain explicit.
+
+The refresh command can fetch live official bytes or replay a retained
+basename-addressed corpus:
+
+```console
+uv run python scripts/refresh_us_productivity_costs_archive.py \
+  --as-of 2026-09-14 \
+  --source-directory /absolute/operator/path/prod-source \
+  --raw-directory /absolute/operator/path/prod-raw
+```
+
+`replay_bls_productivity_costs_archive()` recomputes all 428 normalized
+measure records from the full 215-artifact chain. It rejects missing, changed,
+duplicated, or newly unparseable evidence and any unexplained difference
+between an artifact and the next comparison table.
+`bls_productivity_costs_coverage_from_manifest()` derives the complete
+qualified 214-stage labour slice while counting the one official unavailable
+stage explicitly.
+
 ## Quantified closure audit
 
 `UnitedStatesProgramCoverageV1` records one exact 2000-present denominator and
@@ -397,8 +459,10 @@ retained table. Counts cannot exceed the expected denominator.
 1. every required program has exactly one coverage slice;
 2. all 12 economic families remain represented;
 3. all slices share the same window end and begin on `2000-01-01`;
-4. every expected schedule and initial actual is present;
-5. required previous-as-known values and revision history are present;
+4. every expected schedule and either its initial actual or a counted official
+   unavailable value is present;
+5. required previous-as-known values, or the same counted official
+   unavailability, and revision history are present;
 6. programs with exact recurring times qualify every occurrence at minute or
    better precision;
 7. the archive strategy has enough distinct raw artifact hashes; and
@@ -407,10 +471,11 @@ retained table. Counts cannot exceed the expected denominator.
 
 Programs that did not yet exist in 2000 use an explicit
 `program-not-yet-published` gap. A missing official event-level forecast uses
-`no-event-forecast`; both are nonblocking only because neither invents a
-historical value. FOMC projections, SPF, and MBOS future-diffusion results keep
-their native horizons and scopes. They are never projected into proprietary
-monthly event consensus.
+`no-event-forecast`. A source document that explicitly publishes a required
+measure as unavailable uses `official-measure-unavailable` and a bounded count;
+all three are nonblocking only because none invents a historical value. FOMC
+projections, SPF, and MBOS future-diffusion results keep their native horizons
+and scopes. They are never projected into proprietary monthly event consensus.
 
 Coverage objects and audits are content addressed and round-trip through
 canonical JSON. A passing audit is the closure receipt; the program inventory
@@ -435,8 +500,8 @@ alone is not.
   retain monthly release PDFs; the revised download is not substituted for
   those vintages.
 
-The package preserves the real G.17, CPI, PPI, Employment Situation, and JOLTS
-indexes, one representative G.17 raw release, and all five complete
-raw/normalized manifests. The remaining production raw corpora stay external,
-content addressed, and subject to the coverage audit so wheel size does not
-grow with thousands of federal release files.
+The package preserves the real G.17, CPI, PPI, Employment Situation, JOLTS, and
+Productivity and Costs indexes, one representative G.17 raw release, and all
+six complete raw/normalized manifests. The remaining production raw corpora
+stay external, content addressed, and subject to the coverage audit so wheel
+size does not grow with thousands of federal release files.

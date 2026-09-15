@@ -135,6 +135,7 @@ class UnitedStatesCoverageGapReason(str, Enum):
     UNRESOLVED_REVISION = "unresolved-revision"
     IMPRECISE_RELEASE_TIME = "imprecise-release-time"
     NO_EVENT_FORECAST = "no-event-forecast"
+    OFFICIAL_MEASURE_UNAVAILABLE = "official-measure-unavailable"
     PROGRAM_NOT_YET_PUBLISHED = "program-not-yet-published"
 
     @classmethod
@@ -152,6 +153,7 @@ class UnitedStatesCoverageGapReason(str, Enum):
     def blocks_historical_qualification(self) -> bool:
         return self not in {
             UnitedStatesCoverageGapReason.NO_EVENT_FORECAST,
+            UnitedStatesCoverageGapReason.OFFICIAL_MEASURE_UNAVAILABLE,
             UnitedStatesCoverageGapReason.PROGRAM_NOT_YET_PUBLISHED,
         }
 
@@ -905,6 +907,7 @@ class UnitedStatesProgramCoverageV1:
     artifact_sha256s: tuple[str, ...]
     gap_reasons: tuple[UnitedStatesCoverageGapReason, ...]
     notes: tuple[str, ...]
+    officially_unavailable_count: int = 0
     coverage_id: str = ""
     schema_version: str = US_PROGRAM_COVERAGE_SCHEMA_VERSION
 
@@ -940,6 +943,15 @@ class UnitedStatesProgramCoverageV1:
                 raise ValueError(f"{name} exceeds expected occurrences")
         for name in ("revision_count", "forecast_count"):
             _count(getattr(self, name), name, MAX_US_COVERAGE_ARTIFACTS)
+        unavailable = _count(
+            self.officially_unavailable_count,
+            "officially_unavailable_count",
+            MAX_US_COVERAGE_ARTIFACTS,
+        )
+        if unavailable > expected:
+            raise ValueError(
+                "officially_unavailable_count exceeds expected occurrences"
+            )
         artifacts = tuple(
             sorted(
                 {
@@ -961,6 +973,21 @@ class UnitedStatesProgramCoverageV1:
         )
         object.__setattr__(self, "artifact_sha256s", artifacts)
         object.__setattr__(self, "gap_reasons", gaps)
+        if unavailable and (
+            UnitedStatesCoverageGapReason.OFFICIAL_MEASURE_UNAVAILABLE
+            not in gaps
+        ):
+            raise ValueError(
+                "official unavailability requires its explicit gap reason"
+            )
+        if (
+            UnitedStatesCoverageGapReason.OFFICIAL_MEASURE_UNAVAILABLE in gaps
+            and unavailable == 0
+        ):
+            raise ValueError(
+                "official-unavailability gap requires an occurrence count"
+            )
+        object.__setattr__(self, "officially_unavailable_count", unavailable)
         object.__setattr__(
             self, "notes", _texts(self.notes, "notes", required=True)
         )
@@ -993,10 +1020,13 @@ class UnitedStatesProgramCoverageV1:
         return (
             self.window_start_date == US_BACKFILL_START_DATE
             and self.schedule_count == expected
-            and self.initial_actual_count == expected
+            and self.initial_actual_count + self.officially_unavailable_count
+            == expected
             and (
                 not program.requires_previous_as_known
-                or self.previous_as_known_count == expected
+                or self.previous_as_known_count
+                + self.officially_unavailable_count
+                == expected
             )
             and (
                 not program.requires_revision_history or self.revision_count > 0
@@ -1029,6 +1059,7 @@ class UnitedStatesProgramCoverageV1:
             "artifact_sha256s": list(self.artifact_sha256s),
             "gap_reasons": [item.value for item in self.gap_reasons],
             "notes": list(self.notes),
+            "officially_unavailable_count": self.officially_unavailable_count,
         }
 
     def to_dict(self) -> dict[str, JSONValue]:
@@ -1065,6 +1096,9 @@ class UnitedStatesProgramCoverageV1:
             ),
             notes=tuple(
                 str(item) for item in _sequence(data.get("notes"), "notes")
+            ),
+            officially_unavailable_count=cast(
+                int, data.get("officially_unavailable_count", 0)
             ),
             coverage_id=str(data.get("coverage_id", "")),
             schema_version=str(data.get("schema_version", "")),
@@ -1569,17 +1603,19 @@ def built_in_united_states_backfill_profile(
             "productivity-and-costs",
             "Productivity and Costs",
             "U.S. Bureau of Labor Statistics",
-            "us.bls.public-data",
-            "https://www.bls.gov/bls/news-release/prod2.htm",
+            "us.bls.productivity-costs",
+            "https://www.bls.gov/bls/news-release/prod.htm",
             bls_schedule,
             frequency="quarterly",
             release_stages=(
                 EconomicReleaseStage.PRELIMINARY,
-                EconomicReleaseStage.FINAL,
                 EconomicReleaseStage.REVISION,
             ),
             limitations=(
-                "Preliminary and revised quarterly estimates are separate release stages.",
+                "Use the complete occurrence-specific Productivity and Costs archive for nonfarm-business labor productivity and unit labor costs.",
+                "Preliminary and revised quarterly publications remain separate release stages; preliminary publications also revise the preceding quarter.",
+                "The February 2019 preliminary publication reported the selected headline measures as unavailable because underlying BEA data were delayed.",
+                "The March 2024 artifact retains BLS's reissue notice; corrected prior-quarter evidence first appears in the May 2024 comparison table.",
                 *no_monthly_consensus,
             ),
         ),

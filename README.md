@@ -2669,6 +2669,13 @@ measure-specific triplets. It keeps total-nonfarm seasonally adjusted job
 openings, hires, and total separations separate; preserves 22 annual benchmark
 editions; and explicitly marks all three October 2025 comparisons
 noncomparable because no September publication exists.
+The U.S. Productivity and Costs specialization binds 214 preliminary and
+revised quarterly stages to 215 artifacts from the revised third-quarter 1999
+predecessor through revised second-quarter 2026. It preserves separate
+nonfarm-business productivity and unit-labor-cost values, 426 numeric
+comparison-table revisions, the February 2019 source-authored `N.A.` headline
+stage, and the March/May 2024 correction-lineage discrepancy without filling
+or smoothing either break.
 Central-bank releases additionally use framework-aware
 [`monetary-policy semantics`](docs/monetary-policy-semantics.md). Decisions,
 statements, vote splits, press conferences, minutes, projections, schedules,

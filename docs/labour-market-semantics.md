@@ -132,6 +132,30 @@ August as its last published predecessor and marks the three unlike-period
 revision fields noncomparable. `replay_bls_jolts_archive()` recomputes all 804
 measure triplets and their raw and normalized hashes.
 
+## U.S. Productivity and Costs archive
+
+The Productivity and Costs specialization retains 215 official BLS artifacts
+and reconstructs 214 preliminary/revised release stages from fourth-quarter
+1999 through second-quarter 2026. Every release keeps nonfarm-business labor
+productivity separate from nonfarm-business unit labor costs; both use
+seasonally adjusted annualized quarter-over-quarter percent changes.
+
+The parser follows 64 text and 150 preformatted HTML current releases across
+155 sector-row and 59 measure-row Table A layouts. It also parses the current
+release's comparison table, so preliminary stages preserve third estimates for
+the preceding quarter and revised stages preserve second estimates for the
+current quarter. The resulting 428 normalized measure records contain 426
+numeric revision observations and remain independently replayable from the
+current/predecessor artifact chain.
+
+The February 2019 preliminary fourth-quarter 2018 release explicitly reports
+the selected measures as `N.A.`. That source-authored unavailability remains a
+counted nonblocking gap; the following revised stage does not acquire an
+invented preliminary value. The March 2024 reissue notice and May 2024
+corrected prior-quarter comparison are likewise both retained, making the
+productivity predecessor mismatch explicit. Annual benchmark and historical
+revisions never rewrite earlier release-stage evidence.
+
 ## Economy profiles
 
 `built_in_labour_profiles()` derives one semantic/source profile for all 21
