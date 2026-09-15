@@ -46,6 +46,9 @@ explicitly because the older historical-data route is retired.
 The joint Census/BEA International Trade entry binds the FT-900 monthly archive
 and keeps its retired route, incorrect links, and annual-revision behavior
 explicit.
+The Manufacturing and Trade Inventories and Sales entry binds its successor
+historical page, official directory, current briefing, table formats, and
+release-document evidence separately from the broad Census EITS API entry.
 The reusable HTML-release adapter preserves such text as one bounded UTF-8
 record, including the exact line count and raw-snapshot lineage.
 
@@ -817,6 +820,58 @@ unparseable, differently normalized, or unused evidence.
 `census_new_home_sales_coverage_from_manifest()` derives the complete
 315-publication slice without manufacturing historical event-level consensus.
 
+## Complete Manufacturing and Trade Inventories and Sales qualification
+
+`histdatacom.market_context.us_mtis_archive` qualifies the Census Manufacturing
+and Trade Inventories and Sales archive from January 2000 through June 2026.
+The dedicated `us.census.mtis` source binds the live historical page after the
+retired `/mtis/www/historical/index.html` route began returning 404. It keeps
+total-business sales, total-business inventories, and the inventories-to-sales
+ratio as three separate concepts instead of conflating their units or revision
+chains.
+
+The packaged `us_mtis_archive_v1.json` manifest is observed as of September 15,
+2026. It records 318 monthly publications, 954 initial values, 954
+previous-as-known comparisons, and 723 changed prior estimates from 635
+distinct raw artifacts containing 91,178,773 source bytes. The inventory
+comprises three current official pages, seven archived copies of original
+Census pages used only as 2000 timing witnesses, the December 1999 predecessor
+table, 318 target data tables, and 306 target release PDFs. Every publication
+time is recovered to the exact minute.
+
+The data-table eras are explicit: 157 releases use text, including the bounded
+May 2014 fallback for an indexed spreadsheet that returns 404; 109 use legacy
+XLS; and 52 use XLSX. The historical page omits the live July 2001 PDF, while
+the official directory still enumerates it. The June 2026 stable historical
+objects were live and the current Census briefing identified the same report
+before the historical page listed it. Those three defects are closed only by
+their exact predictable Census-hosted targets.
+
+Three PDFs cannot supply their own timestamp: April 2001 and April 2003 are
+image-only, and November 2009 omits its release-date header. Replay accepts
+only the immediately preceding report's explicit next-release schedule for
+those three occurrences. Seven archived Census-page captures establish the 12
+publication times in 2000; the Internet Archive is retained as transport and
+timing evidence, never reclassified as the legal producer. Nine publications
+retain three-month lags caused by the 2018-2019 and 2025-2026 federal
+disruptions.
+
+The refresh command can fetch missing source bytes or deterministically replay
+a retained corpus:
+
+```console
+uv run python scripts/refresh_us_mtis_archive.py \
+  --as-of 2026-09-15 \
+  --source-directory /absolute/operator/path/mtis-source \
+  --fetch-missing
+```
+
+`replay_census_mtis_archive()` reparses the official enumeration evidence,
+legacy timing witnesses, every table, and every PDF timestamp. It rejects
+missing, changed, duplicated, newly unparseable, differently normalized, or
+unused evidence. `census_mtis_coverage_from_manifest()` derives the complete
+318-publication slice without manufacturing historical event-level consensus.
+
 ## Quantified closure audit
 
 `UnitedStatesProgramCoverageV1` records one exact 2000-present denominator and
@@ -876,8 +931,9 @@ alone is not.
 The package preserves the real G.17, CPI, PPI, Employment Situation, JOLTS,
 Productivity and Costs, GDP, Personal Income and Outlays, and Advance Monthly
 Retail Sales indexes, the Advance Durable Goods index and reviewed OCR corpus,
-the International Trade, New Residential Construction, and New Residential
-Sales indexes, one representative G.17 raw release, and all thirteen complete
-raw/normalized manifests. The remaining production raw corpora stay external,
-content addressed, and subject to the coverage audit so wheel size does not
-grow with thousands of federal release files.
+the International Trade, New Residential Construction, New Residential Sales,
+and Manufacturing and Trade Inventories and Sales indexes, one representative
+G.17 raw release, and all fourteen complete raw/normalized manifests. The
+remaining production raw corpora stay external, content addressed, and subject
+to the coverage audit so wheel size does not grow with thousands of federal
+release files.

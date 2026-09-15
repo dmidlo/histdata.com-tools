@@ -403,6 +403,108 @@
     },
     {
       "schema_version": "histdatacom.official-source-entry.v1",
+      "source_key": "us.census.mtis",
+      "economy_code": "US",
+      "economy_name": "United States",
+      "institution": "U.S. Census Bureau",
+      "jurisdiction": "United States of America",
+      "legal_producer": true,
+      "roles": [
+        "official-archive",
+        "release-calendar"
+      ],
+      "event_families": [
+        "other-official"
+      ],
+      "indicator_ids": [
+        "other-official-macro"
+      ],
+      "formats": [
+        "xls",
+        "xlsx",
+        "text",
+        "html",
+        "pdf"
+      ],
+      "capabilities": [
+        "historical-observations",
+        "historical-vintages",
+        "publication-metadata",
+        "schedule-metadata",
+        "revision-metadata",
+        "archive-enumeration"
+      ],
+      "endpoint_uri_template": "https://www.census.gov/mtis/historic_releases.html",
+      "allowed_hosts": [
+        "www.census.gov",
+        "www2.census.gov"
+      ],
+      "expected_media_types": [
+        "application/pdf",
+        "application/vnd.ms-excel",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "text/html",
+        "text/plain"
+      ],
+      "source_series_ids": [
+        "Total business sales, seasonally adjusted",
+        "Total business inventories, seasonally adjusted",
+        "Total business inventories-to-sales ratio, seasonally adjusted"
+      ],
+      "source_table_ids": [
+        "MTIS Table 1"
+      ],
+      "source_release_ids": [
+        "Manufacturing and Trade Inventories and Sales"
+      ],
+      "release_calendar_uri": "https://www.census.gov/economic-indicators/calendar-listview.html",
+      "archive_uri": "https://www.census.gov/mtis/historic_releases.html",
+      "source_timezone": "America/New_York",
+      "availability_time_precision": "exact-minute",
+      "dst_convention": "IANA zone database controls normalization; each source-authored EST, EDT, or ET token is retained and checked against the release date.",
+      "historical_depth": "The qualified corpus covers all 318 monthly reference periods from January 2000 through June 2026, with December 1999 retained solely for the first previous-as-known comparison.",
+      "known_breaks": [
+        "The retired /mtis/www/historical/index.html route returns 404; the official successor is /mtis/historic_releases.html.",
+        "The historical page omits the July 2001 PDF although the predictable official object remains live and the report is independently enumerated by its text table.",
+        "The May 2014 spreadsheet link returns 404; its exact official text table is retained as the bounded data fallback.",
+        "The June 2026 stable historical files were live and byte-equivalent to the current briefing artifact before the historical page listed them; the current official briefing and directory evidence bind that bounded addition.",
+        "Two legacy PDFs are image-only and the November 2009 PDF omits its release timestamp; each date and time is recovered only from the immediately preceding report's explicit next-release schedule.",
+        "Federal funding lapses altered the 2018-2019 and 2025-2026 release sequence; source-authored release dates are retained without manufacturing normal dates."
+      ],
+      "revision_behavior": "Each concept retains its initial seasonally adjusted total-business value, the report's revised immediately preceding value, and that preceding month's earlier initial value; annual benchmark revisions never rewrite vintage history.",
+      "rate_limit": "No stable archive-specific limit is published; refresh uses sequential bounded requests, bounded retries, backoff on HTTP 429, and an identifying contact user agent.",
+      "authentication": "none",
+      "credential_env_name": null,
+      "credential_header_name": null,
+      "credential_parameter_name": null,
+      "terms_uri": null,
+      "fallback_source_keys": [
+        "us.census.eits"
+      ],
+      "parser_id": "official.census-mtis.v1",
+      "parser_version": "1",
+      "replay_strategy": "Retain the exact historical page, current briefing, official directory listing, bounded archived Census-page witnesses for 2000 timing, December 1999 predecessor table, and every target data and release artifact; bind byte lengths and SHA-256 and reparse every release timestamp and three-concept revision lineage before accepting replay.",
+      "adapter_owner": "market-context/us",
+      "verification_status": "empirically-verified",
+      "reviewed_on": "2026-09-15",
+      "verification_evidence_uris": [
+        "https://www.census.gov/mtis/historic_releases.html",
+        "https://www2.census.gov/mtis/historical/",
+        "https://www.census.gov/economic-indicators/",
+        "https://www2.census.gov/mtis/historical/mtis9912.txt",
+        "https://www2.census.gov/mtis/historical/mtis0107.pdf",
+        "https://www2.census.gov/mtis/historical/mtis1405.txt",
+        "https://web.archive.org/web/20000229040444id_/http://www.census.gov/mtis/www/current.html"
+      ],
+      "redistribution_notes": "The package retains official index evidence, bounded archived Census-page timing witnesses, and a compact hash-and-value manifest; the release tables and PDFs remain an external operator-owned corpus with Census attribution.",
+      "limitations": [
+        "Qualification covers seasonally adjusted total-business sales, inventories, and the inventories-to-sales ratio only; component industries, unadjusted values, percent changes, and year-ago comparisons require separate identities.",
+        "Archived Census pages accessed through the Internet Archive are timing witnesses, not substitute legal producers or data artifacts.",
+        "No historical event-level consensus is manufactured from another survey."
+      ]
+    },
+    {
+      "schema_version": "histdatacom.official-source-entry.v1",
       "source_key": "us.bea-census.international-trade",
       "economy_code": "US",
       "economy_name": "United States",

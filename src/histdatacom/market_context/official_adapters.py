@@ -752,6 +752,19 @@ class OfficialCensusFt900ParserV1(OfficialHtmlParserV1):
     )
 
 
+class OfficialCensusMtisParserV1(OfficialHtmlParserV1):
+    """Parse Census MTIS archive pages, tables, and release documents."""
+
+    parser_id = "official.census-mtis.v1"
+    supported_formats: tuple[OfficialSourceFormat, ...] = (
+        OfficialSourceFormat.XLS,
+        OfficialSourceFormat.XLSX,
+        OfficialSourceFormat.TEXT,
+        OfficialSourceFormat.HTML,
+        OfficialSourceFormat.PDF,
+    )
+
+
 class OfficialReleaseFeedParserV1(_BaseOfficialParser):
     """RSS, Atom, and iCalendar schedule/release feed parser."""
 
@@ -832,6 +845,7 @@ _BUILT_IN_PARSER_TYPES: tuple[type[_BaseOfficialParser], ...] = (
     OfficialCensusNrcParserV1,
     OfficialCensusNrsParserV1,
     OfficialCensusFt900ParserV1,
+    OfficialCensusMtisParserV1,
     OfficialReleaseFeedParserV1,
     OfficialPdfParserV1,
     OfficialArchiveParserV1,
@@ -2930,6 +2944,7 @@ __all__ = [
     "OfficialCensusFt900ParserV1",
     "OfficialCensusM3ParserV1",
     "OfficialCensusMartsParserV1",
+    "OfficialCensusMtisParserV1",
     "OfficialCensusNrcParserV1",
     "OfficialCensusNrsParserV1",
     "OfficialCsvParserV1",
