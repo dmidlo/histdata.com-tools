@@ -214,6 +214,103 @@
     },
     {
       "schema_version": "histdatacom.official-source-entry.v1",
+      "source_key": "us.census.new-residential-construction",
+      "economy_code": "US",
+      "economy_name": "United States",
+      "institution": "U.S. Census Bureau and U.S. Department of Housing and Urban Development",
+      "jurisdiction": "United States of America",
+      "legal_producer": true,
+      "roles": [
+        "official-archive",
+        "release-calendar"
+      ],
+      "event_families": [
+        "housing"
+      ],
+      "indicator_ids": [
+        "housing-and-construction"
+      ],
+      "formats": [
+        "html",
+        "pdf",
+        "text"
+      ],
+      "capabilities": [
+        "historical-observations",
+        "historical-vintages",
+        "publication-metadata",
+        "schedule-metadata",
+        "revision-metadata",
+        "archive-enumeration"
+      ],
+      "endpoint_uri_template": "https://www.census.gov/construction/nrc/data/releases.html",
+      "allowed_hosts": [
+        "www.census.gov"
+      ],
+      "expected_media_types": [
+        "text/html",
+        "application/pdf",
+        "text/plain"
+      ],
+      "source_series_ids": [
+        "New privately-owned housing units authorized by building permits, total",
+        "New privately-owned housing units started, total",
+        "New privately-owned housing units completed, total"
+      ],
+      "source_table_ids": [
+        "NRC Table 1",
+        "NRC Table 3",
+        "NRC Table 5"
+      ],
+      "source_release_ids": [
+        "New Residential Construction"
+      ],
+      "release_calendar_uri": "https://www.census.gov/economic-indicators/",
+      "archive_uri": "https://www.census.gov/construction/nrc/data/releases.html",
+      "source_timezone": "America/New_York",
+      "availability_time_precision": "exact-minute",
+      "dst_convention": "IANA zone database controls normalization; every source-authored EST or EDT token is retained and checked against the release date.",
+      "historical_depth": "The qualified corpus covers all 319 monthly reference periods from January 2000 through July 2026 as 330 real publications, with separate December 1999 predecessor releases for the first starts/permits and completions comparisons.",
+      "known_breaks": [
+        "January 2000 through March 2001 uses separate plain-text starts/permits and completions publications with different release dates; April 2001 onward uses a unified PDF.",
+        "The archive's November 2000 completions link targets January 2000, April 2009 has an fhttps scheme, and August 2012 targets the September PDF; each correction is bounded to the surviving official predictable URI.",
+        "September and October 2013 archive URLs render the same November 26 publication; permits for both months are first published there, while the December 18 report first publishes September-November starts and completions.",
+        "The October and December 2025 and March 2026 reports contain the first estimates for September, November, and February respectively; no separate release time is manufactured for those months.",
+        "Fifteen target-era completions publications occur at 10:00 before the April 2001 unified 08:30 format, and every retained source timezone abbreviation agrees with America/New_York."
+      ],
+      "revision_behavior": "Each measure retains its initial level, the source-reported revised immediately preceding month, and the earlier initial value only when that prior month existed before the publication; fourteen same-publication catch-up comparisons are explicitly non-comparable.",
+      "rate_limit": "No stable archive-specific limit is published; refresh uses sequential bounded requests, retry backoff, and an identifying contact user agent.",
+      "authentication": "none",
+      "credential_env_name": null,
+      "credential_header_name": null,
+      "credential_parameter_name": null,
+      "terms_uri": null,
+      "fallback_source_keys": [
+        "us.census.eits"
+      ],
+      "parser_id": "official.census-nrc.v1",
+      "parser_version": "1",
+      "replay_strategy": "Retain the exact archive page, both December 1999 predecessors, and all 331 target artifact URLs; bind every byte length and SHA-256 and reparse all 330 source publication times and 957 measure occurrences before accepting replay.",
+      "adapter_owner": "market-context/us",
+      "verification_status": "empirically-verified",
+      "reviewed_on": "2026-09-15",
+      "verification_evidence_uris": [
+        "https://www.census.gov/construction/nrc/data/releases.html",
+        "https://www.census.gov/construction/nrc/index.html",
+        "https://www.census.gov/construction/nrc/methodology.html",
+        "https://www.census.gov/construction/nrc/txt/c22_0011.txt",
+        "https://www.census.gov/construction/nrc/pdf/newresconst_200904.pdf",
+        "https://www.census.gov/construction/nrc/pdf/newresconst_201208.pdf"
+      ],
+      "redistribution_notes": "The package retains the official archive page and a compact hash-and-value manifest; release text and PDFs remain an external operator-owned corpus with Census and HUD attribution.",
+      "limitations": [
+        "Qualification covers total seasonally adjusted annual-rate levels for building permits, housing starts, and housing completions only; regional, structure-size, unadjusted, year-to-date, and ancillary construction states require separate identities.",
+        "Same-publication catch-up values remain available as source evidence but are never presented as ex-ante previous-as-known observations.",
+        "No historical event-level consensus is manufactured from another survey."
+      ]
+    },
+    {
+      "schema_version": "histdatacom.official-source-entry.v1",
       "source_key": "au.rba.statistics",
       "economy_code": "AU",
       "economy_name": "Australia",

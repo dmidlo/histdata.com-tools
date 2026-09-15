@@ -110,7 +110,7 @@ def _coverage(
 def test_registry_represents_us_specific_legal_producers_and_text() -> None:
     registry = load_packaged_official_source_registry()
     assert registry.reviewed_on == "2026-09-14"
-    assert len(registry.sources) == 63
+    assert len(registry.sources) == 64
 
     dol = registry.source("us.dol.eta-unemployment-insurance")
     assert dol.institution.startswith("U.S. Department of Labor")
@@ -184,6 +184,16 @@ def test_registry_represents_us_specific_legal_producers_and_text() -> None:
     assert retail.availability_time_precision.value == "exact-minute"
     assert retail.verification_status.value == "empirically-verified"
 
+    housing = registry.source("us.census.new-residential-construction")
+    assert housing.source_release_ids == ("New Residential Construction",)
+    assert set(housing.formats) == {
+        OfficialSourceFormat.HTML,
+        OfficialSourceFormat.PDF,
+        OfficialSourceFormat.TEXT,
+    }
+    assert housing.availability_time_precision.value == "exact-minute"
+    assert housing.verification_status.value == "empirically-verified"
+
 
 def test_builtin_us_profile_covers_every_required_family_and_program() -> None:
     registry = load_packaged_official_source_registry()
@@ -213,6 +223,9 @@ def test_builtin_us_profile_covers_every_required_family_and_program() -> None:
     assert profile.by_key["us.bea.gdp"].source_key == "us.bea.gdp"
     assert profile.by_key["us.census.retail-sales"].source_key == (
         "us.census.retail-sales"
+    )
+    assert profile.by_key["us.census.housing-starts-permits"].source_key == (
+        "us.census.new-residential-construction"
     )
     assert UnitedStatesBackfillProfileV1.from_json(profile.to_json()) == profile
 
