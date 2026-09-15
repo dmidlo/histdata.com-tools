@@ -31,11 +31,14 @@ coverage claim.
 
 The source registry includes separate supplemental entries for DOL/ETA, the
 Philadelphia Fed, CPI, PPI, the Employment Situation, JOLTS, Productivity and
-Costs, GDP, Personal Income and Outlays, and Advance Monthly Retail Sales. This
+Costs, GDP, Personal Income and Outlays, Advance Monthly Retail Sales, and
+Advance Durable Goods. This
 prevents broad family-level entries from being incorrectly named as the
 occurrence-specific source for weekly claims, regional Fed surveys, or
 statistical release documents. The
 Federal Reserve G.17 entry also declares plain text as a real archive format.
+The Advance Durable Goods entry binds the Census M3 historical archive and
+release schedule as separate evidence roles and accepts both HTML and PDF.
 The reusable HTML-release adapter preserves such text as one bounded UTF-8
 record, including the exact line count and raw-snapshot lineage.
 
@@ -607,6 +610,56 @@ unused artifact. `census_retail_coverage_from_manifest()` derives the complete
 320-publication retail-consumption slice without manufacturing historical
 event-level consensus.
 
+## Complete Advance Durable Goods archive qualification
+
+`histdatacom.market_context.us_durable_goods_archive` qualifies Census advance
+durable-goods new orders and nondefense capital-goods new orders excluding
+aircraft for every scheduled monthly reference period from January 2000
+through June 2026. The dedicated `us.census.durable-goods` source binds the M3
+historical release index and Census release schedule without treating the
+current revised time series as an original release.
+
+The packaged `us_durable_goods_archive_v1.json` manifest is observed as of
+September 15, 2026. It records 318 scheduled publications, 621 value-bearing
+measure occurrences, and 580 comparable revisions from 320 exact raw
+artifacts containing 95,545,357 source bytes: the historical index, the
+December 1999 predecessor, and 318 target PDFs. Every artifact has a distinct
+SHA-256 digest. Thirty-six target releases and the predecessor are image-only,
+so reviewed page-aware Tesseract text is separately content-addressed and
+bound to the original PDFs; the remaining releases use native PDF tables.
+
+The manifest preserves source limitations rather than filling them by
+inference. The official November 2009 report says its results are unavailable
+because of a processing error, so the occurrence has no fabricated measures.
+The core capital-goods row is absent from the official Table 1 for 13 periods
+from April 2001 through April 2002 and resumes with explicitly noncomparable
+lineage. December 2009 also starts from the intervening corrected historical
+state. Ninety-seven publications carry explicit historical-revision notices,
+nine target releases were shutdown-delayed, nine target PDFs contain source
+timezone labels inconsistent with their release dates, and three releases
+were published at 10:00 rather than the normal 08:30 Eastern time. The broken
+official July 2005 index link is corrected only to the surviving Census-hosted
+legacy PDF. Across the two measures, 1,242 source-reported rates are checked
+against same-release levels.
+
+The refresh command can fetch missing official bytes or replay a retained
+corpus and reviewed OCR pages:
+
+```console
+uv run python scripts/refresh_us_durable_goods_archive.py \
+  --as-of 2026-09-15 \
+  --source-directory /absolute/operator/path/durable-source \
+  --ocr-page-directory /absolute/operator/path/durable-reviewed-ocr \
+  --fetch-missing
+```
+
+`replay_census_durable_archive()` reparses the retained index, OCR corpus, and
+all publications. It rejects missing, changed, duplicated, newly unparseable,
+differently normalized, or unused evidence.
+`census_durable_coverage_from_manifest()` derives the complete 318-occurrence
+manufacturing slice, counting the official unavailable report explicitly and
+never manufacturing historical event-level consensus.
+
 ## Quantified closure audit
 
 `UnitedStatesProgramCoverageV1` records one exact 2000-present denominator and
@@ -665,7 +718,8 @@ alone is not.
 
 The package preserves the real G.17, CPI, PPI, Employment Situation, JOLTS,
 Productivity and Costs, GDP, Personal Income and Outlays, and Advance Monthly
-Retail Sales indexes, one representative G.17 raw release, and all nine
-complete raw/normalized manifests. The remaining production raw corpora stay
-external, content addressed, and subject to the coverage audit so wheel size
-does not grow with thousands of federal release files.
+Retail Sales indexes, the Advance Durable Goods index and reviewed OCR corpus,
+one representative G.17 raw release, and all ten complete raw/normalized
+manifests. The remaining production raw corpora stay external, content
+addressed, and subject to the coverage audit so wheel size does not grow with
+thousands of federal release files.

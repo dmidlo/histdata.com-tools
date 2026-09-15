@@ -110,7 +110,7 @@ def _coverage(
 def test_registry_represents_us_specific_legal_producers_and_text() -> None:
     registry = load_packaged_official_source_registry()
     assert registry.reviewed_on == "2026-09-14"
-    assert len(registry.sources) == 62
+    assert len(registry.sources) == 63
 
     dol = registry.source("us.dol.eta-unemployment-insurance")
     assert dol.institution.startswith("U.S. Department of Labor")

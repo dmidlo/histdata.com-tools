@@ -122,6 +122,98 @@
     },
     {
       "schema_version": "histdatacom.official-source-entry.v1",
+      "source_key": "us.census.durable-goods",
+      "economy_code": "US",
+      "economy_name": "United States",
+      "institution": "U.S. Census Bureau",
+      "jurisdiction": "United States of America",
+      "legal_producer": true,
+      "roles": [
+        "official-archive",
+        "release-calendar"
+      ],
+      "event_families": [
+        "other-official"
+      ],
+      "indicator_ids": [
+        "other-official-macro"
+      ],
+      "formats": [
+        "html",
+        "pdf"
+      ],
+      "capabilities": [
+        "historical-observations",
+        "historical-vintages",
+        "publication-metadata",
+        "schedule-metadata",
+        "revision-metadata",
+        "archive-enumeration"
+      ],
+      "endpoint_uri_template": "https://www.census.gov/manufacturing/m3/adv/historical_data/index.html",
+      "allowed_hosts": [
+        "www.census.gov",
+        "www2.census.gov"
+      ],
+      "expected_media_types": [
+        "text/html",
+        "application/pdf"
+      ],
+      "source_series_ids": [
+        "Durable goods total new orders",
+        "Nondefense capital goods new orders excluding aircraft"
+      ],
+      "source_table_ids": [
+        "M3 Advance Report Table 1"
+      ],
+      "source_release_ids": [
+        "Advance Report on Durable Goods Manufacturers' Shipments and Orders"
+      ],
+      "release_calendar_uri": "https://www.census.gov/manufacturing/m3/release_schedule.html",
+      "archive_uri": "https://www.census.gov/manufacturing/m3/adv/historical_data/index.html",
+      "source_timezone": "America/New_York",
+      "availability_time_precision": "exact-minute",
+      "dst_convention": "IANA zone database controls normalization; retain every source-authored ET, EST, or EDT token, including ten historical abbreviation errors.",
+      "historical_depth": "The qualified occurrence corpus covers all 318 monthly reference periods from January 2000 through June 2026 and retains the December 1999 predecessor for the first previous-as-known comparison.",
+      "known_breaks": [
+        "The December 1999 predecessor and January 2000 through December 2002 publications are image-only; reviewed two-page OCR is bound to each of the 37 original PDF SHA-256 digests.",
+        "The official November 2009 artifact states that a processing error made the advance report unavailable and that Census was unable to recreate it.",
+        "The Table 1 core nondefense-capital-goods row excluding aircraft is absent from April 2001 through April 2002 and is not derived from a semantically different aircraft aggregate.",
+        "The indexed July 2005 URL returns 404; the byte-identical publication lineage continues at the verified legacy www2.census.gov indicators URI ending in .pdf.pdf.",
+        "Three releases in 2000-2002 were published at 10:00 rather than 08:30, and ten early reports print a DST abbreviation inconsistent with their release date.",
+        "The December 2018-February 2019 and September 2025-February 2026 occurrences were delayed by federal government shutdowns without manufacturing missing periods."
+      ],
+      "revision_behavior": "Each available occurrence retains its source-reported current change, the source-reported revised prior-month change, and the preceding advance occurrence's as-known value; the December 2009 release uses the January 15 historical correction it explicitly identifies after the unavailable November occurrence.",
+      "rate_limit": "No stable archive-specific limit is published; refresh uses sequential bounded requests, retry backoff, and an identifying contact user agent.",
+      "authentication": "none",
+      "credential_env_name": null,
+      "credential_header_name": null,
+      "credential_parameter_name": null,
+      "terms_uri": null,
+      "fallback_source_keys": [
+        "us.census.eits"
+      ],
+      "parser_id": "official.census-m3.v1",
+      "parser_version": "1",
+      "replay_strategy": "Retain the exact archive page, all 318 target PDFs, the December 1999 predecessor, and reviewed OCR; bind byte lengths and SHA-256 digests and recompute both published measure histories before accepting replay.",
+      "adapter_owner": "market-context/us",
+      "verification_status": "empirically-verified",
+      "reviewed_on": "2026-09-15",
+      "verification_evidence_uris": [
+        "https://www.census.gov/manufacturing/m3/adv/historical_data/index.html",
+        "https://www.census.gov/manufacturing/m3/release_schedule.html",
+        "https://www.census.gov/manufacturing/m3/about_the_surveys/index.html",
+        "https://www2.census.gov/indicators/m3/2005/jul05adv.pdf.pdf"
+      ],
+      "redistribution_notes": "The package retains the official archive page, reviewed OCR text, and a compact hash manifest; monthly release PDFs remain an external operator-owned corpus with Census attribution.",
+      "limitations": [
+        "Qualification covers seasonally adjusted monthly percentage changes for total durable-goods new orders and nondefense capital-goods new orders excluding aircraft only; shipments, inventories, unfilled orders, components, unadjusted values, and annual rates require separate identities.",
+        "The 13 source-omitted core occurrences are preserved as measure-level unavailability while headline occurrence coverage remains complete.",
+        "No historical event-level consensus is manufactured from another survey."
+      ]
+    },
+    {
+      "schema_version": "histdatacom.official-source-entry.v1",
       "source_key": "au.rba.statistics",
       "economy_code": "AU",
       "economy_name": "Australia",

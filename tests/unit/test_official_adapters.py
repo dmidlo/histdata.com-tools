@@ -15,6 +15,7 @@ from histdatacom.market_context.official_adapters import (
     OfficialAdapterRecordKind,
     OfficialAdapterRecordV1,
     OfficialArchiveParserV1,
+    OfficialCensusM3ParserV1,
     OfficialCensusMartsParserV1,
     OfficialDataCatalogParserV1,
     OfficialParserError,
@@ -145,7 +146,11 @@ def test_built_in_parsers_cover_every_registered_source_and_format(
     registry: OfficialSourceRegistryV1,
 ) -> None:
     parsers = built_in_official_source_parsers()
-    assert len(parsers) == 12
+    assert len(parsers) == 13
+    assert isinstance(
+        parsers["official.census-m3.v1"],
+        OfficialCensusM3ParserV1,
+    )
     assert isinstance(
         parsers["official.census-marts.v1"],
         OfficialCensusMartsParserV1,
@@ -934,8 +939,7 @@ def test_first_party_fixture_qualifications_complete_required_pack_audit(
                 "nz.rbnz.statistics",
                 _xlsx_bytes([["Period", "OCR"], ["2026-08", 5.25]]),
                 content_type=(
-                    "application/vnd.openxmlformats-officedocument."
-                    "spreadsheetml.sheet"
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 ),
             ),
             "https://www.rbnz.govt.nz/statistics/series/official-cash-rate",
