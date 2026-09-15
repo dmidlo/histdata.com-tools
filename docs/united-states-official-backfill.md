@@ -32,7 +32,7 @@ coverage claim.
 The source registry includes separate supplemental entries for DOL/ETA, the
 Philadelphia Fed, CPI, PPI, the Employment Situation, JOLTS, Productivity and
 Costs, GDP, Personal Income and Outlays, Advance Monthly Retail Sales, Advance
-Durable Goods, and New Residential Construction. This
+Durable Goods, New Residential Construction, and New Residential Sales. This
 prevents broad family-level entries from being incorrectly named as the
 occurrence-specific source for weekly claims, regional Fed surveys, or
 statistical release documents. The
@@ -41,6 +41,8 @@ The Advance Durable Goods entry binds the Census M3 historical archive and
 release schedule as separate evidence roles and accepts both HTML and PDF.
 The New Residential Construction entry separately binds the Census/HUD
 housing-release archive, including its legacy text and unified PDF eras.
+The New Residential Sales entry binds the successor Census release archive
+explicitly because the older historical-data route is retired.
 The reusable HTML-release adapter preserves such text as one bounded UTF-8
 record, including the exact line count and raw-snapshot lineage.
 
@@ -714,6 +716,55 @@ differently normalized, or unused evidence.
 `census_housing_coverage_from_manifest()` derives the complete 330-publication
 housing slice without manufacturing historical event-level consensus.
 
+## Complete New Residential Sales archive qualification
+
+`histdatacom.market_context.us_new_home_sales_archive` qualifies the Census/HUD
+New Residential Sales archive from January 2000 through July 2026. The
+dedicated `us.census.new-residential-sales` source records the retired
+historical-data route and binds its live Census release-archive successor; it
+does not silently treat the route change as a gap or substitute revised series
+data for contemporaneous releases.
+
+The packaged `us_new_home_sales_archive_v1.json` manifest is observed as of
+September 15, 2026. It records 315 logical publications, 319 reference-period
+measures, 315 comparable previous-as-known checks, and 306 changed prior
+estimates from 318 distinct raw artifacts containing 41,950,804 source bytes.
+The inventory comprises the retained archive index, a December 1999
+predecessor, and 316 target artifacts. All 315 publication times are recovered
+to the exact minute at 10:00 Eastern.
+
+Fifteen target publications use the legacy text format, 294 use layout-aware
+PDF extraction, and two difficult PDFs use a bounded standard-extraction
+fallback. The qualification corrects the archive's December 2018 link only to
+the verified Census-hosted release, retains the February 2001 report's
+mistyped prior-period year, and records source timezone-label mismatches in the
+March 2004 and January 2019 reports.
+
+Four hash-bound catch-up publications preserve multi-month tables created by
+the 2013 and 2025-2026 federal disruptions. The byte-distinct September and
+October 2013 artifacts remain two aliases for one December 4 publication with
+two reference-period measures. Later catch-ups recover September 2025,
+November 2025, and February 2026 at their actual publication times. Four prior
+comparisons that first appeared in the same catch-up document are explicitly
+noncomparable, and 14 releases retain historical-revision, sample, or
+methodology notices.
+
+The refresh command can fetch missing official bytes or deterministically
+replay a retained corpus:
+
+```console
+uv run python scripts/refresh_us_new_home_sales_archive.py \
+  --as-of 2026-09-15 \
+  --source-directory /absolute/operator/path/new-home-sales-source \
+  --fetch-missing
+```
+
+`replay_census_new_home_sales_archive()` reparses the exact archive index and
+every source publication. It rejects missing, changed, duplicated, newly
+unparseable, differently normalized, or unused evidence.
+`census_new_home_sales_coverage_from_manifest()` derives the complete
+315-publication slice without manufacturing historical event-level consensus.
+
 ## Quantified closure audit
 
 `UnitedStatesProgramCoverageV1` records one exact 2000-present denominator and
@@ -773,8 +824,8 @@ alone is not.
 The package preserves the real G.17, CPI, PPI, Employment Situation, JOLTS,
 Productivity and Costs, GDP, Personal Income and Outlays, and Advance Monthly
 Retail Sales indexes, the Advance Durable Goods index and reviewed OCR corpus,
-the New Residential Construction index, one representative G.17 raw release,
-and all eleven complete raw/normalized
+the New Residential Construction and New Residential Sales indexes, one
+representative G.17 raw release, and all twelve complete raw/normalized
 manifests. The remaining production raw corpora stay external, content
 addressed, and subject to the coverage audit so wheel size does not grow with
 thousands of federal release files.

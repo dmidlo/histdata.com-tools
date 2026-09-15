@@ -731,6 +731,17 @@ class OfficialCensusNrcParserV1(OfficialHtmlParserV1):
     )
 
 
+class OfficialCensusNrsParserV1(OfficialHtmlParserV1):
+    """Parse Census NRS archive pages and release documents."""
+
+    parser_id = "official.census-nrs.v1"
+    supported_formats: tuple[OfficialSourceFormat, ...] = (
+        OfficialSourceFormat.HTML,
+        OfficialSourceFormat.PDF,
+        OfficialSourceFormat.TEXT,
+    )
+
+
 class OfficialReleaseFeedParserV1(_BaseOfficialParser):
     """RSS, Atom, and iCalendar schedule/release feed parser."""
 
@@ -809,6 +820,7 @@ _BUILT_IN_PARSER_TYPES: tuple[type[_BaseOfficialParser], ...] = (
     OfficialCensusMartsParserV1,
     OfficialCensusM3ParserV1,
     OfficialCensusNrcParserV1,
+    OfficialCensusNrsParserV1,
     OfficialReleaseFeedParserV1,
     OfficialPdfParserV1,
     OfficialArchiveParserV1,
@@ -2907,6 +2919,7 @@ __all__ = [
     "OfficialCensusM3ParserV1",
     "OfficialCensusMartsParserV1",
     "OfficialCensusNrcParserV1",
+    "OfficialCensusNrsParserV1",
     "OfficialCsvParserV1",
     "OfficialDataCatalogParserV1",
     "OfficialHtmlParserV1",

@@ -311,6 +311,98 @@
     },
     {
       "schema_version": "histdatacom.official-source-entry.v1",
+      "source_key": "us.census.new-residential-sales",
+      "economy_code": "US",
+      "economy_name": "United States",
+      "institution": "U.S. Census Bureau and U.S. Department of Housing and Urban Development",
+      "jurisdiction": "United States of America",
+      "legal_producer": true,
+      "roles": [
+        "official-archive",
+        "release-calendar"
+      ],
+      "event_families": [
+        "housing"
+      ],
+      "indicator_ids": [
+        "housing-and-construction"
+      ],
+      "formats": [
+        "html",
+        "pdf",
+        "text"
+      ],
+      "capabilities": [
+        "historical-observations",
+        "historical-vintages",
+        "publication-metadata",
+        "schedule-metadata",
+        "revision-metadata",
+        "archive-enumeration"
+      ],
+      "endpoint_uri_template": "https://www.census.gov/construction/nrs/data/releases.html",
+      "allowed_hosts": [
+        "www.census.gov"
+      ],
+      "expected_media_types": [
+        "text/html",
+        "application/pdf",
+        "text/plain"
+      ],
+      "source_series_ids": [
+        "New privately-owned single-family houses sold, United States total"
+      ],
+      "source_table_ids": [
+        "NRS Table 1"
+      ],
+      "source_release_ids": [
+        "New Residential Sales"
+      ],
+      "release_calendar_uri": "https://www.census.gov/economic-indicators/",
+      "archive_uri": "https://www.census.gov/construction/nrs/data/releases.html",
+      "source_timezone": "America/New_York",
+      "availability_time_precision": "exact-minute",
+      "dst_convention": "IANA zone database controls normalization; each source-authored EST, EDT, or ET token is retained and checked against the release date.",
+      "historical_depth": "The qualified corpus covers all 319 monthly reference periods from January 2000 through July 2026 as 315 real publications, with the December 1999 predecessor retained for the first previous-as-known comparison.",
+      "known_breaks": [
+        "The retired historical_data archive route now returns 404; the official successor is /construction/nrs/data/releases.html.",
+        "The archive's December 2018 link targets September 2019 and is corrected only to the surviving official predictable December 2018 URI; a second August 1999 defect is outside the qualified target window.",
+        "September 2013 was first published with October on December 4; both indexed artifact aliases remain one publication event.",
+        "The October and December 2025 and March 2026 reports contain the first estimates for September, November, and February respectively; no separate release time is manufactured for those months.",
+        "The February 2001 release says revised January 2000 although its value and sequence refer to January 2001; the source typo is retained explicitly."
+      ],
+      "revision_behavior": "Each measure retains its initial seasonally adjusted annual-rate level, the source-reported revised immediately preceding month, and the earlier initial value only when that prior month existed before publication; same-publication catch-up comparisons are explicitly non-comparable.",
+      "rate_limit": "No stable archive-specific limit is published; refresh uses sequential bounded requests, retry backoff, and an identifying contact user agent.",
+      "authentication": "none",
+      "credential_env_name": null,
+      "credential_header_name": null,
+      "credential_parameter_name": null,
+      "terms_uri": null,
+      "fallback_source_keys": [
+        "us.census.eits"
+      ],
+      "parser_id": "official.census-nrs.v1",
+      "parser_version": "1",
+      "replay_strategy": "Retain the exact archive page, the December 1999 predecessor, and all 316 target artifacts; bind every byte length and SHA-256 and reparse all 315 source publication times and 319 measure occurrences before accepting replay.",
+      "adapter_owner": "market-context/us",
+      "verification_status": "empirically-verified",
+      "reviewed_on": "2026-09-15",
+      "verification_evidence_uris": [
+        "https://www.census.gov/construction/nrs/data/releases.html",
+        "https://www.census.gov/construction/nrs/index.html",
+        "https://www.census.gov/construction/nrs/notices.html",
+        "https://www.census.gov/construction/nrs/txt/c25_9912.txt",
+        "https://www.census.gov/construction/nrs/pdf/newressales_201812.pdf"
+      ],
+      "redistribution_notes": "The package retains the official archive page and a compact hash-and-value manifest; release text and PDFs remain an external operator-owned corpus with Census and HUD attribution.",
+      "limitations": [
+        "Qualification covers United States total new single-family houses sold at a seasonally adjusted annual rate only; regional, unadjusted, for-sale inventory, months supply, price, financing, and stage-of-construction measures require separate identities.",
+        "Same-publication catch-up values remain available as source evidence but are never presented as ex-ante previous-as-known observations.",
+        "No historical event-level consensus is manufactured from another survey."
+      ]
+    },
+    {
+      "schema_version": "histdatacom.official-source-entry.v1",
       "source_key": "au.rba.statistics",
       "economy_code": "AU",
       "economy_name": "Australia",
