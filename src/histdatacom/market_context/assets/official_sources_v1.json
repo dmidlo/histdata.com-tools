@@ -1,6 +1,6 @@
 {
   "schema_version": "histdatacom.official-source-registry.v1",
-  "reviewed_on": "2026-09-14",
+  "reviewed_on": "2026-09-15",
   "scoped_economies": [
     "AU",
     "CA",
@@ -398,6 +398,98 @@
       "limitations": [
         "Qualification covers United States total new single-family houses sold at a seasonally adjusted annual rate only; regional, unadjusted, for-sale inventory, months supply, price, financing, and stage-of-construction measures require separate identities.",
         "Same-publication catch-up values remain available as source evidence but are never presented as ex-ante previous-as-known observations.",
+        "No historical event-level consensus is manufactured from another survey."
+      ]
+    },
+    {
+      "schema_version": "histdatacom.official-source-entry.v1",
+      "source_key": "us.bea-census.international-trade",
+      "economy_code": "US",
+      "economy_name": "United States",
+      "institution": "U.S. Census Bureau and U.S. Bureau of Economic Analysis",
+      "jurisdiction": "United States of America",
+      "legal_producer": true,
+      "roles": [
+        "official-archive",
+        "release-calendar"
+      ],
+      "event_families": [
+        "trade-external"
+      ],
+      "indicator_ids": [
+        "trade-and-external-accounts"
+      ],
+      "formats": [
+        "html",
+        "pdf"
+      ],
+      "capabilities": [
+        "historical-observations",
+        "historical-vintages",
+        "publication-metadata",
+        "schedule-metadata",
+        "revision-metadata",
+        "archive-enumeration"
+      ],
+      "endpoint_uri_template": "https://www.census.gov/foreign-trade/Press-Release/ft900_index.html",
+      "allowed_hosts": [
+        "www.census.gov"
+      ],
+      "expected_media_types": [
+        "text/html",
+        "application/pdf"
+      ],
+      "source_series_ids": [
+        "Seasonally adjusted U.S. international trade in goods and services deficit"
+      ],
+      "source_table_ids": [
+        "FT-900 Exhibit 1"
+      ],
+      "source_release_ids": [
+        "FT-900 U.S. International Trade in Goods and Services"
+      ],
+      "release_calendar_uri": "https://www.census.gov/economic-indicators/calendar-listview.html",
+      "archive_uri": "https://www.census.gov/foreign-trade/Press-Release/ft900_index.html",
+      "source_timezone": "America/New_York",
+      "availability_time_precision": "exact-minute",
+      "dst_convention": "IANA zone database controls normalization; 61 legacy reports without a zone token use the producer-local America/New_York convention, while every later EST or EDT token is retained, including five source-authored abbreviation errors.",
+      "historical_depth": "The qualified corpus covers all 319 monthly reference periods from January 2000 through July 2026 and retains December 1999 solely for the first previous-as-known comparison.",
+      "known_breaks": [
+        "The retired /foreign-trade/Press-Release/archive.html route returns 404; the official successor is /foreign-trade/Press-Release/ft900_index.html.",
+        "Six index entries from August-November 2001, July 2002, and August 2015 point at neighboring-year or neighboring-month PDFs; each correction is bounded to the live predictable Census URI.",
+        "The February 2019 index label is misspelled Ferbruary and remains explicit in retained evidence.",
+        "Three legacy PDFs have defective text or encryption layers, and the July 2015 text layer omits its visible release date; reviewed rows are accepted only for four exact SHA-256 identities.",
+        "Annual FT-900 revision packages are released concurrently with April monthly reports; the prior monthly actual and concurrently revised March value remain distinct.",
+        "Federal funding lapses altered the 2013, 2018-2019, and 2025-2026 release sequences; source-authored release dates are retained without manufacturing scheduled dates."
+      ],
+      "revision_behavior": "Each occurrence retains the initially published seasonally adjusted goods-and-services deficit, the report's revised immediately preceding deficit, and that preceding month's earlier initial value; annual revisions never rewrite vintage history.",
+      "rate_limit": "No stable archive-specific limit is published; refresh uses sequential requests, bounded retries, backoff on HTTP 429, and an identifying contact user agent.",
+      "authentication": "none",
+      "credential_env_name": null,
+      "credential_header_name": null,
+      "credential_parameter_name": null,
+      "terms_uri": null,
+      "fallback_source_keys": [
+        "us.bea.api",
+        "us.census.eits"
+      ],
+      "parser_id": "official.census-ft900.v1",
+      "parser_version": "1",
+      "replay_strategy": "Retain the exact historical index, December 1999 predecessor, and all 319 target PDFs; bind every byte length and SHA-256 and reparse every release timestamp, initial deficit, revised-prior deficit, and prior-publication lineage before accepting replay.",
+      "adapter_owner": "market-context/us",
+      "verification_status": "empirically-verified",
+      "reviewed_on": "2026-09-15",
+      "verification_evidence_uris": [
+        "https://www.census.gov/foreign-trade/Press-Release/ft900_index.html",
+        "https://www.census.gov/foreign-trade/schedule.html",
+        "https://www.census.gov/foreign-trade/Press-Release/ft900/ft900_9912.pdf",
+        "https://www.census.gov/foreign-trade/Press-Release/ft900/ft900_0204.pdf",
+        "https://www.census.gov/foreign-trade/Press-Release/ft900/final_2025.pdf"
+      ],
+      "redistribution_notes": "The package retains the official index and a compact hash-and-value manifest; the 320 FT-900 PDFs remain an external operator-owned corpus with joint Census and BEA attribution.",
+      "limitations": [
+        "Qualification covers the headline seasonally adjusted combined goods-and-services deficit only; exports, imports, goods-only, services-only, real-dollar, country, commodity, and unadjusted measures require separate identities.",
+        "A deficit is stored as its source-published positive magnitude; consumers needing a signed balance must negate it explicitly.",
         "No historical event-level consensus is manufactured from another survey."
       ]
     },

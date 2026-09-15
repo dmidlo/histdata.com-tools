@@ -43,6 +43,9 @@ The New Residential Construction entry separately binds the Census/HUD
 housing-release archive, including its legacy text and unified PDF eras.
 The New Residential Sales entry binds the successor Census release archive
 explicitly because the older historical-data route is retired.
+The joint Census/BEA International Trade entry binds the FT-900 monthly archive
+and keeps its retired route, incorrect links, and annual-revision behavior
+explicit.
 The reusable HTML-release adapter preserves such text as one bounded UTF-8
 record, including the exact line count and raw-snapshot lineage.
 
@@ -664,6 +667,55 @@ differently normalized, or unused evidence.
 manufacturing slice, counting the official unavailable report explicitly and
 never manufacturing historical event-level consensus.
 
+## Complete International Trade archive qualification
+
+`histdatacom.market_context.us_international_trade_archive` qualifies the
+joint Census/BEA FT-900 U.S. International Trade in Goods and Services archive
+from January 2000 through July 2026. The dedicated
+`us.bea-census.international-trade` source binds the live monthly archive after
+the retired archive route began returning 404; it does not substitute a
+current revised series for contemporaneous release values.
+
+The packaged `us_international_trade_archive_v1.json` manifest is observed as
+of September 15, 2026. It records 319 monthly publications, 319
+previous-as-known comparisons, and 296 changed prior estimates from 321
+distinct raw artifacts containing 349,754,556 source bytes. The inventory is
+the retained archive index, the December 1999 predecessor, and all 319 target
+PDFs. Every publication time is recovered to the exact minute at 08:30
+Eastern.
+
+Standard PDF extraction qualifies 315 publications. Four difficult PDFs are
+accepted only under reviewed SHA-256-bound rows: May and August 2000, April
+2002, and July 2015. Six index links that point to a neighboring month or year
+are corrected only to the live predictable Census-hosted PDF. The source's
+`Ferbruary 2019` index label remains retained evidence.
+
+Sixty-one legacy reports omit a zone token and therefore use the declared
+producer-local `America/New_York` convention. All 258 explicit EST/EDT tokens
+are preserved, including five source-authored abbreviations inconsistent with
+the release date. Twenty-seven April reports carry concurrent annual
+revisions, and eight reports retain source-authored federal-disruption
+notices. The normalized headline is the positive deficit magnitude as
+published; a consumer that models a signed trade balance must negate it
+explicitly.
+
+The refresh command can fetch missing official bytes or deterministically
+replay a retained corpus:
+
+```console
+uv run python scripts/refresh_us_international_trade_archive.py \
+  --as-of 2026-09-15 \
+  --source-directory /absolute/operator/path/international-trade-source \
+  --fetch-missing
+```
+
+`replay_census_international_trade_archive()` reparses the exact archive index,
+predecessor, and every monthly publication. It rejects missing, changed,
+duplicated, newly unparseable, differently normalized, implausibly delayed, or
+unused evidence. `census_international_trade_coverage_from_manifest()` derives
+the complete 319-publication trade slice without manufacturing historical
+event-level consensus.
+
 ## Complete New Residential Construction archive qualification
 
 `histdatacom.market_context.us_housing_construction_archive` qualifies the
@@ -824,8 +876,8 @@ alone is not.
 The package preserves the real G.17, CPI, PPI, Employment Situation, JOLTS,
 Productivity and Costs, GDP, Personal Income and Outlays, and Advance Monthly
 Retail Sales indexes, the Advance Durable Goods index and reviewed OCR corpus,
-the New Residential Construction and New Residential Sales indexes, one
-representative G.17 raw release, and all twelve complete raw/normalized
-manifests. The remaining production raw corpora stay external, content
-addressed, and subject to the coverage audit so wheel size does not grow with
-thousands of federal release files.
+the International Trade, New Residential Construction, and New Residential
+Sales indexes, one representative G.17 raw release, and all thirteen complete
+raw/normalized manifests. The remaining production raw corpora stay external,
+content addressed, and subject to the coverage audit so wheel size does not
+grow with thousands of federal release files.

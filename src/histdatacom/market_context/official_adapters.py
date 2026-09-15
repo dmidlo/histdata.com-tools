@@ -742,6 +742,16 @@ class OfficialCensusNrsParserV1(OfficialHtmlParserV1):
     )
 
 
+class OfficialCensusFt900ParserV1(OfficialHtmlParserV1):
+    """Parse Census/BEA FT-900 archive pages and monthly PDFs."""
+
+    parser_id = "official.census-ft900.v1"
+    supported_formats: tuple[OfficialSourceFormat, ...] = (
+        OfficialSourceFormat.HTML,
+        OfficialSourceFormat.PDF,
+    )
+
+
 class OfficialReleaseFeedParserV1(_BaseOfficialParser):
     """RSS, Atom, and iCalendar schedule/release feed parser."""
 
@@ -821,6 +831,7 @@ _BUILT_IN_PARSER_TYPES: tuple[type[_BaseOfficialParser], ...] = (
     OfficialCensusM3ParserV1,
     OfficialCensusNrcParserV1,
     OfficialCensusNrsParserV1,
+    OfficialCensusFt900ParserV1,
     OfficialReleaseFeedParserV1,
     OfficialPdfParserV1,
     OfficialArchiveParserV1,
@@ -2916,6 +2927,7 @@ __all__ = [
     "OfficialAdapterRecordKind",
     "OfficialAdapterRecordV1",
     "OfficialArchiveParserV1",
+    "OfficialCensusFt900ParserV1",
     "OfficialCensusM3ParserV1",
     "OfficialCensusMartsParserV1",
     "OfficialCensusNrcParserV1",

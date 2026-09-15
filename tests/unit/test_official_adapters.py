@@ -15,6 +15,7 @@ from histdatacom.market_context.official_adapters import (
     OfficialAdapterRecordKind,
     OfficialAdapterRecordV1,
     OfficialArchiveParserV1,
+    OfficialCensusFt900ParserV1,
     OfficialCensusM3ParserV1,
     OfficialCensusMartsParserV1,
     OfficialCensusNrcParserV1,
@@ -148,7 +149,11 @@ def test_built_in_parsers_cover_every_registered_source_and_format(
     registry: OfficialSourceRegistryV1,
 ) -> None:
     parsers = built_in_official_source_parsers()
-    assert len(parsers) == 15
+    assert len(parsers) == 16
+    assert isinstance(
+        parsers["official.census-ft900.v1"],
+        OfficialCensusFt900ParserV1,
+    )
     assert isinstance(
         parsers["official.census-m3.v1"],
         OfficialCensusM3ParserV1,
