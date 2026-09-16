@@ -621,6 +621,10 @@ from histdatacom.market_context.us_backfill import (
     packaged_federal_reserve_g17_2002_path,
     parse_federal_reserve_g17_release,
 )
+from histdatacom.market_context.us_backfill_closure import (
+    load_packaged_united_states_backfill_audit,
+    load_packaged_united_states_backfill_coverages,
+)
 from histdatacom.market_context.us_cpi_archive import (
     BLS_CPI_ARCHIVE_ENTRY_SCHEMA_VERSION,
     BLS_CPI_ARCHIVE_MANIFEST_SCHEMA_VERSION,
@@ -2496,6 +2500,8 @@ __all__ = [
     "load_packaged_treasury_mts_archive_manifest",
     "load_packaged_treasury_mts_catalog",
     "load_packaged_treasury_mts_reviewed_extracts",
+    "load_packaged_united_states_backfill_audit",
+    "load_packaged_united_states_backfill_coverages",
     "market_context_benchmark_event_state",
     "market_context_calendar_state",
     "market_context_information_inputs",

@@ -1259,6 +1259,23 @@ Coverage objects and audits are content addressed and round-trip through
 canonical JSON. A passing audit is the closure receipt; the program inventory
 alone is not.
 
+`load_packaged_united_states_backfill_coverages()` loads all 20 packaged
+archive manifests, expands the FOMC manifest into its decision, minutes, and
+SEP programs, and returns the 22 program slices on one conservative window.
+The common end is the earliest packaged manifest evidence date, September 14,
+2026, so a later source-specific capture never extends the aggregate claim.
+Profile-level `no-event-forecast` gaps are applied explicitly rather than
+inferred from a zero forecast count.
+
+`load_packaged_united_states_backfill_audit()` recomputes the aggregate receipt
+from those slices. The packaged receipt measures 7,981 expected schedules,
+7,979 initial actuals plus two bounded official-unavailable values, 7,584
+previous-as-known values, 7,971 revision-history occurrences, 7,274
+exact-minute occurrences, and 823 native forecast vintages. All six closure
+checks pass with no incomplete programs and no blocking gaps. Its deterministic
+identity is
+`us-backfill-audit:sha256:558692742e3d977411a98acea1439533b469e1478aa543c7d439064611107930`.
+
 ## Primary evidence routes
 
 - [BLS archived releases](https://www.bls.gov/bls/news-release/) retain
