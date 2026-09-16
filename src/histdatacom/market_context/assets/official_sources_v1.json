@@ -1665,14 +1665,18 @@
         "Monetary policy decisions",
         "Monetary Policy Decisions",
         "Account of the monetary policy meeting",
-        "FOEDB type 20: Meeting of <source-authored dates>"
+        "FOEDB type 20: Meeting of <source-authored dates>",
+        "Introductory statement with Q&A",
+        "Introductory statement to the press conference (with Q&A)",
+        "Monetary policy statement (with Q&A)",
+        "Transcript of the Press Briefing"
       ],
       "release_calendar_uri": "https://www.ecb.europa.eu/press/calendars/mgcgc/html/index.en.html",
       "archive_uri": "https://www.ecb.europa.eu/foedb/dbs/foedb/publications.en/versions.json",
       "source_timezone": "Europe/Berlin",
       "availability_time_precision": "inferred-bounded",
       "dst_convention": "IANA Europe/Berlin normalizes the Frankfurt publication clock; retain the FOEDB epoch and its offset-bearing local rendering.",
-      "historical_depth": "The qualified FOEDB occurrence corpus covers all 299 monetary-policy decision publications from 5 January 2000 through 10 September 2026, retains the 15 December 1999 predecessor for the first previous-as-known rate set, and covers all 96 monetary-policy accounts published from 19 February 2015 through 27 August 2026.",
+      "historical_depth": "The qualified FOEDB occurrence corpus covers all 299 monetary-policy decision publications from 5 January 2000 through 10 September 2026, retains the 15 December 1999 predecessor for the first previous-as-known rate set, covers all 96 monetary-policy accounts published from 19 February 2015 through 27 August 2026, and retains all 270 decision-linked monetary-policy statements from 5 January 2000 through 10 September 2026.",
       "known_breaks": [
         "FOEDB records through 7 September 2017 carry date-only placeholder epochs; records from 26 October 2017 carry the exact publication minute.",
         "The 8 December 2016 decision alone uses the source-authored title 'Monetary Policy Decisions'; all other selected type-92 records use 'Monetary policy decisions'.",
@@ -1680,9 +1684,11 @@
         "The source changed its three-rate presentation from main-refinancing, marginal-lending, deposit order to deposit, main-refinancing, marginal-lending order on 12 September 2024.",
         "The 17 September 2001 and 8 October 2008 decisions are emergency actions outside the ordinary Governing Council sequence.",
         "The first 19 account records carry date-only placeholder epochs; the 77 later records retain exact 13:30 publication minutes except for the separately published 25 June 2025 strategy account at 13:25.",
-        "Account titles use three source eras: a generic account title, a long-form Governing Council title, and meeting-date titles from April 2020 onward."
+        "Account titles use three source eras: a generic account title, a long-form Governing Council title, and meeting-date titles from April 2020 onward.",
+        "The statement archive has six qualified FOEDB title spellings and nine page-heading forms; title and decision-date qualification excludes unrelated type-54 press events stored under the same URL family.",
+        "The first 196 statements retain date-only placeholder epochs; 74 later statements preserve exact publication minutes, moving from 14:45 to 15:00 Europe/Berlin on 21 July 2022."
       ],
-      "revision_behavior": "Each occurrence retains the exact decision or account page; decisions reconstruct their three-rate setting against the immediately preceding official decision, while accounts preserve meeting dates and a link to the matching decision where one exists. Immutable refreshes never overwrite earlier byte evidence.",
+      "revision_behavior": "Each occurrence retains the exact decision, account, or statement page; decisions reconstruct their three-rate setting against the immediately preceding official decision, accounts preserve meeting dates and a link to the matching decision where one exists, and statements preserve one-to-one decision-day communication links without inventing absences. Immutable refreshes never overwrite earlier byte evidence.",
       "rate_limit": "No stable FOEDB-specific limit is published; refresh uses bounded sequential metadata discovery, at most 512 chunks, bounded report requests, retry backoff, and an identifying contact user agent.",
       "authentication": "none",
       "credential_env_name": null,
@@ -1694,7 +1700,7 @@
       ],
       "parser_id": "official.ecb-monetary-policy.v1",
       "parser_version": "1",
-      "replay_strategy": "Retain exact versions.json, metadata.json, all versioned FOEDB data chunks, the predecessor page, every selected decision page, and every selected account page; bind byte lengths and SHA-256 digests, recompute the ordered three-rate lineage, and reconcile each ordinary account to its source-authored meeting date and qualified decision before accepting replay.",
+      "replay_strategy": "Retain exact versions.json, metadata.json, all versioned FOEDB data chunks, the predecessor page, every selected decision page, every selected account page, and every selected statement page; bind byte lengths and SHA-256 digests, recompute the ordered three-rate lineage, reconcile each ordinary account to its source-authored meeting date, and require every retained statement to map to exactly one qualified decision before accepting replay.",
       "adapter_owner": "market-context/ea",
       "verification_status": "empirically-verified",
       "reviewed_on": "2026-09-16",
@@ -1702,17 +1708,21 @@
         "https://www.ecb.europa.eu/foedb/dbs/foedb/publications.en/versions.json",
         "https://www.ecb.europa.eu/press/govcdec/mopo/html/index.en.html",
         "https://www.ecb.europa.eu/press/accounts/html/index.en.html",
+        "https://www.ecb.europa.eu/press/press_conference/monetary-policy-statement/html/index.en.html",
         "https://www.ecb.europa.eu/press/pr/date/1999/html/pr991215.en.html",
         "https://www.ecb.europa.eu/press/pr/date/2016/html/pr161208.en.html",
         "https://www.ecb.europa.eu/press/accounts/2015/html/mg150219.en.html",
         "https://www.ecb.europa.eu/press/accounts/2026/html/ecb.mg260827~f06c21fd54.en.html",
+        "https://www.ecb.europa.eu/press/press_conference/monetary-policy-statement/2000/html/is000105.en.html",
+        "https://www.ecb.europa.eu/press/press_conference/monetary-policy-statement/2026/html/ecb.is260910~6a45359cfc.en.html",
         "https://www.ecb.europa.eu/press/pr/date/2026/html/ecb.mp260910~314e508016.en.html"
       ],
-      "redistribution_notes": "The package retains compact hash manifests; the versioned FOEDB database, decision pages, and account pages remain an external operator-owned corpus with ECB attribution and disclaimer terms.",
+      "redistribution_notes": "The package retains compact hash manifests; the versioned FOEDB database, decision pages, account pages, and statement pages remain an external operator-owned corpus with ECB attribution and disclaimer terms.",
       "limitations": [
         "Qualification covers the three key ECB interest rates only; asset purchases, refinancing-operation terms, liquidity measures, and forward guidance remain source text requiring separate typed identities.",
         "FOEDB does not provide a historical event-consensus rate set, so no market consensus or numeric surprise is manufactured.",
         "Accounts are documentary releases published after their meetings; they are not relabelled as same-day decisions or numeric consensus events.",
+        "Statements are decision-day communication artifacts; they are linked to decisions but are not relabelled as separate rate decisions or numeric consensus events.",
         "Ordinary-sequence classification does not replace contemporaneous calendar evidence for a historical scheduled clock."
       ]
     },

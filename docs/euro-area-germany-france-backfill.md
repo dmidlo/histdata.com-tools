@@ -26,7 +26,7 @@ guess or a third-party calendar. Replay retains and verifies:
 
 The retained corpus contains 42,121,110 bytes and 383 distinct SHA-256
 digests. Its compact packaged receipt is
-`ecb-archive-manifest:sha256:982537c514abd658ea04983296094cde827f70a1c178115d6c7b76e6a39c90e3`.
+`ecb-archive-manifest:sha256:4f24e5843b0f705fd1a717a52c11f0a1829d837d3771077d4430e4a1c162e87f`.
 
 Each decision preserves a native `RATE_SET` with separate components for the
 main refinancing operations, marginal lending facility, and deposit facility.
@@ -70,7 +70,7 @@ qualifies all 96 FOEDB type-20 accounts published from 19 February 2015 through
 27 August 2026. The selection retains 83 versioned FOEDB database artifacts
 and all 96 official HTML pages: 179 artifacts, 26,253,142 bytes, and 179 unique
 SHA-256 digests. Its packaged receipt is
-`ecb-account-archive-manifest:sha256:56a480037af78469fcef45c60b9ff1dcb2c8625d655ad0d53cb18fbdfa401356`.
+`ecb-account-archive-manifest:sha256:c43b486b6d38f25a36033e8c936819b3770959163d0a96c66ea87124fcb6c6e8`.
 
 Replay parses the source-authored meeting dates rather than inferring them from
 publication dates. It preserves three observed title eras (35 generic titles,
@@ -94,14 +94,46 @@ uv run python scripts/refresh_ecb_monetary_policy_accounts_archive.py \
   --source-directory /path/to/retained-ecb-corpus
 ```
 
+## Complete ECB monetary-policy statement archive
+
+`histdatacom.market_context.ecb_monetary_policy_statements_archive` qualifies
+all 270 decision-linked monetary-policy statements from 5 January 2000 through
+10 September 2026. The exact selection combines FOEDB type `54`, six observed
+source-title spellings, the monetary-policy-statement URL family, and an
+independently qualified decision date. This excludes unrelated press events
+that FOEDB stores under the same broad type and historical path family.
+
+Replay retains the 83 versioned FOEDB artifacts and all 270 official statement
+pages: 353 artifacts, 48,734,109 bytes, and 353 unique SHA-256 digests. Its
+packaged receipt is
+`ecb-statement-archive-manifest:sha256:b9eb22f74ce5fc54a5ca2be45261e3e06a07a8db87adf75593fd48a978bdd372`.
+Every page contains exactly one of nine observed historical heading forms and
+every retained statement links to exactly one qualified decision occurrence.
+
+The first 196 statement records retain date-only placeholder epochs. The 74
+later records preserve an exact FOEDB minute: 40 at 14:45 and 34 at 15:00
+Europe/Berlin, with the clock change beginning on 21 July 2022. Twenty-nine of
+the 299 qualified decision dates have no statement. These are preserved as
+explicit absences, chiefly early twice-monthly decisions without a press
+conference plus the 17 September 2001 and 8 October 2008 emergency actions.
+No replacement statement or clock is fabricated.
+
+An operator with the retained corpus can reproduce the statement receipt with:
+
+```console
+uv run python scripts/refresh_ecb_monetary_policy_statements_archive.py \
+  --as-of 2026-09-15 \
+  --source-directory /path/to/retained-ecb-corpus
+```
+
 ## Remaining issue scope
 
-These ECB decision and account archives complete two monetary-policy artifact
-families, not issue #539 as a whole. Eurostat aggregate releases and the ECB
-statement/projection families, Destatis and Bundesbank programs for Germany,
-and INSEE and Banque de France programs for France still require their own
-empirical archive qualifications before the regional calendar can produce a
-closure receipt.
+These ECB decision, account, and statement archives complete three
+monetary-policy artifact families, not issue #539 as a whole. Eurostat
+aggregate releases and the ECB projection/statistical families, Destatis and
+Bundesbank programs for Germany, and INSEE and Banque de France programs for
+France still require their own empirical archive qualifications before the
+regional calendar can produce a closure receipt.
 
 Official entrypoints:
 
@@ -109,4 +141,5 @@ Official entrypoints:
 - [ECB public FOEDB version pointer](https://www.ecb.europa.eu/foedb/dbs/foedb/publications.en/versions.json)
 - [Eurostat release calendar](https://ec.europa.eu/eurostat/news/release-calendar)
 - [ECB monetary-policy accounts](https://www.ecb.europa.eu/press/accounts/html/index.en.html)
+- [ECB monetary-policy statements](https://www.ecb.europa.eu/press/press_conference/monetary-policy-statement/html/index.en.html)
 - [ECB staff projections](https://www.ecb.europa.eu/press/projections/html/all-releases.en.html)

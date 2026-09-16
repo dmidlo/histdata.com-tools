@@ -75,8 +75,12 @@ def test_ecb_archive_source_has_a_dedicated_empirical_parser() -> None:
     assert source.source_release_ids == (
         "Account of the monetary policy meeting",
         "FOEDB type 20: Meeting of <source-authored dates>",
+        "Introductory statement to the press conference (with Q&A)",
+        "Introductory statement with Q&A",
         "Monetary Policy Decisions",
         "Monetary policy decisions",
+        "Monetary policy statement (with Q&A)",
+        "Transcript of the Press Briefing",
     )
     assert source.formats == (
         OfficialSourceFormat.JSON,
@@ -107,7 +111,7 @@ def test_packaged_ecb_archive_quantifies_the_complete_decision_series() -> None:
     assert manifest.emergency_count == 2
     assert manifest.manifest_id == (
         "ecb-archive-manifest:sha256:"
-        "982537c514abd658ea04983296094cde827f70a1c178115d6c7b76e6a39c90e3"
+        "4f24e5843b0f705fd1a717a52c11f0a1829d837d3771077d4430e4a1c162e87f"
     )
 
 

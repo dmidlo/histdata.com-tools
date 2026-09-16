@@ -113,6 +113,7 @@ class EcbArtifactRole(str, Enum):
     FOEDB_CHUNK = "foedb-chunk"
     DECISION_HTML = "decision-html"
     ACCOUNT_HTML = "account-html"
+    STATEMENT_HTML = "statement-html"
 
 
 def _required_text(value: object, name: str) -> str:
@@ -230,6 +231,7 @@ class EcbArchiveArtifactV1:
         if role in {
             EcbArtifactRole.DECISION_HTML,
             EcbArtifactRole.ACCOUNT_HTML,
+            EcbArtifactRole.STATEMENT_HTML,
         }:
             if source_format is not OfficialSourceFormat.HTML:
                 raise ValueError("ECB publication artifact must be HTML")
@@ -1050,7 +1052,12 @@ def _artifact(
         raise ValueError("ECB snapshot changes source or parser identity")
     expected_format = (
         OfficialSourceFormat.HTML
-        if role in {EcbArtifactRole.DECISION_HTML, EcbArtifactRole.ACCOUNT_HTML}
+        if role
+        in {
+            EcbArtifactRole.DECISION_HTML,
+            EcbArtifactRole.ACCOUNT_HTML,
+            EcbArtifactRole.STATEMENT_HTML,
+        }
         else OfficialSourceFormat.JSON
     )
     if snapshot.request.source_format is not expected_format:
