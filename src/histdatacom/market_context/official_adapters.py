@@ -808,12 +808,13 @@ class OfficialFederalReserveFomcParserV1(OfficialHtmlParserV1):
 
 
 class OfficialEcbMonetaryPolicyParserV1(OfficialHtmlParserV1):
-    """Bind ECB FOEDB JSON plus decision and account HTML exactly."""
+    """Bind ECB FOEDB JSON plus policy HTML/PDF artifacts exactly."""
 
     parser_id = "official.ecb-monetary-policy.v1"
     supported_formats: tuple[OfficialSourceFormat, ...] = (
         OfficialSourceFormat.JSON,
         OfficialSourceFormat.HTML,
+        OfficialSourceFormat.PDF,
     )
 
     def parse(
@@ -821,6 +822,8 @@ class OfficialEcbMonetaryPolicyParserV1(OfficialHtmlParserV1):
     ) -> Sequence[Mapping[str, JSONValue]]:
         if snapshot.request.source_format is OfficialSourceFormat.JSON:
             return _parse_json(self, snapshot, max_events=max_events)
+        if snapshot.request.source_format is OfficialSourceFormat.PDF:
+            return _parse_pdf(self, snapshot, max_events=max_events)
         return super().parse(snapshot, max_events=max_events)
 
 

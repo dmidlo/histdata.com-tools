@@ -26,7 +26,7 @@ guess or a third-party calendar. Replay retains and verifies:
 
 The retained corpus contains 42,121,110 bytes and 383 distinct SHA-256
 digests. Its compact packaged receipt is
-`ecb-archive-manifest:sha256:4f24e5843b0f705fd1a717a52c11f0a1829d837d3771077d4430e4a1c162e87f`.
+`ecb-archive-manifest:sha256:58f4b271f167b96e8c463c0f69363ec910ff75d2ab6fca624d2b092bcd95e667`.
 
 Each decision preserves a native `RATE_SET` with separate components for the
 main refinancing operations, marginal lending facility, and deposit facility.
@@ -70,7 +70,7 @@ qualifies all 96 FOEDB type-20 accounts published from 19 February 2015 through
 27 August 2026. The selection retains 83 versioned FOEDB database artifacts
 and all 96 official HTML pages: 179 artifacts, 26,253,142 bytes, and 179 unique
 SHA-256 digests. Its packaged receipt is
-`ecb-account-archive-manifest:sha256:c43b486b6d38f25a36033e8c936819b3770959163d0a96c66ea87124fcb6c6e8`.
+`ecb-account-archive-manifest:sha256:885640d1922d8784cb67733721e3ee7df11c285cf7832e2d6fe2637454684b77`.
 
 Replay parses the source-authored meeting dates rather than inferring them from
 publication dates. It preserves three observed title eras (35 generic titles,
@@ -106,7 +106,7 @@ that FOEDB stores under the same broad type and historical path family.
 Replay retains the 83 versioned FOEDB artifacts and all 270 official statement
 pages: 353 artifacts, 48,734,109 bytes, and 353 unique SHA-256 digests. Its
 packaged receipt is
-`ecb-statement-archive-manifest:sha256:b9eb22f74ce5fc54a5ca2be45261e3e06a07a8db87adf75593fd48a978bdd372`.
+`ecb-statement-archive-manifest:sha256:739cfb3d5f037282d5908d5c225523fb7472c260b8d431489af6d25615d951c0`.
 Every page contains exactly one of nine observed historical heading forms and
 every retained statement links to exactly one qualified decision occurrence.
 
@@ -126,14 +126,58 @@ uv run python scripts/refresh_ecb_monetary_policy_statements_archive.py \
   --source-directory /path/to/retained-ecb-corpus
 ```
 
+## Complete ECB staff-projection release archive
+
+`histdatacom.market_context.ecb_staff_projections_archive` qualifies all 90
+main ECB and Eurosystem staff macroeconomic projection rounds from 3 June 2004
+through 10 September 2026. FOEDB type `95` and the independent official
+all-releases page must reconcile one-to-one by round, publication date, title,
+producer, and canonical main-document URI. The official standalone archive
+does not begin until June 2004; the implementation does not manufacture
+projection rounds for 2000 through May 2004 from unrelated publications.
+
+Replay retains the 83 versioned FOEDB artifacts, the all-releases index, 90
+official PDFs, and the 31 available HTML counterparts: 205 artifacts,
+43,393,009 bytes, and 205 distinct SHA-256 digests. Its packaged receipt is
+`ecb-projection-archive-manifest:sha256:7f0ee524f559da477b77170d632b23e5e0ba3220884d5518431ee0fb6a5f405a`.
+The inventory contains 45 ECB staff rounds in March/September and 45
+Eurosystem staff rounds in June/December. It also preserves the September 2006
+round's early 31 August publication date instead of forcing the release date
+to equal the round month.
+
+Each round is explicitly scoped as an annual euro-area central-bank
+projection with core real-GDP-growth and HICP-inflation targets. The retained
+source text supplies a horizon one, two, or three years beyond the release
+year: 29, 51, and 10 rounds respectively. These are period projections, not
+monthly or quarterly event-consensus estimates, and they cannot populate a
+calendar-style consensus field. The compact receipt intentionally qualifies
+release identity, scope, and horizon without transcribing every projected
+value from the retained reports; value-level forecast mapping remains part of
+the separately governed forecast work.
+
+The first 54 projection records preserve date-only placeholder epochs. The 36
+later records retain their exact FOEDB minute: 19 at 15:30 and 17 at 15:45
+Europe/Berlin, with the observed clock change in September 2022. The first 59
+rounds are PDF-only; the 31 rounds from March 2019 onward retain both HTML and
+PDF evidence.
+
+An operator with the retained corpus can reproduce the projection receipt
+with:
+
+```console
+uv run python scripts/refresh_ecb_staff_projections_archive.py \
+  --as-of 2026-09-15 \
+  --source-directory /path/to/retained-ecb-corpus
+```
+
 ## Remaining issue scope
 
-These ECB decision, account, and statement archives complete three
-monetary-policy artifact families, not issue #539 as a whole. Eurostat
-aggregate releases and the ECB projection/statistical families, Destatis and
-Bundesbank programs for Germany, and INSEE and Banque de France programs for
-France still require their own empirical archive qualifications before the
-regional calendar can produce a closure receipt.
+These ECB decision, account, statement, and staff-projection archives complete
+the four ECB monetary-policy artifact families, not issue #539 as a whole.
+Eurostat aggregate releases and the remaining ECB statistical families,
+Destatis and Bundesbank programs for Germany, and INSEE and Banque de France
+programs for France still require their own empirical archive qualifications
+before the regional calendar can produce a closure receipt.
 
 Official entrypoints:
 

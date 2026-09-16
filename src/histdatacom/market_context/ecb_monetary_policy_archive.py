@@ -114,6 +114,9 @@ class EcbArtifactRole(str, Enum):
     DECISION_HTML = "decision-html"
     ACCOUNT_HTML = "account-html"
     STATEMENT_HTML = "statement-html"
+    PROJECTION_INDEX_HTML = "projection-index-html"
+    PROJECTION_HTML = "projection-html"
+    PROJECTION_PDF = "projection-pdf"
 
 
 def _required_text(value: object, name: str) -> str:
@@ -232,9 +235,14 @@ class EcbArchiveArtifactV1:
             EcbArtifactRole.DECISION_HTML,
             EcbArtifactRole.ACCOUNT_HTML,
             EcbArtifactRole.STATEMENT_HTML,
+            EcbArtifactRole.PROJECTION_INDEX_HTML,
+            EcbArtifactRole.PROJECTION_HTML,
         }:
             if source_format is not OfficialSourceFormat.HTML:
                 raise ValueError("ECB publication artifact must be HTML")
+        elif role is EcbArtifactRole.PROJECTION_PDF:
+            if source_format is not OfficialSourceFormat.PDF:
+                raise ValueError("ECB projection artifact must be PDF")
         elif source_format is not OfficialSourceFormat.JSON:
             raise ValueError("ECB FOEDB artifact must be JSON")
         object.__setattr__(self, "role", role)
@@ -1057,8 +1065,14 @@ def _artifact(
             EcbArtifactRole.DECISION_HTML,
             EcbArtifactRole.ACCOUNT_HTML,
             EcbArtifactRole.STATEMENT_HTML,
+            EcbArtifactRole.PROJECTION_INDEX_HTML,
+            EcbArtifactRole.PROJECTION_HTML,
         }
-        else OfficialSourceFormat.JSON
+        else (
+            OfficialSourceFormat.PDF
+            if role is EcbArtifactRole.PROJECTION_PDF
+            else OfficialSourceFormat.JSON
+        )
     )
     if snapshot.request.source_format is not expected_format:
         raise ValueError("ECB snapshot format differs from artifact role")

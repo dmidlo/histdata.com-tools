@@ -74,6 +74,8 @@ def test_ecb_archive_source_has_a_dedicated_empirical_parser() -> None:
     assert source.verification_status.value == "empirically-verified"
     assert source.source_release_ids == (
         "Account of the monetary policy meeting",
+        "ECB staff macroeconomic projections for the euro area",
+        "Eurosystem staff macroeconomic projections for the euro area",
         "FOEDB type 20: Meeting of <source-authored dates>",
         "Introductory statement to the press conference (with Q&A)",
         "Introductory statement with Q&A",
@@ -85,6 +87,7 @@ def test_ecb_archive_source_has_a_dedicated_empirical_parser() -> None:
     assert source.formats == (
         OfficialSourceFormat.JSON,
         OfficialSourceFormat.HTML,
+        OfficialSourceFormat.PDF,
     )
     assert isinstance(
         resolve_official_source_parser(source),
@@ -111,7 +114,7 @@ def test_packaged_ecb_archive_quantifies_the_complete_decision_series() -> None:
     assert manifest.emergency_count == 2
     assert manifest.manifest_id == (
         "ecb-archive-manifest:sha256:"
-        "4f24e5843b0f705fd1a717a52c11f0a1829d837d3771077d4430e4a1c162e87f"
+        "58f4b271f167b96e8c463c0f69363ec910ff75d2ab6fca624d2b092bcd95e667"
     )
 
 
