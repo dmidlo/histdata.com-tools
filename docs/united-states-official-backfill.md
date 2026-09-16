@@ -1274,7 +1274,7 @@ previous-as-known values, 7,971 revision-history occurrences, 7,274
 exact-minute occurrences, and 823 native forecast vintages. All six closure
 checks pass with no incomplete programs and no blocking gaps. Its deterministic
 identity is
-`us-backfill-audit:sha256:558692742e3d977411a98acea1439533b469e1478aa543c7d439064611107930`.
+`us-backfill-audit:sha256:e4a0cefbd78c2d336f3f1a51c31af22ae2ca81c18cb00b929c3db5f870a51f6a`.
 
 ## Primary evidence routes
 

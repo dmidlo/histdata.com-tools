@@ -14,7 +14,7 @@ capability until its first-party fixture qualification passes.
 ## Reviewed scope and authority rule
 
 The packaged registry is
-`histdatacom/market_context/assets/official_sources_v1.json`. Its 69 entries
+`histdatacom/market_context/assets/official_sources_v1.json`. Its 70 entries
 cover every cell in the 21-economy by 12-event-family matrix. Exactly one entry
 with role `primary-producer` must exist in every cell. Registry construction
 fails on a missing or ambiguous cell.
@@ -80,6 +80,14 @@ were reviewed. It does not prove complete indicator coverage, exact historical
 depth, historical publication times, or original vintages. The registry marks
 those series-dependent obligations explicitly so an economy backfill cannot
 close on an institution name alone.
+
+The dedicated ECB monetary-policy archive entry is `empirically-verified` for
+the three key interest rates. Its versioned FOEDB database, 81 data chunks,
+15 December 1999 predecessor, and all 298 decision pages from 2000 through
+10 September 2026 are content-addressed and replayable. The qualification
+keeps 226 legacy records date-only, retains 72 exact publication minutes, and
+parses both the historical main-refinancing-first and current deposit-first
+rate order. See the [euro-area, Germany, and France backfill](euro-area-germany-france-backfill.md).
 
 The Federal Reserve G.17 industrial-production entry is the first route raised
 to `empirically-verified`: its official release index and all 319 enumerated

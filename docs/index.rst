@@ -33,6 +33,7 @@ Data and reconstruction foundations
    national-accounts-semantics
    activity-indicator-semantics
    united-states-official-backfill
+   euro-area-germany-france-backfill
    economic-calendar-branch-migration
    cftc-positioning-contracts
    provider-neutral-dataset-catalog

@@ -1617,6 +1617,96 @@
     },
     {
       "schema_version": "histdatacom.official-source-entry.v1",
+      "source_key": "ea.ecb.monetary-policy",
+      "economy_code": "EA",
+      "economy_name": "Euro Area",
+      "institution": "European Central Bank",
+      "jurisdiction": "European Union / euro area",
+      "legal_producer": true,
+      "roles": [
+        "official-archive",
+        "release-calendar"
+      ],
+      "event_families": [
+        "monetary-policy"
+      ],
+      "indicator_ids": [
+        "policy-rate-and-decisions"
+      ],
+      "formats": [
+        "json",
+        "html"
+      ],
+      "capabilities": [
+        "current-values",
+        "historical-observations",
+        "historical-vintages",
+        "publication-metadata",
+        "schedule-metadata",
+        "archive-enumeration"
+      ],
+      "endpoint_uri_template": "https://www.ecb.europa.eu/foedb/dbs/foedb/publications.en/versions.json",
+      "allowed_hosts": [
+        "www.ecb.europa.eu"
+      ],
+      "expected_media_types": [
+        "application/json",
+        "text/html"
+      ],
+      "source_series_ids": [
+        "Main refinancing operations rate",
+        "Marginal lending facility rate",
+        "Deposit facility rate"
+      ],
+      "source_table_ids": [
+        "FOEDB publications.en"
+      ],
+      "source_release_ids": [
+        "Monetary policy decisions"
+      ],
+      "release_calendar_uri": "https://www.ecb.europa.eu/press/calendars/mgcgc/html/index.en.html",
+      "archive_uri": "https://www.ecb.europa.eu/press/govcdec/mopo/html/index.en.html",
+      "source_timezone": "Europe/Berlin",
+      "availability_time_precision": "inferred-bounded",
+      "dst_convention": "IANA Europe/Berlin normalizes the Frankfurt publication clock; retain the FOEDB epoch and its offset-bearing local rendering.",
+      "historical_depth": "The qualified FOEDB occurrence corpus covers all 298 monetary-policy decision publications from 5 January 2000 through 10 September 2026 and retains the 15 December 1999 predecessor for the first previous-as-known rate set.",
+      "known_breaks": [
+        "FOEDB records through 7 September 2017 carry date-only placeholder epochs; records from 26 October 2017 carry the exact publication minute.",
+        "The decision publication clock moved from 13:45 to 14:15 Europe/Berlin beginning with the 21 July 2022 decision.",
+        "The source changed its three-rate presentation from main-refinancing, marginal-lending, deposit order to deposit, main-refinancing, marginal-lending order on 12 September 2024.",
+        "The 17 September 2001 and 8 October 2008 decisions are emergency actions outside the ordinary Governing Council sequence."
+      ],
+      "revision_behavior": "Each occurrence retains the exact decision page and reconstructs its three-rate setting against the immediately preceding official decision; immutable refreshes never overwrite earlier byte evidence.",
+      "rate_limit": "No stable FOEDB-specific limit is published; refresh uses bounded sequential metadata discovery, at most 512 chunks, bounded report requests, retry backoff, and an identifying contact user agent.",
+      "authentication": "none",
+      "credential_env_name": null,
+      "credential_header_name": null,
+      "credential_parameter_name": null,
+      "terms_uri": "https://www.ecb.europa.eu/services/disclaimer/html/index.en.html",
+      "fallback_source_keys": [
+        "ea.ecb.data-portal"
+      ],
+      "parser_id": "official.ecb-monetary-policy.v1",
+      "parser_version": "1",
+      "replay_strategy": "Retain exact versions.json, metadata.json, all versioned FOEDB data chunks, the predecessor page, and every selected decision page; bind byte lengths and SHA-256 digests and recompute the ordered three-rate lineage before accepting replay.",
+      "adapter_owner": "market-context/ea",
+      "verification_status": "empirically-verified",
+      "reviewed_on": "2026-09-16",
+      "verification_evidence_uris": [
+        "https://www.ecb.europa.eu/foedb/dbs/foedb/publications.en/versions.json",
+        "https://www.ecb.europa.eu/press/govcdec/mopo/html/index.en.html",
+        "https://www.ecb.europa.eu/press/pr/date/1999/html/pr991215.en.html",
+        "https://www.ecb.europa.eu/press/pr/date/2026/html/ecb.mp260910~314e508016.en.html"
+      ],
+      "redistribution_notes": "The package retains a compact hash manifest; the versioned FOEDB database and decision pages remain an external operator-owned corpus with ECB attribution and disclaimer terms.",
+      "limitations": [
+        "Qualification covers the three key ECB interest rates only; asset purchases, refinancing-operation terms, liquidity measures, and forward guidance remain source text requiring separate typed identities.",
+        "FOEDB does not provide a historical event-consensus rate set, so no market consensus or numeric surprise is manufactured.",
+        "Ordinary-sequence classification does not replace contemporaneous calendar evidence for a historical scheduled clock."
+      ]
+    },
+    {
+      "schema_version": "histdatacom.official-source-entry.v1",
       "source_key": "gb.ons.api",
       "economy_code": "GB",
       "economy_name": "United Kingdom",
