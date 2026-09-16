@@ -2695,6 +2695,12 @@ monthly, spreadsheet, OCR, index, and annual-benchmark artifacts. It preserves
 revisions, the May 2001 SIC-to-NAICS boundary, six broken archive links, two
 Strict OOXML defects, and nine shutdown-delayed publications without rewriting
 earlier vintages.
+The U.S. Survey of Professional Forecasters specialization binds 107 quarterly
+publications and 428 current-quarter median forecasts to 113 official
+artifacts from 2000 Q1 through 2026 Q3. It preserves the official true deadline
+and news-release date separately, retains all four shutdown-delayed surveys,
+uses date-only precision where no source release time exists, and never
+substitutes quarterly professional forecasts for monthly event consensus.
 Central-bank releases additionally use framework-aware
 [`monetary-policy semantics`](docs/monetary-policy-semantics.md). Decisions,
 statements, vote splits, press conferences, minutes, projections, schedules,

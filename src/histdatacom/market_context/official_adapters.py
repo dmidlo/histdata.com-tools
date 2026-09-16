@@ -765,6 +765,18 @@ class OfficialCensusMtisParserV1(OfficialHtmlParserV1):
     )
 
 
+class OfficialPhiladelphiaFedSpfParserV1(OfficialHtmlParserV1):
+    """Parse Philadelphia Fed SPF pages, workbooks, ledger, and PDFs."""
+
+    parser_id = "official.philadelphia-spf.v1"
+    supported_formats: tuple[OfficialSourceFormat, ...] = (
+        OfficialSourceFormat.HTML,
+        OfficialSourceFormat.TEXT,
+        OfficialSourceFormat.XLSX,
+        OfficialSourceFormat.PDF,
+    )
+
+
 class OfficialReleaseFeedParserV1(_BaseOfficialParser):
     """RSS, Atom, and iCalendar schedule/release feed parser."""
 
@@ -846,6 +858,7 @@ _BUILT_IN_PARSER_TYPES: tuple[type[_BaseOfficialParser], ...] = (
     OfficialCensusNrsParserV1,
     OfficialCensusFt900ParserV1,
     OfficialCensusMtisParserV1,
+    OfficialPhiladelphiaFedSpfParserV1,
     OfficialReleaseFeedParserV1,
     OfficialPdfParserV1,
     OfficialArchiveParserV1,

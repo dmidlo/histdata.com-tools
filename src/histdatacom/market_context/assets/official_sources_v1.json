@@ -5052,6 +5052,103 @@
     },
     {
       "schema_version": "histdatacom.official-source-entry.v1",
+      "source_key": "us.frb.philadelphia-spf",
+      "economy_code": "US",
+      "economy_name": "United States",
+      "institution": "Federal Reserve Bank of Philadelphia",
+      "jurisdiction": "United States of America",
+      "legal_producer": true,
+      "roles": [
+        "official-archive",
+        "release-calendar",
+        "independent-official-cross-check"
+      ],
+      "event_families": [
+        "confidence-survey"
+      ],
+      "indicator_ids": [
+        "official-confidence-and-tendency-surveys"
+      ],
+      "formats": [
+        "html",
+        "text",
+        "xlsx",
+        "pdf"
+      ],
+      "capabilities": [
+        "current-values",
+        "historical-observations",
+        "publication-metadata",
+        "schedule-metadata",
+        "series-metadata",
+        "forecast-survey",
+        "archive-enumeration"
+      ],
+      "endpoint_uri_template": "https://www.philadelphiafed.org/surveys-and-data/real-time-data-research/survey-of-professional-forecasters",
+      "allowed_hosts": [
+        "www.philadelphiafed.org"
+      ],
+      "expected_media_types": [
+        "text/html",
+        "text/plain",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "application/pdf",
+        "application/octet-stream"
+      ],
+      "source_series_ids": [
+        "SPF-RGDP-CURRENT-QUARTER-MEDIAN-GROWTH",
+        "SPF-UNEMP-CURRENT-QUARTER-MEDIAN",
+        "SPF-CPI-CURRENT-QUARTER-MEDIAN-INFLATION",
+        "SPF-TBILL-CURRENT-QUARTER-MEDIAN"
+      ],
+      "source_table_ids": [
+        "MedianGrowth.xlsx:RGDP:drgdp2",
+        "MedianLevel.xlsx:UNEMP:UNEMP2",
+        "MedianLevel.xlsx:CPI:CPI2",
+        "MedianLevel.xlsx:TBILL:TBILL2"
+      ],
+      "source_release_ids": [
+        "survey-of-professional-forecasters"
+      ],
+      "release_calendar_uri": "https://www.philadelphiafed.org/-/media/FRBP/Assets/Surveys-And-Data/survey-of-professional-forecasters/spf-release-dates.txt",
+      "archive_uri": "https://www.philadelphiafed.org/surveys-and-data/real-time-data-research/survey-of-professional-forecasters",
+      "source_timezone": "America/New_York",
+      "availability_time_precision": "date-only",
+      "dst_convention": "The official SPF ledger publishes dates without times; do not infer an intraday timestamp.",
+      "historical_depth": "All 107 quarterly survey releases from 2000 Q1 through 2026 Q3 are bound to distinct official PDFs, the true-deadline/release-date ledger, and current-quarter median forecast rows in official workbooks.",
+      "known_breaks": [
+        "The 2013 Q4, 2019 Q1, 2025 Q4, and 2026 Q1 surveys were delayed by federal government shutdowns.",
+        "The 2025 Q4 survey lacked most historical jump-off values; the release-date ledger identifies the exception and the forecast vintage remains usable."
+      ],
+      "revision_behavior": "Each survey is a point-in-time forecast vintage; later surveys do not overwrite earlier forecast observations and are not release-stage revisions.",
+      "rate_limit": "No stable public limit recorded at review; use bounded concurrency and retain the complete content-addressed corpus.",
+      "authentication": "none",
+      "credential_env_name": null,
+      "credential_header_name": null,
+      "credential_parameter_name": null,
+      "terms_uri": null,
+      "fallback_source_keys": [],
+      "parser_id": "official.philadelphia-spf.v1",
+      "parser_version": "1",
+      "replay_strategy": "Retain the archive page, exact release-date ledger, median workbooks, documentation, and every release PDF; bind raw SHA-256 and workbook coordinates before normalization.",
+      "adapter_owner": "market-context/us",
+      "verification_status": "empirically-verified",
+      "reviewed_on": "2026-09-15",
+      "verification_evidence_uris": [
+        "https://www.philadelphiafed.org/surveys-and-data/real-time-data-research/survey-of-professional-forecasters",
+        "https://www.philadelphiafed.org/surveys-and-data/real-time-data-research/median-forecasts",
+        "https://www.philadelphiafed.org/-/media/FRBP/Assets/Surveys-And-Data/survey-of-professional-forecasters/spf-release-dates.txt",
+        "https://www.philadelphiafed.org/-/media/FRBP/Assets/Surveys-And-Data/survey-of-professional-forecasters/historical-data/medianLevel.xlsx",
+        "https://www.philadelphiafed.org/-/media/FRBP/Assets/Surveys-And-Data/survey-of-professional-forecasters/historical-data/medianGrowth.xlsx"
+      ],
+      "redistribution_notes": "Federal Reserve Bank research data; the package retains only compact hashes, normalized values, and the small release-date ledger.",
+      "limitations": [
+        "SPF quarterly forecasts are not monthly event-consensus observations.",
+        "Release dates are qualified only to the day because the official ledger does not publish release times."
+      ]
+    },
+    {
+      "schema_version": "histdatacom.official-source-entry.v1",
       "source_key": "us.frb.philadelphia-surveys",
       "economy_code": "US",
       "economy_name": "United States",
@@ -5098,16 +5195,14 @@
       ],
       "source_series_ids": [
         "MBOS-GENERAL-ACTIVITY-CURRENT",
-        "MBOS-GENERAL-ACTIVITY-FUTURE",
-        "SPF"
+        "MBOS-GENERAL-ACTIVITY-FUTURE"
       ],
       "source_table_ids": [
         "bos_difx",
         "hos_historyx"
       ],
       "source_release_ids": [
-        "manufacturing-business-outlook-survey",
-        "survey-of-professional-forecasters"
+        "manufacturing-business-outlook-survey"
       ],
       "release_calendar_uri": "https://www.philadelphiafed.org/surveys-and-data/regional-economic-analysis/manufacturing-business-outlook-survey",
       "archive_uri": "https://www.philadelphiafed.org/surveys-and-data/mbos-archives",
@@ -5133,13 +5228,11 @@
       "verification_status": "reviewed-entrypoint",
       "reviewed_on": "2026-09-14",
       "verification_evidence_uris": [
-        "https://www.philadelphiafed.org/surveys-and-data/mbos-archives",
-        "https://www.philadelphiafed.org/surveys-and-data/real-time-data-research/survey-of-professional-forecasters"
+        "https://www.philadelphiafed.org/surveys-and-data/mbos-archives"
       ],
       "redistribution_notes": "Federal Reserve Bank research data; retain source attribution and recheck download terms when packaging raw artifacts.",
       "limitations": [
-        "MBOS measures one Federal Reserve District and must not be relabeled as a national manufacturing statistic.",
-        "SPF quarterly forecasts are not monthly event-consensus observations."
+        "MBOS measures one Federal Reserve District and must not be relabeled as a national manufacturing statistic."
       ]
     },
     {

@@ -30,9 +30,10 @@ limitations. An archive start date is a route declaration, not a historical
 coverage claim.
 
 The source registry includes separate supplemental entries for DOL/ETA, the
-Philadelphia Fed, CPI, PPI, the Employment Situation, JOLTS, Productivity and
-Costs, GDP, Personal Income and Outlays, Advance Monthly Retail Sales, Advance
-Durable Goods, New Residential Construction, and New Residential Sales. This
+Philadelphia Fed's MBOS and SPF programs, CPI, PPI, the Employment Situation,
+JOLTS, Productivity and Costs, GDP, Personal Income and Outlays, Advance
+Monthly Retail Sales, Advance Durable Goods, New Residential Construction, and
+New Residential Sales. This
 prevents broad family-level entries from being incorrectly named as the
 occurrence-specific source for weekly claims, regional Fed surveys, or
 statistical release documents. The
@@ -49,6 +50,9 @@ explicit.
 The Manufacturing and Trade Inventories and Sales entry binds its successor
 historical page, official directory, current briefing, table formats, and
 release-document evidence separately from the broad Census EITS API entry.
+The SPF entry binds its release archive, true-deadline/release-date ledger,
+median workbooks, documentation, and date-only publication precision without
+turning quarterly professional forecasts into monthly event consensus.
 The reusable HTML-release adapter preserves such text as one bounded UTF-8
 record, including the exact line count and raw-snapshot lineage.
 
@@ -872,6 +876,53 @@ missing, changed, duplicated, newly unparseable, differently normalized, or
 unused evidence. `census_mtis_coverage_from_manifest()` derives the complete
 318-publication slice without manufacturing historical event-level consensus.
 
+## Complete Survey of Professional Forecasters qualification
+
+`histdatacom.market_context.us_spf_archive` qualifies every Philadelphia Fed
+Survey of Professional Forecasters publication from 2000 Q1 through 2026 Q3.
+The dedicated `us.frb.philadelphia-spf` source is separate from MBOS because
+the two programs have different archives, frequencies, evidence, and release
+precision.
+
+The packaged `us_spf_archive_v1.json` manifest is observed as of September 15,
+2026. It records 107 quarterly publications and 428 forecast occurrences from
+113 distinct official artifacts containing 93,449,761 bytes. The corpus binds
+the archive page, median-forecast landing page, exact release-date ledger,
+median-level and median-growth workbooks, methodology documentation, and 107
+distinct release PDFs. The small release-date ledger is packaged byte-for-byte;
+the workbooks and release PDFs remain in the external content-addressed corpus.
+
+Each publication keeps four independent current-quarter medians: annualized
+real-GDP growth, the unemployment rate, annualized headline-CPI inflation, and
+the three-month Treasury-bill rate. The official documentation defines column
+`2` as the current-quarter nowcast and column `1` as the prior-quarter
+historical value. All 428 selected cells are numeric. Workbook coordinates and
+source lexical precision are retained instead of rounding values to the one
+decimal place commonly shown in release summaries.
+
+The true deadline and news-release date remain separate. The ledger identifies
+the 2013 Q4, 2019 Q1, 2025 Q4, and 2026 Q1 shutdown-delayed surveys and the
+missing historical jump-off values in 2025 Q4. SPF publishes no stable release
+time, so all 107 occurrences remain honestly date-only. Each quarterly survey
+is a forecast vintage, not a revision stage; later panels do not rewrite prior
+survey observations.
+
+The bounded refresh command can also retain all raw artifacts outside the
+wheel:
+
+```console
+uv run python scripts/refresh_us_spf_archive.py \
+  --as-of 2026-09-15 \
+  --raw-directory /absolute/operator/path/spf-raw
+```
+
+`replay_philadelphia_fed_spf_archive()` reparses the archive and ledger,
+validates every PDF, rereads all selected workbook cells, and compares the
+resulting manifest exactly. Missing, duplicated, changed, newly nonnumeric, or
+unreadable evidence fails closed.
+`philadelphia_fed_spf_coverage_from_manifest()` derives complete date-only
+survey-vintage coverage while leaving event-level consensus unsupported.
+
 ## Quantified closure audit
 
 `UnitedStatesProgramCoverageV1` records one exact 2000-present denominator and
@@ -927,13 +978,17 @@ alone is not.
 - [Philadelphia Fed MBOS archives](https://www.philadelphiafed.org/surveys-and-data/mbos-archives)
   retain monthly release PDFs; the revised download is not substituted for
   those vintages.
+- [Philadelphia Fed SPF](https://www.philadelphiafed.org/surveys-and-data/real-time-data-research/survey-of-professional-forecasters)
+  retains quarterly release PDFs, release dates, methodology, and median
+  forecast workbooks as a distinct professional-survey archive.
 
 The package preserves the real G.17, CPI, PPI, Employment Situation, JOLTS,
 Productivity and Costs, GDP, Personal Income and Outlays, and Advance Monthly
 Retail Sales indexes, the Advance Durable Goods index and reviewed OCR corpus,
 the International Trade, New Residential Construction, New Residential Sales,
-and Manufacturing and Trade Inventories and Sales indexes, one representative
-G.17 raw release, and all fourteen complete raw/normalized manifests. The
+and Manufacturing and Trade Inventories and Sales indexes, the SPF release
+ledger, one representative G.17 raw release, and all fifteen complete
+raw/normalized manifests. The
 remaining production raw corpora stay external, content addressed, and subject
 to the coverage audit so wheel size does not grow with thousands of federal
 release files.

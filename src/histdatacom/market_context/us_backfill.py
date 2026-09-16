@@ -1812,7 +1812,7 @@ def built_in_united_states_backfill_profile(
             "survey-professional-forecasters",
             "Survey of Professional Forecasters",
             "Federal Reserve Bank of Philadelphia",
-            "us.frb.philadelphia-surveys",
+            "us.frb.philadelphia-spf",
             spf_uri,
             spf_uri,
             frequency="quarterly",
@@ -1820,10 +1820,12 @@ def built_in_united_states_backfill_profile(
             time_precision=EconomicTimePrecision.DATE_ONLY,
             archive_strategy=UnitedStatesArchiveStrategy.OFFICIAL_VINTAGE_TABLE,
             requires_previous_as_known=False,
+            requires_revision_history=False,
             forecast_strategy=(
                 UnitedStatesForecastStrategy.OFFICIAL_PROFESSIONAL_SURVEY
             ),
             forecast_uri=spf_uri,
+            release_stages=(EconomicReleaseStage.INITIAL,),
             limitations=(
                 "SPF survey vintages and respondent panels must remain point in time.",
                 "Quarterly SPF aggregates are not monthly event-consensus values.",

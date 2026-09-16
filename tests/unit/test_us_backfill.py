@@ -110,7 +110,7 @@ def _coverage(
 def test_registry_represents_us_specific_legal_producers_and_text() -> None:
     registry = load_packaged_official_source_registry()
     assert registry.reviewed_on == "2026-09-15"
-    assert len(registry.sources) == 67
+    assert len(registry.sources) == 68
 
     dol = registry.source("us.dol.eta-unemployment-insurance")
     assert dol.institution.startswith("U.S. Department of Labor")
@@ -118,8 +118,17 @@ def test_registry_represents_us_specific_legal_producers_and_text() -> None:
     assert EconomicEventFamily.LABOUR_MARKET in dol.event_families
 
     philadelphia = registry.source("us.frb.philadelphia-surveys")
-    assert "SPF" in philadelphia.source_series_ids
+    assert "SPF" not in philadelphia.source_series_ids
+    assert philadelphia.source_release_ids == (
+        "manufacturing-business-outlook-survey",
+    )
     assert EconomicEventFamily.CONFIDENCE_SURVEY in philadelphia.event_families
+
+    spf = registry.source("us.frb.philadelphia-spf")
+    assert spf.verification_status.value == "empirically-verified"
+    assert spf.parser_id == "official.philadelphia-spf.v1"
+    assert len(spf.source_series_ids) == 4
+    assert spf.source_release_ids == ("survey-of-professional-forecasters",)
 
     g17 = registry.source("us.frb.industrial-production")
     assert OfficialSourceFormat.TEXT in g17.formats
