@@ -808,7 +808,7 @@ class OfficialFederalReserveFomcParserV1(OfficialHtmlParserV1):
 
 
 class OfficialEcbMonetaryPolicyParserV1(OfficialHtmlParserV1):
-    """Bind ECB FOEDB JSON and monetary-policy decision HTML exactly."""
+    """Bind ECB FOEDB JSON plus decision and account HTML exactly."""
 
     parser_id = "official.ecb-monetary-policy.v1"
     supported_formats: tuple[OfficialSourceFormat, ...] = (

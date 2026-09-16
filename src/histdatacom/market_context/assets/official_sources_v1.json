@@ -1662,21 +1662,27 @@
         "FOEDB publications.en"
       ],
       "source_release_ids": [
-        "Monetary policy decisions"
+        "Monetary policy decisions",
+        "Monetary Policy Decisions",
+        "Account of the monetary policy meeting",
+        "FOEDB type 20: Meeting of <source-authored dates>"
       ],
       "release_calendar_uri": "https://www.ecb.europa.eu/press/calendars/mgcgc/html/index.en.html",
-      "archive_uri": "https://www.ecb.europa.eu/press/govcdec/mopo/html/index.en.html",
+      "archive_uri": "https://www.ecb.europa.eu/foedb/dbs/foedb/publications.en/versions.json",
       "source_timezone": "Europe/Berlin",
       "availability_time_precision": "inferred-bounded",
       "dst_convention": "IANA Europe/Berlin normalizes the Frankfurt publication clock; retain the FOEDB epoch and its offset-bearing local rendering.",
-      "historical_depth": "The qualified FOEDB occurrence corpus covers all 298 monetary-policy decision publications from 5 January 2000 through 10 September 2026 and retains the 15 December 1999 predecessor for the first previous-as-known rate set.",
+      "historical_depth": "The qualified FOEDB occurrence corpus covers all 299 monetary-policy decision publications from 5 January 2000 through 10 September 2026, retains the 15 December 1999 predecessor for the first previous-as-known rate set, and covers all 96 monetary-policy accounts published from 19 February 2015 through 27 August 2026.",
       "known_breaks": [
         "FOEDB records through 7 September 2017 carry date-only placeholder epochs; records from 26 October 2017 carry the exact publication minute.",
+        "The 8 December 2016 decision alone uses the source-authored title 'Monetary Policy Decisions'; all other selected type-92 records use 'Monetary policy decisions'.",
         "The decision publication clock moved from 13:45 to 14:15 Europe/Berlin beginning with the 21 July 2022 decision.",
         "The source changed its three-rate presentation from main-refinancing, marginal-lending, deposit order to deposit, main-refinancing, marginal-lending order on 12 September 2024.",
-        "The 17 September 2001 and 8 October 2008 decisions are emergency actions outside the ordinary Governing Council sequence."
+        "The 17 September 2001 and 8 October 2008 decisions are emergency actions outside the ordinary Governing Council sequence.",
+        "The first 19 account records carry date-only placeholder epochs; the 77 later records retain exact 13:30 publication minutes except for the separately published 25 June 2025 strategy account at 13:25.",
+        "Account titles use three source eras: a generic account title, a long-form Governing Council title, and meeting-date titles from April 2020 onward."
       ],
-      "revision_behavior": "Each occurrence retains the exact decision page and reconstructs its three-rate setting against the immediately preceding official decision; immutable refreshes never overwrite earlier byte evidence.",
+      "revision_behavior": "Each occurrence retains the exact decision or account page; decisions reconstruct their three-rate setting against the immediately preceding official decision, while accounts preserve meeting dates and a link to the matching decision where one exists. Immutable refreshes never overwrite earlier byte evidence.",
       "rate_limit": "No stable FOEDB-specific limit is published; refresh uses bounded sequential metadata discovery, at most 512 chunks, bounded report requests, retry backoff, and an identifying contact user agent.",
       "authentication": "none",
       "credential_env_name": null,
@@ -1688,20 +1694,25 @@
       ],
       "parser_id": "official.ecb-monetary-policy.v1",
       "parser_version": "1",
-      "replay_strategy": "Retain exact versions.json, metadata.json, all versioned FOEDB data chunks, the predecessor page, and every selected decision page; bind byte lengths and SHA-256 digests and recompute the ordered three-rate lineage before accepting replay.",
+      "replay_strategy": "Retain exact versions.json, metadata.json, all versioned FOEDB data chunks, the predecessor page, every selected decision page, and every selected account page; bind byte lengths and SHA-256 digests, recompute the ordered three-rate lineage, and reconcile each ordinary account to its source-authored meeting date and qualified decision before accepting replay.",
       "adapter_owner": "market-context/ea",
       "verification_status": "empirically-verified",
       "reviewed_on": "2026-09-16",
       "verification_evidence_uris": [
         "https://www.ecb.europa.eu/foedb/dbs/foedb/publications.en/versions.json",
         "https://www.ecb.europa.eu/press/govcdec/mopo/html/index.en.html",
+        "https://www.ecb.europa.eu/press/accounts/html/index.en.html",
         "https://www.ecb.europa.eu/press/pr/date/1999/html/pr991215.en.html",
+        "https://www.ecb.europa.eu/press/pr/date/2016/html/pr161208.en.html",
+        "https://www.ecb.europa.eu/press/accounts/2015/html/mg150219.en.html",
+        "https://www.ecb.europa.eu/press/accounts/2026/html/ecb.mg260827~f06c21fd54.en.html",
         "https://www.ecb.europa.eu/press/pr/date/2026/html/ecb.mp260910~314e508016.en.html"
       ],
-      "redistribution_notes": "The package retains a compact hash manifest; the versioned FOEDB database and decision pages remain an external operator-owned corpus with ECB attribution and disclaimer terms.",
+      "redistribution_notes": "The package retains compact hash manifests; the versioned FOEDB database, decision pages, and account pages remain an external operator-owned corpus with ECB attribution and disclaimer terms.",
       "limitations": [
         "Qualification covers the three key ECB interest rates only; asset purchases, refinancing-operation terms, liquidity measures, and forward guidance remain source text requiring separate typed identities.",
         "FOEDB does not provide a historical event-consensus rate set, so no market consensus or numeric surprise is manufactured.",
+        "Accounts are documentary releases published after their meetings; they are not relabelled as same-day decisions or numeric consensus events.",
         "Ordinary-sequence classification does not replace contemporaneous calendar evidence for a historical scheduled clock."
       ]
     },

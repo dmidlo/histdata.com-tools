@@ -153,7 +153,7 @@ def test_manifest_quantifies_every_release_and_archive_anomaly() -> None:
     assert packaged_dol_initial_claims_manifest_path().is_file()
     assert manifest.manifest_id == (
         "initial-claims-archive-manifest:sha256:"
-        "c75dea910b283e3277f04078b7d4f4728b8ef0775edb04139a9de05408f7603d"
+        "89218b69a79dbd7ec0100cfb86a620aa7da2af19193284e19d78135eba823b4e"
     )
     assert len(manifest.publications) == 1_240
     assert manifest.raw_artifact_count == 1_269

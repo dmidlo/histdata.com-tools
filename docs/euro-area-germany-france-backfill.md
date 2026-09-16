@@ -19,26 +19,26 @@ guess or a third-party calendar. Replay retains and verifies:
 - `versions.json` and its one active database version;
 - the versioned `metadata.json` record schema;
 - all 81 data chunks containing 20,073 publication records;
-- the exact selection predicate: publication type `92` and the
-  source-authored title `Monetary policy decisions`;
-- the 1999 predecessor and all 298 in-window HTML decision pages; and
-- byte length and SHA-256 for every one of the 382 official artifacts.
+- the exact selection predicate: publication type `92` and either observed
+  source title, `Monetary policy decisions` or `Monetary Policy Decisions`;
+- the 1999 predecessor and all 299 in-window HTML decision pages; and
+- byte length and SHA-256 for every one of the 383 official artifacts.
 
-The retained corpus contains 42,018,085 bytes and 382 distinct SHA-256
+The retained corpus contains 42,121,110 bytes and 383 distinct SHA-256
 digests. Its compact packaged receipt is
-`ecb-archive-manifest:sha256:112cdfa7ade349a2ee189b7dc0a3f8c32568925f5516ee349ed69cc336bde408`.
+`ecb-archive-manifest:sha256:982537c514abd658ea04983296094cde827f70a1c178115d6c7b76e6a39c90e3`.
 
 Each decision preserves a native `RATE_SET` with separate components for the
 main refinancing operations, marginal lending facility, and deposit facility.
 The parser does not assign values by a fixed position: it reads the
 source-authored component order. This is essential after 12 September 2024,
 when the ECB began presenting the deposit rate first. Ordered comparison with
-the preceding official page produces 237 holds, 32 easing decisions, and 29
+the preceding official page produces 238 holds, 32 easing decisions, and 29
 tightening decisions with no discontinuity in the rate lineage.
 
 FOEDB's publication timestamp has two empirically distinct meanings:
 
-- 226 in-window publications through 7 September 2017 carry date-only
+- 227 in-window publications through 7 September 2017 carry date-only
   placeholder epochs and therefore do not receive invented intraday clocks;
 - 72 publications from 26 October 2017 onward carry exact minutes, with the
   local decision clock moving from 13:45 to 14:15 Europe/Berlin on 21 July
@@ -63,13 +63,45 @@ The refresh discovers the active database version before constructing bounded
 metadata, chunk, and report requests. `--fetch-missing` is explicit; without
 it, a missing retained artifact fails closed.
 
+## Complete ECB monetary-policy account archive
+
+`histdatacom.market_context.ecb_monetary_policy_accounts_archive` independently
+qualifies all 96 FOEDB type-20 accounts published from 19 February 2015 through
+27 August 2026. The selection retains 83 versioned FOEDB database artifacts
+and all 96 official HTML pages: 179 artifacts, 26,253,142 bytes, and 179 unique
+SHA-256 digests. Its packaged receipt is
+`ecb-account-archive-manifest:sha256:56a480037af78469fcef45c60b9ff1dcb2c8625d655ad0d53cb18fbdfa401356`.
+
+Replay parses the source-authored meeting dates rather than inferring them from
+publication dates. It preserves three observed title eras (35 generic titles,
+six long-form Governing Council titles, and 55 meeting-date titles), one
+source-omitted meeting-year inference, and release lags of 21 through 64 days.
+Nineteen early FOEDB timestamps remain date-only; 77 later publications retain
+their exact local minute, including the distinct 13:25 and 13:30 publications
+on 28 August 2025.
+
+Ninety-three ordinary accounts link to the exact qualified decision occurrence
+by meeting end date. The 18 March 2020 PEPP emergency meeting and strategy
+reviews of 7 July 2021 and 25 June 2025 remain explicit, unlinked exceptions;
+they are not forced onto unrelated three-rate decisions. Accounts are
+documentary releases and do not supply a numeric event consensus or surprise.
+
+An operator with the retained corpus can reproduce the account receipt with:
+
+```console
+uv run python scripts/refresh_ecb_monetary_policy_accounts_archive.py \
+  --as-of 2026-09-15 \
+  --source-directory /path/to/retained-ecb-corpus
+```
+
 ## Remaining issue scope
 
-This ECB decision archive completes one monetary-policy program, not issue
-#539 as a whole. Eurostat aggregate releases and the ECB accounts/projections
-families, Destatis and Bundesbank programs for Germany, and INSEE and Banque de
-France programs for France still require their own empirical archive
-qualifications before the regional calendar can produce a closure receipt.
+These ECB decision and account archives complete two monetary-policy artifact
+families, not issue #539 as a whole. Eurostat aggregate releases and the ECB
+statement/projection families, Destatis and Bundesbank programs for Germany,
+and INSEE and Banque de France programs for France still require their own
+empirical archive qualifications before the regional calendar can produce a
+closure receipt.
 
 Official entrypoints:
 

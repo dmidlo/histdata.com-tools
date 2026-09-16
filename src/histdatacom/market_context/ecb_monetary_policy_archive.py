@@ -99,6 +99,9 @@ _COMPONENT_LABELS: Final[Mapping[str, str]] = MappingProxyType(
         "deposit-facility": "Deposit facility rate",
     }
 )
+_DECISION_TITLES: Final = frozenset(
+    {"Monetary policy decisions", "Monetary Policy Decisions"}
+)
 _EMERGENCY_RELEASE_DATES: Final = frozenset({"2001-09-17", "2008-10-08"})
 
 
@@ -109,6 +112,7 @@ class EcbArtifactRole(str, Enum):
     FOEDB_METADATA = "foedb-metadata"
     FOEDB_CHUNK = "foedb-chunk"
     DECISION_HTML = "decision-html"
+    ACCOUNT_HTML = "account-html"
 
 
 def _required_text(value: object, name: str) -> str:
@@ -208,7 +212,7 @@ def _version_base_uri(version: str, version_hash: str) -> str:
 
 @dataclass(frozen=True, slots=True)
 class EcbArchiveArtifactV1:
-    """Content-addressed official ECB database or decision artifact."""
+    """Content-addressed official ECB database or publication artifact."""
 
     role: EcbArtifactRole
     source_uri: str
@@ -223,9 +227,12 @@ class EcbArchiveArtifactV1:
             raise ValueError("unsupported ECB artifact schema")
         role = EcbArtifactRole(self.role)
         source_format = OfficialSourceFormat.from_value(self.source_format)
-        if role is EcbArtifactRole.DECISION_HTML:
+        if role in {
+            EcbArtifactRole.DECISION_HTML,
+            EcbArtifactRole.ACCOUNT_HTML,
+        }:
             if source_format is not OfficialSourceFormat.HTML:
-                raise ValueError("ECB decision artifact must be HTML")
+                raise ValueError("ECB publication artifact must be HTML")
         elif source_format is not OfficialSourceFormat.JSON:
             raise ValueError("ECB FOEDB artifact must be JSON")
         object.__setattr__(self, "role", role)
@@ -301,7 +308,7 @@ class EcbFoedbPublicationV1:
         if _document_release_date(source_uri) != self.release_date:
             raise ValueError("ECB FOEDB URI and release date differ")
         object.__setattr__(self, "source_uri", source_uri)
-        if _required_text(self.title, "title") != "Monetary policy decisions":
+        if _required_text(self.title, "title") not in _DECISION_TITLES:
             raise ValueError("ECB FOEDB entry has an unexpected title")
         precision = EconomicTimePrecision.from_value(self.time_precision)
         if precision not in {
@@ -950,7 +957,7 @@ def _parse_rate_set(content: bytes) -> _ParsedRateSet:
     parser = _EcbDecisionHtmlParser()
     parser.feed(text)
     parser.close()
-    if "Monetary policy decisions" not in parser.title:
+    if "monetary policy decisions" not in parser.title.casefold():
         raise ValueError("ECB decision page title differs")
 
     selected: list[str] = []
@@ -1043,7 +1050,7 @@ def _artifact(
         raise ValueError("ECB snapshot changes source or parser identity")
     expected_format = (
         OfficialSourceFormat.HTML
-        if role is EcbArtifactRole.DECISION_HTML
+        if role in {EcbArtifactRole.DECISION_HTML, EcbArtifactRole.ACCOUNT_HTML}
         else OfficialSourceFormat.JSON
     )
     if snapshot.request.source_format is not expected_format:
@@ -1154,35 +1161,25 @@ def build_ecb_foedb_chunk_requests(
     )
 
 
-def _publication_time(
-    release_date: str, database_timestamp: int
-) -> tuple[EconomicTimePrecision, int | None, str | None]:
-    timestamp = datetime.fromtimestamp(database_timestamp, timezone.utc)
-    local = timestamp.astimezone(ZoneInfo(ECB_SOURCE_TIMEZONE))
-    # FOEDB encodes legacy records as local midnight (plus one anomalous 02:00
-    # value on 7 September 2017).  From 26 October 2017 it carries the actual
-    # 13:45 or 14:15 decision publication clock.
-    if release_date >= "2017-10-26":
-        if local.date().isoformat() != release_date:
-            raise ValueError("ECB exact publication timestamp has wrong date")
-        lexical = local.isoformat(timespec="minutes")
-        return (
-            EconomicTimePrecision.EXACT_MINUTE,
-            database_timestamp * 1_000_000_000,
-            lexical,
-        )
-    return EconomicTimePrecision.DATE_ONLY, None, None
+@dataclass(frozen=True, slots=True)
+class _EcbFoedbDatabaseV1:
+    """Validated in-memory view of one complete FOEDB database version."""
+
+    version: str
+    version_hash: str
+    total_records: int
+    chunk_size: int
+    chunk_group_size: int
+    artifacts: tuple[EcbArchiveArtifactV1, ...]
+    records: tuple[Mapping[str, Any], ...]
 
 
-def build_ecb_foedb_release_index(
+def _decode_ecb_foedb_database(
     versions_snapshot: OfficialRawSnapshotV1,
     metadata_snapshot: OfficialRawSnapshotV1,
     chunk_snapshots: Sequence[OfficialRawSnapshotV1],
-    *,
-    as_of_date: str,
-) -> EcbFoedbReleaseIndexV1:
-    """Parse every FOEDB record and select the exact decision series."""
-    as_of = _iso_date(as_of_date, "as_of_date")
+) -> _EcbFoedbDatabaseV1:
+    """Validate and decode one complete retained FOEDB database version."""
     version, version_hash = parse_ecb_foedb_version(versions_snapshot)
     version_base = _version_base_uri(version, version_hash)
     if metadata_snapshot.request.uri != f"{version_base}/metadata.json":
@@ -1262,16 +1259,58 @@ def build_ecb_foedb_release_index(
         )
     if len(records) != total:
         raise ValueError("ECB FOEDB total record count differs")
+    return _EcbFoedbDatabaseV1(
+        version=version,
+        version_hash=version_hash,
+        total_records=total,
+        chunk_size=chunk_size,
+        chunk_group_size=group_size,
+        artifacts=tuple(artifacts),
+        records=tuple(records),
+    )
+
+
+def _publication_time(
+    release_date: str, database_timestamp: int
+) -> tuple[EconomicTimePrecision, int | None, str | None]:
+    timestamp = datetime.fromtimestamp(database_timestamp, timezone.utc)
+    local = timestamp.astimezone(ZoneInfo(ECB_SOURCE_TIMEZONE))
+    # FOEDB encodes legacy records as local midnight (plus one anomalous 02:00
+    # value on 7 September 2017).  From 26 October 2017 it carries the actual
+    # 13:45 or 14:15 decision publication clock.
+    if release_date >= "2017-10-26":
+        if local.date().isoformat() != release_date:
+            raise ValueError("ECB exact publication timestamp has wrong date")
+        lexical = local.isoformat(timespec="minutes")
+        return (
+            EconomicTimePrecision.EXACT_MINUTE,
+            database_timestamp * 1_000_000_000,
+            lexical,
+        )
+    return EconomicTimePrecision.DATE_ONLY, None, None
+
+
+def build_ecb_foedb_release_index(
+    versions_snapshot: OfficialRawSnapshotV1,
+    metadata_snapshot: OfficialRawSnapshotV1,
+    chunk_snapshots: Sequence[OfficialRawSnapshotV1],
+    *,
+    as_of_date: str,
+) -> EcbFoedbReleaseIndexV1:
+    """Parse every FOEDB record and select the exact decision series."""
+    as_of = _iso_date(as_of_date, "as_of_date")
+    database = _decode_ecb_foedb_database(
+        versions_snapshot, metadata_snapshot, chunk_snapshots
+    )
 
     publications: list[EcbFoedbPublicationV1] = []
-    for record in records:
+    for record in database.records:
         properties = _mapping(
             record.get("publicationProperties") or {},
             "publicationProperties",
         )
-        if record.get("type") != 92 or properties.get("Title") != (
-            "Monetary policy decisions"
-        ):
+        title = _optional_text(properties.get("Title"))
+        if record.get("type") != 92 or title not in _DECISION_TITLES:
             continue
         paths = _sequence(record.get("documentTypes"), "documentTypes")
         if len(paths) != 1:
@@ -1293,7 +1332,7 @@ def build_ecb_foedb_release_index(
                 database_timestamp=timestamp,
                 release_date=release_date,
                 source_uri=uri,
-                title="Monetary policy decisions",
+                title=title,
                 time_precision=precision,
                 published_at_ns=published_at_ns,
                 published_lexical=lexical,
@@ -1301,12 +1340,12 @@ def build_ecb_foedb_release_index(
         )
     return EcbFoedbReleaseIndexV1(
         as_of_date=as_of,
-        database_version=version,
-        database_version_hash=version_hash,
-        database_total_records=total,
-        database_chunk_size=chunk_size,
-        database_chunk_group_size=group_size,
-        database_artifacts=tuple(artifacts),
+        database_version=database.version,
+        database_version_hash=database.version_hash,
+        database_total_records=database.total_records,
+        database_chunk_size=database.chunk_size,
+        database_chunk_group_size=database.chunk_group_size,
+        database_artifacts=database.artifacts,
         publications=tuple(publications),
     )
 

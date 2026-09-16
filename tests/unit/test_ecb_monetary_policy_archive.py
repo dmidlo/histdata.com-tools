@@ -72,7 +72,12 @@ def test_ecb_archive_source_has_a_dedicated_empirical_parser() -> None:
 
     assert source.economy_code == "EA"
     assert source.verification_status.value == "empirically-verified"
-    assert source.source_release_ids == ("Monetary policy decisions",)
+    assert source.source_release_ids == (
+        "Account of the monetary policy meeting",
+        "FOEDB type 20: Meeting of <source-authored dates>",
+        "Monetary Policy Decisions",
+        "Monetary policy decisions",
+    )
     assert source.formats == (
         OfficialSourceFormat.JSON,
         OfficialSourceFormat.HTML,
@@ -92,17 +97,17 @@ def test_packaged_ecb_archive_quantifies_the_complete_decision_series() -> None:
     assert manifest.release_index.database_version_hash == "FS9roLbU"
     assert manifest.release_index.database_total_records == 20_073
     assert len(manifest.release_index.database_artifacts) == 83
-    assert len(manifest.release_index.publications) == 299
-    assert len(manifest.decisions) == 298
-    assert manifest.raw_artifact_count == 382
-    assert manifest.unique_content_sha256_count == 382
-    assert manifest.total_content_bytes == 42_018_085
+    assert len(manifest.release_index.publications) == 300
+    assert len(manifest.decisions) == 299
+    assert manifest.raw_artifact_count == 383
+    assert manifest.unique_content_sha256_count == 383
+    assert manifest.total_content_bytes == 42_121_110
     assert manifest.exact_minute_count == 72
-    assert manifest.date_only_count == 226
+    assert manifest.date_only_count == 227
     assert manifest.emergency_count == 2
     assert manifest.manifest_id == (
         "ecb-archive-manifest:sha256:"
-        "112cdfa7ade349a2ee189b7dc0a3f8c32568925f5516ee349ed69cc336bde408"
+        "982537c514abd658ea04983296094cde827f70a1c178115d6c7b76e6a39c90e3"
     )
 
 
@@ -145,7 +150,7 @@ def test_ecb_decisions_preserve_three_rate_lineage_and_order_changes() -> None:
         )
     )
     assert Counter(item.direction.value for item in manifest.decisions) == {
-        "hold": 237,
+        "hold": 238,
         "ease": 32,
         "tighten": 29,
     }
@@ -169,6 +174,24 @@ def test_ecb_foedb_times_fail_closed_before_the_exact_minute_era() -> None:
         for item in manifest.decisions
         if item.action_timing.value == "emergency"
     ] == ["2001-09-17", "2008-10-08"]
+
+
+def test_ecb_decision_selection_preserves_the_2016_capitalization_variant() -> (
+    None
+):
+    manifest = load_packaged_ecb_monetary_policy_archive_manifest()
+    publication = next(
+        item
+        for item in manifest.release_index.publications
+        if item.release_date == "2016-12-08"
+    )
+    decision = next(
+        item for item in manifest.decisions if item.release_date == "2016-12-08"
+    )
+
+    assert publication.title == "Monetary Policy Decisions"
+    assert publication.source_uri.endswith("/2016/html/pr161208.en.html")
+    assert _values(decision.previous_setting) == _values(decision.new_setting)
 
 
 def test_ecb_requests_bind_the_complete_versioned_inventory() -> None:
@@ -203,7 +226,7 @@ def test_ecb_requests_bind_the_complete_versioned_inventory() -> None:
     assert len(chunks) == 81
     assert chunks[0].uri.endswith("/data/0/chunk_0.json")
     assert chunks[-1].uri.endswith("/data/0/chunk_80.json")
-    assert len(reports) == 299
+    assert len(reports) == 300
     assert {item.parser_id for item in (*chunks, *reports)} == {
         "official.ecb-monetary-policy.v1"
     }
