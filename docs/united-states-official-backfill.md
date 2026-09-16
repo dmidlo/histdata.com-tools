@@ -246,8 +246,54 @@ compares the rebuilt manifest exactly. Missing, extra, duplicated, changed,
 misdated, dummy, or unparseable evidence fails closed.
 `dol_initial_claims_coverage_from_manifest()` qualifies only the 1,238
 comparable triplets and keeps both noncomparable publications plus the seven
-unpublished dates explicit. This brings 21 of 22 U.S. programs to complete
-archive qualification; only the Monthly Treasury Statement remains open.
+unpublished dates explicit.
+
+## Monthly Treasury Statement archive
+
+The qualified FiscalData lineage selects the continuous official PDF series
+from December 1999 through August 2026. December 1999 is predecessor-only;
+January 2000 through August 2026 contribute 320 monthly occurrence records.
+Each occurrence preserves three distinct, source-authored values from Table 1:
+
+- the current statement's monthly budget balance;
+- the preceding statement's value as it was initially known; and
+- the current statement's revised preceding-month value.
+
+Balances are normalized in millions of dollars with surplus positive and
+deficit negative. The FiscalData API table `mts_table_1` remains a current
+revised-series cross-check and never replaces the occurrence PDFs. Four PDFs
+with damaged 2023-2024 Table 1 text maps use reviewed 300-DPI OCR bound to the
+exact report hashes and cross-checked against Table 2.
+At qualification, all 138 API-era current-month rows from March 2015 through
+August 2026 matched the corresponding retained PDF values after rounding the
+API's dollar amounts to published millions and reversing its deficit-positive
+sign convention.
+
+Release metadata remains equally conservative. There are 288 exact 2:00 p.m.
+Eastern schedule times, six early annual-table dates without source clocks,
+and 26 date-only September year-end releases. The corpus preserves the printed
+January 21, 2002 schedule for December 2001, corrects the December 2006 PDF's
+impossible 2006 year only through its November 2006 annual-table witness, and
+uses the November 2022 annual schedule when the April 2023 report skips May.
+The September 2025 occurrence uses the official report response's October 16
+`Last-Modified` date without inventing a time.
+
+The retained evidence inventory contains 347 unique artifacts and 417,602,025
+bytes: one exact catalog receipt, 321 report PDFs, and 25 Treasury year-end
+pages. The package ships the compact manifest, reviewed extracts, and base64
+catalog envelope; the full raw corpus stays caller-retained:
+
+```console
+uv run python scripts/refresh_us_mts_archive.py \
+  --as-of 2026-09-16 \
+  --source-directory /absolute/operator/path/mts-source \
+  --schedule-ocr-directory /absolute/operator/path/mts-schedule-ocr
+```
+
+`replay_treasury_mts_archive()` reparses every Table 1, validates each timing
+witness and reviewed override against retained hashes, and compares the rebuilt
+manifest exactly. `treasury_mts_coverage_from_manifest()` qualifies all 320
+triplets, completing archive qualification for all 22 U.S. programs.
 
 ## Retained real release
 

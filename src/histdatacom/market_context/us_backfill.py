@@ -1870,7 +1870,11 @@ def built_in_united_states_backfill_profile(
             time_precision=EconomicTimePrecision.DATE_ONLY,
             archive_strategy=UnitedStatesArchiveStrategy.OFFICIAL_VINTAGE_TABLE,
             limitations=(
-                "Fiscal-period revisions and classification changes require vintage metadata.",
+                "Use the complete January 2000 through August 2026 occurrence corpus, with December 1999 retained only as the previous-as-known predecessor.",
+                "Budget balance is normalized as surplus positive and deficit negative in millions of dollars.",
+                "The preceding PDF supplies previous-as-known and the current PDF Table 1 supplies revised previous; the current API is only a revised-series cross-check.",
+                "September year-end releases retain official date-only evidence; six early annual schedules without clocks remain inferred-bounded.",
+                "Four damaged 2023-2024 Table 1 text maps require hash-bound reviewed OCR values.",
                 *no_monthly_consensus,
             ),
         ),

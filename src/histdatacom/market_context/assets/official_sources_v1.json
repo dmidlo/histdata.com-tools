@@ -5357,7 +5357,9 @@
         "government-finance"
       ],
       "formats": [
-        "json"
+        "json",
+        "html",
+        "pdf"
       ],
       "capabilities": [
         "current-values",
@@ -5368,27 +5370,39 @@
         "series-metadata",
         "archive-enumeration"
       ],
-      "endpoint_uri_template": "https://api.fiscaldata.treasury.gov/services/api/fiscal_service/",
+      "endpoint_uri_template": "https://api.fiscaldata.treasury.gov/services/api/fiscal_service/v1/accounting/mts/mts_table_1",
       "allowed_hosts": [
         "api.fiscaldata.treasury.gov",
-        "fiscaldata.treasury.gov"
+        "fiscaldata.treasury.gov",
+        "home.treasury.gov"
       ],
       "expected_media_types": [
-        "application/json"
+        "application/json",
+        "text/html",
+        "application/pdf"
       ],
-      "source_series_ids": [],
-      "source_table_ids": [],
-      "source_release_ids": [],
-      "release_calendar_uri": "https://fiscaldata.treasury.gov/datasets/",
-      "archive_uri": "https://fiscaldata.treasury.gov/api-documentation/",
+      "source_series_ids": [
+        "015-BFS-2014Q1-13"
+      ],
+      "source_table_ids": [
+        "mts_table_1"
+      ],
+      "source_release_ids": [
+        "monthly-treasury-statement"
+      ],
+      "release_calendar_uri": "https://fiscaldata.treasury.gov/datasets/monthly-treasury-statement/",
+      "archive_uri": "https://fiscaldata.treasury.gov/page-data/datasets/monthly-treasury-statement/page-data.json",
       "source_timezone": "America/New_York",
-      "availability_time_precision": "scheduled-only",
-      "dst_convention": "IANA zone database; retain source lexical times and require explicit DST-fold evidence.",
-      "historical_depth": "Series-dependent current revised history; contemporaneous release artifacts are required before claiming original vintages.",
+      "availability_time_precision": "date-only",
+      "dst_convention": "IANA America/New_York conversion for source-authored 2:00 p.m. EST schedule lines; year-end releases and early tables without clocks never receive invented instants.",
+      "historical_depth": "The official PDF catalog is continuous from February 1954 through the current statement; qualified point-in-time coverage retains the December 1999 predecessor and every January 2000 through August 2026 report.",
       "known_breaks": [
-        "Series/table identifiers, classifications, seasonal adjustment, rebases, and dissemination endpoints are versioned per adapter."
+        "September statements have a year-end-dependent date rather than the normal next-report schedule and require official Treasury year-end evidence.",
+        "December 2000 through December 2005 annual schedule tables omit a release clock and remain inferred-bounded.",
+        "Four 2023-2024 PDFs have damaged Table 1 text maps and require hash-bound reviewed OCR values.",
+        "The December 2006 report prints February 12, 2006 for the January 2007 statement; the November 2006 annual table supplies the internally consistent February 12, 2007 date."
       ],
-      "revision_behavior": "Published values may be revised, benchmarked, rebased, or corrected; immutable fetches never overwrite earlier evidence.",
+      "revision_behavior": "Retain each statement's current-month budget balance, the preceding statement's initial value, and the current statement's revised preceding-month Table 1 row as distinct point-in-time values.",
       "rate_limit": "No stable public limit recorded at review; apply the stricter local request, byte, page, event, retry, and runtime bounds.",
       "authentication": "none",
       "credential_env_name": null,
@@ -5396,19 +5410,22 @@
       "credential_parameter_name": null,
       "terms_uri": null,
       "fallback_source_keys": [],
-      "parser_id": "official.json.v1",
+      "parser_id": "official.treasury-mts.v1",
       "parser_version": "1",
-      "replay_strategy": "Retain exact response bytes, request parameters, endpoint and parser identities, response validators, source clocks, and SHA-256 before normalization.",
+      "replay_strategy": "Retain the exact catalog receipt, December 1999 predecessor, every selected monthly PDF, year-end Treasury pages, response metadata, source hashes, and reviewed exceptional extracts before deterministic normalization.",
       "adapter_owner": "market-context/us",
-      "verification_status": "reviewed-entrypoint",
-      "reviewed_on": "2026-09-13",
+      "verification_status": "empirically-verified",
+      "reviewed_on": "2026-09-16",
       "verification_evidence_uris": [
-        "https://fiscaldata.treasury.gov/api-documentation/"
+        "https://fiscaldata.treasury.gov/datasets/monthly-treasury-statement/",
+        "https://fiscaldata.treasury.gov/page-data/datasets/monthly-treasury-statement/page-data.json",
+        "https://api.fiscaldata.treasury.gov/services/api/fiscal_service/v1/accounting/mts/mts_table_1"
       ],
-      "redistribution_notes": "Official public-data terms and attribution requirements must be rechecked and retained by the qualifying adapter.",
+      "redistribution_notes": "The package retains compact hashes, normalized vintage values, the exact catalog receipt, and hash-bound reviewed extracts; the complete 417 MB first-party PDF and HTML corpus remains caller-retained replay evidence.",
       "limitations": [
-        "Registry review proves the official entrypoint and legal producer, not complete per-series coverage or historical-vintage availability.",
-        "Protocol-specific parsing and empirical fixture qualification are owned by issue #584 and the economy backfill."
+        "The current FiscalData API is a revised-series cross-check and is not substituted for occurrence-specific PDF evidence.",
+        "Budget balance is normalized as surplus positive and deficit negative in millions of dollars; the API's deficit/surplus field uses the opposite sign.",
+        "No official monthly event-consensus forecast is represented."
       ]
     },
     {

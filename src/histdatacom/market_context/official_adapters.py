@@ -848,6 +848,24 @@ class OfficialDolEtaInitialClaimsParserV1(OfficialHtmlParserV1):
         return super().parse(snapshot, max_events=max_events)
 
 
+class OfficialTreasuryMtsParserV1(OfficialHtmlParserV1):
+    """Bind FiscalData MTS catalog, API, PDF, and release evidence."""
+
+    parser_id = "official.treasury-mts.v1"
+    supported_formats: tuple[OfficialSourceFormat, ...] = (
+        OfficialSourceFormat.JSON,
+        OfficialSourceFormat.HTML,
+        OfficialSourceFormat.PDF,
+    )
+
+    def parse(
+        self, snapshot: OfficialRawSnapshotV1, *, max_events: int
+    ) -> Sequence[Mapping[str, JSONValue]]:
+        if snapshot.request.source_format is OfficialSourceFormat.JSON:
+            return _parse_json(self, snapshot, max_events=max_events)
+        return super().parse(snapshot, max_events=max_events)
+
+
 class OfficialReleaseFeedParserV1(_BaseOfficialParser):
     """RSS, Atom, and iCalendar schedule/release feed parser."""
 
@@ -934,6 +952,7 @@ _BUILT_IN_PARSER_TYPES: tuple[type[_BaseOfficialParser], ...] = (
     OfficialFederalReserveH6ParserV1,
     OfficialPhiladelphiaFedMbosParserV1,
     OfficialPhiladelphiaFedSpfParserV1,
+    OfficialTreasuryMtsParserV1,
     OfficialReleaseFeedParserV1,
     OfficialPdfParserV1,
     OfficialArchiveParserV1,
@@ -3054,6 +3073,7 @@ __all__ = [
     "OfficialSdmx30ParserV1",
     "OfficialSpreadsheetLayoutV1",
     "OfficialSpreadsheetParserV1",
+    "OfficialTreasuryMtsParserV1",
     "audit_official_adapter_coverage",
     "built_in_official_source_parsers",
     "parse_with_built_in_official_adapter",
