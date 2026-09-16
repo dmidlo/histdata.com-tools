@@ -110,7 +110,7 @@ def _coverage(
 def test_registry_represents_us_specific_legal_producers_and_text() -> None:
     registry = load_packaged_official_source_registry()
     assert registry.reviewed_on == "2026-09-16"
-    assert len(registry.sources) == 68
+    assert len(registry.sources) == 69
 
     dol = registry.source("us.dol.eta-unemployment-insurance")
     assert dol.institution.startswith("U.S. Department of Labor")
@@ -231,6 +231,19 @@ def test_registry_represents_us_specific_legal_producers_and_text() -> None:
     assert mtis.availability_time_precision.value == "exact-minute"
     assert mtis.verification_status.value == "empirically-verified"
 
+    fomc = registry.source("us.frb.fomc")
+    assert fomc.source_release_ids == (
+        "FOMC minutes",
+        "FOMC statement",
+        "Summary of Economic Projections",
+    )
+    assert fomc.parser_id == "official.federal-reserve-fomc.v1"
+    assert fomc.verification_status.value == "empirically-verified"
+
+    money_stock = registry.source("us.frb.money-stock")
+    assert money_stock.source_release_ids == ("H.6 Money Stock Measures",)
+    assert money_stock.verification_status.value == "reviewed-entrypoint"
+
 
 def test_builtin_us_profile_covers_every_required_family_and_program() -> None:
     registry = load_packaged_official_source_registry()
@@ -270,6 +283,9 @@ def test_builtin_us_profile_covers_every_required_family_and_program() -> None:
     assert (
         profile.by_key["us.census.manufacturing-trade-inventories"].source_key
         == "us.census.mtis"
+    )
+    assert profile.by_key["us.frb.money-stock"].source_key == (
+        "us.frb.money-stock"
     )
     assert UnitedStatesBackfillProfileV1.from_json(profile.to_json()) == profile
 

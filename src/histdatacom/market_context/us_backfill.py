@@ -1842,7 +1842,7 @@ def built_in_united_states_backfill_profile(
             "money-stock-measures",
             "Money Stock Measures",
             "Board of Governors of the Federal Reserve System",
-            "us.frb.fomc",
+            "us.frb.money-stock",
             "https://www.federalreserve.gov/releases/h6/",
             "https://www.federalreserve.gov/releases/h6/",
             frequency="weekly-monthly",

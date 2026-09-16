@@ -675,6 +675,86 @@
     },
     {
       "schema_version": "histdatacom.official-source-entry.v1",
+      "source_key": "us.frb.money-stock",
+      "economy_code": "US",
+      "economy_name": "United States",
+      "institution": "Board of Governors of the Federal Reserve System",
+      "jurisdiction": "United States of America",
+      "legal_producer": true,
+      "roles": [
+        "primary-producer",
+        "official-archive",
+        "release-calendar"
+      ],
+      "event_families": [
+        "money-credit"
+      ],
+      "indicator_ids": [
+        "money-credit-and-financial-statistics"
+      ],
+      "formats": [
+        "html",
+        "text",
+        "pdf"
+      ],
+      "capabilities": [
+        "current-values",
+        "historical-observations",
+        "publication-metadata",
+        "schedule-metadata",
+        "revision-metadata",
+        "series-metadata",
+        "archive-enumeration"
+      ],
+      "endpoint_uri_template": "https://www.federalreserve.gov/releases/h6/",
+      "allowed_hosts": [
+        "www.federalreserve.gov"
+      ],
+      "expected_media_types": [
+        "text/html",
+        "text/plain",
+        "application/pdf"
+      ],
+      "source_series_ids": [],
+      "source_table_ids": [],
+      "source_release_ids": [
+        "H.6 Money Stock Measures"
+      ],
+      "release_calendar_uri": "https://www.federalreserve.gov/releases/h6/",
+      "archive_uri": "https://www.federalreserve.gov/releases/h6/",
+      "source_timezone": "America/New_York",
+      "availability_time_precision": "scheduled-only",
+      "dst_convention": "IANA zone database; retain source lexical times and require explicit DST-fold evidence.",
+      "historical_depth": "Current H.6 release, historical tables, and archive entrypoints; occurrence-specific 2000-present qualification remains pending.",
+      "known_breaks": [
+        "Weekly H.6 publication ended in 2021 and the release moved to a monthly publication schedule.",
+        "Definitions, seasonal adjustment, benchmark revisions, and table layouts require occurrence-specific evidence."
+      ],
+      "revision_behavior": "Published values may be revised, benchmarked, or seasonally adjusted; immutable fetches never overwrite earlier evidence.",
+      "rate_limit": "No stable public limit recorded at review; apply the stricter local request, byte, page, event, retry, and runtime bounds.",
+      "authentication": "none",
+      "credential_env_name": null,
+      "credential_header_name": null,
+      "credential_parameter_name": null,
+      "terms_uri": null,
+      "fallback_source_keys": [],
+      "parser_id": "official.html.v1",
+      "parser_version": "1",
+      "replay_strategy": "Retain exact response bytes, request parameters, endpoint and parser identities, response validators, source clocks, and SHA-256 before normalization.",
+      "adapter_owner": "market-context/us",
+      "verification_status": "reviewed-entrypoint",
+      "reviewed_on": "2026-09-16",
+      "verification_evidence_uris": [
+        "https://www.federalreserve.gov/releases/h6/"
+      ],
+      "redistribution_notes": "Official public-data terms and attribution requirements must be rechecked and retained by the qualifying adapter.",
+      "limitations": [
+        "Registry review proves the official H.6 entrypoint and legal producer, not complete per-release coverage or vintage semantics.",
+        "The FOMC meeting-archive qualification does not qualify this distinct statistical release."
+      ]
+    },
+    {
+      "schema_version": "histdatacom.official-source-entry.v1",
       "source_key": "ca.statcan.wds",
       "economy_code": "CA",
       "economy_name": "Canada",
@@ -5331,12 +5411,10 @@
         "release-calendar"
       ],
       "event_families": [
-        "monetary-policy",
-        "money-credit"
+        "monetary-policy"
       ],
       "indicator_ids": [
-        "policy-rate-and-decisions",
-        "money-credit-and-financial-statistics"
+        "policy-rate-and-decisions"
       ],
       "formats": [
         "html",
@@ -5361,15 +5439,21 @@
       ],
       "source_series_ids": [],
       "source_table_ids": [],
-      "source_release_ids": [],
+      "source_release_ids": [
+        "FOMC statement",
+        "FOMC minutes",
+        "Summary of Economic Projections"
+      ],
       "release_calendar_uri": "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm",
-      "archive_uri": "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm",
+      "archive_uri": "https://www.federalreserve.gov/monetarypolicy/fomc_historical.htm",
       "source_timezone": "America/New_York",
-      "availability_time_precision": "exact-minute",
+      "availability_time_precision": "inferred-bounded",
       "dst_convention": "IANA zone database; retain source lexical times and require explicit DST-fold evidence.",
-      "historical_depth": "Series-dependent current revised history; contemporaneous release artifacts are required before claiming original vintages.",
+      "historical_depth": "Complete meeting-container inventory from 2000 through the latest fully published meeting, with statement settings, unique minutes publications, and SEP vintages beginning October 2007.",
       "known_breaks": [
-        "Series/table identifiers, classifications, seasonal adjustment, rebases, and dissemination endpoints are versioned per adapter."
+        "Scalar federal-funds targets became target ranges in December 2008.",
+        "Advance SEP tables began with the April 2011 press conference; all SEP exhibits moved to same-day publication in December 2020.",
+        "Source-authored statement clocks are incomplete before the modern 2 p.m. release era and remain bounded rather than inferred as exact."
       ],
       "revision_behavior": "Published values may be revised, benchmarked, rebased, or corrected; immutable fetches never overwrite earlier evidence.",
       "rate_limit": "No stable public limit recorded at review; apply the stricter local request, byte, page, event, retry, and runtime bounds.",
@@ -5379,19 +5463,22 @@
       "credential_parameter_name": null,
       "terms_uri": null,
       "fallback_source_keys": [],
-      "parser_id": "official.html.v1",
+      "parser_id": "official.federal-reserve-fomc.v1",
       "parser_version": "1",
       "replay_strategy": "Retain exact response bytes, request parameters, endpoint and parser identities, response validators, source clocks, and SHA-256 before normalization.",
       "adapter_owner": "market-context/us",
-      "verification_status": "reviewed-entrypoint",
-      "reviewed_on": "2026-09-13",
+      "verification_status": "empirically-verified",
+      "reviewed_on": "2026-09-16",
       "verification_evidence_uris": [
-        "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm"
+        "https://www.federalreserve.gov/monetarypolicy/fomc_historical.htm",
+        "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm",
+        "https://www.federalreserve.gov/monetarypolicy/fomcpresconf20110427.htm"
       ],
       "redistribution_notes": "Official public-data terms and attribution requirements must be rechecked and retained by the qualifying adapter.",
       "limitations": [
-        "Registry review proves the official entrypoint and legal producer, not complete per-series coverage or historical-vintage availability.",
-        "Protocol-specific parsing and empirical fixture qualification are owned by issue #584 and the economy backfill."
+        "The qualified corpus treats only links bound inside official meeting containers as decisions, minutes, or projections.",
+        "The August 2025 longer-run strategy notation vote is not a policy-rate decision.",
+        "No official event-level decision consensus is published; SEP remains a central-bank projection vintage rather than a monthly consensus substitute."
       ]
     },
     {

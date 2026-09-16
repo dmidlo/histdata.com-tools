@@ -797,6 +797,16 @@ class OfficialPhiladelphiaFedMbosParserV1(OfficialHtmlParserV1):
         return super().parse(snapshot, max_events=max_events)
 
 
+class OfficialFederalReserveFomcParserV1(OfficialHtmlParserV1):
+    """Bind Federal Reserve FOMC HTML and PDF artifacts exactly."""
+
+    parser_id = "official.federal-reserve-fomc.v1"
+    supported_formats: tuple[OfficialSourceFormat, ...] = (
+        OfficialSourceFormat.HTML,
+        OfficialSourceFormat.PDF,
+    )
+
+
 class OfficialReleaseFeedParserV1(_BaseOfficialParser):
     """RSS, Atom, and iCalendar schedule/release feed parser."""
 
@@ -878,6 +888,7 @@ _BUILT_IN_PARSER_TYPES: tuple[type[_BaseOfficialParser], ...] = (
     OfficialCensusNrsParserV1,
     OfficialCensusFt900ParserV1,
     OfficialCensusMtisParserV1,
+    OfficialFederalReserveFomcParserV1,
     OfficialPhiladelphiaFedMbosParserV1,
     OfficialPhiladelphiaFedSpfParserV1,
     OfficialReleaseFeedParserV1,
@@ -2983,6 +2994,7 @@ __all__ = [
     "OfficialCensusNrsParserV1",
     "OfficialCsvParserV1",
     "OfficialDataCatalogParserV1",
+    "OfficialFederalReserveFomcParserV1",
     "OfficialHtmlParserV1",
     "OfficialJsonParserV1",
     "OfficialJsonStatParserV1",

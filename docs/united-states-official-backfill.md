@@ -33,11 +33,13 @@ The source registry includes separate supplemental entries for DOL/ETA, the
 Philadelphia Fed's MBOS and SPF programs, CPI, PPI, the Employment Situation,
 JOLTS, Productivity and Costs, GDP, Personal Income and Outlays, Advance
 Monthly Retail Sales, Advance Durable Goods, New Residential Construction, and
-New Residential Sales. This
+New Residential Sales. FOMC meeting publications and H.6 Money Stock Measures
+also use separate registry entries: qualifying the meeting archive therefore
+cannot imply that the distinct statistical release has been verified. This
 prevents broad family-level entries from being incorrectly named as the
 occurrence-specific source for weekly claims, regional Fed surveys, or
-statistical release documents. The
-Federal Reserve G.17 entry also declares plain text as a real archive format.
+statistical release documents. The Federal Reserve G.17 entry also declares
+plain text as a real archive format.
 The Advance Durable Goods entry binds the Census M3 historical archive and
 release schedule as separate evidence roles and accepts both HTML and PDF.
 The New Residential Construction entry separately binds the Census/HUD
@@ -59,6 +61,68 @@ eras, and contemporaneous current/prior/future diffusion indexes without
 substituting the revised history download.
 The reusable HTML-release adapter preserves such text as one bounded UTF-8
 record, including the exact line count and raw-snapshot lineage.
+
+## Complete FOMC archive qualification
+
+`histdatacom.market_context.us_fomc_archive` qualifies the three distinct FOMC
+programs without flattening them into one calendar row. The package retains
+the exact 21 annual historical meeting pages for 2000--2020 plus the current
+calendar page. Those 22 pages bind documents to official meeting containers;
+a URL resemblance alone can never classify a statement, minutes publication,
+or SEP vintage.
+
+The packaged `us_fomc_archive_v1.json` manifest is observed through September
+15, 2026, the last fully observable day before the September meeting. It
+records:
+
+- 249 meeting, conference-call, and notation-vote containers;
+- 225 policy statements from February 2000 through July 2026;
+- 213 unique minutes publications, including documents shared by separately
+  indexed conference calls;
+- 75 contemporaneous SEP vintages from October 2007 through June 2026; and
+- 521 unique official artifacts containing 49,272,968 bytes.
+
+Every decision preserves the native federal-funds setting shape and its
+previous-as-known lineage. The first statement derives the preceding 5.5
+percent target from the source-authored 25-basis-point increase to 5.75
+percent. The December 2008 change from a 1 percent scalar target to a
+0--0.25 percent range remains an explicit shape transition. The archive yields
+148 holds, 40 tightenings, 34 easings, one guidance-only statement, and two
+operational liquidity statements that state no target change and therefore
+carry the preceding known setting. Only those three pinned source URIs may use
+that carry rule; an unrecognized parsing failure stops the build. The
+August 2025 longer-run strategy notation vote is not misclassified as a rate
+decision. Ninety statements supply an exact publication clock; the others
+remain honestly bounded. Thirteen decisions are explicitly unscheduled.
+
+SEP publication regimes remain occurrence-specific. Fourteen October
+2007--January 2011 vintages use the public minutes addendum released after the
+meeting. Thirty-nine April 2011--December 2020 vintages use the contemporaneous
+advance projection-table PDFs, and 22 March 2021--June 2026 vintages use the
+current HTML projection tables. These central-bank projection vintages remain
+distinct from a proprietary event consensus. Likewise, minutes are documentary
+events and are not given fabricated numeric triplets.
+
+Only the compact manifest and the exact 2,172,157-byte index-page corpus ship
+in the package. The larger statement, minutes, and SEP corpus stays in a
+caller-retained content-addressed directory. It can be fetched once or replayed
+without network access:
+
+```console
+uv run python scripts/refresh_us_fomc_archive.py \
+  --as-of 2026-09-15 \
+  --source-directory /absolute/operator/path/fomc-source \
+  --fetch-missing
+```
+
+`replay_federal_reserve_fomc_archive()` reparses every retained index and
+document and compares the rebuilt manifest exactly. Missing, changed,
+duplicated, newly ambiguous, incorrectly classified, or unused evidence fails
+closed. `federal_reserve_fomc_coverages_from_manifest()` derives three complete
+program slices while leaving the unavailable event-level decision consensus
+explicit. Together with the previously qualified archives, 19 of the 22 U.S.
+programs are now complete; initial claims, H.6, and the Monthly Treasury
+Statement remain open.
 
 ## Retained real release
 
