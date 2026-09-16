@@ -80,6 +80,7 @@ def test_ecb_archive_source_has_a_dedicated_empirical_parser() -> None:
         "Introductory statement to the press conference (with Q&A)",
         "Introductory statement with Q&A",
         "Monetary Policy Decisions",
+        "Monetary developments in the euro area",
         "Monetary policy decisions",
         "Monetary policy statement (with Q&A)",
         "Transcript of the Press Briefing",
@@ -114,7 +115,7 @@ def test_packaged_ecb_archive_quantifies_the_complete_decision_series() -> None:
     assert manifest.emergency_count == 2
     assert manifest.manifest_id == (
         "ecb-archive-manifest:sha256:"
-        "58f4b271f167b96e8c463c0f69363ec910ff75d2ab6fca624d2b092bcd95e667"
+        "eda20db2d19520a5181bef3a3fded63b74353f52de131fea325938920affeb18"
     )
 
 

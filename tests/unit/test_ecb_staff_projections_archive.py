@@ -48,7 +48,7 @@ def test_packaged_ecb_projections_quantify_the_exact_foedb_series() -> None:
     assert manifest.date_only_count == 54
     assert manifest.manifest_id == (
         "ecb-projection-archive-manifest:sha256:"
-        "7f0ee524f559da477b77170d632b23e5e0ba3220884d5518431ee0fb6a5f405a"
+        "6ec72398f96749bdde29c4e28ffd9afa87e1287b29f8bc8b1672f618bbe0e19f"
     )
     assert packaged_ecb_staff_projections_manifest_path().is_file()
 

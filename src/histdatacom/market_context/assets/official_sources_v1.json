@@ -1628,10 +1628,12 @@
         "release-calendar"
       ],
       "event_families": [
-        "monetary-policy"
+        "monetary-policy",
+        "money-credit"
       ],
       "indicator_ids": [
-        "policy-rate-and-decisions"
+        "policy-rate-and-decisions",
+        "money-credit-and-financial-statistics"
       ],
       "formats": [
         "json",
@@ -1658,7 +1660,8 @@
       "source_series_ids": [
         "Main refinancing operations rate",
         "Marginal lending facility rate",
-        "Deposit facility rate"
+        "Deposit facility rate",
+        "BSI.M.U2.Y.V.M30.X.I.U2.2300.Z01.A"
       ],
       "source_table_ids": [
         "FOEDB publications.en"
@@ -1673,14 +1676,15 @@
         "Monetary policy statement (with Q&A)",
         "Transcript of the Press Briefing",
         "ECB staff macroeconomic projections for the euro area",
-        "Eurosystem staff macroeconomic projections for the euro area"
+        "Eurosystem staff macroeconomic projections for the euro area",
+        "Monetary developments in the euro area"
       ],
       "release_calendar_uri": "https://www.ecb.europa.eu/press/calendars/mgcgc/html/index.en.html",
       "archive_uri": "https://www.ecb.europa.eu/foedb/dbs/foedb/publications.en/versions.json",
       "source_timezone": "Europe/Berlin",
       "availability_time_precision": "inferred-bounded",
       "dst_convention": "IANA Europe/Berlin normalizes the Frankfurt publication clock; retain the FOEDB epoch and its offset-bearing local rendering.",
-      "historical_depth": "The qualified FOEDB occurrence corpus covers all 299 monetary-policy decision publications from 5 January 2000 through 10 September 2026, retains the 15 December 1999 predecessor for the first previous-as-known rate set, covers all 96 monetary-policy accounts published from 19 February 2015 through 27 August 2026, retains all 270 decision-linked monetary-policy statements from 5 January 2000 through 10 September 2026, and reconciles all 90 ECB/Eurosystem staff projection rounds from 3 June 2004 through 10 September 2026 to the independent official all-releases index.",
+      "historical_depth": "The qualified FOEDB occurrence corpus covers all 299 monetary-policy decision publications from 5 January 2000 through 10 September 2026, retains the 15 December 1999 predecessor for the first previous-as-known rate set, covers all 96 monetary-policy accounts published from 19 February 2015 through 27 August 2026, retains all 270 decision-linked monetary-policy statements from 5 January 2000 through 10 September 2026, reconciles all 90 ECB/Eurosystem staff projection rounds from 3 June 2004 through 10 September 2026 to the independent official all-releases index, and accounts for all 333 monthly type-10 monetary-developments records from 30 December 1998 through 27 August 2026 while qualifying the 320 release occurrences in the 2000-present issue window plus their immediate predecessor.",
       "known_breaks": [
         "FOEDB records through 7 September 2017 carry date-only placeholder epochs; records from 26 October 2017 carry the exact publication minute.",
         "The 8 December 2016 decision alone uses the source-authored title 'Monetary Policy Decisions'; all other selected type-92 records use 'Monetary policy decisions'.",
@@ -1694,9 +1698,14 @@
         "The standalone projection archive begins on 3 June 2004; no earlier standalone projection round is inferred from other ECB publications.",
         "The September 2006 projection round was published early on 31 August 2006; projection-round identity is therefore distinct from the publication date.",
         "The first 54 projection records retain date-only placeholder epochs; 36 later rounds preserve exact publication minutes, moving from 15:30 to 15:45 Europe/Berlin in September 2022.",
-        "The first 59 projection rounds are PDF-only in FOEDB; the 31 rounds from March 2019 through September 2026 retain both official HTML and PDF artifacts."
+        "The first 59 projection rounds are PDF-only in FOEDB; the 31 rounds from March 2019 through September 2026 retain both official HTML and PDF artifacts.",
+        "The monetary-developments inventory excludes 12 pre-window releases, retains the 28 December 1999 predecessor, and then preserves a gap-free monthly reference-period lineage from December 1999 through July 2026.",
+        "FOEDB assigns placeholder epochs one month early to md0112.pdf and md0210.pdf; their retained document headings establish the corrected publication dates of 28 January 2002 and 28 November 2002.",
+        "The first 211 in-window monetary-developments records retain date-only placeholder epochs; 109 records from 28 August 2017 onward preserve the exact 10:00 Europe/Berlin publication minute.",
+        "One type-10 URI is the non-periodic filename m3release.pdf, so its January 2010 reference period is sequence-derived and independently required to match the retained document heading; all other selected reference periods are encoded in their document paths.",
+        "Monetary-developments release documents explicitly disclose seasonal and end-of-month calendar adjustment from the 26 July 2001 publication onward; earlier absence of that exact disclosure is not relabelled as an unadjusted series."
       ],
-      "revision_behavior": "Each occurrence retains the exact decision, account, statement, or projection artifact; decisions reconstruct their three-rate setting against the immediately preceding official decision, accounts preserve meeting dates and a link to the matching decision where one exists, statements preserve one-to-one decision-day communication links without inventing absences, and projection rounds preserve their source-authored euro-area scope and annual horizon. Immutable refreshes never overwrite earlier byte evidence.",
+      "revision_behavior": "Each occurrence retains the exact decision, account, statement, projection, or monetary-developments artifact; decisions reconstruct their three-rate setting against the immediately preceding official decision, accounts preserve meeting dates and a link to the matching decision where one exists, statements preserve one-to-one decision-day communication links without inventing absences, projection rounds preserve their source-authored euro-area scope and annual horizon, and monthly M3 releases compare the current document's previous-period figure with that period's value in the immediately preceding retained release. Immutable refreshes never overwrite earlier byte evidence.",
       "rate_limit": "No stable FOEDB-specific limit is published; refresh uses bounded sequential metadata discovery, at most 512 chunks, bounded report requests, retry backoff, and an identifying contact user agent.",
       "authentication": "none",
       "credential_env_name": null,
@@ -1708,7 +1717,7 @@
       ],
       "parser_id": "official.ecb-monetary-policy.v1",
       "parser_version": "1",
-      "replay_strategy": "Retain exact versions.json, metadata.json, all versioned FOEDB data chunks, the predecessor page, every selected decision page, every selected account page, every selected statement page, the projection all-releases index, and every main projection HTML/PDF artifact; bind byte lengths and SHA-256 digests, recompute the ordered three-rate lineage, reconcile accounts and statements to their decision evidence, require the FOEDB projection inventory to match the independent archive page one-to-one, and re-extract every projection scope and annual horizon before accepting replay.",
+      "replay_strategy": "Retain exact versions.json, metadata.json, all versioned FOEDB data chunks, the predecessor page, every selected decision page, every selected account page, every selected statement page, the projection all-releases index, every main projection HTML/PDF artifact, and every type-10 monetary-developments document in the predecessor plus 2000-present window; bind byte lengths and SHA-256 digests, recompute the ordered three-rate lineage, reconcile accounts and statements to their decision evidence, require the FOEDB projection inventory to match the independent archive page one-to-one, re-extract every projection scope and annual horizon, and reconstruct the monthly M3 actual/previous-as-known revision chain before accepting replay.",
       "adapter_owner": "market-context/ea",
       "verification_status": "empirically-verified",
       "reviewed_on": "2026-09-16",
@@ -1726,15 +1735,21 @@
         "https://www.ecb.europa.eu/press/press_conference/monetary-policy-statement/2026/html/ecb.is260910~6a45359cfc.en.html",
         "https://www.ecb.europa.eu/pub/pdf/other/ecbstaffprojections200406en.pdf",
         "https://www.ecb.europa.eu/press/projections/html/ecb.projections202609_ecbstaff~8e340fc69d.en.html",
+        "https://www.ecb.europa.eu/press/pdf/md/md9911.pdf",
+        "https://www.ecb.europa.eu/press/pdf/md/md0112.pdf",
+        "https://www.ecb.europa.eu/press/pdf/md/md0210.pdf",
+        "https://www.ecb.europa.eu/press/stats/md/html/ecb.md2607~e7127e7d02.en.html",
         "https://www.ecb.europa.eu/press/pr/date/2026/html/ecb.mp260910~314e508016.en.html"
       ],
-      "redistribution_notes": "The package retains compact hash manifests; the versioned FOEDB database and the decision, account, statement, and projection artifacts remain an external operator-owned corpus with ECB attribution and disclaimer terms.",
+      "redistribution_notes": "The package retains compact hash manifests; the versioned FOEDB database and the decision, account, statement, projection, and monetary-developments artifacts remain an external operator-owned corpus with ECB attribution and disclaimer terms.",
       "limitations": [
         "Qualification covers the three key ECB interest rates only; asset purchases, refinancing-operation terms, liquidity measures, and forward guidance remain source text requiring separate typed identities.",
         "FOEDB does not provide a historical event-consensus rate set, so no market consensus or numeric surprise is manufactured.",
         "Accounts are documentary releases published after their meetings; they are not relabelled as same-day decisions or numeric consensus events.",
         "Statements are decision-day communication artifacts; they are linked to decisions but are not relabelled as separate rate decisions or numeric consensus events.",
         "Staff projection rounds are annual euro-area central-bank period forecasts; they are not relabelled as monthly or quarterly release consensus, and the compact receipt does not transcribe every value in the retained reports.",
+        "The monetary-developments receipt qualifies the annual M3 growth rate and its immediately previous monthly comparison; it does not transcribe every money, credit, counterpart, or annex series from each release.",
+        "Modern FOEDB records may pair the English HTML value source with a localized PDF rendering; both artifacts are retained, but localized text is not treated as an independent numeric observation.",
         "Ordinary-sequence classification does not replace contemporaneous calendar evidence for a historical scheduled clock."
       ]
     },
