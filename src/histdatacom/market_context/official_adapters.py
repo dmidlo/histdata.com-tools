@@ -826,6 +826,28 @@ class OfficialFederalReserveH6ParserV1(OfficialHtmlParserV1):
         return super().parse(snapshot, max_events=max_events)
 
 
+class OfficialDolEtaInitialClaimsParserV1(OfficialHtmlParserV1):
+    """Bind ETA Initial Claims archive pages and release artifacts exactly."""
+
+    parser_id = "official.dol-eta-initial-claims.v1"
+    supported_formats: tuple[OfficialSourceFormat, ...] = (
+        OfficialSourceFormat.HTML,
+        OfficialSourceFormat.PDF,
+    )
+
+    def parse(
+        self, snapshot: OfficialRawSnapshotV1, *, max_events: int
+    ) -> Sequence[Mapping[str, JSONValue]]:
+        if snapshot.request.source_format is OfficialSourceFormat.HTML:
+            return _parse_html(
+                self,
+                snapshot,
+                max_events=max_events,
+                strict_tables=False,
+            )
+        return super().parse(snapshot, max_events=max_events)
+
+
 class OfficialReleaseFeedParserV1(_BaseOfficialParser):
     """RSS, Atom, and iCalendar schedule/release feed parser."""
 
@@ -907,6 +929,7 @@ _BUILT_IN_PARSER_TYPES: tuple[type[_BaseOfficialParser], ...] = (
     OfficialCensusNrsParserV1,
     OfficialCensusFt900ParserV1,
     OfficialCensusMtisParserV1,
+    OfficialDolEtaInitialClaimsParserV1,
     OfficialFederalReserveFomcParserV1,
     OfficialFederalReserveH6ParserV1,
     OfficialPhiladelphiaFedMbosParserV1,
@@ -2235,6 +2258,7 @@ def _parse_html(
     snapshot: OfficialRawSnapshotV1,
     *,
     max_events: int,
+    strict_tables: bool = True,
 ) -> tuple[Mapping[str, JSONValue], ...]:
     try:
         text = snapshot.content.decode("utf-8-sig")
@@ -2281,6 +2305,8 @@ def _parse_html(
             header_version = _header_version(headers)
             for row_index, row in enumerate(table[1:], start=2):
                 if len(row) != len(headers):
+                    if not strict_tables:
+                        continue
                     raise parser.error(
                         snapshot,
                         OfficialParserFailureCode.SCHEMA_DRIFT,

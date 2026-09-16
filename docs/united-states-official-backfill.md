@@ -18,7 +18,7 @@ reviewed source registry and covers every provider-neutral event family:
 | BLS | CPI, PPI, Employment Situation, JOLTS, Productivity and Costs |
 | BEA | GDP stages and Personal Income and Outlays, including PCE |
 | Census, including joint HUD/BEA releases | retail sales, durable goods, international trade, housing starts/permits, new-home sales, manufacturing/trade inventories |
-| DOL/ETA | weekly initial and continued unemployment-insurance claims |
+| DOL/ETA | weekly initial unemployment-insurance claims |
 | Philadelphia Fed | Manufacturing Business Outlook Survey and Survey of Professional Forecasters |
 | Treasury | Monthly Treasury Statement |
 
@@ -40,6 +40,10 @@ prevents broad family-level entries from being incorrectly named as the
 occurrence-specific source for weekly claims, regional Fed surveys, or
 statistical release documents. The Federal Reserve G.17 entry also declares
 plain text as a real archive format.
+The DOL/ETA entry binds the annual Initial Claims archive POST contract, HTML
+and PDF release eras, the exact Eastern release clock, and the archive's
+pre-October-2002 boundary, duplicate aliases, dummy artifact, missing release,
+and 2025 appropriations-lapse publications.
 The Advance Durable Goods entry binds the Census M3 historical archive and
 release schedule as separate evidence roles and accepts both HTML and PDF.
 The New Residential Construction entry separately binds the Census/HUD
@@ -181,9 +185,69 @@ retained corpus. Missing, extra, duplicated, changed, misdated, stale, or
 unparseable evidence fails closed. `federal_reserve_h6_coverage_from_manifest()`
 derives complete schedule, initial-actual, previous-as-known, revision, and
 timing coverage while leaving unavailable event-level consensus explicit.
-Together with the previously qualified archives, 20 of the 22 U.S. programs
-are now complete; initial claims and the Monthly Treasury Statement remain
-open.
+Together with the previously qualified archives, H.6 brought 20 of the 22 U.S.
+programs to complete archive qualification.
+
+## Complete DOL/ETA Initial Claims archive qualification
+
+`histdatacom.market_context.us_initial_claims_archive` qualifies the
+regular-state, seasonally adjusted Initial Claims headline from the official
+DOL Employment and Training Administration year-indexed release archive. The
+source archive begins October 17, 2002 rather than at the profile's January
+2000 boundary, so the earlier source-unavailable span is named and no current
+revised series is presented as an original release vintage.
+
+The packaged manifest is observed through September 16, 2026 and binds 1,240
+unique releases through September 10, 2026: 105 legacy HTML pages, 494 ASP
+pages treated as HTML, and 641 native PDFs. It preserves 1,238 comparable
+actual/previous-as-known/revised-prior triplets and 1,019 occurrences where the
+prior estimate changed. Every qualified occurrence carries the release's
+authored 8:30 a.m. Eastern embargo clock and regular-state seasonally adjusted
+claims unit; continued claims, unadjusted claims, federal programs, and
+pandemic programs remain separate identities.
+
+The archive defects and federal disruption are part of the model:
+
+- the first retained release is predecessor-only because October 10, 2002 is
+  outside ETA's occurrence archive;
+- the annual index omits October 17, 2019, but the October 24 release explicitly
+  reports the missing occurrence's `214,000` initial value and its revision to
+  `218,000`, so the October 24 triplet remains source-backed;
+- seven releases from October 2 through November 13, 2025 were not published
+  during the appropriations lapse; the November 20 restart retains its
+  `220,000` actual and `228,000` prior-week level but is noncomparable because
+  no preceding occurrence published that value;
+- two 2013 ASP files are listed under the 2012 directory and are byte-identical
+  to their canonical 2013 artifacts, while `031514.pdf` is an authored dummy
+  file; all three remain hash-bound exclusions rather than occurrences;
+- `010318.pdf` is listed in the 2019 directory but authors January 3, 2019, so
+  its correction is narrowly pinned; and
+- the March 24, 2016 annual seasonal-factor release reports an intermediate
+  `260,000` comparison, but the preceding occurrence actually published
+  `265,000`; previous-as-known therefore remains `265,000` and the comparable
+  revision is `-6,000`.
+
+The retained evidence inventory has 1,269 artifacts and 358,921,608 bytes: 26
+landing/annual index receipts, 1,240 canonical publications, two duplicate
+aliases, and the dummy PDF. There are 1,267 unique content hashes because each
+alias exactly matches its canonical artifact. Only the compact manifest and
+the exact index-page envelope ship in the package; the larger release corpus
+stays in a caller-retained directory:
+
+```console
+uv run python scripts/refresh_us_initial_claims_archive.py \
+  --as-of 2026-09-16 \
+  --source-directory /absolute/operator/path/initial-claims-source \
+  --fetch-missing
+```
+
+`replay_dol_initial_claims_archive()` reparses every retained artifact and
+compares the rebuilt manifest exactly. Missing, extra, duplicated, changed,
+misdated, dummy, or unparseable evidence fails closed.
+`dol_initial_claims_coverage_from_manifest()` qualifies only the 1,238
+comparable triplets and keeps both noncomparable publications plus the seven
+unpublished dates explicit. This brings 21 of 22 U.S. programs to complete
+archive qualification; only the Monthly Treasury Statement remains open.
 
 ## Retained real release
 
@@ -1165,8 +1229,9 @@ alone is not.
   retains the weekly and monthly Money Stock Measures occurrence history.
 - [FOMC historical materials](https://www.federalreserve.gov/monetarypolicy/fomc_historical.htm)
   distinguish statements, minutes, projections, and other meeting materials.
-- [DOL/ETA claims](https://oui.doleta.gov/unemploy/claims.asp) is the legal
-  administrative source for weekly unemployment-insurance claims.
+- [DOL/ETA claims archive](https://oui.doleta.gov/unemploy/claims_arch.asp) is
+  the legal administrative source for weekly initial-claims publications and
+  exposes occurrence artifacts from October 2002 onward.
 - [Philadelphia Fed MBOS archives](https://www.philadelphiafed.org/surveys-and-data/mbos-archives)
   retain monthly release PDFs; the revised download is not substituted for
   those vintages.
@@ -1179,8 +1244,8 @@ Productivity and Costs, GDP, Personal Income and Outlays, and Advance Monthly
 Retail Sales indexes, the Advance Durable Goods index and reviewed OCR corpus,
 the International Trade, New Residential Construction, New Residential Sales,
 and Manufacturing and Trade Inventories and Sales indexes, the MBOS archive
-receipt and reviewed OCR corpus, the SPF release ledger, one representative
-G.17 raw release, and all twenty complete raw/normalized manifests. The
-remaining production raw corpora stay external, content addressed, and subject
-to the coverage audit so wheel size does not grow with thousands of federal
-release files.
+receipt and reviewed OCR corpus, the SPF release ledger, the complete Initial
+Claims annual-index receipts, one representative G.17 raw release, and all 21
+complete raw/normalized manifests. The remaining production raw corpora stay
+external, content addressed, and subject to the coverage audit so wheel size
+does not grow with thousands of federal release files.

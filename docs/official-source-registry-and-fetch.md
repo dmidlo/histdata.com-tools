@@ -96,6 +96,15 @@ dedicated `official.federal-reserve-h6.v1` parser across HTML, JSON, PDF, and
 one official text fallback; it does not inherit evidence from the FOMC route
 or treat stale and special-notice PDF links as publication clocks.
 
+The DOL/ETA Initial Claims entry is `empirically-verified` only for the
+regular-state seasonally adjusted headline. Its dedicated
+`official.dol-eta-initial-claims.v1` parser and annual POST-index contract bind
+1,240 unique HTML/ASP/PDF releases from October 2002 through September 2026,
+1,238 comparable triplets, 26 exact index receipts, and three hash-bound index
+exclusions. The entry names the pre-archive boundary, omitted October 2019
+artifact, seven unpublished 2025 shutdown occurrences, and noncomparable
+restart instead of substituting ETA's current revised time series.
+
 The registry's complete authority matrix feeds the
 [canonical indicator catalog](economic-indicator-catalog.md). The catalog
 adds exact concept, methodology-era, recurrence-rule, and expected-occurrence

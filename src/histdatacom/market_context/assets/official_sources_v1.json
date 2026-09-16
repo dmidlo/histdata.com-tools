@@ -5005,7 +5005,7 @@
         "series-metadata",
         "archive-enumeration"
       ],
-      "endpoint_uri_template": "https://oui.doleta.gov/unemploy/claims.asp",
+      "endpoint_uri_template": "https://oui.doleta.gov/unemploy/claims_arch.asp",
       "allowed_hosts": [
         "oui.doleta.gov",
         "www.dol.gov"
@@ -5022,13 +5022,15 @@
         "weekly-unemployment-insurance-claims"
       ],
       "release_calendar_uri": "https://www.dol.gov/ui/data.pdf",
-      "archive_uri": "https://oui.doleta.gov/unemploy/claims.asp",
+      "archive_uri": "https://oui.doleta.gov/unemploy/claims_arch.asp",
       "source_timezone": "America/New_York",
       "availability_time_precision": "exact-minute",
       "dst_convention": "IANA zone database; retain source lexical times and require explicit DST-fold evidence.",
-      "historical_depth": "ETA weekly claims tables and official news releases identify the administrative series; occurrence-specific releases remain required for as-known values.",
+      "historical_depth": "The year-indexed ETA occurrence archive begins October 17, 2002 and is empirically replayed through September 10, 2026; releases before that boundary are not present in the official archive.",
       "known_breaks": [
-        "Pandemic-era programs and state revisions must remain distinct from regular state initial and continued claims."
+        "Pandemic-era programs and state revisions must remain distinct from regular state initial and continued claims.",
+        "The ETA annual index omits the October 17, 2019 release, contains two byte-identical 2013 aliases under 2012, and links one authored dummy PDF dated March 15, 2014.",
+        "No weekly releases were published from October 2 through November 13, 2025 during the appropriations lapse."
       ],
       "revision_behavior": "States revise claims; retain every weekly publication and do not overwrite the previous-as-known estimate.",
       "rate_limit": "No stable public limit recorded at review; apply the stricter local request, byte, page, event, retry, and runtime bounds.",
@@ -5038,20 +5040,24 @@
       "credential_parameter_name": null,
       "terms_uri": null,
       "fallback_source_keys": [],
-      "parser_id": "official.html.v1",
+      "parser_id": "official.dol-eta-initial-claims.v1",
       "parser_version": "1",
       "replay_strategy": "Retain exact release and table bytes, source locators, parser identity, response clocks, and SHA-256 before normalization.",
       "adapter_owner": "market-context/us",
-      "verification_status": "reviewed-entrypoint",
-      "reviewed_on": "2026-09-14",
+      "verification_status": "empirically-verified",
+      "reviewed_on": "2026-09-16",
       "verification_evidence_uris": [
-        "https://oui.doleta.gov/unemploy/claims.asp",
-        "https://www.dol.gov/ui/data.pdf"
+        "https://oui.doleta.gov/unemploy/claims_arch.asp",
+        "https://oui.doleta.gov/press/2002/101702.html",
+        "https://oui.doleta.gov/press/2014/041014.pdf",
+        "https://oui.doleta.gov/press/2025/112025.pdf",
+        "https://oui.doleta.gov/press/2026/091026.pdf"
       ],
       "redistribution_notes": "Public federal statistics; retain agency attribution and recheck publication terms when packaging raw releases.",
       "limitations": [
-        "A current ETA table is not evidence of its historical initial publication.",
-        "State revisions and pandemic-program claims require occurrence-specific release artifacts."
+        "Qualification is limited to the regular-state seasonally adjusted initial-claims headline; continued claims, unadjusted claims, federal programs, and pandemic programs require separate identities.",
+        "The first retained release and the November 20, 2025 restart release lack comparable predecessor evidence; no current revised time series is substituted.",
+        "The archive does not provide occurrence releases from the January 2000 profile boundary through October 10, 2002."
       ]
     },
     {

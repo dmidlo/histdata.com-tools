@@ -116,6 +116,9 @@ def test_registry_represents_us_specific_legal_producers_and_text() -> None:
     assert dol.institution.startswith("U.S. Department of Labor")
     assert "ETA-538" in dol.source_series_ids
     assert EconomicEventFamily.LABOUR_MARKET in dol.event_families
+    assert dol.parser_id == "official.dol-eta-initial-claims.v1"
+    assert dol.archive_uri == "https://oui.doleta.gov/unemploy/claims_arch.asp"
+    assert dol.verification_status.value == "empirically-verified"
 
     philadelphia = registry.source("us.frb.philadelphia-surveys")
     assert "SPF" not in philadelphia.source_series_ids
@@ -258,6 +261,10 @@ def test_builtin_us_profile_covers_every_required_family_and_program() -> None:
     assert set(profile.required_program_keys) == set(profile.by_key)
     assert profile.by_key["us.dol.initial-claims"].source_key == (
         "us.dol.eta-unemployment-insurance"
+    )
+    assert (
+        profile.by_key["us.dol.initial-claims"].archive_start_date
+        == "2002-10-17"
     )
     assert profile.by_key["us.philadelphia-fed.mbos"].forecast_strategy is (
         UnitedStatesForecastStrategy.PRODUCER_OUTLOOK_SURVEY
