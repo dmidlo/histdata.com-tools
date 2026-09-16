@@ -1278,6 +1278,9 @@ alone is not.
 - [DOL/ETA claims archive](https://oui.doleta.gov/unemploy/claims_arch.asp) is
   the legal administrative source for weekly initial-claims publications and
   exposes occurrence artifacts from October 2002 onward.
+- [Treasury Fiscal Data Monthly Treasury Statement](https://fiscaldata.treasury.gov/datasets/monthly-treasury-statement/)
+  retains the official monthly publication lineage and current-series API used
+  only as a cross-check of the occurrence PDFs.
 - [Philadelphia Fed MBOS archives](https://www.philadelphiafed.org/surveys-and-data/mbos-archives)
   retain monthly release PDFs; the revised download is not substituted for
   those vintages.
@@ -1291,7 +1294,8 @@ Retail Sales indexes, the Advance Durable Goods index and reviewed OCR corpus,
 the International Trade, New Residential Construction, New Residential Sales,
 and Manufacturing and Trade Inventories and Sales indexes, the MBOS archive
 receipt and reviewed OCR corpus, the SPF release ledger, the complete Initial
-Claims annual-index receipts, one representative G.17 raw release, and all 21
-complete raw/normalized manifests. The remaining production raw corpora stay
-external, content addressed, and subject to the coverage audit so wheel size
-does not grow with thousands of federal release files.
+Claims annual-index receipts, the MTS catalog and reviewed OCR corpus, one
+representative G.17 raw release, and all 22 complete raw/normalized manifests.
+The remaining production raw corpora stay external, content addressed, and
+subject to the coverage audit so wheel size does not grow with thousands of
+federal release files.
