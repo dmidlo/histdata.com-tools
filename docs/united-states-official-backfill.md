@@ -120,9 +120,70 @@ document and compares the rebuilt manifest exactly. Missing, changed,
 duplicated, newly ambiguous, incorrectly classified, or unused evidence fails
 closed. `federal_reserve_fomc_coverages_from_manifest()` derives three complete
 program slices while leaving the unavailable event-level decision consensus
-explicit. Together with the previously qualified archives, 19 of the 22 U.S.
-programs are now complete; initial claims, H.6, and the Monthly Treasury
-Statement remain open.
+explicit.
+
+## Complete H.6 money-stock archive qualification
+
+`histdatacom.market_context.us_h6_archive` qualifies the distinct Federal
+Reserve H.6 Money Stock Measures program from the official release landing
+page, JSON release-date ledger, occurrence pages, one occurrence-specific text
+fallback, and matching timing PDFs. The packaged manifest is observed through
+September 15, 2026 and contains 1,169 in-scope publications from January 6,
+2000 through August 25, 2026, plus the December 30, 1999 predecessor needed to
+recover the first previous-as-known value.
+
+The archive preserves the native publication redesign instead of projecting
+all observations onto one frequency. It contains 1,102 weekly publications
+through February 11, 2021 and 67 monthly publications beginning February 23,
+2021. Weekly releases use the last two seasonally adjusted M2 week-average
+rows; monthly releases use the last two seasonally adjusted monthly M2 rows.
+For each occurrence, the previous-as-known value comes from the preceding
+release and is kept distinct from the current release's revised previous row.
+The first monthly occurrence deliberately compares December 2020 with the
+preceding weekly release's monthly table. The Federal Reserve's associated M1
+definition change stays explicit without falsely declaring an M2 break.
+
+Five source-layout eras are replayed: 324 pre-discontinuation M3 weekly
+publications, 396 preformatted M2 weekly publications, 178 legacy-table weekly
+publications, 204 modern-table weekly publications, and 67 modern-table monthly
+publications. The manifest records 973 occurrences where the previous value
+changed. Of 1,169 occurrences, 1,091 have an occurrence-authored minute and 78
+retain only the official scheduled convention. A scheduled convention never
+creates an artificial publication instant.
+
+The qualification also makes the surviving archive's defects reviewable:
+
+- four JSON ledger dates differ from dates authored by both the occurrence
+  page and PDF; every correction is pinned to that one occurrence and retains
+  both the indexed date and authored date;
+- the June 13, 2002 directory's default and screen-reader HTML are stale May
+  16 copies, so its official text release is retained and cross-checked against
+  the correctly authored June 13 PDF; and
+- 19 weekly `h6.pdf` routes are special notices without an occurrence clock or
+  are stale, while the 22 apparent monthly PDF routes through November 2022
+  resolve to the final weekly notice. None is accepted as timing evidence.
+
+The replay inventory contains 2,247 unique official artifacts and 174,852,559
+bytes: two index receipts, 1,170 value-bearing release artifacts, and 1,075
+matching timing PDFs. Only the compact 2.4 MiB manifest and the exact packaged
+index receipts ship in the wheel; the larger corpus remains in a
+caller-retained directory:
+
+```console
+uv run python scripts/refresh_us_h6_archive.py \
+  --as-of 2026-09-15 \
+  --source-directory /absolute/operator/path/h6-source \
+  --fetch-missing
+```
+
+`replay_federal_reserve_h6_archive()` reparses and hash-compares the complete
+retained corpus. Missing, extra, duplicated, changed, misdated, stale, or
+unparseable evidence fails closed. `federal_reserve_h6_coverage_from_manifest()`
+derives complete schedule, initial-actual, previous-as-known, revision, and
+timing coverage while leaving unavailable event-level consensus explicit.
+Together with the previously qualified archives, 20 of the 22 U.S. programs
+are now complete; initial claims and the Monthly Treasury Statement remain
+open.
 
 ## Retained real release
 
@@ -1100,6 +1161,8 @@ alone is not.
   retain the value-bearing releases.
 - [Federal Reserve G.17 archive](https://www.federalreserve.gov/releases/g17/)
   exposes releases and release dates back before 2000.
+- [Federal Reserve H.6 archive](https://www.federalreserve.gov/releases/h6/)
+  retains the weekly and monthly Money Stock Measures occurrence history.
 - [FOMC historical materials](https://www.federalreserve.gov/monetarypolicy/fomc_historical.htm)
   distinguish statements, minutes, projections, and other meeting materials.
 - [DOL/ETA claims](https://oui.doleta.gov/unemploy/claims.asp) is the legal
@@ -1117,8 +1180,7 @@ Retail Sales indexes, the Advance Durable Goods index and reviewed OCR corpus,
 the International Trade, New Residential Construction, New Residential Sales,
 and Manufacturing and Trade Inventories and Sales indexes, the MBOS archive
 receipt and reviewed OCR corpus, the SPF release ledger, one representative
-G.17 raw release, and all sixteen complete
-raw/normalized manifests. The
+G.17 raw release, and all twenty complete raw/normalized manifests. The
 remaining production raw corpora stay external, content addressed, and subject
 to the coverage audit so wheel size does not grow with thousands of federal
 release files.

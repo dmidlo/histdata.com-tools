@@ -242,7 +242,8 @@ def test_registry_represents_us_specific_legal_producers_and_text() -> None:
 
     money_stock = registry.source("us.frb.money-stock")
     assert money_stock.source_release_ids == ("H.6 Money Stock Measures",)
-    assert money_stock.verification_status.value == "reviewed-entrypoint"
+    assert money_stock.parser_id == "official.federal-reserve-h6.v1"
+    assert money_stock.verification_status.value == "empirically-verified"
 
 
 def test_builtin_us_profile_covers_every_required_family_and_program() -> None:

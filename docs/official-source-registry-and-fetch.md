@@ -14,7 +14,7 @@ capability until its first-party fixture qualification passes.
 ## Reviewed scope and authority rule
 
 The packaged registry is
-`histdatacom/market_context/assets/official_sources_v1.json`. Its 61 entries
+`histdatacom/market_context/assets/official_sources_v1.json`. Its 69 entries
 cover every cell in the 21-economy by 12-event-family matrix. Exactly one entry
 with role `primary-producer` must exist in every cell. Registry construction
 fails on a missing or ambiguous cell.
@@ -87,6 +87,14 @@ plain-text publications through August 2026 have content-addressed manifest
 evidence and parser replay. That status is deliberately limited to the total
 industrial-production headline; it does not qualify capacity utilization,
 component series, current revised databases, or another source entry.
+
+The separate Federal Reserve H.6 entry is also `empirically-verified`. Its
+official JSON ledger, 1,170 value-bearing release artifacts including one
+predecessor, and 1,075 occurrence-authored timing PDFs qualify seasonally
+adjusted M2 publications from 2000 through August 2026. The binding uses the
+dedicated `official.federal-reserve-h6.v1` parser across HTML, JSON, PDF, and
+one official text fallback; it does not inherit evidence from the FOMC route
+or treat stale and special-notice PDF links as publication clocks.
 
 The registry's complete authority matrix feeds the
 [canonical indicator catalog](economic-indicator-catalog.md). The catalog

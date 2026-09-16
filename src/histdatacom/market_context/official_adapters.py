@@ -807,6 +807,25 @@ class OfficialFederalReserveFomcParserV1(OfficialHtmlParserV1):
     )
 
 
+class OfficialFederalReserveH6ParserV1(OfficialHtmlParserV1):
+    """Bind Federal Reserve H.6 HTML, JSON, and PDF artifacts exactly."""
+
+    parser_id = "official.federal-reserve-h6.v1"
+    supported_formats: tuple[OfficialSourceFormat, ...] = (
+        OfficialSourceFormat.HTML,
+        OfficialSourceFormat.JSON,
+        OfficialSourceFormat.PDF,
+        OfficialSourceFormat.TEXT,
+    )
+
+    def parse(
+        self, snapshot: OfficialRawSnapshotV1, *, max_events: int
+    ) -> Sequence[Mapping[str, JSONValue]]:
+        if snapshot.request.source_format is OfficialSourceFormat.JSON:
+            return _parse_json(self, snapshot, max_events=max_events)
+        return super().parse(snapshot, max_events=max_events)
+
+
 class OfficialReleaseFeedParserV1(_BaseOfficialParser):
     """RSS, Atom, and iCalendar schedule/release feed parser."""
 
@@ -889,6 +908,7 @@ _BUILT_IN_PARSER_TYPES: tuple[type[_BaseOfficialParser], ...] = (
     OfficialCensusFt900ParserV1,
     OfficialCensusMtisParserV1,
     OfficialFederalReserveFomcParserV1,
+    OfficialFederalReserveH6ParserV1,
     OfficialPhiladelphiaFedMbosParserV1,
     OfficialPhiladelphiaFedSpfParserV1,
     OfficialReleaseFeedParserV1,
@@ -2995,6 +3015,7 @@ __all__ = [
     "OfficialCsvParserV1",
     "OfficialDataCatalogParserV1",
     "OfficialFederalReserveFomcParserV1",
+    "OfficialFederalReserveH6ParserV1",
     "OfficialHtmlParserV1",
     "OfficialJsonParserV1",
     "OfficialJsonStatParserV1",

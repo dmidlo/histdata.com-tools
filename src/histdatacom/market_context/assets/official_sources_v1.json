@@ -694,8 +694,9 @@
       ],
       "formats": [
         "html",
-        "text",
-        "pdf"
+        "json",
+        "pdf",
+        "text"
       ],
       "capabilities": [
         "current-values",
@@ -712,8 +713,9 @@
       ],
       "expected_media_types": [
         "text/html",
-        "text/plain",
-        "application/pdf"
+        "application/json",
+        "application/pdf",
+        "text/plain"
       ],
       "source_series_ids": [],
       "source_table_ids": [],
@@ -725,7 +727,7 @@
       "source_timezone": "America/New_York",
       "availability_time_precision": "scheduled-only",
       "dst_convention": "IANA zone database; retain source lexical times and require explicit DST-fold evidence.",
-      "historical_depth": "Current H.6 release, historical tables, and archive entrypoints; occurrence-specific 2000-present qualification remains pending.",
+      "historical_depth": "Complete H.6 occurrence inventory from 2000 through the latest fully published release, with one predecessor release retained for point-in-time comparison.",
       "known_breaks": [
         "Weekly H.6 publication ended in 2021 and the release moved to a monthly publication schedule.",
         "Definitions, seasonal adjustment, benchmark revisions, and table layouts require occurrence-specific evidence."
@@ -738,19 +740,25 @@
       "credential_parameter_name": null,
       "terms_uri": null,
       "fallback_source_keys": [],
-      "parser_id": "official.html.v1",
+      "parser_id": "official.federal-reserve-h6.v1",
       "parser_version": "1",
       "replay_strategy": "Retain exact response bytes, request parameters, endpoint and parser identities, response validators, source clocks, and SHA-256 before normalization.",
       "adapter_owner": "market-context/us",
-      "verification_status": "reviewed-entrypoint",
+      "verification_status": "empirically-verified",
       "reviewed_on": "2026-09-16",
       "verification_evidence_uris": [
-        "https://www.federalreserve.gov/releases/h6/"
+        "https://www.federalreserve.gov/releases/h6/",
+        "https://www.federalreserve.gov/releases/h6/releaseDates.json",
+        "https://www.federalreserve.gov/releases/h6/20210211/",
+        "https://www.federalreserve.gov/releases/h6/20210223/"
       ],
       "redistribution_notes": "Official public-data terms and attribution requirements must be rechecked and retained by the qualifying adapter.",
       "limitations": [
-        "Registry review proves the official H.6 entrypoint and legal producer, not complete per-release coverage or vintage semantics.",
-        "The FOMC meeting-archive qualification does not qualify this distinct statistical release."
+        "Four official JSON ledger tokens differ from the authored page and PDF dates; each correction is explicit, occurrence-scoped, and retained in the release index.",
+        "The June 13, 2002 directory's default and screen-reader HTML are stale May 16 copies, so the official text artifact is used and cross-checked against the June 13 PDF.",
+        "Special-notice, stale, and post-transition h6.pdf routes are excluded from timing evidence unless their own authored clock and date match the occurrence.",
+        "Exact release clocks are claimed only when an occurrence PDF or authored HTML release note supplies the clock; other occurrences retain the official scheduled-only convention.",
+        "The February 2021 weekly-to-monthly and M1-definition redesign remains explicit; the Federal Reserve states that the M2 definition was unchanged."
       ]
     },
     {

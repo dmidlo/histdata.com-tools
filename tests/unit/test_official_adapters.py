@@ -23,6 +23,7 @@ from histdatacom.market_context.official_adapters import (
     OfficialCensusNrsParserV1,
     OfficialDataCatalogParserV1,
     OfficialFederalReserveFomcParserV1,
+    OfficialFederalReserveH6ParserV1,
     OfficialParserError,
     OfficialParserFailureCode,
     OfficialPdfParserV1,
@@ -153,10 +154,14 @@ def test_built_in_parsers_cover_every_registered_source_and_format(
     registry: OfficialSourceRegistryV1,
 ) -> None:
     parsers = built_in_official_source_parsers()
-    assert len(parsers) == 20
+    assert len(parsers) == 21
     assert isinstance(
         parsers["official.federal-reserve-fomc.v1"],
         OfficialFederalReserveFomcParserV1,
+    )
+    assert isinstance(
+        parsers["official.federal-reserve-h6.v1"],
+        OfficialFederalReserveH6ParserV1,
     )
     assert isinstance(
         parsers["official.census-ft900.v1"],

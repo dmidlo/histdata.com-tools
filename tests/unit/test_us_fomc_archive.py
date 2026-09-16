@@ -69,7 +69,7 @@ def test_fomc_source_parser_profile_and_h6_identity_are_separate() -> None:
         resolve_official_source_parser(source),
         OfficialFederalReserveFomcParserV1,
     )
-    assert money_stock.verification_status.value == "reviewed-entrypoint"
+    assert money_stock.verification_status.value == "empirically-verified"
     assert money_stock.source_release_ids == ("H.6 Money Stock Measures",)
     assert profile.by_key["us.frb.money-stock"].source_key == (
         "us.frb.money-stock"
