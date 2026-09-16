@@ -1,6 +1,6 @@
 {
   "schema_version": "histdatacom.official-source-registry.v1",
-  "reviewed_on": "2026-09-15",
+  "reviewed_on": "2026-09-16",
   "scoped_economies": [
     "AU",
     "CA",
@@ -5167,6 +5167,7 @@
         "official-confidence-and-tendency-surveys"
       ],
       "formats": [
+        "archive",
         "html",
         "csv",
         "xls",
@@ -5207,13 +5208,16 @@
       "release_calendar_uri": "https://www.philadelphiafed.org/surveys-and-data/regional-economic-analysis/manufacturing-business-outlook-survey",
       "archive_uri": "https://www.philadelphiafed.org/surveys-and-data/mbos-archives",
       "source_timezone": "America/New_York",
-      "availability_time_precision": "exact-minute",
-      "dst_convention": "IANA zone database; retain source lexical times and require explicit DST-fold evidence.",
-      "historical_depth": "Monthly MBOS release PDFs are archived from 1968; downloadable time series are revised and therefore do not replace contemporaneous releases.",
+      "availability_time_precision": "inferred-bounded",
+      "dst_convention": "IANA zone database for source-authored times; releases without a time line retain only the producer's third-Thursday date convention and never receive an invented instant.",
+      "historical_depth": "The official bulk ZIP supplies the December 1999 predecessor and every 2000-2007 report; the live archive supplies a continuous monthly corpus from January 2008 through the current qualified boundary.",
       "known_breaks": [
-        "Annual seasonal-factor revisions change the downloadable history; the release PDFs remain the vintage evidence."
+        "December 1999 through December 2001 are image-only two-page scans and require content-hash-bound reviewed OCR.",
+        "The Summary of Returns uses eight columns through February 2003 and ten columns with explicit prior diffusion indexes beginning in March 2003.",
+        "Source-authored release times are absent through May 2005, noon ET from June 2005 through December 2007, 10:00 ET from January 2008 through October 2015, and 8:30 ET thereafter; January 2010 omits its release-time line.",
+        "Annual January seasonal-factor revisions change historical values, with one additional pandemic-era seasonal revision in April 2021; the release PDFs remain the vintage evidence."
       ],
-      "revision_behavior": "Downloadable histories are revised annually; retain contemporaneous monthly releases for initial values.",
+      "revision_behavior": "Retain every contemporaneous initial value and the prior value printed in later releases; preserve annual January revisions and the April 2021 off-cycle seasonal revision as explicit deltas.",
       "rate_limit": "No stable public limit recorded at review; apply the stricter local request, byte, page, event, retry, and runtime bounds.",
       "authentication": "none",
       "credential_env_name": null,
@@ -5221,18 +5225,22 @@
       "credential_parameter_name": null,
       "terms_uri": null,
       "fallback_source_keys": [],
-      "parser_id": "official.html.v1",
+      "parser_id": "official.philadelphia-mbos.v1",
       "parser_version": "1",
-      "replay_strategy": "Retain each release PDF or table download, exact request and parser identity, source clocks, and SHA-256 before normalization.",
+      "replay_strategy": "Retain the live archive receipt, complete legacy ZIP, every direct release PDF and companion report page, archive-member/container hashes, and hash-bound reviewed OCR before deterministic normalization.",
       "adapter_owner": "market-context/us",
-      "verification_status": "reviewed-entrypoint",
-      "reviewed_on": "2026-09-14",
+      "verification_status": "empirically-verified",
+      "reviewed_on": "2026-09-16",
       "verification_evidence_uris": [
-        "https://www.philadelphiafed.org/surveys-and-data/mbos-archives"
+        "https://www.philadelphiafed.org/surveys-and-data/regional-economic-analysis/manufacturing-business-outlook-survey",
+        "https://www.philadelphiafed.org/surveys-and-data/mbos-archives",
+        "https://www.philadelphiafed.org/-/media/FRBP/Assets/Surveys-And-Data/MBOS/Archives/MBOS-1968_2007.zip"
       ],
-      "redistribution_notes": "Federal Reserve Bank research data; retain source attribution and recheck download terms when packaging raw artifacts.",
+      "redistribution_notes": "Federal Reserve Bank research data; the package retains compact hashes, normalized values, the archive-index receipt, and reviewed OCR, while complete raw artifacts remain caller-retained replay evidence.",
       "limitations": [
-        "MBOS measures one Federal Reserve District and must not be relabeled as a national manufacturing statistic."
+        "MBOS measures one Federal Reserve District and must not be relabeled as a national manufacturing statistic.",
+        "The future general-activity diffusion index is the survey's native six-month outlook, not a monthly event-consensus forecast.",
+        "Exact-minute coverage begins only where individual publications state a release time; earlier occurrences remain inferred-bounded."
       ]
     },
     {

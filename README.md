@@ -2701,6 +2701,13 @@ artifacts from 2000 Q1 through 2026 Q3. It preserves the official true deadline
 and news-release date separately, retains all four shutdown-delayed surveys,
 uses date-only precision where no source release time exists, and never
 substitutes quarterly professional forecasts for monthly event consensus.
+The U.S. Manufacturing Business Outlook Survey specialization binds 320
+monthly publications and their current, previous-as-known, revised-prior, and
+native six-month-future diffusion indexes to a complete December 1999--August
+2026 official corpus. It preserves 54 changed prior values, reviewed
+content-hash-bound OCR for 25 image-only reports, and occurrence-specific noon,
+10:00, 08:30, or honestly bounded release-time evidence without substituting
+the revised history download.
 Central-bank releases additionally use framework-aware
 [`monetary-policy semantics`](docs/monetary-policy-semantics.md). Decisions,
 statements, vote splits, press conferences, minutes, projections, schedules,

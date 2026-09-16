@@ -109,7 +109,7 @@ def _coverage(
 
 def test_registry_represents_us_specific_legal_producers_and_text() -> None:
     registry = load_packaged_official_source_registry()
-    assert registry.reviewed_on == "2026-09-15"
+    assert registry.reviewed_on == "2026-09-16"
     assert len(registry.sources) == 68
 
     dol = registry.source("us.dol.eta-unemployment-insurance")
@@ -123,6 +123,9 @@ def test_registry_represents_us_specific_legal_producers_and_text() -> None:
         "manufacturing-business-outlook-survey",
     )
     assert EconomicEventFamily.CONFIDENCE_SURVEY in philadelphia.event_families
+    assert OfficialSourceFormat.ARCHIVE in philadelphia.formats
+    assert philadelphia.availability_time_precision.value == "inferred-bounded"
+    assert philadelphia.verification_status.value == "empirically-verified"
 
     spf = registry.source("us.frb.philadelphia-spf")
     assert spf.verification_status.value == "empirically-verified"

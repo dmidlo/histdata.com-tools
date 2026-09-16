@@ -25,6 +25,7 @@ from histdatacom.market_context.official_adapters import (
     OfficialParserError,
     OfficialParserFailureCode,
     OfficialPdfParserV1,
+    OfficialPhiladelphiaFedMbosParserV1,
     OfficialPhiladelphiaFedSpfParserV1,
     OfficialReleaseFeedParserV1,
     OfficialSpreadsheetLayoutV1,
@@ -151,7 +152,7 @@ def test_built_in_parsers_cover_every_registered_source_and_format(
     registry: OfficialSourceRegistryV1,
 ) -> None:
     parsers = built_in_official_source_parsers()
-    assert len(parsers) == 18
+    assert len(parsers) == 19
     assert isinstance(
         parsers["official.census-ft900.v1"],
         OfficialCensusFt900ParserV1,
@@ -175,6 +176,10 @@ def test_built_in_parsers_cover_every_registered_source_and_format(
     assert isinstance(
         parsers["official.census-nrs.v1"],
         OfficialCensusNrsParserV1,
+    )
+    assert isinstance(
+        parsers["official.philadelphia-mbos.v1"],
+        OfficialPhiladelphiaFedMbosParserV1,
     )
     assert isinstance(
         parsers["official.philadelphia-spf.v1"],

@@ -1793,7 +1793,8 @@ def built_in_united_states_backfill_profile(
                 "https://www.philadelphiafed.org/surveys-and-data/"
                 "regional-economic-analysis/manufacturing-business-outlook-survey"
             ),
-            scheduled_time_local="08:30",
+            scheduled_time_local=None,
+            time_precision=EconomicTimePrecision.INFERRED_BOUNDED,
             forecast_strategy=(
                 UnitedStatesForecastStrategy.PRODUCER_OUTLOOK_SURVEY
             ),
@@ -1802,8 +1803,12 @@ def built_in_united_states_backfill_profile(
                 "regional-economic-analysis/manufacturing-business-outlook-survey"
             ),
             limitations=(
+                "Use the complete occurrence-specific corpus from January 2000, with December 1999 retained only as the previous-as-known predecessor.",
                 "MBOS is a Third District diffusion survey, not a national output statistic.",
-                "Current and six-month-future indexes are distinct survey concepts.",
+                "Current and native six-month-future general-activity indexes are distinct survey concepts; the latter is not monthly event consensus.",
+                "Image-only reports through December 2001 require hash-bound reviewed OCR, while later PDF table values remain bound to their exact source artifacts.",
+                "Release timing changes from an unstated early convention to noon, 10:00, and 08:30 ET eras; only source-authored occurrence times receive exact instants.",
+                "Annual January and April 2021 seasonal revisions preserve both preceding initial and revised previous values instead of rewriting history.",
             ),
         ),
         _program(

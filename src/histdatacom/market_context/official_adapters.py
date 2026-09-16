@@ -777,6 +777,26 @@ class OfficialPhiladelphiaFedSpfParserV1(OfficialHtmlParserV1):
     )
 
 
+class OfficialPhiladelphiaFedMbosParserV1(OfficialHtmlParserV1):
+    """Parse Philadelphia Fed MBOS archives, pages, tables, and PDFs."""
+
+    parser_id = "official.philadelphia-mbos.v1"
+    supported_formats: tuple[OfficialSourceFormat, ...] = (
+        OfficialSourceFormat.ARCHIVE,
+        OfficialSourceFormat.HTML,
+        OfficialSourceFormat.CSV,
+        OfficialSourceFormat.XLS,
+        OfficialSourceFormat.PDF,
+    )
+
+    def parse(
+        self, snapshot: OfficialRawSnapshotV1, *, max_events: int
+    ) -> Sequence[Mapping[str, JSONValue]]:
+        if snapshot.request.source_format is OfficialSourceFormat.ARCHIVE:
+            return _parse_archive(self, snapshot, max_events=max_events)
+        return super().parse(snapshot, max_events=max_events)
+
+
 class OfficialReleaseFeedParserV1(_BaseOfficialParser):
     """RSS, Atom, and iCalendar schedule/release feed parser."""
 
@@ -858,6 +878,7 @@ _BUILT_IN_PARSER_TYPES: tuple[type[_BaseOfficialParser], ...] = (
     OfficialCensusNrsParserV1,
     OfficialCensusFt900ParserV1,
     OfficialCensusMtisParserV1,
+    OfficialPhiladelphiaFedMbosParserV1,
     OfficialPhiladelphiaFedSpfParserV1,
     OfficialReleaseFeedParserV1,
     OfficialPdfParserV1,
@@ -2968,6 +2989,7 @@ __all__ = [
     "OfficialParserError",
     "OfficialParserFailureCode",
     "OfficialPdfParserV1",
+    "OfficialPhiladelphiaFedMbosParserV1",
     "OfficialReleaseFeedParserV1",
     "OfficialSdmx21ParserV1",
     "OfficialSdmx30ParserV1",

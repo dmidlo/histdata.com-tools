@@ -53,6 +53,10 @@ release-document evidence separately from the broad Census EITS API entry.
 The SPF entry binds its release archive, true-deadline/release-date ledger,
 median workbooks, documentation, and date-only publication precision without
 turning quarterly professional forecasts into monthly event consensus.
+The MBOS entry binds its complete legacy ZIP, live archive receipt,
+occurrence-specific PDFs and pages, reviewed OCR, changing publication-time
+eras, and contemporaneous current/prior/future diffusion indexes without
+substituting the revised history download.
 The reusable HTML-release adapter preserves such text as one bounded UTF-8
 record, including the exact line count and raw-snapshot lineage.
 
@@ -876,6 +880,67 @@ missing, changed, duplicated, newly unparseable, differently normalized, or
 unused evidence. `census_mtis_coverage_from_manifest()` derives the complete
 318-publication slice without manufacturing historical event-level consensus.
 
+## Complete Manufacturing Business Outlook Survey qualification
+
+`histdatacom.market_context.us_mbos_archive` qualifies every Philadelphia Fed
+Manufacturing Business Outlook Survey publication from January 2000 through
+August 2026. The official 1968--2007 ZIP supplies the December 1999
+previous-as-known predecessor and all 2000--2007 reports; the live archive
+supplies an unbroken January 2008--August 2026 sequence. MBOS remains a Third
+District manufacturing diffusion survey and is never relabeled as national
+output.
+
+The packaged `us_mbos_archive_v1.json` manifest is observed as of September 16,
+2026. It records 320 monthly publications, 320 initial current indexes, 320
+previous-as-known comparisons, 320 native six-month-future indexes, and 54
+changed prior values across 27 publications. The 321 occurrence PDFs contain
+94,818,605 bytes. The full caller-retained corpus has 234 distinct fetched
+artifacts containing 114,235,398 bytes: the archive receipt, legacy ZIP, 224
+direct PDFs, and eight companion HTML reports. The package retains only the
+compact manifest, exact archive receipt, and reviewed OCR.
+
+December 1999 through December 2001 are image-only two-page reports. Their 25
+OCR records are bound to exact PDF hashes, fixed 300-DPI rendering, Tesseract
+version, and page-segmentation modes; the 24 target publications remain
+distinguishable from the predecessor. Seven damaged OCR/text-layer rows use
+hash-bound corrections checked against the report narrative and the diffusion
+identity. The Summary of Returns uses eight columns through February 2003 and
+ten columns thereafter, where the added columns preserve the prior diffusion
+indexes printed in that same release.
+
+Release precision is occurrence-specific. The first 65 target publications
+state no release time and retain only the producer's third-Thursday convention.
+Reports state noon ET from June 2005 through December 2007, 10:00 ET from
+January 2008 through October 2015, and 08:30 ET thereafter. January 2010 omits
+its release line and remains inferred-bounded even though its expected local
+time is recorded. Consequently 254 occurrences have exact-minute evidence and
+66 remain inferred-bounded; no synthetic instant is created.
+
+Annual January seasonal revisions retain both the preceding initial index and
+the revised previous index. The April 2021 pandemic-era off-cycle seasonal
+revision is handled the same way, while January 2022's revision notice is kept
+even though neither selected index changed. The future general-activity index
+keeps its native six-month horizon and is not converted into event consensus.
+
+The refresh command can fetch missing source bytes, produce OCR candidates for
+review, or deterministically replay retained evidence:
+
+```console
+uv run python scripts/refresh_us_mbos_archive.py \
+  --as-of 2026-09-16 \
+  --source-directory /absolute/operator/path/mbos-source \
+  --ocr-page-directory /absolute/operator/path/mbos-reviewed-ocr \
+  --fetch-missing
+```
+
+`replay_philadelphia_fed_mbos_archive()` reparses the live archive and legacy
+ZIP, verifies every member/direct PDF and report page, rereads every table and
+reviewed OCR row, and compares the resulting manifest exactly. Missing,
+duplicated, changed, newly ambiguous, differently normalized, or unused
+evidence fails closed. `philadelphia_fed_mbos_coverage_from_manifest()` derives
+complete monthly actual, previous, revision, schedule, timing, and native
+outlook coverage.
+
 ## Complete Survey of Professional Forecasters qualification
 
 `histdatacom.market_context.us_spf_archive` qualifies every Philadelphia Fed
@@ -986,8 +1051,9 @@ The package preserves the real G.17, CPI, PPI, Employment Situation, JOLTS,
 Productivity and Costs, GDP, Personal Income and Outlays, and Advance Monthly
 Retail Sales indexes, the Advance Durable Goods index and reviewed OCR corpus,
 the International Trade, New Residential Construction, New Residential Sales,
-and Manufacturing and Trade Inventories and Sales indexes, the SPF release
-ledger, one representative G.17 raw release, and all fifteen complete
+and Manufacturing and Trade Inventories and Sales indexes, the MBOS archive
+receipt and reviewed OCR corpus, the SPF release ledger, one representative
+G.17 raw release, and all sixteen complete
 raw/normalized manifests. The
 remaining production raw corpora stay external, content addressed, and subject
 to the coverage audit so wheel size does not grow with thousands of federal
