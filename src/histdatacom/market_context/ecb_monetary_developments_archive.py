@@ -127,7 +127,7 @@ def _texts(values: Sequence[str], name: str) -> tuple[str, ...]:
 
 
 def _month(value: object, name: str) -> str:
-    result = _required_text(value, name)
+    result: str = _required_text(value, name)
     if _PERIOD_RE.fullmatch(result) is None:
         raise ValueError(f"{name} must be YYYY-MM")
     parsed = date.fromisoformat(f"{result}-01")
@@ -170,7 +170,7 @@ def _document_reference_period(uri: str) -> str | None:
 
 
 def _source_title(value: object, reference_period: str) -> str:
-    title = _required_text(value, "source_title")
+    title: str = _required_text(value, "source_title")
     label = _month_label(reference_period)
     if title not in {
         _GENERIC_TITLE,
@@ -1160,7 +1160,8 @@ class EcbMonetaryDevelopmentsArchiveManifestV1:
         return {**self.identity_payload(), "manifest_id": self.manifest_id}
 
     def to_json(self) -> str:
-        return cast(str, canonical_contract_json(self.to_dict()))
+        encoded: str = canonical_contract_json(self.to_dict())
+        return encoded
 
     @classmethod
     def from_dict(

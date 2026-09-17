@@ -1536,6 +1536,102 @@
     },
     {
       "schema_version": "histdatacom.official-source-entry.v1",
+      "source_key": "ea.eurostat.hicp",
+      "economy_code": "EA",
+      "economy_name": "Euro Area",
+      "institution": "Eurostat",
+      "jurisdiction": "European Union / euro area",
+      "legal_producer": true,
+      "roles": [
+        "official-archive",
+        "release-calendar"
+      ],
+      "event_families": [
+        "inflation-prices"
+      ],
+      "indicator_ids": [
+        "consumer-and-producer-prices"
+      ],
+      "formats": [
+        "json-stat",
+        "html",
+        "pdf"
+      ],
+      "capabilities": [
+        "historical-observations",
+        "historical-vintages",
+        "publication-metadata",
+        "schedule-metadata",
+        "revision-metadata",
+        "series-metadata",
+        "archive-enumeration"
+      ],
+      "endpoint_uri_template": "https://ec.europa.eu/eurostat/en/web/hicp/publications",
+      "allowed_hosts": [
+        "ec.europa.eu"
+      ],
+      "expected_media_types": [
+        "application/json",
+        "text/html",
+        "application/pdf"
+      ],
+      "source_series_ids": [],
+      "source_table_ids": [
+        "prc_hicp_fp",
+        "prc_hicp_fpd"
+      ],
+      "source_release_ids": [
+        "HICP flash estimate",
+        "HICP final"
+      ],
+      "release_calendar_uri": "https://ec.europa.eu/eurostat/news/release-calendar",
+      "archive_uri": "https://ec.europa.eu/eurostat/en/web/hicp/publications",
+      "source_timezone": "Europe/Brussels",
+      "availability_time_precision": "date-only",
+      "dst_convention": "The qualified archive preserves source dates only; no intraday publication clock or DST offset is inferred.",
+      "historical_depth": "The first-published-data tables cover monthly all-items annual HICP rates from January 2000; the dedicated migrated publication index contains 539 in-scope HICP releases from 5 January 2004 through 1 September 2026 plus one explicitly excluded G20 card, and source-dated legacy release artifacts extend the occurrence lineage before migration.",
+      "known_breaks": [
+        "The dedicated HICP publication index begins with the 5 January 2004 flash release; earlier occurrences must be retained from source-dated Euro-indicator release artifacts.",
+        "Migrated publication cards may display a date one day before the source-authored date encoded by the release URI; both values and the observed offset are retained.",
+        "One migrated 2011 document URI omits a year digit, so the index card date is retained as an explicit source-date correction rather than silently repairing the official URI.",
+        "The 22 February 2024 final-release page embeds the prior 1 February flash PDF; linked-document discovery is source-date constrained so that cross-release artifact is not misattributed.",
+        "The HICP publication index contains one G20 inflation card; it remains hash-bound as an explicit non-euro-area exclusion rather than entering the HICP occurrence lineage.",
+        "The retired prc_hicp_fp table uses original ECOICOP code CP00, while prc_hicp_fpd uses ECOICOP version 2 code TOTAL.",
+        "Across their common first-published cells, the retired and current tables contain numeric and status differences, so the current-table backcast is not substituted for the retired historical evidence.",
+        "Historical release headlines and the first-published EA table are independently retained because their euro-area composition or later table treatment can differ.",
+        "Flash estimates begin with the October 2001 reference period, and the retired table exposes only the more recent part of that flash lineage for Germany."
+      ],
+      "revision_behavior": "Flash estimates and final releases are distinct occurrences. The qualified archive prefers the retired first-published table through December 2025, uses the successor table for 2026 onward, records every overlapping numeric or status difference, and retains the official release headline independently.",
+      "rate_limit": "The publication index exposed an observed five-request rolling window during qualification; refreshes therefore use sequential requests, at least 13 seconds between index or release requests, explicit 429 retry-after handling, bounded retries, and an identifying contact user agent.",
+      "authentication": "none",
+      "credential_env_name": null,
+      "credential_header_name": null,
+      "credential_parameter_name": null,
+      "terms_uri": "https://ec.europa.eu/eurostat/help/copyright-notice",
+      "fallback_source_keys": [],
+      "parser_id": "official.eurostat-hicp.v1",
+      "parser_version": "1",
+      "replay_strategy": "Retain exact JSON-stat bytes for prc_hicp_fp and prc_hicp_fpd, every contiguous page of the dedicated HICP publication index, every selected primary landing or direct HTML/PDF artifact, and every linked English release document exposed by a selected landing; bind request and parser identities, byte lengths, SHA-256 digests, explicit exclusions and source-date corrections, stage and reference-period identities, headline/table comparisons, taxonomy provenance, and all legacy/current overlap differences before accepting replay.",
+      "adapter_owner": "market-context/ea",
+      "verification_status": "empirically-verified",
+      "reviewed_on": "2026-09-16",
+      "verification_evidence_uris": [
+        "https://ec.europa.eu/eurostat/en/web/hicp/publications",
+        "https://ec.europa.eu/eurostat/api/dissemination/statistics/1.0/data/prc_hicp_fp",
+        "https://ec.europa.eu/eurostat/api/dissemination/statistics/1.0/data/prc_hicp_fpd",
+        "https://webgate.ec.europa.eu/eurostat/cache/metadata/en/prc_hicp_esms.htm",
+        "https://ec.europa.eu/eurostat/documents/2995521/5209466/2-16052002-AP-EN.PDF.pdf"
+      ],
+      "redistribution_notes": "The package retains a compact hash-bound manifest; exact Eurostat index, release, and dataset bytes remain an external operator-owned corpus subject to Eurostat attribution and copyright terms.",
+      "limitations": [
+        "No market-consensus history is supplied, so numeric surprise is not manufactured.",
+        "The qualified publication evidence is date-only unless an independent retained calendar artifact establishes a historical clock.",
+        "The first-published tables provide Germany and France values only where Eurostat exposed those cells; absent country cells remain absent rather than inferred from current revised series.",
+        "The current ECOICOP version 2 backcast is retained for audit but is not treated as interchangeable historical-vintage evidence."
+      ]
+    },
+    {
+      "schema_version": "histdatacom.official-source-entry.v1",
       "source_key": "ea.ecb.data-portal",
       "economy_code": "EA",
       "economy_name": "Euro Area",

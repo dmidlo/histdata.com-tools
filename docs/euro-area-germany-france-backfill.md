@@ -26,7 +26,7 @@ guess or a third-party calendar. Replay retains and verifies:
 
 The retained corpus contains 42,121,110 bytes and 383 distinct SHA-256
 digests. Its compact packaged receipt is
-`ecb-archive-manifest:sha256:eda20db2d19520a5181bef3a3fded63b74353f52de131fea325938920affeb18`.
+`ecb-archive-manifest:sha256:fbaf4a82a577a08a32ce7e362d81013d316d1e9327b68cbdaabc171699712ce7`.
 
 Each decision preserves a native `RATE_SET` with separate components for the
 main refinancing operations, marginal lending facility, and deposit facility.
@@ -70,7 +70,7 @@ qualifies all 96 FOEDB type-20 accounts published from 19 February 2015 through
 27 August 2026. The selection retains 83 versioned FOEDB database artifacts
 and all 96 official HTML pages: 179 artifacts, 26,253,142 bytes, and 179 unique
 SHA-256 digests. Its packaged receipt is
-`ecb-account-archive-manifest:sha256:e36d73ada818582c1ada1eedc9bcdc98e39b76f649164c77eb5cc4cf6db7fc40`.
+`ecb-account-archive-manifest:sha256:5fad33b623094208e4fa661647b1477f1522649455c2b9faa260af4dbb788697`.
 
 Replay parses the source-authored meeting dates rather than inferring them from
 publication dates. It preserves three observed title eras (35 generic titles,
@@ -106,7 +106,7 @@ that FOEDB stores under the same broad type and historical path family.
 Replay retains the 83 versioned FOEDB artifacts and all 270 official statement
 pages: 353 artifacts, 48,734,109 bytes, and 353 unique SHA-256 digests. Its
 packaged receipt is
-`ecb-statement-archive-manifest:sha256:6653f89ab5e780d9913b4f9e858297499af64b56ab2199373b1b405ea40a0961`.
+`ecb-statement-archive-manifest:sha256:3dabf9f1af4c7ae74e2d4745abba001cd52f3ca52743c82e668159c0ac972a92`.
 Every page contains exactly one of nine observed historical heading forms and
 every retained statement links to exactly one qualified decision occurrence.
 
@@ -139,7 +139,7 @@ projection rounds for 2000 through May 2004 from unrelated publications.
 Replay retains the 83 versioned FOEDB artifacts, the all-releases index, 90
 official PDFs, and the 31 available HTML counterparts: 205 artifacts,
 43,393,009 bytes, and 205 distinct SHA-256 digests. Its packaged receipt is
-`ecb-projection-archive-manifest:sha256:6ec72398f96749bdde29c4e28ffd9afa87e1287b29f8bc8b1672f618bbe0e19f`.
+`ecb-projection-archive-manifest:sha256:4017121492436032b16dd709cdeec01213bfc8ff7e5d03d4954c7dbd4e40e0a4`.
 The inventory contains 45 ECB staff rounds in March/September and 45
 Eurosystem staff rounds in June/December. It also preserves the September 2006
 round's early 31 August publication date instead of forcing the release date
@@ -184,7 +184,7 @@ Replay retains the 83 versioned FOEDB artifacts and every document named by
 the 321 selected records: 248 PDFs and 96 HTML pages. The resulting 427
 artifacts contain 62,669,957 bytes and 427 distinct SHA-256 digests. The
 packaged receipt is
-`ecb-monetary-developments-archive-manifest:sha256:1b39fa9ce46fae4d645a22f5728e911407c31b5a22c94f3771971ded10a69859`.
+`ecb-monetary-developments-archive-manifest:sha256:085c88744ab7c98e2d3683a4c66a551e99cc60db38f30c15e3a906ba73530007`.
 The in-window source-format eras comprise 224 PDF-only releases, 73 HTML-only
 releases, and 23 releases with both English HTML and a localized PDF. Localized
 PDFs remain hashed evidence; values come from the corresponding English HTML.
@@ -222,21 +222,112 @@ uv run python scripts/refresh_ecb_monetary_developments_archive.py \
   --source-directory /path/to/retained-ecb-corpus
 ```
 
+## Eurostat HICP first-release and publication archive
+
+`histdatacom.market_context.eurostat_hicp_archive` keeps Eurostat's two
+first-published HICP tables and its release publications as independent
+official evidence surfaces. It does not use the current HICP time series as a
+surrogate historical vintage.
+
+The retained JSON-stat tables are filtered to monthly all-items annual rates
+for the euro area, Germany, and France:
+
+- retired `prc_hicp_fp` / ECOICOP `CP00` contains 1,238 observations: 312
+  final values for each economy from January 2000 through December 2025, plus
+  101 euro-area, 100 German, and 101 French flash values from 2017 onward;
+- current `prc_hicp_fpd` / ECOICOP v2 `TOTAL` contains 981 observations: 319
+  final values for each economy through July 2026 and eight flash values for
+  each economy from January through August 2026; and
+- the 936 common cells produce 365 explicit differences. There are 173
+  numeric differences (34 euro-area, 124 German, and 15 French) and 204 French
+  status differences; 12 cells differ in both respects.
+
+The qualification therefore prefers the retired table through December 2025
+and uses the successor table only for 2026 onward. Both complete source
+responses and every difference remain hash-bound, so that policy is auditable
+rather than destructive.
+
+Release evidence is independently retained from all 180 pages of the
+dedicated HICP publication index. Its 540 cards contain 539 in-scope HICP
+publications from the source-dated 5 January 2004 release through 1 September
+2026. One G20 inflation card on index page 103 is retained as an explicit
+non-euro-area exclusion. Forty additional official pre-migration releases
+were recovered from Eurostat's date-addressed Euro-indicator products: 22
+final publications and 18 flash estimates from 5 November 2001 through 17
+December 2003. The first is Eurostat's October 2001 flash estimate. The legacy
+discovery surface is incomplete, so the manifest enumerates every missing
+final reference month from January 2000 and every missing flash month from
+October 2001 instead of manufacturing release dates. The combined lineage has
+579 releases: 289 final and 290 flash. It records 30 unavailable final
+reference months and nine unavailable flash reference months.
+
+Each selected occurrence retains the official primary artifact named by the
+index, whether that artifact is a landing page or a direct HTML/PDF document.
+Older product stubs must also retain the linked English release document; the
+pre-migration set contains 38 HTML documents and two PDFs. Newer `/w/` pages
+contain the release directly. Twenty-eight early `/w/` pages also expose a
+same-release PDF, which is retained; the other 62 are valid landing-only
+evidence. The 22 February 2024 final page embeds only the prior 1 February
+flash PDF, so that cross-release link is deliberately excluded rather than
+misattributed. Every occurrence keeps flash versus final stage, reference
+month, headline lexical value, and the date encoded by its official URI.
+Source pages and some migrated cards display one day earlier than that URI;
+those dates and offsets remain explicit. The migrated primary set comprises
+90 landing pages, 16 HTML documents, and 433 PDFs. A single malformed 2011
+document token omits a year digit, so its 28 February 2011 index date is
+retained as an explicit source-date correction. No intraday clock is inferred.
+
+The compact receipt binds 829 raw artifacts, 189,367,122 bytes, and 829
+distinct SHA-256 digests. Its identity is
+`eurostat-hicp-archive-manifest:sha256:dc6748a381c10fa8daf5bfb89dd4287e1f54065f5b7c1342835fd1d207877066`.
+Two consecutive offline rebuilds produced byte-identical packaged JSON with
+SHA-256 `3648b4433379f7d810c1398a9fb76d997c735ca5d8f7da5c6a6de8b4f789766d`.
+The release-page/date audit records 40 page offsets and 15 migrated-card
+offsets of one day.
+
+Release headlines and first-published-table values are compared but never
+collapsed. Historical differences can reflect the source-era euro-area
+composition or later table treatment. Germany and France remain separate
+economy scopes, and unavailable country flash cells remain absent. Eurostat
+does not provide a historical market-consensus series, so this archive does
+not manufacture consensus or surprise values. Of 579 release headlines, 398
+have a same-stage, same-reference-month euro-area table value and 38 differ
+numerically; 181 releases carry no additional German or French table value
+because those country cells are unavailable for the occurrence.
+
+An operator with the exact retained corpus can rebuild or replay the receipt
+with:
+
+```console
+uv run python scripts/refresh_eurostat_hicp_archive.py \
+  --as-of 2026-09-15 \
+  --page-count 180 \
+  --legacy-uri-file /path/to/legacy-release-uris.txt \
+  --source-directory /path/to/retained-eurostat-hicp-corpus
+```
+
+`--fetch-missing` is explicit. The refresh is sequential, honors a minimum
+13-second interval between Eurostat requests, and handles bounded `429`
+retry-after responses.
+
 ## Remaining issue scope
 
-These ECB decision, account, statement, staff-projection, and monthly
-monetary-developments archives complete the four ECB monetary-policy artifact
-families and the selected euro-area money/credit lineage, not issue #539 as a
-whole. Eurostat aggregate releases and the remaining ECB statistical families,
-Destatis and Bundesbank programs for Germany, and INSEE and Banque de France
-programs for France still require their own empirical archive qualifications
-before the regional calendar can produce a closure receipt.
+These ECB decision, account, statement, staff-projection, monthly
+monetary-developments, and Eurostat HICP archives complete the four ECB
+monetary-policy artifact families, the selected euro-area money/credit
+lineage, and the harmonized inflation anchor, not issue #539 as a whole.
+Euro-area GDP, labour, production, trade/current-account, and survey releases,
+the remaining ECB statistical families, Destatis and Bundesbank programs for
+Germany, and INSEE and Banque de France programs for France still require
+their own empirical archive qualifications before the regional calendar can
+produce a closure receipt.
 
 Official entrypoints:
 
 - [ECB monetary-policy decisions](https://www.ecb.europa.eu/press/govcdec/mopo/html/index.en.html)
 - [ECB public FOEDB version pointer](https://www.ecb.europa.eu/foedb/dbs/foedb/publications.en/versions.json)
 - [Eurostat release calendar](https://ec.europa.eu/eurostat/news/release-calendar)
+- [Eurostat HICP publications](https://ec.europa.eu/eurostat/en/web/hicp/publications)
 - [ECB monetary-policy accounts](https://www.ecb.europa.eu/press/accounts/html/index.en.html)
 - [ECB monetary-policy statements](https://www.ecb.europa.eu/press/press_conference/monetary-policy-statement/html/index.en.html)
 - [ECB staff projections](https://www.ecb.europa.eu/press/projections/html/all-releases.en.html)

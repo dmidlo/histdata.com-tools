@@ -116,7 +116,7 @@ def test_manifest_quantifies_the_complete_retained_corpus() -> None:
     assert packaged_treasury_mts_reviewed_extracts_path().is_file()
     assert manifest.manifest_id == (
         "mts-archive-manifest:sha256:"
-        "58864ddcce8d53c63b83e2d629c8b82a2ecfd48a2fea46b79474c9c759401815"
+        "c8eeadd377d544677347690d1dae8d5ad9e2d419aa2fc0e287f3794a334a83ae"
     )
     assert reviewed.corpus_id == manifest.reviewed_extracts_id
     assert len(reviewed.timings) == 320

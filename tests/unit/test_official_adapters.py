@@ -23,6 +23,7 @@ from histdatacom.market_context.official_adapters import (
     OfficialCensusNrsParserV1,
     OfficialDataCatalogParserV1,
     OfficialDolEtaInitialClaimsParserV1,
+    OfficialEurostatHicpParserV1,
     OfficialFederalReserveFomcParserV1,
     OfficialFederalReserveH6ParserV1,
     OfficialParserError,
@@ -155,7 +156,7 @@ def test_built_in_parsers_cover_every_registered_source_and_format(
     registry: OfficialSourceRegistryV1,
 ) -> None:
     parsers = built_in_official_source_parsers()
-    assert len(parsers) == 24
+    assert len(parsers) == 25
     assert isinstance(
         parsers["official.dol-eta-initial-claims.v1"],
         OfficialDolEtaInitialClaimsParserV1,
@@ -167,6 +168,10 @@ def test_built_in_parsers_cover_every_registered_source_and_format(
     assert isinstance(
         parsers["official.federal-reserve-h6.v1"],
         OfficialFederalReserveH6ParserV1,
+    )
+    assert isinstance(
+        parsers["official.eurostat-hicp.v1"],
+        OfficialEurostatHicpParserV1,
     )
     assert isinstance(
         parsers["official.census-ft900.v1"],
@@ -218,6 +223,55 @@ def test_built_in_parsers_cover_every_registered_source_and_format(
     assert not audit.missing_parser_bindings
     assert set(audit.missing_qualifications) == set(audit.required_packs)
     assert set(audit.available_packs) == set(OfficialAdapterPack)
+
+
+@pytest.mark.parametrize(
+    ("source_format", "content_type", "content"),
+    (
+        (
+            OfficialSourceFormat.JSON_STAT,
+            "application/json",
+            (
+                b'{"class":"dataset","id":["time"],"size":[1],'
+                b'"dimension":{"time":{"category":{"index":['
+                b'"2026M08"]}}},"value":[3.3]}'
+            ),
+        ),
+        (
+            OfficialSourceFormat.HTML,
+            "text/html",
+            b"<html><body><h1>Euro area annual inflation 3.3%</h1></body></html>",
+        ),
+        (
+            OfficialSourceFormat.PDF,
+            "application/pdf",
+            _text_pdf_bytes(["Euro area annual inflation 3.3%"]),
+        ),
+    ),
+)
+def test_eurostat_hicp_adapter_dispatches_each_registered_format(
+    registry: OfficialSourceRegistryV1,
+    source_format: OfficialSourceFormat,
+    content_type: str,
+    content: bytes,
+) -> None:
+    source = registry.source("ea.eurostat.hicp")
+    snapshot = _snapshot(
+        registry,
+        source.source_key,
+        content,
+        source_format=source_format,
+        content_type=content_type,
+    )
+
+    records = parse_with_built_in_official_adapter(
+        snapshot, source, max_events=20
+    )
+
+    assert records
+    assert {item["parser_id"] for item in records} == {
+        "official.eurostat-hicp.v1"
+    }
 
 
 def test_generic_json_and_csv_emit_deterministic_raw_provenance(

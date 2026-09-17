@@ -195,7 +195,7 @@ def test_packaged_registry_is_a_complete_reviewed_21_economy_matrix(
     assert packaged_official_source_registry_path().is_file()
     assert registry.schema_version == OFFICIAL_SOURCE_REGISTRY_SCHEMA_VERSION
     assert registry.scoped_economies == SCOPED_ECONOMIES
-    assert len(registry.sources) == 70
+    assert len(registry.sources) == 71
     matrix = official_source_matrix(registry)
     assert set(matrix) == set(SCOPED_ECONOMIES)
     assert sum(len(row) for row in matrix.values()) == 21 * len(
@@ -226,6 +226,18 @@ def test_packaged_registry_is_a_complete_reviewed_21_economy_matrix(
     assert (
         registry.source("tr.cbrt.evds").formats[0] is OfficialSourceFormat.JSON
     )
+    hicp = registry.source("ea.eurostat.hicp")
+    assert hicp.roles == (
+        OfficialSourceRole.OFFICIAL_ARCHIVE,
+        OfficialSourceRole.RELEASE_CALENDAR,
+    )
+    assert hicp.formats == (
+        OfficialSourceFormat.JSON_STAT,
+        OfficialSourceFormat.HTML,
+        OfficialSourceFormat.PDF,
+    )
+    assert hicp.source_table_ids == ("prc_hicp_fp", "prc_hicp_fpd")
+    assert hicp.parser_id == "official.eurostat-hicp.v1"
 
 
 def test_registry_round_trip_and_identity_cover_source_endpoint_and_parser(
