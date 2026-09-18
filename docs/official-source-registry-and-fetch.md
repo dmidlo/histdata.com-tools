@@ -14,7 +14,7 @@ capability until its first-party fixture qualification passes.
 ## Reviewed scope and authority rule
 
 The packaged registry is
-`histdatacom/market_context/assets/official_sources_v1.json`. Its 72 entries
+`histdatacom/market_context/assets/official_sources_v1.json`. Its 73 entries
 cover every cell in the 21-economy by 12-event-family matrix. Exactly one entry
 with role `primary-producer` must exist in every cell. Registry construction
 fails on a missing or ambiguous cell.
@@ -99,6 +99,19 @@ one methodology false positive and six pre-search reference-quarter gaps
 remain explicit. The separately retained `namq_10_gdp` JSON-stat table is a
 current revised cross-check for EA20, Germany, and France, not a substitute for
 those historical values or the independent national publication archives.
+
+The supplemental Eurostat monthly-unemployment entry is
+`empirically-verified` for the harmonised aggregate publication lineage. Four
+official Atom-search pages enumerate 383 results and select 296 source-dated
+monthly releases from January 2002 through September 2026 while preserving all
+87 exclusions. All 296 landings and all 264 discovered English documents (234
+PDF and 30 HTML) are retained; 32 source-complete landings expose no separate
+English document. Source-era tables retain supported euro-area, German, and
+French rates, historical membership composition, and repeated-month revision
+comparisons; the missing February 2003 publication remains explicit. The
+separately retained `une_rt_m` JSON-stat table is a current revised cross-check
+for EA21, Germany, and France, not a replacement for historical release values
+or independent national-producer publications.
 
 The Federal Reserve G.17 industrial-production entry is the first route raised
 to `empirically-verified`: its official release index and all 319 enumerated

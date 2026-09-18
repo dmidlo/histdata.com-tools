@@ -2,6 +2,14 @@
 
 ### Added
 
+- **market context**: qualify 296 source-dated Eurostat monthly-unemployment
+  publications from January 2002 through September 2026, preserve the
+  source-era euro-area composition, headline direction and rate, supported
+  EA/Germany/France table values, and repeated-month revision comparisons;
+  retain the complete 383-result Atom selection, explicit exclusions, all 296
+  landings, and all 264 discovered English documents; and bind a 2000-01
+  onward `une_rt_m` revised-series cross-check without treating it as
+  historical-vintage evidence (#539).
 - **market context**: qualify 279 source-dated Eurostat quarterly-GDP
   publications from January 2002 through September 2026, preserve distinct
   preliminary-flash, flash, first-, second-, third-, and regular-estimate

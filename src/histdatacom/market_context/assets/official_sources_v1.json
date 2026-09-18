@@ -1732,6 +1732,101 @@
     },
     {
       "schema_version": "histdatacom.official-source-entry.v1",
+      "source_key": "ea.eurostat.unemployment",
+      "economy_code": "EA",
+      "economy_name": "Euro Area",
+      "institution": "Eurostat",
+      "jurisdiction": "European Union / euro area",
+      "legal_producer": true,
+      "roles": [
+        "official-archive",
+        "release-calendar"
+      ],
+      "event_families": [
+        "labour-market"
+      ],
+      "indicator_ids": [
+        "employment-unemployment-and-earnings"
+      ],
+      "formats": [
+        "atom",
+        "json-stat",
+        "html",
+        "pdf"
+      ],
+      "capabilities": [
+        "current-values",
+        "historical-observations",
+        "historical-vintages",
+        "publication-metadata",
+        "schedule-metadata",
+        "revision-metadata",
+        "series-metadata",
+        "archive-enumeration"
+      ],
+      "endpoint_uri_template": "https://ec.europa.eu/eurostat/search",
+      "allowed_hosts": [
+        "ec.europa.eu"
+      ],
+      "expected_media_types": [
+        "application/atom+xml",
+        "application/json",
+        "text/html",
+        "application/pdf"
+      ],
+      "source_series_ids": [],
+      "source_table_ids": [
+        "une_rt_m"
+      ],
+      "source_release_ids": [
+        "monthly harmonised unemployment"
+      ],
+      "release_calendar_uri": "https://ec.europa.eu/eurostat/news/release-calendar",
+      "archive_uri": "https://ec.europa.eu/eurostat/search?text=unemployment",
+      "source_timezone": "Europe/Brussels",
+      "availability_time_precision": "date-only",
+      "dst_convention": "Source-authored exact timestamps are retained where the modern landing exposes them; legacy Atom timestamps remain metadata rather than an inferred historical release clock.",
+      "historical_depth": "The retained CAT_PREREL Atom search contains 383 unique results at 17 September 2026; a deterministic title-lineage predicate selects 296 monthly euro-area unemployment releases from 4 January 2002 through 1 September 2026 and explicitly retains the other 87 results as exclusions. The corpus retains every landing and all 264 discovered English documents (234 PDF and 30 HTML); 32 self-contained landings expose no separate English document. The current revised une_rt_m response declares EA21, Germany and France from January 2000 through August 2026, with non-null observations through July 2026 at the qualification boundary.",
+      "known_breaks": [
+        "The searchable release lineage begins with the November 2001 reference month; earlier current-series observations remain an explicit release-artifact gap.",
+        "The Atom search omits the release that would report February 2003; that internal gap remains explicit rather than synthesized.",
+        "Headline naming changes from Euro-zone through Euro area unemployment rate to Euro area unemployment at; selection retains each observed era under one evidence-backed predicate.",
+        "Euro-area composition changes from EA12 through EA21 are retained per release; the January 2026 transition tables expose parallel EA20 and EA21 rows, and EA21 is used only for like-for-like current-series comparison.",
+        "Thirty legacy landing-page dates precede their product-code dates by one day; product 3-30032007-bp is the explicit three-day exception, with a 30 March product code and a 2 April source-authored page date.",
+        "The 4 November 2004 landing exposes source-authored release prose but no separate English document; its headline remains qualified without manufacturing an absent totals table.",
+        "Modern self-contained totals tables use split year/month headers before changing to Mon-YY headers; both source layouts are bound to the release reference month rather than parsed heuristically from unrelated page text."
+      ],
+      "revision_behavior": "Each source-dated headline and every parseable totals-table value remain distinct evidence. Repeated source-era cells are compared without collapsing revisions. The current une_rt_m JSON-stat response is a revised-series cross-check only and is never substituted for a historical published value.",
+      "rate_limit": "The search and product surfaces exposed an observed five-request rolling window during qualification; refreshes use sequential requests, at least 13 seconds between network requests, explicit 429 retry-after handling, bounded retries, and an identifying contact user agent.",
+      "authentication": "none",
+      "credential_env_name": null,
+      "credential_header_name": null,
+      "credential_parameter_name": null,
+      "terms_uri": "https://ec.europa.eu/eurostat/help/copyright-notice",
+      "fallback_source_keys": [],
+      "parser_id": "official.eurostat-unemployment.v1",
+      "parser_version": "1",
+      "replay_strategy": "Retain exact bytes for all four populated CAT_PREREL Atom result pages, the bounded une_rt_m JSON-stat response, all 296 selected source-dated release landings, and all 264 discovered English HTML/PDF release documents. Bind request and redirect identities, byte lengths, SHA-256 digests, explicit selection and exclusion counts, product/page dates, source-authored timestamps, reference months, publication lags, historical euro-area composition, headline and totals-table rates, repeated-value revisions, revised-current comparisons, and every pre-search or internal release gap before accepting replay.",
+      "adapter_owner": "market-context/ea",
+      "verification_status": "empirically-verified",
+      "reviewed_on": "2026-09-17",
+      "verification_evidence_uris": [
+        "https://ec.europa.eu/eurostat/search?text=unemployment",
+        "https://ec.europa.eu/eurostat/api/dissemination/statistics/1.0/data/une_rt_m",
+        "https://ec.europa.eu/eurostat/en/web/products-euro-indicators/-/3-04012002-ap",
+        "https://ec.europa.eu/eurostat/en/web/products-euro-indicators/w/3-01092026-bp",
+        "https://ec.europa.eu/eurostat/cache/metadata/en/une_rt_m_esms.htm"
+      ],
+      "redistribution_notes": "The package retains a compact hash-bound manifest; exact Eurostat search, dataset and release bytes remain an external operator-owned corpus subject to Eurostat attribution and copyright terms.",
+      "limitations": [
+        "No market-consensus history is supplied, so numeric surprise is not manufactured.",
+        "Legacy release evidence is date-only unless a source-authored landing timestamp establishes a stronger clock.",
+        "Eurostat member-state rows qualify harmonised Germany and France values, not independent national-producer release vintages.",
+        "Localized German and French renderings are not duplicate replay inputs because the discovered English publication or self-contained landing supplies the qualified source evidence."
+      ]
+    },
+    {
+      "schema_version": "histdatacom.official-source-entry.v1",
       "source_key": "ea.ecb.data-portal",
       "economy_code": "EA",
       "economy_name": "Euro Area",
