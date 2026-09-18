@@ -2,6 +2,13 @@
 
 ### Added
 
+- **market context**: qualify the gap-free May 2009 through August 2026 INSEE
+  final CPI release lineage and January 2016 through August 2026 provisional
+  lineage; preserve all 583 bounded search results, exact source timestamps,
+  release-authored CPI, core-inflation, and HICP rates, 384 comparable
+  provisional-to-final revisions, and four separately labelled latest-revised
+  BDM SDMX cross-check series without manufacturing earlier releases,
+  consensus, or historical vintages (#539).
 - **market context**: qualify the complete October 1999 through July 2026 ECB
   monthly balance-of-payments publication lineage across the legacy BPM5 and
   current BPM6 inventories; preserve both official inventory gaps, 57

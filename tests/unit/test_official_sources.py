@@ -195,7 +195,7 @@ def test_packaged_registry_is_a_complete_reviewed_21_economy_matrix(
     assert packaged_official_source_registry_path().is_file()
     assert registry.schema_version == OFFICIAL_SOURCE_REGISTRY_SCHEMA_VERSION
     assert registry.scoped_economies == SCOPED_ECONOMIES
-    assert len(registry.sources) == 79
+    assert len(registry.sources) == 80
     matrix = official_source_matrix(registry)
     assert set(matrix) == set(SCOPED_ECONOMIES)
     assert sum(len(row) for row in matrix.values()) == 21 * len(
@@ -238,6 +238,27 @@ def test_packaged_registry_is_a_complete_reviewed_21_economy_matrix(
     )
     assert hicp.source_table_ids == ("prc_hicp_fp", "prc_hicp_fpd")
     assert hicp.parser_id == "official.eurostat-hicp.v1"
+    insee_cpi = registry.source("fr.insee.cpi")
+    assert insee_cpi.roles == (
+        OfficialSourceRole.OFFICIAL_ARCHIVE,
+        OfficialSourceRole.RELEASE_CALENDAR,
+    )
+    assert insee_cpi.formats == (
+        OfficialSourceFormat.JSON,
+        OfficialSourceFormat.HTML,
+        OfficialSourceFormat.SDMX_21,
+    )
+    assert insee_cpi.source_series_ids == (
+        "011812232",
+        "011814145",
+        "011814631",
+        "011814632",
+    )
+    assert insee_cpi.parser_id == "official.insee-cpi.v1"
+    assert (
+        insee_cpi.verification_status
+        is OfficialSourceVerificationStatus.EMPIRICALLY_VERIFIED
+    )
     gdp = registry.source("ea.eurostat.gdp")
     assert gdp.roles == (
         OfficialSourceRole.OFFICIAL_ARCHIVE,

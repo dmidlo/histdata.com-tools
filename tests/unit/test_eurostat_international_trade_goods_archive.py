@@ -269,11 +269,11 @@ def test_packaged_archive_is_complete_and_registry_bound() -> None:
     assert manifest.current_dataset.time_end == "2026-07"
     assert manifest.manifest_id == (
         "eurostat-international-trade-goods-archive-manifest:sha256:"
-        "c972a87f23202e1e5925329ce0c4e8838eb76af58d215beed8d518be5b70f454"
+        "2e861c54f5fd3e45bebf4eaeb2b5c4aff965490104addab3c522c821d140f0ef"
     )
     assert path.stat().st_size == 2_816_352
     assert sha256(path.read_bytes()).hexdigest() == (
-        "e21434e3bb292bb8319deb03b1b0cb4aabfd1fc99ff854f987959e328284925f"
+        "8de4045c186cc39035bf56919b7d2900540d7f654897fc4174029158784bba3b"
     )
 
 

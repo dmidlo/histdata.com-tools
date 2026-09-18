@@ -185,7 +185,7 @@ def _sha256(value: bytes) -> str:
 
 
 def _month(value: object, name: str) -> str:
-    result = cast(str, _required_text(value, name))
+    result = str(_required_text(value, name))
     if _PERIOD_RE.fullmatch(result) is None:
         raise ValueError(f"{name} must be YYYY-MM")
     parsed = date.fromisoformat(f"{result}-01")

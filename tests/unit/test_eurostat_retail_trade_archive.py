@@ -239,11 +239,11 @@ def test_packaged_archive_quantifies_the_complete_corpus() -> None:
     assert manifest.total_content_bytes == 156_617_385
     assert manifest.manifest_id == (
         "eurostat-retail-trade-archive-manifest:sha256:"
-        "e0a35ccb8c151990251cb88005f337f4e701cd0b88a5fcc874afd45a180438f7"
+        "e6462b37c5bb614867b7b01f3c63a4acc1d95eb73579f96a0f8088514dff85c7"
     )
     assert path.stat().st_size == 6_566_066
     assert sha256(path.read_bytes()).hexdigest() == (
-        "b400d984d5112d8298cd33500facfc64e05b042940a6df6aeb45ddd8c20f866f"
+        "cab17118bfaf72c298c4be9ff5bc22053b2e8a10482094aa98f510e9f94105af"
     )
 
 

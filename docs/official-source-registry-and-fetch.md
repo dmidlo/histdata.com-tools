@@ -14,7 +14,7 @@ capability until its first-party fixture qualification passes.
 ## Reviewed scope and authority rule
 
 The packaged registry is
-`histdatacom/market_context/assets/official_sources_v1.json`. Its 79 entries
+`histdatacom/market_context/assets/official_sources_v1.json`. Its 80 entries
 cover every cell in the 21-economy by 12-event-family matrix. Exactly one entry
 with role `primary-producer` must exist in every cell. Registry construction
 fails on a missing or ambiguous cell.
@@ -99,6 +99,17 @@ composition, 703 source-authored values, and conservative date provenance.
 The two missing 2000 reference months and 40 undated early occurrences are not
 manufactured, and current ECB Data Portal history is not treated as a
 historical publication vintage. See the [euro-area, Germany, and France
+backfill](euro-area-germany-france-backfill.md).
+
+The supplemental INSEE CPI entry is `empirically-verified` for France's
+national provisional and final publication lineage. One bounded English Solr
+query accounts for all 583 results and selects 336 exact release pages: 208
+gap-free final releases from May 2009 and 128 gap-free provisional releases
+from January 2016, both through August 2026. Release pages retain
+source-authored CPI, core-inflation, and HICP rates and 384 directly comparable
+provisional-to-final values. Four BDM SDMX series from January 2000 remain
+separately labelled latest-revised cross-checks; they are not historical
+publication vintages. See the [euro-area, Germany, and France
 backfill](euro-area-germany-france-backfill.md).
 
 The supplemental Eurostat GDP entry is `empirically-verified` for the
