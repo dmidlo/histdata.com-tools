@@ -195,7 +195,7 @@ def test_packaged_registry_is_a_complete_reviewed_21_economy_matrix(
     assert packaged_official_source_registry_path().is_file()
     assert registry.schema_version == OFFICIAL_SOURCE_REGISTRY_SCHEMA_VERSION
     assert registry.scoped_economies == SCOPED_ECONOMIES
-    assert len(registry.sources) == 77
+    assert len(registry.sources) == 78
     matrix = official_source_matrix(registry)
     assert set(matrix) == set(SCOPED_ECONOMIES)
     assert sum(len(row) for row in matrix.values()) == 21 * len(
@@ -336,6 +336,23 @@ def test_packaged_registry_is_a_complete_reviewed_21_economy_matrix(
     )
     assert (
         goods_trade.verification_status
+        is OfficialSourceVerificationStatus.EMPIRICALLY_VERIFIED
+    )
+    labour_cost = registry.source("ea.eurostat.labour-cost")
+    assert labour_cost.roles == (
+        OfficialSourceRole.OFFICIAL_ARCHIVE,
+        OfficialSourceRole.RELEASE_CALENDAR,
+    )
+    assert labour_cost.formats == (
+        OfficialSourceFormat.ATOM,
+        OfficialSourceFormat.JSON_STAT,
+        OfficialSourceFormat.HTML,
+        OfficialSourceFormat.PDF,
+    )
+    assert labour_cost.source_table_ids == ("lc_lci_r2_q",)
+    assert labour_cost.parser_id == "official.eurostat-labour-cost.v1"
+    assert (
+        labour_cost.verification_status
         is OfficialSourceVerificationStatus.EMPIRICALLY_VERIFIED
     )
 

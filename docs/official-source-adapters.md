@@ -101,8 +101,9 @@ an explicit failure.
 registry format matrix and declared archive routes. The current registry needs
 SDMX, JSON-stat, generic structured, spreadsheet, HTML release, release-feed,
 PDF, and static-archive support. The Eurostat GDP, monthly-unemployment,
-monthly-industrial-production, construction-output, monthly-retail-trade, and
-monthly-goods-trade sources make Atom a reviewed registry input. The qualified release-feed pack
+monthly-industrial-production, construction-output, monthly-retail-trade,
+monthly-goods-trade, and quarterly-labour-cost sources make Atom a reviewed
+registry input. The qualified release-feed pack
 covers RSS and ICS; the data-catalog parser remains installed but does not
 become a qualification requirement until a reviewed registry entry declares
 that format.
@@ -116,8 +117,9 @@ that format.
 The unit qualification corpus uses reduced responses with the real structural
 shapes and official fixture URIs for BLS JSON, ECB SDMX, Eurostat GDP,
 monthly-unemployment, monthly-industrial-production, construction-output,
-monthly-retail-trade, and monthly-goods-trade Atom/JSON-stat inputs, Statistics Norway JSON-stat, RBNZ
-spreadsheets, Federal Reserve HTML/PDF, and RBA archive indexes. Separate
+monthly-retail-trade, monthly-goods-trade, and quarterly-labour-cost
+Atom/JSON-stat inputs, Statistics Norway JSON-stat, RBNZ spreadsheets, Federal
+Reserve HTML/PDF, and RBA archive indexes. Separate
 fixtures cover SDMX
 dataflow/codelist discovery, SDMX-JSON, RSS, ICS, ZIP enumeration, catalog
 discovery, malformed input, drift, record bounds, and PDF reacquisition.

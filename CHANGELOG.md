@@ -2,6 +2,15 @@
 
 ### Added
 
+- **market context**: qualify the uninterrupted 2001-Q3 through 2026-Q2
+  Eurostat quarterly labour-cost publication lineage, preserve source-era
+  euro-area composition, signed headline movements, the 2012 business- to
+  whole-economy activity-scope break, total/wages/other table values for the
+  euro area, Germany, and France, and scope-safe revision comparisons; retain
+  the bounded Atom, landing, and discovered
+  English-document corpus; and bind an independent `lc_lci_r2_q`
+  revised-series cross-check without substituting current EA21 values for
+  historical publication vintages (#539).
 - **market context**: qualify the uninterrupted April 2012 through July 2026
   Eurostat monthly international-trade-in-goods publication lineage, preserve
   source-era EA17 through EA21 composition, monthly versus year-to-date

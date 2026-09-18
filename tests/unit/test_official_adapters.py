@@ -26,6 +26,7 @@ from histdatacom.market_context.official_adapters import (
     OfficialEurostatGdpParserV1,
     OfficialEurostatHicpParserV1,
     OfficialEurostatInternationalTradeGoodsParserV1,
+    OfficialEurostatLabourCostParserV1,
     OfficialEurostatRetailTradeParserV1,
     OfficialFederalReserveFomcParserV1,
     OfficialFederalReserveH6ParserV1,
@@ -159,7 +160,7 @@ def test_built_in_parsers_cover_every_registered_source_and_format(
     registry: OfficialSourceRegistryV1,
 ) -> None:
     parsers = built_in_official_source_parsers()
-    assert len(parsers) == 31
+    assert len(parsers) == 32
     assert isinstance(
         parsers["official.dol-eta-initial-claims.v1"],
         OfficialDolEtaInitialClaimsParserV1,
@@ -187,6 +188,10 @@ def test_built_in_parsers_cover_every_registered_source_and_format(
     assert isinstance(
         parsers["official.eurostat-international-trade-goods.v1"],
         OfficialEurostatInternationalTradeGoodsParserV1,
+    )
+    assert isinstance(
+        parsers["official.eurostat-labour-cost.v1"],
+        OfficialEurostatLabourCostParserV1,
     )
     assert isinstance(
         parsers["official.census-ft900.v1"],

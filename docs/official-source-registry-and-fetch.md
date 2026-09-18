@@ -14,7 +14,7 @@ capability until its first-party fixture qualification passes.
 ## Reviewed scope and authority rule
 
 The packaged registry is
-`histdatacom/market_context/assets/official_sources_v1.json`. Its 77 entries
+`histdatacom/market_context/assets/official_sources_v1.json`. Its 78 entries
 cover every cell in the 21-economy by 12-event-family matrix. Exactly one entry
 with role `primary-producer` must exist in every cell. Registry construction
 fails on a missing or ambiguous cell.
@@ -183,6 +183,20 @@ measures from January 2011 through July 2026. Current EA21 values are
 comparison evidence
 only; they do not replace historical EA17 through EA20 vintages or manufacture
 balances from exports and imports.
+
+The supplemental Eurostat quarterly-labour-cost entry is
+`empirically-verified` for the harmonised aggregate publication lineage. Two
+official `CAT_PREREL` Atom-search pages enumerate 159 unique products and
+select 100 gap-free quarterly releases from January 2002 through September
+2026 while preserving all 59 exclusions. All 100 landings and their 89
+discovered English documents (78 PDF and 11 HTML) are retained; 11 modern
+landings are self-contained. Source-era values preserve euro-area membership,
+the 2012-Q2 business- to whole-economy scope break, and total, wages, and other
+labour-cost observations for the euro area, Germany, and France. One official
+English-linked 2008 PDF contains German content and therefore remains
+headline-only. The retained `lc_lci_r2_q` JSON-stat table contains 726 current
+revised observations from 2000-Q1 through 2026-Q2; compatible comparisons do
+not replace publication vintages or cross the activity-scope break.
 
 The Federal Reserve G.17 industrial-production entry is the first route raised
 to `empirically-verified`: its official release index and all 319 enumerated
