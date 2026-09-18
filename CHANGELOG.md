@@ -2,6 +2,13 @@
 
 ### Added
 
+- **market context**: qualify 298 source-dated Eurostat retail-trade
+  publications from April 2000 through September 2026, preserve the explicit
+  searchable-release gaps, source-era headline measure and euro-area
+  composition, 9,393 supported EA/Germany/France table values, and revision
+  comparisons; retain all 298 landings and 267 discovered English documents;
+  and bind an independent `sts_trtu_m` revised-series cross-check without
+  substituting current values for historical publication vintages (#539).
 - **market context**: qualify the complete March 2002 through September 2026
   Eurostat construction-output publication lineage across its quarterly and
   monthly eras, preserve duplicate and gap semantics, source-era euro-area

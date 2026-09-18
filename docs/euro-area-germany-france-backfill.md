@@ -26,7 +26,7 @@ guess or a third-party calendar. Replay retains and verifies:
 
 The retained corpus contains 42,121,110 bytes and 383 distinct SHA-256
 digests. Its compact packaged receipt is
-`ecb-archive-manifest:sha256:df6456e66c5113ff52619c39bacb2fdc7b0dbf514889b42cd91127799ffc793a`.
+`ecb-archive-manifest:sha256:7cc0ce75602e8e9d425e0fae46458b3d81025ddaff4f125ea2ad0fcc2f38cbbe`.
 
 Each decision preserves a native `RATE_SET` with separate components for the
 main refinancing operations, marginal lending facility, and deposit facility.
@@ -70,7 +70,7 @@ qualifies all 96 FOEDB type-20 accounts published from 19 February 2015 through
 27 August 2026. The selection retains 83 versioned FOEDB database artifacts
 and all 96 official HTML pages: 179 artifacts, 26,253,142 bytes, and 179 unique
 SHA-256 digests. Its packaged receipt is
-`ecb-account-archive-manifest:sha256:e4fae471fa4f1d5575960e7a983a82d83bd5a9bdba5a3a8895f5e7adb2be35bb`.
+`ecb-account-archive-manifest:sha256:4fac63ef83fd6bebf1c810f91f9b0a75b6aec20d321d3b52baa0737021b6b814`.
 
 Replay parses the source-authored meeting dates rather than inferring them from
 publication dates. It preserves three observed title eras (35 generic titles,
@@ -106,7 +106,7 @@ that FOEDB stores under the same broad type and historical path family.
 Replay retains the 83 versioned FOEDB artifacts and all 270 official statement
 pages: 353 artifacts, 48,734,109 bytes, and 353 unique SHA-256 digests. Its
 packaged receipt is
-`ecb-statement-archive-manifest:sha256:2ffa4a6950dddd700748b0a6aac997725e2d3527d2ff04cfc567eb18f0dbb6c0`.
+`ecb-statement-archive-manifest:sha256:65437f191d30425c37a735049fce9640b8fdea11eacf6095d9e8e3a72da900b4`.
 Every page contains exactly one of nine observed historical heading forms and
 every retained statement links to exactly one qualified decision occurrence.
 
@@ -139,7 +139,7 @@ projection rounds for 2000 through May 2004 from unrelated publications.
 Replay retains the 83 versioned FOEDB artifacts, the all-releases index, 90
 official PDFs, and the 31 available HTML counterparts: 205 artifacts,
 43,393,009 bytes, and 205 distinct SHA-256 digests. Its packaged receipt is
-`ecb-projection-archive-manifest:sha256:79f1a10cddb9c4815c5e49e44163ffd5f890547c0a8c8a455959b7b654f3bb73`.
+`ecb-projection-archive-manifest:sha256:271a76a2336ca13aea7d42fe3d9fa2282655093e41f679a5ccf315ae95e777f3`.
 The inventory contains 45 ECB staff rounds in March/September and 45
 Eurosystem staff rounds in June/December. It also preserves the September 2006
 round's early 31 August publication date instead of forcing the release date
@@ -184,7 +184,7 @@ Replay retains the 83 versioned FOEDB artifacts and every document named by
 the 321 selected records: 248 PDFs and 96 HTML pages. The resulting 427
 artifacts contain 62,669,957 bytes and 427 distinct SHA-256 digests. The
 packaged receipt is
-`ecb-monetary-developments-archive-manifest:sha256:a510aab463870ad2a25eec657b4df42748f427d4bc30cfdd30c93d192c894727`.
+`ecb-monetary-developments-archive-manifest:sha256:512ae529aa95c07c0d6cfddcd899d747130b4b14af77a4faf826e2eb62112a3f`.
 The in-window source-format eras comprise 224 PDF-only releases, 73 HTML-only
 releases, and 23 releases with both English HTML and a localized PDF. Localized
 PDFs remain hashed evidence; values come from the corresponding English HTML.
@@ -279,9 +279,9 @@ retained as an explicit source-date correction. No intraday clock is inferred.
 
 The compact receipt binds 829 raw artifacts, 189,367,122 bytes, and 829
 distinct SHA-256 digests. Its identity is
-`eurostat-hicp-archive-manifest:sha256:fa1755020e55acf991a804d157aaf43ef1095975a8009578d374e5a761d4c884`.
+`eurostat-hicp-archive-manifest:sha256:4d26c01714ac5fb9deaca70d2ee82f1a1e7e9cdd48858d25c03e35c2b5f3a8f6`.
 The current registry-bound packaged JSON is 2,988,977 bytes with SHA-256
-`6506b62f188ee007d7aa509c228c723ad844ae5160600b04e01381b406351e83`.
+`5e99dd15e408e928703bdce1f47e085ec6a651d92eeceec97f4fa1eebf89ff4b`.
 The release-page/date audit records 40 page offsets and 15 migrated-card
 offsets of one day.
 
@@ -361,9 +361,9 @@ earlier flash and first-estimate artifacts remain unavailable. The compact
 receipt binds 538 raw artifacts and 538 distinct SHA-256 digests totaling
 118,956,446 bytes: ten search pages, one revised-series response, 279
 source-dated landings, and 248 English release documents. Its identity is
-`eurostat-gdp-archive-manifest:sha256:e3b3a290d6bda4d7ea4bd1a5b50afc06f7d276b3b8993a135864e4941068f185`.
+`eurostat-gdp-archive-manifest:sha256:1d7182518601561dfd6b04cd10f1209f9cb64aa3bbdd6632c005af66f15ef1a2`.
 The current registry-bound packaged JSON is 1,973,058 bytes with SHA-256
-`8ec371ff13adbd2fa9f261b6325915e7fecc8c403dba40fc593600f39dac9835`.
+`63b9656c764e90a95cecbb50da6e51e4e39e822e2da7565a582b5cd66c625a68`.
 
 The independently retained `namq_10_gdp` JSON-stat response contributes 636
 current revised observations: quarter-over-quarter and year-over-year real-GDP
@@ -453,9 +453,9 @@ release-to-release cells, of which 4,358 changed, plus 5,590 comparisons with
 the current dataset, of which 5,384 changed. The 493 retained artifacts have
 493 unique digests and total 149,658,751 bytes. Two independent offline
 rebuilds produced the same 6,690,664-byte canonical JSON file, manifest
-identity `95b46b32d69aa94c8dfb81b39e2526d5822d2329380ff8089ef71f349e601342`,
+identity `f9a5e5a163b7461d4986f247bd42f300b2588a66b358d2475a2329f617524f7a`,
 and file SHA-256
-`e0b8b2781ffaaf2f8c9ea48526622e98e15c4b7d7713309a3c4280153b9a9517`.
+`a93831561b4ff506815ff0b93ba3605d5c8c7f402ddac27c33c0f09ca9662027`.
 
 An operator with the exact retained corpus can rebuild or replay the receipt
 with:
@@ -529,10 +529,10 @@ records 3,146 within-scope consecutive revision comparisons, of which 1,144
 change, plus 2,683 comparisons with the retained current dataset, of which
 2,248 differ. The receipt binds 565 raw artifacts and 565 distinct SHA-256
 digests totaling 134,483,606 bytes. Its identity is
-`eurostat-unemployment-archive-manifest:sha256:b84297c5e7edfed4ad2cc29d5dc766d336aadfef0979a3c3b657548040c4c5e5`.
+`eurostat-unemployment-archive-manifest:sha256:9f25332871763036e1b4350efc582cbc50c66f508196eaadd8887daa4e34af64`.
 Two fresh offline rebuilds produced byte-identical 3,577,040-byte packaged JSON
 with SHA-256
-`5bba89057af51c7f26870923a7e56a053ed98e53743aad3a799a34d19ee957a0`.
+`3b0389571b63382bb444f9c11d6a04fe9073bdccbc8a4feedbff1771541f8e79`.
 
 The independently retained `une_rt_m` JSON-stat response declares the monthly
 cube from January 2000 through August 2026 and contains 957 non-null revised
@@ -601,10 +601,10 @@ within-scope consecutive revision comparisons, of which 4,660 change, plus
 6,936 comparisons with the retained current dataset, of which 6,473 differ.
 The receipt binds 573 raw artifacts and 573 distinct SHA-256 digests totaling
 151,722,249 bytes. Its identity is
-`eurostat-industrial-production-archive-manifest:sha256:f2de14c5938a99f3e467655e011cee5251b76112abc2eac1d422492acc045e7b`.
+`eurostat-industrial-production-archive-manifest:sha256:9d8dabc5fc410b83b8ce6fe7ebbc21d48d23fe72622e36ce17a8219219be5b46`.
 Two fresh offline rebuilds produced byte-identical 7,767,781-byte packaged JSON
 with SHA-256
-`cae79e507662ed84d1ea1d2cbfb6faac6f72d55365424c13d4cb08f374aa203e`.
+`859268e41f9dc7bf017969447034e3f8090c591a08a606277378e458d38841af`.
 
 The independently retained `sts_inpr_m` JSON-stat response declares January
 2000 through July 2026 and contains 1,914 non-null revised observations: both
@@ -627,11 +627,88 @@ uv run python scripts/refresh_eurostat_industrial_production_archive.py \
 least 13 seconds between Eurostat requests, and handles bounded `429`
 retry-after responses.
 
+## Eurostat retail-trade publication archive
+
+`histdatacom.market_context.eurostat_retail_trade_archive` qualifies 298
+source-dated euro-area retail-trade publications from 12 April 2000 through 4
+September 2026. Five populated pages of Eurostat's official `CAT_PREREL` Atom
+search contain 417 raw results and 417 unique alternate URIs. A deterministic
+`Volume of retail trade ...` title predicate selects the 298 releases; all 119
+nonselected results remain explicit exclusions comprising 77 labour-market, 28
+broad-search, and 14 production releases.
+
+The first searchable publication reports January 2000. The source lineage then
+resumes with October 2001, runs through November 2003, has no searchable
+December 2003 release, and resumes continuously from January 2004 through July
+2026. Both the February 2000 through September 2001 gap and the December 2003
+gap remain explicit rather than being reconstructed from the current
+dissemination table.
+
+The source headline changes measure during the lineage. Headlines report the
+year-over-year rate through reference month June 2007 and the month-over-month
+rate from July 2007 onward. Each release preserves that authored measure,
+signed direction, reference month, publication lag, historical euro-area
+composition, and any supported euro-area, German, and French table values.
+The April 2000 release therefore retains its 2.3% annual headline alongside its
+0.3% monthly table value instead of treating them as a conflict.
+
+All 298 landing pages expose 267 unique English documents: 32 HTML and 235
+PDF. Thirty-one self-contained modern landings expose no separate document.
+The 5 May 2023 landing links the same content-addressed PDF for preview and
+download; replay collapses only the `download=true` variant while retaining
+the identical content path and other query parameters. Forty-six modern
+landings expose a source-authored exact timestamp. Thirty-two legacy landings
+are dated one day before their product codes, while `4-04052007-ap` is
+source-dated three days later and `4-19032009-bp` six days earlier; the two
+exceptional dates agree across Atom and landing metadata and remain explicit.
+
+Across the corpus, supported release tables contribute 9,393 source-authored
+values and 7,528 comparable repeated-month observations; 4,933 comparisons
+change between publications. Of 6,195 table values comparable with the current
+EA21/Germany/France cube, 5,842 differ, which is retained as revision evidence
+rather than normalized away.
+
+The earliest legacy HTML document supplies January 2000 directly and establishes
+an observed 72-day publication lag. Its two-digit table headers also include
+1999 predecessor months, which replay resolves with a bounded 1990s/2000s
+century pivot. The August 2004 product code `4-040582004-ap` contains a source
+typo; one exact override binds its Atom entry, landing, and suffixed English
+document path without generalizing the malformed shape.
+
+The independently retained `sts_trtu_m` JSON-stat response reports update time
+16 September 2026 and contains 1,901 non-null revised observations from January
+2000 through July 2026. It covers month-over-month and year-over-year retail-
+trade-volume changes for EA21, Germany, and France. The 13 absent cells are
+explicit: EA21's January 2000 monthly rate and its January through December
+2000 annual rates. This current cube is comparison evidence only and never
+fills a missing historical publication or substitutes EA21 for a source-era
+euro-area composition.
+
+The receipt binds 571 raw artifacts and 571 distinct SHA-256 digests totaling
+156,617,385 bytes. Its identity is
+`eurostat-retail-trade-archive-manifest:sha256:4b8a55383656205e2449b1036aa8d214d46dfde19248361d9dcc9986f341caeb`.
+Two fresh offline rebuilds produced byte-identical 6,566,066-byte canonical
+JSON with SHA-256
+`0756139dccb2ac53cf12fb2f5d1d4f91db1697c06c31d13c146cb0c2c883a0c3`.
+
+An operator with the exact retained corpus can rebuild or replay the receipt
+with:
+
+```console
+uv run python scripts/refresh_eurostat_retail_trade_archive.py \
+  --as-of 2026-09-18 \
+  --source-directory /path/to/retained-eurostat-retail-trade-corpus
+```
+
+`--fetch-missing` is explicit. Network acquisition is sequential, enforces at
+least 13 seconds between Eurostat requests, and handles bounded `429`
+retry-after responses.
+
 ## Remaining issue scope
 
 These ECB decision, account, statement, staff-projection, monthly
 monetary-developments, Eurostat HICP, GDP, monthly-unemployment, and
-monthly-industrial-production, and construction-output archives
+monthly-industrial-production, construction-output, and retail-trade archives
 complete four ECB monetary-policy artifact families, the selected euro-area
 money/credit lineage, the harmonized inflation and aggregate-GDP anchors, and
 the first labour-market and production slices, not issue #539 as a whole.
@@ -655,6 +732,8 @@ Official entrypoints:
 - [Eurostat monthly industrial-production dataset](https://ec.europa.eu/eurostat/databrowser/view/sts_inpr_m/default/table)
 - [Eurostat construction-output release search](https://ec.europa.eu/eurostat/search?text=production%20in%20construction)
 - [Eurostat monthly construction-output dataset](https://ec.europa.eu/eurostat/databrowser/view/sts_copr_m/default/table)
+- [Eurostat retail-trade release search](https://ec.europa.eu/eurostat/search?text=retail%20trade)
+- [Eurostat monthly retail-trade dataset](https://ec.europa.eu/eurostat/databrowser/view/sts_trtu_m/default/table)
 - [ECB monetary-policy accounts](https://www.ecb.europa.eu/press/accounts/html/index.en.html)
 - [ECB monetary-policy statements](https://www.ecb.europa.eu/press/press_conference/monetary-policy-statement/html/index.en.html)
 - [ECB staff projections](https://www.ecb.europa.eu/press/projections/html/all-releases.en.html)

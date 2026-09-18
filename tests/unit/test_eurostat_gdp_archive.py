@@ -117,7 +117,7 @@ def test_packaged_gdp_archive_quantifies_inventory_dataset_and_releases() -> (
     assert manifest.total_content_bytes == 118_956_446
     assert manifest.manifest_id == (
         "eurostat-gdp-archive-manifest:sha256:"
-        "e3b3a290d6bda4d7ea4bd1a5b50afc06f7d276b3b8993a135864e4941068f185"
+        "1d7182518601561dfd6b04cd10f1209f9cb64aa3bbdd6632c005af66f15ef1a2"
     )
     assert packaged_eurostat_gdp_manifest_path().is_file()
 

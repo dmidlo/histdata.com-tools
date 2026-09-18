@@ -25,6 +25,7 @@ from histdatacom.market_context.official_adapters import (
     OfficialDolEtaInitialClaimsParserV1,
     OfficialEurostatGdpParserV1,
     OfficialEurostatHicpParserV1,
+    OfficialEurostatRetailTradeParserV1,
     OfficialFederalReserveFomcParserV1,
     OfficialFederalReserveH6ParserV1,
     OfficialParserError,
@@ -157,7 +158,7 @@ def test_built_in_parsers_cover_every_registered_source_and_format(
     registry: OfficialSourceRegistryV1,
 ) -> None:
     parsers = built_in_official_source_parsers()
-    assert len(parsers) == 29
+    assert len(parsers) == 30
     assert isinstance(
         parsers["official.dol-eta-initial-claims.v1"],
         OfficialDolEtaInitialClaimsParserV1,
@@ -177,6 +178,10 @@ def test_built_in_parsers_cover_every_registered_source_and_format(
     assert isinstance(
         parsers["official.eurostat-hicp.v1"],
         OfficialEurostatHicpParserV1,
+    )
+    assert isinstance(
+        parsers["official.eurostat-retail-trade.v1"],
+        OfficialEurostatRetailTradeParserV1,
     )
     assert isinstance(
         parsers["official.census-ft900.v1"],
@@ -509,6 +514,64 @@ def test_eurostat_construction_output_adapter_dispatches_each_format(
     assert records
     assert {item["parser_id"] for item in records} == {
         "official.eurostat-construction-output.v1"
+    }
+
+
+@pytest.mark.parametrize(
+    ("source_format", "content_type", "content"),
+    (
+        (
+            OfficialSourceFormat.ATOM,
+            "application/atom+xml",
+            (
+                b'<feed xmlns="http://www.w3.org/2005/Atom"><entry>'
+                b"<title>Volume of retail trade down by 0.6%</title>"
+                b"<id>4-04092026-ap</id></entry></feed>"
+            ),
+        ),
+        (
+            OfficialSourceFormat.JSON_STAT,
+            "application/json",
+            (
+                b'{"class":"dataset","id":["time"],"size":[1],'
+                b'"dimension":{"time":{"category":{"index":['
+                b'"2026-07"]}}},"value":[0.0]}'
+            ),
+        ),
+        (
+            OfficialSourceFormat.HTML,
+            "text/html",
+            b"<html><body><h1>Volume of retail trade down by 0.6%</h1></body></html>",
+        ),
+        (
+            OfficialSourceFormat.PDF,
+            "application/pdf",
+            _text_pdf_bytes(["Volume of retail trade down by 0.6%"]),
+        ),
+    ),
+)
+def test_eurostat_retail_trade_adapter_dispatches_each_format(
+    registry: OfficialSourceRegistryV1,
+    source_format: OfficialSourceFormat,
+    content_type: str,
+    content: bytes,
+) -> None:
+    source = registry.source("ea.eurostat.retail-trade")
+    snapshot = _snapshot(
+        registry,
+        source.source_key,
+        content,
+        source_format=source_format,
+        content_type=content_type,
+    )
+
+    records = parse_with_built_in_official_adapter(
+        snapshot, source, max_events=20
+    )
+
+    assert records
+    assert {item["parser_id"] for item in records} == {
+        "official.eurostat-retail-trade.v1"
     }
 
 

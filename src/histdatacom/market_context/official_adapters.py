@@ -908,6 +908,27 @@ class OfficialEurostatConstructionOutputParserV1(OfficialHtmlParserV1):
         return super().parse(snapshot, max_events=max_events)
 
 
+class OfficialEurostatRetailTradeParserV1(OfficialHtmlParserV1):
+    """Bind retail-trade Atom, JSON-stat, HTML, and PDF artifacts."""
+
+    parser_id = "official.eurostat-retail-trade.v1"
+    supported_formats: tuple[OfficialSourceFormat, ...] = (
+        OfficialSourceFormat.ATOM,
+        OfficialSourceFormat.JSON_STAT,
+        OfficialSourceFormat.HTML,
+        OfficialSourceFormat.PDF,
+    )
+
+    def parse(
+        self, snapshot: OfficialRawSnapshotV1, *, max_events: int
+    ) -> Sequence[Mapping[str, JSONValue]]:
+        if snapshot.request.source_format is OfficialSourceFormat.ATOM:
+            return _parse_xml_feed(self, snapshot, max_events=max_events)
+        if snapshot.request.source_format is OfficialSourceFormat.JSON_STAT:
+            return _parse_json_stat(self, snapshot, max_events=max_events)
+        return super().parse(snapshot, max_events=max_events)
+
+
 class OfficialEurostatUnemploymentParserV1(OfficialHtmlParserV1):
     """Bind unemployment Atom inventory, JSON-stat table, HTML, and PDFs."""
 
@@ -1075,6 +1096,7 @@ _BUILT_IN_PARSER_TYPES: tuple[type[_BaseOfficialParser], ...] = (
     OfficialEurostatGdpParserV1,
     OfficialEurostatHicpParserV1,
     OfficialEurostatIndustrialProductionParserV1,
+    OfficialEurostatRetailTradeParserV1,
     OfficialEurostatUnemploymentParserV1,
     OfficialFederalReserveFomcParserV1,
     OfficialFederalReserveH6ParserV1,
@@ -3192,6 +3214,7 @@ __all__ = [
     "OfficialEurostatGdpParserV1",
     "OfficialEurostatHicpParserV1",
     "OfficialEurostatIndustrialProductionParserV1",
+    "OfficialEurostatRetailTradeParserV1",
     "OfficialEurostatUnemploymentParserV1",
     "OfficialFederalReserveFomcParserV1",
     "OfficialFederalReserveH6ParserV1",

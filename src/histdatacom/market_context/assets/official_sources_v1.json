@@ -1732,6 +1732,99 @@
     },
     {
       "schema_version": "histdatacom.official-source-entry.v1",
+      "source_key": "ea.eurostat.retail-trade",
+      "economy_code": "EA",
+      "economy_name": "Euro Area",
+      "institution": "Eurostat",
+      "jurisdiction": "European Union / euro area",
+      "legal_producer": true,
+      "roles": [
+        "official-archive",
+        "release-calendar"
+      ],
+      "event_families": [
+        "retail-consumption"
+      ],
+      "indicator_ids": [
+        "retail-sales-and-household-consumption"
+      ],
+      "formats": [
+        "atom",
+        "json-stat",
+        "html",
+        "pdf"
+      ],
+      "capabilities": [
+        "current-values",
+        "historical-observations",
+        "publication-metadata",
+        "schedule-metadata",
+        "revision-metadata",
+        "series-metadata",
+        "archive-enumeration"
+      ],
+      "endpoint_uri_template": "https://ec.europa.eu/eurostat/search",
+      "allowed_hosts": [
+        "ec.europa.eu"
+      ],
+      "expected_media_types": [
+        "application/atom+xml",
+        "application/json",
+        "text/html",
+        "application/pdf"
+      ],
+      "source_series_ids": [],
+      "source_table_ids": [
+        "sts_trtu_m"
+      ],
+      "source_release_ids": [
+        "volume of retail trade"
+      ],
+      "release_calendar_uri": "https://ec.europa.eu/eurostat/news/release-calendar",
+      "archive_uri": "https://ec.europa.eu/eurostat/search?text=retail%20trade",
+      "source_timezone": "Europe/Brussels",
+      "availability_time_precision": "date-only",
+      "dst_convention": "Source-authored exact timestamps are retained where the modern landing exposes them; legacy Atom timestamps remain metadata rather than an inferred historical release clock.",
+      "historical_depth": "The official CAT_PREREL Atom search exposes 417 unique entries at 18 September 2026. A deterministic exact-title predicate selects 298 Volume of retail trade releases from 12 April 2000 through 4 September 2026. All 298 landings and 267 discovered English documents (32 HTML and 235 PDF) are retained; 31 self-contained modern landings expose no separate document. The first publication covers January 2000; the monthly reference lineage resumes with October 2001, runs through November 2003, and after an explicit December 2003 gap remains continuous from January 2004 through July 2026. The current revised sts_trtu_m cross-check contains 1,901 non-null EA21, Germany and France observations from January 2000 through July 2026 for the qualified monthly and annual percentage-change measures.",
+      "known_breaks": [
+        "The searchable publication lineage contains one April 2000 release for January 2000 before resuming in January 2002 with the October 2001 reference month; the intervening February 2000 through September 2001 gap and the later December 2003 gap must remain explicit.",
+        "The headline rate is year over year through the June 2007 reference month and month over month from July 2007 onward; the archive retains that source-era measure transition rather than relabelling the early headlines.",
+        "The 5 May 2023 landing exposes preview and download links for the same content-addressed English PDF; only query variants with the same path and identical non-download parameters collapse to one document identity.",
+        "The malformed product code 4-040582004-ap is bound by one exact override across Atom, landing and suffixed document identities rather than by a general five-digit-year repair.",
+        "Thirty-two landing pages are source-dated one day before their product codes. Product 4-04052007-ap is source-dated three days later, while 4-19032009-bp is source-dated six days earlier; both exceptional dates are corroborated by Atom and landing metadata and remain explicit.",
+        "Headline geography wording changes from euro-zone through euro area and parallel EU formulations while the selected Volume of retail trade prefix remains stable.",
+        "Euro-area composition and retail-classification changes must remain source-dated rather than projected backward from the current EA21/G47 dissemination cube."
+      ],
+      "revision_behavior": "Each source-dated headline retains its source-era measure and every parseable publication-table value remains distinct evidence. The current sts_trtu_m JSON-stat response is revised-series comparison evidence only and is never substituted for a historical published value.",
+      "rate_limit": "The search and product surfaces expose an observed five-request rolling window; refreshes use sequential requests, at least 13 seconds between network requests, explicit 429 retry-after handling, bounded retries, and an identifying contact user agent.",
+      "authentication": "none",
+      "credential_env_name": null,
+      "credential_header_name": null,
+      "credential_parameter_name": null,
+      "terms_uri": "https://ec.europa.eu/eurostat/help/copyright-notice",
+      "fallback_source_keys": [],
+      "parser_id": "official.eurostat-retail-trade.v1",
+      "parser_version": "1",
+      "replay_strategy": "Retain exact Atom-search, JSON-stat, release-landing and discovered English-document bytes. Bind request and redirect identities, byte lengths, SHA-256 digests, source dates and timestamps, reference months, publication lags, historical euro-area composition, adjustment and measure identity, published values, revisions, and revised-current comparisons before accepting replay.",
+      "adapter_owner": "market-context/ea",
+      "verification_status": "empirically-verified",
+      "reviewed_on": "2026-09-18",
+      "verification_evidence_uris": [
+        "https://ec.europa.eu/eurostat/search?text=retail%20trade",
+        "https://ec.europa.eu/eurostat/api/dissemination/statistics/1.0/data/sts_trtu_m",
+        "https://ec.europa.eu/eurostat/en/web/products-euro-indicators/-/4-12042000-ap",
+        "https://ec.europa.eu/eurostat/en/web/products-euro-indicators/w/4-04092026-ap",
+        "https://ec.europa.eu/eurostat/cache/metadata/en/sts_trtu_m_esms.htm"
+      ],
+      "redistribution_notes": "The package retains a compact hash-bound manifest; exact Eurostat search, dataset and release bytes remain an external operator-owned corpus subject to Eurostat attribution and copyright terms.",
+      "limitations": [
+        "Published-value coverage is limited to supported source-authored euro-area, German and French percentage-change table rows; releases without those rows retain their headline evidence without manufactured values.",
+        "No market-consensus history is supplied, so numeric surprise is not manufactured.",
+        "Eurostat member-state rows qualify harmonised Germany and France values, not independent national-producer release vintages."
+      ]
+    },
+    {
+      "schema_version": "histdatacom.official-source-entry.v1",
       "source_key": "ea.eurostat.unemployment",
       "economy_code": "EA",
       "economy_name": "Euro Area",

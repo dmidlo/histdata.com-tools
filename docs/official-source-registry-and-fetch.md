@@ -14,7 +14,7 @@ capability until its first-party fixture qualification passes.
 ## Reviewed scope and authority rule
 
 The packaged registry is
-`histdatacom/market_context/assets/official_sources_v1.json`. Its 75 entries
+`histdatacom/market_context/assets/official_sources_v1.json`. Its 76 entries
 cover every cell in the 21-economy by 12-event-family matrix. Exactly one entry
 with role `primary-producer` must exist in every cell. Registry construction
 fails on a missing or ambiguous cell.
@@ -149,6 +149,22 @@ separately retained `sts_copr_m` JSON-stat table contains 1,914 current revised
 monthly observations across EA21, Germany, and France from January 2000
 through July 2026; it is not a replacement for historical release values,
 quarterly evidence, or independent national-producer publications.
+
+The supplemental Eurostat monthly-retail-trade entry is
+`empirically-verified` for the harmonised aggregate publication lineage. Five
+official Atom-search pages enumerate 417 unique results and select 298
+source-dated releases from April 2000 through September 2026 while preserving
+all 119 exclusions. All 298 landings and 267 discovered English documents (32
+HTML and 235 PDF) are retained; 31 self-contained modern landings expose no
+separate document. The searchable reference lineage covers January 2000,
+October 2001 through November 2003, and January 2004 through July 2026; both
+explicit gaps remain unfilled. Source-era tables retain 9,393 supported
+euro-area, German, and French month-over-month and year-over-year values,
+historical membership composition, and repeated-month revision comparisons.
+The separately retained `sts_trtu_m` JSON-stat table contains 1,901 current
+revised observations across EA21, Germany, and France from January 2000
+through July 2026; it is comparison evidence, not a replacement for historical
+release values or independent national-producer publications.
 
 The Federal Reserve G.17 industrial-production entry is the first route raised
 to `empirically-verified`: its official release index and all 319 enumerated
