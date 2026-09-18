@@ -2,6 +2,15 @@
 
 ### Added
 
+- **market context**: qualify the uninterrupted April 2012 through July 2026
+  Eurostat monthly international-trade-in-goods publication lineage, preserve
+  source-era EA17 through EA21 composition, monthly versus year-to-date
+  headline scope, eight source-authored flow-table measures, repeated-month
+  revision comparisons, and every broad-search exclusion; retain the bounded
+  Atom, landing, and discovered English-document corpus; and bind an
+  independent six-measure `ext_st_easitc` revised-series cross-check without
+  deriving balances or substituting current EA21 values for historical
+  publication vintages (#539).
 - **market context**: qualify 298 source-dated Eurostat retail-trade
   publications from April 2000 through September 2026, preserve the explicit
   searchable-release gaps, source-era headline measure and euro-area

@@ -195,7 +195,7 @@ def test_packaged_registry_is_a_complete_reviewed_21_economy_matrix(
     assert packaged_official_source_registry_path().is_file()
     assert registry.schema_version == OFFICIAL_SOURCE_REGISTRY_SCHEMA_VERSION
     assert registry.scoped_economies == SCOPED_ECONOMIES
-    assert len(registry.sources) == 76
+    assert len(registry.sources) == 77
     matrix = official_source_matrix(registry)
     assert set(matrix) == set(SCOPED_ECONOMIES)
     assert sum(len(row) for row in matrix.values()) == 21 * len(
@@ -317,6 +317,25 @@ def test_packaged_registry_is_a_complete_reviewed_21_economy_matrix(
     assert retail_trade.parser_id == "official.eurostat-retail-trade.v1"
     assert (
         retail_trade.verification_status
+        is OfficialSourceVerificationStatus.EMPIRICALLY_VERIFIED
+    )
+    goods_trade = registry.source("ea.eurostat.international-trade-goods")
+    assert goods_trade.roles == (
+        OfficialSourceRole.OFFICIAL_ARCHIVE,
+        OfficialSourceRole.RELEASE_CALENDAR,
+    )
+    assert goods_trade.formats == (
+        OfficialSourceFormat.ATOM,
+        OfficialSourceFormat.JSON_STAT,
+        OfficialSourceFormat.HTML,
+        OfficialSourceFormat.PDF,
+    )
+    assert goods_trade.source_table_ids == ("ext_st_easitc",)
+    assert goods_trade.parser_id == (
+        "official.eurostat-international-trade-goods.v1"
+    )
+    assert (
+        goods_trade.verification_status
         is OfficialSourceVerificationStatus.EMPIRICALLY_VERIFIED
     )
 

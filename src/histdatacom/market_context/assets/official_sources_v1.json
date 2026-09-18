@@ -1825,6 +1825,97 @@
     },
     {
       "schema_version": "histdatacom.official-source-entry.v1",
+      "source_key": "ea.eurostat.international-trade-goods",
+      "economy_code": "EA",
+      "economy_name": "Euro Area",
+      "institution": "Eurostat",
+      "jurisdiction": "European Union / euro area",
+      "legal_producer": true,
+      "roles": [
+        "official-archive",
+        "release-calendar"
+      ],
+      "event_families": [
+        "trade-external"
+      ],
+      "indicator_ids": [
+        "trade-and-external-accounts"
+      ],
+      "formats": [
+        "atom",
+        "json-stat",
+        "html",
+        "pdf"
+      ],
+      "capabilities": [
+        "current-values",
+        "historical-observations",
+        "historical-vintages",
+        "publication-metadata",
+        "schedule-metadata",
+        "revision-metadata",
+        "series-metadata",
+        "archive-enumeration"
+      ],
+      "endpoint_uri_template": "https://ec.europa.eu/eurostat/search",
+      "allowed_hosts": [
+        "ec.europa.eu"
+      ],
+      "expected_media_types": [
+        "application/atom+xml",
+        "application/json",
+        "text/html",
+        "application/pdf"
+      ],
+      "source_series_ids": [],
+      "source_table_ids": [
+        "ext_st_easitc"
+      ],
+      "source_release_ids": [
+        "Euro area international trade in goods"
+      ],
+      "release_calendar_uri": "https://ec.europa.eu/eurostat/news/release-calendar",
+      "archive_uri": "https://ec.europa.eu/eurostat/search?text=international%20trade%20in%20goods",
+      "source_timezone": "Europe/Brussels",
+      "availability_time_precision": "date-only",
+      "dst_convention": "Source-authored exact timestamps are retained where the modern landing exposes them; legacy Atom timestamps remain metadata rather than an inferred historical release clock.",
+      "historical_depth": "The frozen CAT_PREREL search exposes 414 unique products across five pages at 18 September 2026. The exact euro-area monthly headline selects 172 uninterrupted releases from 15 June 2012 through 15 September 2026, covering April 2012 through July 2026. Exact landings, English documents where exposed, and the bounded ext_st_easitc current-data response are retained externally and hash-bound by the packaged manifest.",
+      "known_breaks": [
+        "The broad search also returns balance-of-payments, labour-market, services-trade, partner, product, and EU-only releases; all 242 non-lineage products remain explicit exclusions.",
+        "The publication calls its source ext_st_ea_sitc, while the current Statistics API dataflow identity is ext_st_easitc; the archive records the exact current endpoint rather than propagating the display alias.",
+        "December reference releases use a year-to-date headline balance while their flow tables retain monthly December and comparison-month values; period scope remains explicit.",
+        "Euro-area membership changes from EA17 through EA21 and must remain source-dated rather than projected backward from the current EA21 cube."
+      ],
+      "revision_behavior": "Each release retains its source-authored monthly non-seasonally-adjusted and seasonally-adjusted exports, imports, balance and intra-area trade. Repeated historical values and the current EA21 ext_st_easitc response are comparison evidence only and never replace vintage values.",
+      "rate_limit": "The search and product surfaces expose an observed five-request rolling window; refreshes use sequential requests, at least 13 seconds between network requests, explicit 429 retry-after handling, bounded retries, and an identifying contact user agent.",
+      "authentication": "none",
+      "credential_env_name": null,
+      "credential_header_name": null,
+      "credential_parameter_name": null,
+      "terms_uri": "https://ec.europa.eu/eurostat/help/copyright-notice",
+      "fallback_source_keys": [],
+      "parser_id": "official.eurostat-international-trade-goods.v1",
+      "parser_version": "1",
+      "replay_strategy": "Retain exact Atom-search, JSON-stat, release-landing and discovered English-document bytes. Bind request and redirect identities, lengths, SHA-256 digests, source dates and timestamps, reference months, lags, membership composition, adjustment, flow, lexical values, revision comparisons and current-data comparisons before accepting replay.",
+      "adapter_owner": "market-context/ea",
+      "verification_status": "empirically-verified",
+      "reviewed_on": "2026-09-18",
+      "verification_evidence_uris": [
+        "https://ec.europa.eu/eurostat/search?text=international%20trade%20in%20goods",
+        "https://ec.europa.eu/eurostat/api/dissemination/statistics/1.0/data/ext_st_easitc",
+        "https://ec.europa.eu/eurostat/en/web/products-euro-indicators/-/6-15062012-bp",
+        "https://ec.europa.eu/eurostat/en/web/products-euro-indicators/w/6-15092026-ap",
+        "https://ec.europa.eu/eurostat/web/international-trade-in-goods/information-data"
+      ],
+      "redistribution_notes": "The package retains a compact hash-bound manifest; exact Eurostat search, dataset and release bytes remain an external operator-owned corpus subject to Eurostat attribution and copyright terms.",
+      "limitations": [
+        "The selected Atom title lineage starts with the April 2012 reference month; earlier external-trade titles require a separately bounded legacy-search qualification.",
+        "Current-data comparisons apply only where the release's historical euro-area composition is EA21 and do not manufacture balance values from exports minus imports.",
+        "No market-consensus history is supplied, so numeric surprise is not manufactured."
+      ]
+    },
+    {
+      "schema_version": "histdatacom.official-source-entry.v1",
       "source_key": "ea.eurostat.unemployment",
       "economy_code": "EA",
       "economy_name": "Euro Area",

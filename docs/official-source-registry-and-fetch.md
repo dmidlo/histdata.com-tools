@@ -14,7 +14,7 @@ capability until its first-party fixture qualification passes.
 ## Reviewed scope and authority rule
 
 The packaged registry is
-`histdatacom/market_context/assets/official_sources_v1.json`. Its 76 entries
+`histdatacom/market_context/assets/official_sources_v1.json`. Its 77 entries
 cover every cell in the 21-economy by 12-event-family matrix. Exactly one entry
 with role `primary-producer` must exist in every cell. Registry construction
 fails on a missing or ambiguous cell.
@@ -165,6 +165,24 @@ The separately retained `sts_trtu_m` JSON-stat table contains 1,901 current
 revised observations across EA21, Germany, and France from January 2000
 through July 2026; it is comparison evidence, not a replacement for historical
 release values or independent national-producer publications.
+
+The supplemental Eurostat monthly-goods-trade entry is
+`empirically-verified` for the euro-area headline lineage. Five official
+`CAT_PREREL` Atom-search pages enumerate 414 unique products and select 172
+uninterrupted releases from June 2012 through September 2026 while preserving
+all 242 exclusions. The releases cover reference months April 2012 through
+July 2026 and retain the source-authored billion-euro,
+non-seasonally-adjusted and seasonally-adjusted exports, imports, balance, and
+intra-area trade values. All 172 landings and the 141 unique English PDFs they
+expose are retained as exact external corpus artifacts; the other 31 modern
+landings are self-contained.
+December headlines remain explicitly year-to-date rather than being equated
+with their monthly table balance. The retained `ext_st_easitc` JSON-stat table
+contains 1,122 current revised million-euro observations for six non-derived
+measures from January 2011 through July 2026. Current EA21 values are
+comparison evidence
+only; they do not replace historical EA17 through EA20 vintages or manufacture
+balances from exports and imports.
 
 The Federal Reserve G.17 industrial-production entry is the first route raised
 to `empirically-verified`: its official release index and all 319 enumerated

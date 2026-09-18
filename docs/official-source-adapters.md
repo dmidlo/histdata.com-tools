@@ -7,7 +7,7 @@ credential, MIME, byte, request, page, runtime, source-clock, and conditional
 request policy remains in the
 [official-source fetch layer](official-source-registry-and-fetch.md).
 
-The built-ins implement every parser identity in the 73-source registry and
+The built-ins implement every parser identity in the 77-source registry and
 also expose forward-compatible feed, archive, PDF, and data-catalog parsers.
 `resolve_official_source_parser()` requires the registry's exact parser ID and
 version and verifies every declared format. It does not substitute another
@@ -101,8 +101,8 @@ an explicit failure.
 registry format matrix and declared archive routes. The current registry needs
 SDMX, JSON-stat, generic structured, spreadsheet, HTML release, release-feed,
 PDF, and static-archive support. The Eurostat GDP, monthly-unemployment,
-monthly-industrial-production, construction-output, and monthly-retail-trade
-sources make Atom a reviewed registry input. The qualified release-feed pack
+monthly-industrial-production, construction-output, monthly-retail-trade, and
+monthly-goods-trade sources make Atom a reviewed registry input. The qualified release-feed pack
 covers RSS and ICS; the data-catalog parser remains installed but does not
 become a qualification requirement until a reviewed registry entry declares
 that format.
@@ -115,8 +115,8 @@ that format.
 
 The unit qualification corpus uses reduced responses with the real structural
 shapes and official fixture URIs for BLS JSON, ECB SDMX, Eurostat GDP,
-monthly-unemployment, monthly-industrial-production, construction-output, and
-monthly-retail-trade Atom/JSON-stat inputs, Statistics Norway JSON-stat, RBNZ
+monthly-unemployment, monthly-industrial-production, construction-output,
+monthly-retail-trade, and monthly-goods-trade Atom/JSON-stat inputs, Statistics Norway JSON-stat, RBNZ
 spreadsheets, Federal Reserve HTML/PDF, and RBA archive indexes. Separate
 fixtures cover SDMX
 dataflow/codelist discovery, SDMX-JSON, RSS, ICS, ZIP enumeration, catalog
