@@ -14,7 +14,7 @@ capability until its first-party fixture qualification passes.
 ## Reviewed scope and authority rule
 
 The packaged registry is
-`histdatacom/market_context/assets/official_sources_v1.json`. Its 78 entries
+`histdatacom/market_context/assets/official_sources_v1.json`. Its 79 entries
 cover every cell in the 21-economy by 12-event-family matrix. Exactly one entry
 with role `primary-producer` must exist in every cell. Registry construction
 fails on a missing or ambiguous cell.
@@ -88,6 +88,18 @@ the three key interest rates. Its versioned FOEDB database, 81 data chunks,
 keeps 227 legacy records date-only, retains 72 exact publication minutes, and
 parses both the historical main-refinancing-first and current deposit-first
 rate order. See the [euro-area, Germany, and France backfill](euro-area-germany-france-backfill.md).
+
+The dedicated ECB monthly balance-of-payments archive entry is
+`empirically-verified` for the euro-area current account. Its frozen FOEDB
+version and 81 chunks cross-check all 143 current BPM6 releases, while the
+separate legacy inventory contributes 177 BPM5 releases. The replayable
+receipt binds all 320 release pages, 521 release-local table/annex artifacts,
+57 explicit quarterly/annual exclusions, source-era EA11 through EA21
+composition, 703 source-authored values, and conservative date provenance.
+The two missing 2000 reference months and 40 undated early occurrences are not
+manufactured, and current ECB Data Portal history is not treated as a
+historical publication vintage. See the [euro-area, Germany, and France
+backfill](euro-area-germany-france-backfill.md).
 
 The supplemental Eurostat GDP entry is `empirically-verified` for the
 quarterly euro-area publication lineage. Ten official Atom-search pages, 279

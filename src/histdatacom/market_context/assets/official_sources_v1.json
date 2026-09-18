@@ -2377,6 +2377,101 @@
     },
     {
       "schema_version": "histdatacom.official-source-entry.v1",
+      "source_key": "ea.ecb.balance-of-payments",
+      "economy_code": "EA",
+      "economy_name": "Euro Area",
+      "institution": "European Central Bank",
+      "jurisdiction": "European Union / euro area",
+      "legal_producer": true,
+      "roles": [
+        "official-archive",
+        "release-calendar"
+      ],
+      "event_families": [
+        "trade-external"
+      ],
+      "indicator_ids": [
+        "trade-and-external-accounts"
+      ],
+      "formats": [
+        "json",
+        "html",
+        "pdf"
+      ],
+      "capabilities": [
+        "historical-observations",
+        "historical-vintages",
+        "publication-metadata",
+        "schedule-metadata",
+        "revision-metadata",
+        "series-metadata",
+        "archive-enumeration"
+      ],
+      "endpoint_uri_template": "https://www.ecb.europa.eu/foedb/dbs/foedb/publications.en/versions.json",
+      "allowed_hosts": [
+        "www.ecb.europa.eu"
+      ],
+      "expected_media_types": [
+        "application/json",
+        "text/html",
+        "application/pdf"
+      ],
+      "source_series_ids": [],
+      "source_table_ids": [
+        "FOEDB publications.en type 53"
+      ],
+      "source_release_ids": [
+        "Monthly developments in <reference month>",
+        "Euro area balance of payments (<reference month>)",
+        "Euro area monthly balance of payments: <reference month>"
+      ],
+      "release_calendar_uri": "https://www.ecb.europa.eu/press/calendars/statscal/ext/html/stprbp.en.html",
+      "archive_uri": "https://www.ecb.europa.eu/press/stats/bop/html/index_bop.en.html",
+      "source_timezone": "Europe/Berlin",
+      "availability_time_precision": "inferred-bounded",
+      "dst_convention": "IANA Europe/Berlin normalizes exact FOEDB publication epochs; legacy date-only evidence never receives an inferred intraday clock.",
+      "historical_depth": "The retained legacy index contributes 177 monthly releases from October 1999 through August 2014 and the current index contributes 143 FOEDB type-53 releases from September 2014 through July 2026. Together they expose 320 reference months; January and March 2000 are absent from the official legacy index.",
+      "known_breaks": [
+        "The archive changes from the dedicated legacy BPM5 table to the current BPM6 publication inventory between the August and September 2014 reference periods.",
+        "The legacy inventory omits January and March 2000 and those occurrences are not manufactured.",
+        "Older migrated pages share an article date of 4 May 2015; the qualified archive rejects that migration date as historical publication evidence.",
+        "The March and April 2003 pages repeat an already-used 27 May schedule date; those two later projections are rejected instead of assigning one day to three monthly releases.",
+        "Release titles move from monthly-developments wording through parenthetical euro-area balance-of-payments wording to the modern colon-delimited monthly title.",
+        "Euro-area composition changes from EA11 through EA21 across the retained reference-period lineage.",
+        "Recent releases expose separate PDF table annexes while older releases use release-local HTML or PDF table artifacts."
+      ],
+      "revision_behavior": "Each release retains its source-authored reference-month current-account balance and supported components independently from later releases and current ECB Data Portal history. Explicit revision disclosures and release-local table artifacts remain bound to the occurrence that published them.",
+      "rate_limit": "No stable archive-specific limit is published; refresh uses bounded FOEDB discovery, at most 512 releases, bounded support discovery, retry backoff, and an identifying contact user agent.",
+      "authentication": "none",
+      "credential_env_name": null,
+      "credential_header_name": null,
+      "credential_parameter_name": null,
+      "terms_uri": "https://www.ecb.europa.eu/services/disclaimer/html/index.en.html",
+      "fallback_source_keys": [
+        "ea.ecb.data-portal"
+      ],
+      "parser_id": "official.ecb-balance-of-payments.v1",
+      "parser_version": "1",
+      "replay_strategy": "Retain exact versions.json, metadata.json, every versioned FOEDB chunk, the current and legacy release inventories, all selected English release pages, and every release-local English table or annex artifact; bind URI, request, byte length, SHA-256, reference month, date provenance, methodology era, composition, value locator, and explicit exclusion before accepting replay.",
+      "adapter_owner": "market-context/ea",
+      "verification_status": "empirically-verified",
+      "reviewed_on": "2026-09-18",
+      "verification_evidence_uris": [
+        "https://www.ecb.europa.eu/press/stats/bop/html/index_bop.en.html",
+        "https://www.ecb.europa.eu/press/stats/bop/html/previous_releases.en.html",
+        "https://www.ecb.europa.eu/foedb/dbs/foedb/publications.en/versions.json",
+        "https://www.ecb.europa.eu/press/calendars/statscal/ext/html/stprbp.en.html"
+      ],
+      "redistribution_notes": "The package retains a compact hash-bound manifest; exact ECB inventory, FOEDB, release, and annex bytes remain an external operator-owned corpus subject to ECB terms and attribution.",
+      "limitations": [
+        "No market-consensus history is supplied, so numeric surprise is not manufactured.",
+        "Some early legacy pages do not expose a reliable source-authored publication day and remain explicitly undated.",
+        "Current ECB Data Portal history is not treated as interchangeable first-published vintage evidence.",
+        "Quarterly balance-of-payments and international-investment-position releases are retained as explicit inventory exclusions for this monthly slice."
+      ]
+    },
+    {
+      "schema_version": "histdatacom.official-source-entry.v1",
       "source_key": "ea.ecb.monetary-policy",
       "economy_code": "EA",
       "economy_name": "Euro Area",

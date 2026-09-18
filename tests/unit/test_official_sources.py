@@ -195,7 +195,7 @@ def test_packaged_registry_is_a_complete_reviewed_21_economy_matrix(
     assert packaged_official_source_registry_path().is_file()
     assert registry.schema_version == OFFICIAL_SOURCE_REGISTRY_SCHEMA_VERSION
     assert registry.scoped_economies == SCOPED_ECONOMIES
-    assert len(registry.sources) == 78
+    assert len(registry.sources) == 79
     matrix = official_source_matrix(registry)
     assert set(matrix) == set(SCOPED_ECONOMIES)
     assert sum(len(row) for row in matrix.values()) == 21 * len(
@@ -353,6 +353,26 @@ def test_packaged_registry_is_a_complete_reviewed_21_economy_matrix(
     assert labour_cost.parser_id == "official.eurostat-labour-cost.v1"
     assert (
         labour_cost.verification_status
+        is OfficialSourceVerificationStatus.EMPIRICALLY_VERIFIED
+    )
+    balance_of_payments = registry.source("ea.ecb.balance-of-payments")
+    assert balance_of_payments.roles == (
+        OfficialSourceRole.OFFICIAL_ARCHIVE,
+        OfficialSourceRole.RELEASE_CALENDAR,
+    )
+    assert balance_of_payments.formats == (
+        OfficialSourceFormat.JSON,
+        OfficialSourceFormat.HTML,
+        OfficialSourceFormat.PDF,
+    )
+    assert balance_of_payments.source_table_ids == (
+        "FOEDB publications.en type 53",
+    )
+    assert balance_of_payments.parser_id == (
+        "official.ecb-balance-of-payments.v1"
+    )
+    assert (
+        balance_of_payments.verification_status
         is OfficialSourceVerificationStatus.EMPIRICALLY_VERIFIED
     )
 

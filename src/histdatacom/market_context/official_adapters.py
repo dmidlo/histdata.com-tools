@@ -827,6 +827,26 @@ class OfficialEcbMonetaryPolicyParserV1(OfficialHtmlParserV1):
         return super().parse(snapshot, max_events=max_events)
 
 
+class OfficialEcbBalanceOfPaymentsParserV1(OfficialHtmlParserV1):
+    """Bind ECB BOP inventory, FOEDB, release, and annex artifacts."""
+
+    parser_id = "official.ecb-balance-of-payments.v1"
+    supported_formats: tuple[OfficialSourceFormat, ...] = (
+        OfficialSourceFormat.JSON,
+        OfficialSourceFormat.HTML,
+        OfficialSourceFormat.PDF,
+    )
+
+    def parse(
+        self, snapshot: OfficialRawSnapshotV1, *, max_events: int
+    ) -> Sequence[Mapping[str, JSONValue]]:
+        if snapshot.request.source_format is OfficialSourceFormat.JSON:
+            return _parse_json(self, snapshot, max_events=max_events)
+        if snapshot.request.source_format is OfficialSourceFormat.PDF:
+            return _parse_pdf(self, snapshot, max_events=max_events)
+        return super().parse(snapshot, max_events=max_events)
+
+
 class OfficialEurostatHicpParserV1(OfficialHtmlParserV1):
     """Bind HICP JSON-stat tables, release HTML, and source PDFs."""
 
@@ -1133,6 +1153,7 @@ _BUILT_IN_PARSER_TYPES: tuple[type[_BaseOfficialParser], ...] = (
     OfficialCensusFt900ParserV1,
     OfficialCensusMtisParserV1,
     OfficialDolEtaInitialClaimsParserV1,
+    OfficialEcbBalanceOfPaymentsParserV1,
     OfficialEcbMonetaryPolicyParserV1,
     OfficialEurostatConstructionOutputParserV1,
     OfficialEurostatGdpParserV1,
@@ -3253,6 +3274,7 @@ __all__ = [
     "OfficialCensusNrsParserV1",
     "OfficialCsvParserV1",
     "OfficialDataCatalogParserV1",
+    "OfficialEcbBalanceOfPaymentsParserV1",
     "OfficialEcbMonetaryPolicyParserV1",
     "OfficialEurostatConstructionOutputParserV1",
     "OfficialEurostatGdpParserV1",

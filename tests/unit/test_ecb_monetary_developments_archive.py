@@ -56,7 +56,7 @@ def test_packaged_ecb_money_archive_quantifies_the_complete_foedb_series() -> (
     assert manifest.release_date_correction_count == 2
     assert manifest.manifest_id == (
         "ecb-monetary-developments-archive-manifest:sha256:"
-        "d5bd188a5325d79ed79c32f4cf3097082651beadbeed264e362e25c2ce356dbd"
+        "893b49f083222d90fed25b18c5963b0a19b804f5b92003b48ea662f468474d7d"
     )
     assert packaged_ecb_monetary_developments_manifest_path().is_file()
 

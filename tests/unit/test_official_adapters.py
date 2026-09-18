@@ -23,6 +23,7 @@ from histdatacom.market_context.official_adapters import (
     OfficialCensusNrsParserV1,
     OfficialDataCatalogParserV1,
     OfficialDolEtaInitialClaimsParserV1,
+    OfficialEcbBalanceOfPaymentsParserV1,
     OfficialEurostatGdpParserV1,
     OfficialEurostatHicpParserV1,
     OfficialEurostatInternationalTradeGoodsParserV1,
@@ -160,7 +161,11 @@ def test_built_in_parsers_cover_every_registered_source_and_format(
     registry: OfficialSourceRegistryV1,
 ) -> None:
     parsers = built_in_official_source_parsers()
-    assert len(parsers) == 32
+    assert len(parsers) == 33
+    assert isinstance(
+        parsers["official.ecb-balance-of-payments.v1"],
+        OfficialEcbBalanceOfPaymentsParserV1,
+    )
     assert isinstance(
         parsers["official.dol-eta-initial-claims.v1"],
         OfficialDolEtaInitialClaimsParserV1,

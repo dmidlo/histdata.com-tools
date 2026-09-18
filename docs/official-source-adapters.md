@@ -7,7 +7,7 @@ credential, MIME, byte, request, page, runtime, source-clock, and conditional
 request policy remains in the
 [official-source fetch layer](official-source-registry-and-fetch.md).
 
-The built-ins implement every parser identity in the 77-source registry and
+The built-ins implement every parser identity in the 79-source registry and
 also expose forward-compatible feed, archive, PDF, and data-catalog parsers.
 `resolve_official_source_parser()` requires the registry's exact parser ID and
 version and verifies every declared format. It does not substitute another
@@ -118,7 +118,8 @@ The unit qualification corpus uses reduced responses with the real structural
 shapes and official fixture URIs for BLS JSON, ECB SDMX, Eurostat GDP,
 monthly-unemployment, monthly-industrial-production, construction-output,
 monthly-retail-trade, monthly-goods-trade, and quarterly-labour-cost
-Atom/JSON-stat inputs, Statistics Norway JSON-stat, RBNZ spreadsheets, Federal
+Atom/JSON-stat inputs, the ECB balance-of-payments FOEDB JSON plus release
+HTML/PDF corpus, Statistics Norway JSON-stat, RBNZ spreadsheets, Federal
 Reserve HTML/PDF, and RBA archive indexes. Separate
 fixtures cover SDMX
 dataflow/codelist discovery, SDMX-JSON, RSS, ICS, ZIP enumeration, catalog

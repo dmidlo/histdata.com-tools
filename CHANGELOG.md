@@ -2,6 +2,14 @@
 
 ### Added
 
+- **market context**: qualify the complete October 1999 through July 2026 ECB
+  monthly balance-of-payments publication lineage across the legacy BPM5 and
+  current BPM6 inventories; preserve both official inventory gaps, 57
+  quarterly/annual exclusions, source-era euro-area composition, conservative
+  publication-time provenance, 703 release-authored current-account and
+  component values, revision disclosures, and 925 hash-bound FOEDB,
+  inventory, release, table, and annex artifacts without substituting current
+  ECB Data Portal history for first-published vintages (#539).
 - **market context**: qualify the uninterrupted 2001-Q3 through 2026-Q2
   Eurostat quarterly labour-cost publication lineage, preserve source-era
   euro-area composition, signed headline movements, the 2012 business- to

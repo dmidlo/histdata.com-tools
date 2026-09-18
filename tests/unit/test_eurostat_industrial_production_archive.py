@@ -241,11 +241,11 @@ def test_packaged_archive_quantifies_the_complete_corpus() -> None:
     assert manifest.total_content_bytes == 151_722_249
     assert manifest.manifest_id == (
         "eurostat-industrial-production-archive-manifest:sha256:"
-        "89d9b9f0f898f9aed71862447530eee16aa72067e925235c1da70b106a252523"
+        "4cf8f0eafe18c297f82fc7f79d0b3a0f9b811baf809250ece4ca84f6e74ca791"
     )
     assert path.stat().st_size == 7_767_781
     assert sha256(path.read_bytes()).hexdigest() == (
-        "0f28ed35a329432da79470c22ebf78c1f0ab789e969016be92a5768d827de3b8"
+        "efea5c7a5f5b545670c64cf35bc6180c6742ca6e7fed502ad1f6f0d026ef06ce"
     )
 
 
