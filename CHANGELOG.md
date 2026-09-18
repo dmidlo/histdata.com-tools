@@ -2,6 +2,14 @@
 
 ### Added
 
+- **market context**: qualify 279 source-dated Eurostat quarterly-GDP
+  publications from January 2002 through September 2026, preserve distinct
+  preliminary-flash, flash, first-, second-, third-, and regular-estimate
+  stages, exact modern publication clocks, 248 English release documents, and
+  source-era EA/Germany/France q/q and y/y values with revision comparisons;
+  retain the complete 932-result Atom selection and explicit false positive;
+  and bind a 2000-Q1 onward revised-series cross-check without treating it as
+  historical-vintage evidence (#539).
 - **market context**: qualify all 319 published PPI headline releases from
   January 2000 through August 2026 with 320 distinct current/predecessor
   artifacts, exact 08:30 publication times, legacy text and semantic/fallback

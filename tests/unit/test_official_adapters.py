@@ -23,6 +23,7 @@ from histdatacom.market_context.official_adapters import (
     OfficialCensusNrsParserV1,
     OfficialDataCatalogParserV1,
     OfficialDolEtaInitialClaimsParserV1,
+    OfficialEurostatGdpParserV1,
     OfficialEurostatHicpParserV1,
     OfficialFederalReserveFomcParserV1,
     OfficialFederalReserveH6ParserV1,
@@ -156,7 +157,7 @@ def test_built_in_parsers_cover_every_registered_source_and_format(
     registry: OfficialSourceRegistryV1,
 ) -> None:
     parsers = built_in_official_source_parsers()
-    assert len(parsers) == 25
+    assert len(parsers) == 26
     assert isinstance(
         parsers["official.dol-eta-initial-claims.v1"],
         OfficialDolEtaInitialClaimsParserV1,
@@ -168,6 +169,10 @@ def test_built_in_parsers_cover_every_registered_source_and_format(
     assert isinstance(
         parsers["official.federal-reserve-h6.v1"],
         OfficialFederalReserveH6ParserV1,
+    )
+    assert isinstance(
+        parsers["official.eurostat-gdp.v1"],
+        OfficialEurostatGdpParserV1,
     )
     assert isinstance(
         parsers["official.eurostat-hicp.v1"],
@@ -214,6 +219,7 @@ def test_built_in_parsers_cover_every_registered_source_and_format(
         OfficialAdapterPack.HTML_RELEASE,
         OfficialAdapterPack.JSON_STAT,
         OfficialAdapterPack.PDF,
+        OfficialAdapterPack.RELEASE_FEED,
         OfficialAdapterPack.SDMX,
         OfficialAdapterPack.SPREADSHEET,
         OfficialAdapterPack.STATIC_ARCHIVE,
@@ -271,6 +277,64 @@ def test_eurostat_hicp_adapter_dispatches_each_registered_format(
     assert records
     assert {item["parser_id"] for item in records} == {
         "official.eurostat-hicp.v1"
+    }
+
+
+@pytest.mark.parametrize(
+    ("source_format", "content_type", "content"),
+    (
+        (
+            OfficialSourceFormat.ATOM,
+            "application/atom+xml",
+            (
+                b'<feed xmlns="http://www.w3.org/2005/Atom"><entry>'
+                b"<title>GDP up by 0.3% in the euro area</title>"
+                b"<id>2-07092026-ap</id></entry></feed>"
+            ),
+        ),
+        (
+            OfficialSourceFormat.JSON_STAT,
+            "application/json",
+            (
+                b'{"class":"dataset","id":["time"],"size":[1],'
+                b'"dimension":{"time":{"category":{"index":['
+                b'"2026-Q2"]}}},"value":[0.3]}'
+            ),
+        ),
+        (
+            OfficialSourceFormat.HTML,
+            "text/html",
+            b"<html><body><h1>GDP up by 0.3% in the euro area</h1></body></html>",
+        ),
+        (
+            OfficialSourceFormat.PDF,
+            "application/pdf",
+            _text_pdf_bytes(["GDP up by 0.3% in the euro area"]),
+        ),
+    ),
+)
+def test_eurostat_gdp_adapter_dispatches_each_registered_format(
+    registry: OfficialSourceRegistryV1,
+    source_format: OfficialSourceFormat,
+    content_type: str,
+    content: bytes,
+) -> None:
+    source = registry.source("ea.eurostat.gdp")
+    snapshot = _snapshot(
+        registry,
+        source.source_key,
+        content,
+        source_format=source_format,
+        content_type=content_type,
+    )
+
+    records = parse_with_built_in_official_adapter(
+        snapshot, source, max_events=20
+    )
+
+    assert records
+    assert {item["parser_id"] for item in records} == {
+        "official.eurostat-gdp.v1"
     }
 
 
@@ -1016,6 +1080,23 @@ def test_first_party_fixture_qualifications_complete_required_pack_audit(
                 content_type="application/pdf",
             ),
             "https://www.federalreserve.gov/monetarypolicy/files/monetary20260916a1.pdf",
+            None,
+        ),
+        (
+            OfficialAdapterPack.RELEASE_FEED,
+            registry.source("ea.eurostat.gdp"),
+            _snapshot(
+                registry,
+                "ea.eurostat.gdp",
+                (
+                    b'<feed xmlns="http://www.w3.org/2005/Atom"><entry>'
+                    b"<title>GDP up by 0.3% in the euro area</title>"
+                    b"<id>2-07092026-ap</id></entry></feed>"
+                ),
+                source_format=OfficialSourceFormat.ATOM,
+                content_type="application/atom+xml",
+            ),
+            "https://ec.europa.eu/eurostat/search?text=GDP",
             None,
         ),
         (

@@ -14,7 +14,7 @@ capability until its first-party fixture qualification passes.
 ## Reviewed scope and authority rule
 
 The packaged registry is
-`histdatacom/market_context/assets/official_sources_v1.json`. Its 71 entries
+`histdatacom/market_context/assets/official_sources_v1.json`. Its 72 entries
 cover every cell in the 21-economy by 12-event-family matrix. Exactly one entry
 with role `primary-producer` must exist in every cell. Registry construction
 fails on a missing or ambiguous cell.
@@ -83,11 +83,22 @@ close on an institution name alone.
 
 The dedicated ECB monetary-policy archive entry is `empirically-verified` for
 the three key interest rates. Its versioned FOEDB database, 81 data chunks,
-15 December 1999 predecessor, and all 298 decision pages from 2000 through
+15 December 1999 predecessor, and all 299 decision pages from 2000 through
 10 September 2026 are content-addressed and replayable. The qualification
-keeps 226 legacy records date-only, retains 72 exact publication minutes, and
+keeps 227 legacy records date-only, retains 72 exact publication minutes, and
 parses both the historical main-refinancing-first and current deposit-first
 rate order. See the [euro-area, Germany, and France backfill](euro-area-germany-france-backfill.md).
+
+The supplemental Eurostat GDP entry is `empirically-verified` for the
+quarterly euro-area publication lineage. Ten official Atom-search pages, 279
+source-dated landing pages, and all 248 discovered English release documents
+qualify occurrences from January 2002 through September 2026. Source-era
+tables retain supported EA, Germany, and France q/q and y/y values and their
+cross-stage revision comparisons, including the legacy third-estimate stage;
+one methodology false positive and six pre-search reference-quarter gaps
+remain explicit. The separately retained `namq_10_gdp` JSON-stat table is a
+current revised cross-check for EA20, Germany, and France, not a substitute for
+those historical values or the independent national publication archives.
 
 The Federal Reserve G.17 industrial-production entry is the first route raised
 to `empirically-verified`: its official release index and all 319 enumerated

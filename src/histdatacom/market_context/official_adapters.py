@@ -845,6 +845,27 @@ class OfficialEurostatHicpParserV1(OfficialHtmlParserV1):
         return super().parse(snapshot, max_events=max_events)
 
 
+class OfficialEurostatGdpParserV1(OfficialHtmlParserV1):
+    """Bind GDP Atom inventory, JSON-stat table, HTML, and PDFs."""
+
+    parser_id = "official.eurostat-gdp.v1"
+    supported_formats: tuple[OfficialSourceFormat, ...] = (
+        OfficialSourceFormat.ATOM,
+        OfficialSourceFormat.JSON_STAT,
+        OfficialSourceFormat.HTML,
+        OfficialSourceFormat.PDF,
+    )
+
+    def parse(
+        self, snapshot: OfficialRawSnapshotV1, *, max_events: int
+    ) -> Sequence[Mapping[str, JSONValue]]:
+        if snapshot.request.source_format is OfficialSourceFormat.ATOM:
+            return _parse_xml_feed(self, snapshot, max_events=max_events)
+        if snapshot.request.source_format is OfficialSourceFormat.JSON_STAT:
+            return _parse_json_stat(self, snapshot, max_events=max_events)
+        return super().parse(snapshot, max_events=max_events)
+
+
 class OfficialFederalReserveH6ParserV1(OfficialHtmlParserV1):
     """Bind Federal Reserve H.6 HTML, JSON, and PDF artifacts exactly."""
 
@@ -987,6 +1008,7 @@ _BUILT_IN_PARSER_TYPES: tuple[type[_BaseOfficialParser], ...] = (
     OfficialCensusMtisParserV1,
     OfficialDolEtaInitialClaimsParserV1,
     OfficialEcbMonetaryPolicyParserV1,
+    OfficialEurostatGdpParserV1,
     OfficialEurostatHicpParserV1,
     OfficialFederalReserveFomcParserV1,
     OfficialFederalReserveH6ParserV1,
@@ -3100,6 +3122,7 @@ __all__ = [
     "OfficialCsvParserV1",
     "OfficialDataCatalogParserV1",
     "OfficialEcbMonetaryPolicyParserV1",
+    "OfficialEurostatGdpParserV1",
     "OfficialEurostatHicpParserV1",
     "OfficialFederalReserveFomcParserV1",
     "OfficialFederalReserveH6ParserV1",

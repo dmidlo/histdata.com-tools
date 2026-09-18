@@ -1,6 +1,6 @@
 {
   "schema_version": "histdatacom.official-source-registry.v1",
-  "reviewed_on": "2026-09-16",
+  "reviewed_on": "2026-09-17",
   "scoped_economies": [
     "AU",
     "CA",
@@ -1628,6 +1628,106 @@
         "The qualified publication evidence is date-only unless an independent retained calendar artifact establishes a historical clock.",
         "The first-published tables provide Germany and France values only where Eurostat exposed those cells; absent country cells remain absent rather than inferred from current revised series.",
         "The current ECOICOP version 2 backcast is retained for audit but is not treated as interchangeable historical-vintage evidence."
+      ]
+    },
+    {
+      "schema_version": "histdatacom.official-source-entry.v1",
+      "source_key": "ea.eurostat.gdp",
+      "economy_code": "EA",
+      "economy_name": "Euro Area",
+      "institution": "Eurostat",
+      "jurisdiction": "European Union / euro area",
+      "legal_producer": true,
+      "roles": [
+        "official-archive",
+        "release-calendar"
+      ],
+      "event_families": [
+        "gdp-national-accounts"
+      ],
+      "indicator_ids": [
+        "gdp-and-national-accounts"
+      ],
+      "formats": [
+        "atom",
+        "json-stat",
+        "html",
+        "pdf"
+      ],
+      "capabilities": [
+        "current-values",
+        "historical-observations",
+        "historical-vintages",
+        "publication-metadata",
+        "schedule-metadata",
+        "revision-metadata",
+        "series-metadata",
+        "archive-enumeration"
+      ],
+      "endpoint_uri_template": "https://ec.europa.eu/eurostat/search",
+      "allowed_hosts": [
+        "ec.europa.eu"
+      ],
+      "expected_media_types": [
+        "application/atom+xml",
+        "application/json",
+        "text/html",
+        "application/pdf"
+      ],
+      "source_series_ids": [],
+      "source_table_ids": [
+        "namq_10_gdp"
+      ],
+      "source_release_ids": [
+        "quarterly GDP preliminary flash estimate",
+        "quarterly GDP flash estimate",
+        "quarterly GDP first estimate",
+        "quarterly GDP second estimate",
+        "quarterly GDP third estimate",
+        "quarterly GDP regular estimate"
+      ],
+      "release_calendar_uri": "https://ec.europa.eu/eurostat/news/release-calendar",
+      "archive_uri": "https://ec.europa.eu/eurostat/search?text=GDP",
+      "source_timezone": "Europe/Brussels",
+      "availability_time_precision": "date-only",
+      "dst_convention": "The qualified archive preserves source dates only; no intraday publication clock or DST offset is inferred.",
+      "historical_depth": "The retained CAT_PREREL Atom search contains 932 unique results at 15 September 2026; a deterministic title-and-scope predicate selects 279 quarterly euro-area GDP releases from 10 January 2002 through 7 September 2026. The corpus retains every landing and all 248 discovered English HTML/PDF release documents; source-era GDP tables preserve supported EA, Germany and France q/q and y/y values. The current revised namq_10_gdp cross-check covers EA20, Germany and France from 2000-Q1 through 2026-Q2.",
+      "known_breaks": [
+        "The searchable release lineage begins with a 10 January 2002 product covering 2001-Q3; 2000-Q1 through 2001-Q2 therefore remain an explicit release-artifact gap even though the current revised table exposes values.",
+        "The release program changed over time from flash plus first and second estimates, through a two-release sequence, to preliminary-flash, flash and regular estimates; the archive retains release lag and within-quarter sequence instead of merging revisions.",
+        "Product-code dates and source-authored landing-page dates differ by one day throughout the observed legacy surface; both dates and every offset are retained.",
+        "Euro-area composition changed during the archive; EA20 is used only for the separately retained current-series cross-check and is not silently projected onto historical release headlines.",
+        "One 17 October 2014 ESA 2010 level-shift methodology item passes the broad GDP title predicate and is retained as an explicit exclusion rather than as a quarterly release.",
+        "Legacy product identifiers include AP2, AP_0 and BP1 suffix variants; exact identifiers are retained rather than normalized to the more common AP or BP forms."
+      ],
+      "revision_behavior": "Each source-dated headline and table is retained as its own reference-quarter stage. Adjacent same-period q/q and y/y values are compared without collapsing unchanged or changed estimates. The current namq_10_gdp JSON-stat response is a revised-series cross-check only and is never substituted for a historical published value.",
+      "rate_limit": "The search and product surfaces exposed an observed five-request rolling window during qualification; refreshes use sequential requests, at least 13 seconds between network requests, explicit 429 retry-after handling, bounded retries, and an identifying contact user agent.",
+      "authentication": "none",
+      "credential_env_name": null,
+      "credential_header_name": null,
+      "credential_parameter_name": null,
+      "terms_uri": "https://ec.europa.eu/eurostat/help/copyright-notice",
+      "fallback_source_keys": [],
+      "parser_id": "official.eurostat-gdp.v1",
+      "parser_version": "1",
+      "replay_strategy": "Retain exact bytes for all ten contiguous CAT_PREREL Atom result pages, the bounded namq_10_gdp JSON-stat response, every selected source-dated release landing, and every discovered English HTML/PDF release document. Bind request and redirect identities, byte lengths, SHA-256 digests, selection and exclusion counts, product/page dates, exact first-party publication timestamps, reference quarters, publication lags, estimate stages, headline/table q/q and y/y values, cross-stage revision comparisons, and the explicit pre-search release gap before accepting replay.",
+      "adapter_owner": "market-context/ea",
+      "verification_status": "empirically-verified",
+      "reviewed_on": "2026-09-17",
+      "verification_evidence_uris": [
+        "https://ec.europa.eu/eurostat/search?text=GDP",
+        "https://ec.europa.eu/eurostat/api/dissemination/statistics/1.0/data/namq_10_gdp",
+        "https://ec.europa.eu/eurostat/en/web/products-euro-indicators/-/2-10012002-ap",
+        "https://ec.europa.eu/eurostat/en/web/products-euro-indicators/-/2-07092026-ap",
+        "https://ec.europa.eu/eurostat/cache/metadata/en/namq_10_gdp_esms.htm"
+      ],
+      "redistribution_notes": "The package retains a compact hash-bound manifest; exact Eurostat search, dataset and release bytes remain an external operator-owned corpus subject to Eurostat attribution and copyright terms.",
+      "limitations": [
+        "No market-consensus history is supplied, so numeric surprise is not manufactured.",
+        "Legacy release evidence is date-only; exact modern first-party publication timestamps are retained, while Atom placeholders do not establish an older intraday availability clock.",
+        "Historical Eurostat publications qualify source-supported EA, Germany and France quarter-over-quarter and year-over-year table values, but the member-state rows are not reconstructed national-producer release vintages.",
+        "All 248 discovered English release documents are retained alongside the 279 landings; localized German and French renderings are not duplicate replay inputs because the English publication already contains the qualified member-state table.",
+        "Stage classification is evidence-graded from the observed publication lag and within-quarter sequence because many legacy headlines omit an explicit stage label."
       ]
     },
     {

@@ -195,7 +195,7 @@ def test_packaged_registry_is_a_complete_reviewed_21_economy_matrix(
     assert packaged_official_source_registry_path().is_file()
     assert registry.schema_version == OFFICIAL_SOURCE_REGISTRY_SCHEMA_VERSION
     assert registry.scoped_economies == SCOPED_ECONOMIES
-    assert len(registry.sources) == 71
+    assert len(registry.sources) == 72
     matrix = official_source_matrix(registry)
     assert set(matrix) == set(SCOPED_ECONOMIES)
     assert sum(len(row) for row in matrix.values()) == 21 * len(
@@ -238,6 +238,19 @@ def test_packaged_registry_is_a_complete_reviewed_21_economy_matrix(
     )
     assert hicp.source_table_ids == ("prc_hicp_fp", "prc_hicp_fpd")
     assert hicp.parser_id == "official.eurostat-hicp.v1"
+    gdp = registry.source("ea.eurostat.gdp")
+    assert gdp.roles == (
+        OfficialSourceRole.OFFICIAL_ARCHIVE,
+        OfficialSourceRole.RELEASE_CALENDAR,
+    )
+    assert gdp.formats == (
+        OfficialSourceFormat.ATOM,
+        OfficialSourceFormat.JSON_STAT,
+        OfficialSourceFormat.HTML,
+        OfficialSourceFormat.PDF,
+    )
+    assert gdp.source_table_ids == ("namq_10_gdp",)
+    assert gdp.parser_id == "official.eurostat-gdp.v1"
 
 
 def test_registry_round_trip_and_identity_cover_source_endpoint_and_parser(

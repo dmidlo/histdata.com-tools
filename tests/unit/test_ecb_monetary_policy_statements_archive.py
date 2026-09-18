@@ -46,11 +46,11 @@ def test_packaged_ecb_statements_quantify_the_exact_foedb_series() -> None:
     assert manifest.decision_without_statement_count == 29
     assert manifest.manifest_id == (
         "ecb-statement-archive-manifest:sha256:"
-        "3dabf9f1af4c7ae74e2d4745abba001cd52f3ca52743c82e668159c0ac972a92"
+        "52a37974dccafffe048b0051a366fe39a6458308ad8066ed654cd1c947b53ad0"
     )
     assert manifest.decision_archive_manifest_id == (
         "ecb-archive-manifest:sha256:"
-        "fbaf4a82a577a08a32ce7e362d81013d316d1e9327b68cbdaabc171699712ce7"
+        "896051839bfd7f66214fb04ad39eaf4cfc6119e2370d4340e4efa2067aae86ff"
     )
     assert packaged_ecb_monetary_policy_statements_manifest_path().is_file()
 

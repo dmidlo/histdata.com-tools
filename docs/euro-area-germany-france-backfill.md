@@ -26,7 +26,7 @@ guess or a third-party calendar. Replay retains and verifies:
 
 The retained corpus contains 42,121,110 bytes and 383 distinct SHA-256
 digests. Its compact packaged receipt is
-`ecb-archive-manifest:sha256:fbaf4a82a577a08a32ce7e362d81013d316d1e9327b68cbdaabc171699712ce7`.
+`ecb-archive-manifest:sha256:896051839bfd7f66214fb04ad39eaf4cfc6119e2370d4340e4efa2067aae86ff`.
 
 Each decision preserves a native `RATE_SET` with separate components for the
 main refinancing operations, marginal lending facility, and deposit facility.
@@ -70,7 +70,7 @@ qualifies all 96 FOEDB type-20 accounts published from 19 February 2015 through
 27 August 2026. The selection retains 83 versioned FOEDB database artifacts
 and all 96 official HTML pages: 179 artifacts, 26,253,142 bytes, and 179 unique
 SHA-256 digests. Its packaged receipt is
-`ecb-account-archive-manifest:sha256:5fad33b623094208e4fa661647b1477f1522649455c2b9faa260af4dbb788697`.
+`ecb-account-archive-manifest:sha256:2b5a34a0479a7b43f85fb7e654f65a9bd4a20e810948eaf8d4afaaa54adfd716`.
 
 Replay parses the source-authored meeting dates rather than inferring them from
 publication dates. It preserves three observed title eras (35 generic titles,
@@ -106,7 +106,7 @@ that FOEDB stores under the same broad type and historical path family.
 Replay retains the 83 versioned FOEDB artifacts and all 270 official statement
 pages: 353 artifacts, 48,734,109 bytes, and 353 unique SHA-256 digests. Its
 packaged receipt is
-`ecb-statement-archive-manifest:sha256:3dabf9f1af4c7ae74e2d4745abba001cd52f3ca52743c82e668159c0ac972a92`.
+`ecb-statement-archive-manifest:sha256:52a37974dccafffe048b0051a366fe39a6458308ad8066ed654cd1c947b53ad0`.
 Every page contains exactly one of nine observed historical heading forms and
 every retained statement links to exactly one qualified decision occurrence.
 
@@ -139,7 +139,7 @@ projection rounds for 2000 through May 2004 from unrelated publications.
 Replay retains the 83 versioned FOEDB artifacts, the all-releases index, 90
 official PDFs, and the 31 available HTML counterparts: 205 artifacts,
 43,393,009 bytes, and 205 distinct SHA-256 digests. Its packaged receipt is
-`ecb-projection-archive-manifest:sha256:4017121492436032b16dd709cdeec01213bfc8ff7e5d03d4954c7dbd4e40e0a4`.
+`ecb-projection-archive-manifest:sha256:311ecd1b3386ef8855ae0b068993742ec49655d42b2702dabdfd14f9dd152d11`.
 The inventory contains 45 ECB staff rounds in March/September and 45
 Eurosystem staff rounds in June/December. It also preserves the September 2006
 round's early 31 August publication date instead of forcing the release date
@@ -184,7 +184,7 @@ Replay retains the 83 versioned FOEDB artifacts and every document named by
 the 321 selected records: 248 PDFs and 96 HTML pages. The resulting 427
 artifacts contain 62,669,957 bytes and 427 distinct SHA-256 digests. The
 packaged receipt is
-`ecb-monetary-developments-archive-manifest:sha256:085c88744ab7c98e2d3683a4c66a551e99cc60db38f30c15e3a906ba73530007`.
+`ecb-monetary-developments-archive-manifest:sha256:ddd9592558988c781f526bbb4ab06f5ba48c639724de6a7433be1840f183d69e`.
 The in-window source-format eras comprise 224 PDF-only releases, 73 HTML-only
 releases, and 23 releases with both English HTML and a localized PDF. Localized
 PDFs remain hashed evidence; values come from the corresponding English HTML.
@@ -279,9 +279,9 @@ retained as an explicit source-date correction. No intraday clock is inferred.
 
 The compact receipt binds 829 raw artifacts, 189,367,122 bytes, and 829
 distinct SHA-256 digests. Its identity is
-`eurostat-hicp-archive-manifest:sha256:dc6748a381c10fa8daf5bfb89dd4287e1f54065f5b7c1342835fd1d207877066`.
+`eurostat-hicp-archive-manifest:sha256:a1ab608fbcfe7098ffc0186f47bed0c536b6ecaaef36a4cd946dfa5e18ee8105`.
 Two consecutive offline rebuilds produced byte-identical packaged JSON with
-SHA-256 `3648b4433379f7d810c1398a9fb76d997c735ca5d8f7da5c6a6de8b4f789766d`.
+SHA-256 `daaf188aac07e454ffd8c48000b81e668b539a4cd85dce7e0c9c500f21c50337`.
 The release-page/date audit records 40 page offsets and 15 migrated-card
 offsets of one day.
 
@@ -310,17 +310,95 @@ uv run python scripts/refresh_eurostat_hicp_archive.py \
 13-second interval between Eurostat requests, and handles bounded `429`
 retry-after responses.
 
+## Eurostat quarterly-GDP publication archive
+
+`histdatacom.market_context.eurostat_gdp_archive` qualifies 279 quarterly
+euro-area GDP publications from 10 January 2002 through 7 September 2026. The
+inventory is Eurostat's official `CAT_PREREL` Atom search, not a third-party
+calendar or a guessed product sequence. Ten exact result pages contain 932
+unique entries. A deterministic GDP, euro-area, and movement predicate matches
+280 candidates; the 17 October 2014 ESA 2010 level-shift methodology item is
+retained as the one explicit non-release exclusion.
+
+The selected publications cover reference quarters 2001-Q3 through 2026-Q2.
+Their source-dated landing pages preserve 42 preliminary-flash, 94 flash, 35
+first-estimate, 37 second-estimate, eight third-estimate, and 63
+regular-estimate occurrences. Stage classification is evidence-graded from
+the source-stated reference quarter, each publication lag, and the observed
+within-quarter sequence because many legacy headlines omit an explicit stage
+label. All four headlines that do state a stage explicitly agree with that
+classification. It never collapses successive estimates into one latest
+value. Legacy product suffixes such as `AP2`, `AP_0`, and `BP1` remain exact
+identifiers.
+
+Each occurrence binds the Atom title and product-code date to the exact
+landing bytes and source-authored page date. The archive also retains all 248
+discovered English source documents (216 PDFs and 32 HTML/HTM artifacts); the
+remaining 31 modern publications embed the complete release in their landing
+page. The receipt retains 46 exact publication timestamps from modern
+first-party metadata and keeps legacy products date-only. It also records 34
+source-authored page-date offsets: 33 pages dated one day before the
+product-code date and one page dated one day after it.
+
+The release-value layer preserves the current-reference-quarter
+quarter-over-quarter and year-over-year table values for source-supported
+`EA`, Germany, and France rows. Every occurrence independently reconciles its
+`EA` quarter-over-quarter table value with the Atom/landing headline, and
+successive estimate values remain separate so unchanged and changed revision
+comparisons can be derived and validated. The receipt contains 1,582 published
+values and 982 same-series comparisons against the current revised table, of
+which 247 differ. Historical aggregate values retain composition-neutral `EA`
+scope because euro-area membership changed during the archive; they are not
+retrospectively relabeled `EA20`. German and French rows are Eurostat's values
+as published in the aggregate release, not a substitute for the separate
+national-producer release lineage.
+
+The searchable publication surface begins with the release for 2001-Q3, so
+2000-Q1 through 2001-Q2 remain six explicit release-artifact gaps rather than
+inferred dates. That boundary quarter is itself only partially represented by
+its 10 January 2002 second estimate and 7 February 2002 third estimate; its
+earlier flash and first-estimate artifacts remain unavailable. The compact
+receipt binds 538 raw artifacts and 538 distinct SHA-256 digests totaling
+118,956,446 bytes: ten search pages, one revised-series response, 279
+source-dated landings, and 248 English release documents. Its identity is
+`eurostat-gdp-archive-manifest:sha256:272bb4e4bc2eea9175083c319e371d1e450ee99e90f6c89a66d425fdd76c52a9`.
+Two consecutive offline rebuilds produced byte-identical packaged JSON of
+1,973,058 bytes with SHA-256
+`853ad08236e650201f9543f5aaf8cb4bcd1e94b84a0dd8f46892cee228fe633a`.
+
+The independently retained `namq_10_gdp` JSON-stat response contributes 636
+current revised observations: quarter-over-quarter and year-over-year real-GDP
+growth for EA20, Germany, and France across 106 quarters from 2000-Q1 through
+2026-Q2. Those values are a scope and revised-series cross-check only. They do
+not replace a historical release headline, establish the composition of a
+source-era euro area, or reconstruct national German and French publication
+vintages. Eurostat supplies no historical market-consensus series, so numeric
+consensus and surprise values remain unavailable.
+
+An operator with the exact retained corpus can rebuild or replay the receipt
+with:
+
+```console
+uv run python scripts/refresh_eurostat_gdp_archive.py \
+  --as-of 2026-09-15 \
+  --source-directory /path/to/retained-eurostat-gdp-corpus
+```
+
+`--fetch-missing` is explicit. Network acquisition is sequential, enforces at
+least 13 seconds between Eurostat requests, and handles bounded `429`
+retry-after responses.
+
 ## Remaining issue scope
 
 These ECB decision, account, statement, staff-projection, monthly
-monetary-developments, and Eurostat HICP archives complete the four ECB
-monetary-policy artifact families, the selected euro-area money/credit
-lineage, and the harmonized inflation anchor, not issue #539 as a whole.
-Euro-area GDP, labour, production, trade/current-account, and survey releases,
-the remaining ECB statistical families, Destatis and Bundesbank programs for
-Germany, and INSEE and Banque de France programs for France still require
-their own empirical archive qualifications before the regional calendar can
-produce a closure receipt.
+monetary-developments, Eurostat HICP, and Eurostat GDP archives complete the
+four ECB monetary-policy artifact families, the selected euro-area
+money/credit lineage, and the harmonized inflation and aggregate-GDP anchors,
+not issue #539 as a whole. Euro-area labour, production,
+trade/current-account, and survey releases, the remaining ECB statistical
+families, Destatis and Bundesbank programs for Germany, and INSEE and Banque de
+France programs for France still require their own empirical archive
+qualifications before the regional calendar can produce a closure receipt.
 
 Official entrypoints:
 
@@ -328,6 +406,8 @@ Official entrypoints:
 - [ECB public FOEDB version pointer](https://www.ecb.europa.eu/foedb/dbs/foedb/publications.en/versions.json)
 - [Eurostat release calendar](https://ec.europa.eu/eurostat/news/release-calendar)
 - [Eurostat HICP publications](https://ec.europa.eu/eurostat/en/web/hicp/publications)
+- [Eurostat GDP release search](https://ec.europa.eu/eurostat/search?text=GDP)
+- [Eurostat quarterly GDP dataset](https://ec.europa.eu/eurostat/databrowser/view/namq_10_gdp/default/table)
 - [ECB monetary-policy accounts](https://www.ecb.europa.eu/press/accounts/html/index.en.html)
 - [ECB monetary-policy statements](https://www.ecb.europa.eu/press/press_conference/monetary-policy-statement/html/index.en.html)
 - [ECB staff projections](https://www.ecb.europa.eu/press/projections/html/all-releases.en.html)

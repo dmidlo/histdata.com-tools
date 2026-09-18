@@ -7,7 +7,7 @@ credential, MIME, byte, request, page, runtime, source-clock, and conditional
 request policy remains in the
 [official-source fetch layer](official-source-registry-and-fetch.md).
 
-The built-ins implement every parser identity in the 52-source registry and
+The built-ins implement every parser identity in the 72-source registry and
 also expose forward-compatible feed, archive, PDF, and data-catalog parsers.
 `resolve_official_source_parser()` requires the registry's exact parser ID and
 version and verifies every declared format. It does not substitute another
@@ -99,10 +99,11 @@ an explicit failure.
 
 `required_official_adapter_packs()` derives the current requirement from the
 registry format matrix and declared archive routes. The current registry needs
-SDMX, JSON-stat, generic structured, spreadsheet, HTML release, PDF, and static
-archive support. RSS/Atom/ICS and data-catalog parsers are installed now, but
-do not become qualification requirements until a reviewed registry entry
-declares those formats.
+SDMX, JSON-stat, generic structured, spreadsheet, HTML release, release-feed,
+PDF, and static-archive support. The Eurostat GDP source makes Atom a reviewed
+registry input. RSS and ICS share the qualified release-feed pack; the
+data-catalog parser remains installed but does not become a qualification
+requirement until a reviewed registry entry declares that format.
 
 `audit_official_adapter_coverage()` reports:
 
@@ -111,11 +112,11 @@ declares those formats.
 - any registry-required pack without a pinned qualification.
 
 The unit qualification corpus uses reduced responses with the real structural
-shapes and official fixture URIs for BLS JSON, ECB SDMX, Statistics Norway
-JSON-stat, RBNZ spreadsheets, Federal Reserve HTML/PDF, and RBA archive
-indexes. Separate fixtures cover SDMX dataflow/codelist discovery, SDMX-JSON,
-RSS, Atom, ICS, ZIP enumeration, catalog discovery, malformed input, drift,
-record bounds, and PDF reacquisition.
+shapes and official fixture URIs for BLS JSON, ECB SDMX, Eurostat GDP Atom and
+JSON-stat, Statistics Norway JSON-stat, RBNZ spreadsheets, Federal Reserve
+HTML/PDF, and RBA archive indexes. Separate fixtures cover SDMX
+dataflow/codelist discovery, SDMX-JSON, RSS, ICS, ZIP enumeration, catalog
+discovery, malformed input, drift, record bounds, and PDF reacquisition.
 
 ## Capability and vintage boundary
 
