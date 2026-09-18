@@ -113,6 +113,23 @@ separately retained `une_rt_m` JSON-stat table is a current revised cross-check
 for EA21, Germany, and France, not a replacement for historical release values
 or independent national-producer publications.
 
+The supplemental Eurostat monthly-industrial-production entry is
+`empirically-verified` for the harmonised aggregate publication lineage.
+Thirteen official Atom-search pages enumerate 1,213 raw results and 1,212
+unique alternate URIs, including one identical duplicate, and select 297
+source-dated monthly releases from January 2002 through September 2026 while
+preserving all 915 unique exclusions. All 297 landings and 262 discovered
+English documents (31 HTML and 231 PDF) are retained; 35 source-complete or
+anomalous landings expose no separate document. Source-era HTML/PDF tables retain
+supported euro-area, German, and French month-over-month and year-over-year
+percentage changes, membership composition, and repeated-month revision
+comparisons. One empty migrated landing has an explicitly identified inferred
+reference month rather than manufactured body evidence. The separately
+retained `sts_inpr_m` JSON-stat table contains
+1,914 current revised observations for both measures across EA21, Germany, and
+France from January 2000 through July 2026; it is not a replacement for
+historical release values or independent national-producer publications.
+
 The Federal Reserve G.17 industrial-production entry is the first route raised
 to `empirically-verified`: its official release index and all 319 enumerated
 plain-text publications through August 2026 have content-addressed manifest

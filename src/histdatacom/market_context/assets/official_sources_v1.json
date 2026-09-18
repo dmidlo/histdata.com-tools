@@ -1,6 +1,6 @@
 {
   "schema_version": "histdatacom.official-source-registry.v1",
-  "reviewed_on": "2026-09-17",
+  "reviewed_on": "2026-09-18",
   "scoped_economies": [
     "AU",
     "CA",
@@ -1823,6 +1823,101 @@
         "Legacy release evidence is date-only unless a source-authored landing timestamp establishes a stronger clock.",
         "Eurostat member-state rows qualify harmonised Germany and France values, not independent national-producer release vintages.",
         "Localized German and French renderings are not duplicate replay inputs because the discovered English publication or self-contained landing supplies the qualified source evidence."
+      ]
+    },
+    {
+      "schema_version": "histdatacom.official-source-entry.v1",
+      "source_key": "ea.eurostat.industrial-production",
+      "economy_code": "EA",
+      "economy_name": "Euro Area",
+      "institution": "Eurostat",
+      "jurisdiction": "European Union / euro area",
+      "legal_producer": true,
+      "roles": [
+        "official-archive",
+        "release-calendar"
+      ],
+      "event_families": [
+        "industrial-production"
+      ],
+      "indicator_ids": [
+        "industrial-production"
+      ],
+      "formats": [
+        "atom",
+        "json-stat",
+        "html",
+        "pdf"
+      ],
+      "capabilities": [
+        "current-values",
+        "historical-observations",
+        "historical-vintages",
+        "publication-metadata",
+        "schedule-metadata",
+        "revision-metadata",
+        "series-metadata",
+        "archive-enumeration"
+      ],
+      "endpoint_uri_template": "https://ec.europa.eu/eurostat/search",
+      "allowed_hosts": [
+        "ec.europa.eu"
+      ],
+      "expected_media_types": [
+        "application/atom+xml",
+        "application/json",
+        "text/html",
+        "application/pdf"
+      ],
+      "source_series_ids": [],
+      "source_table_ids": [
+        "sts_inpr_m"
+      ],
+      "source_release_ids": [
+        "monthly industrial production"
+      ],
+      "release_calendar_uri": "https://ec.europa.eu/eurostat/news/release-calendar",
+      "archive_uri": "https://ec.europa.eu/eurostat/search?text=industrial%20production",
+      "source_timezone": "Europe/Brussels",
+      "availability_time_precision": "date-only",
+      "dst_convention": "Source-authored exact timestamps are retained where the modern landing exposes them; legacy Atom timestamps remain metadata rather than an inferred historical release clock.",
+      "historical_depth": "The retained CAT_PREREL Atom search contains 1,213 raw entries and 1,212 unique alternate URIs at 18 September 2026. A deterministic exact-title predicate selects 297 unique monthly industrial-production releases from 21 January 2002 through 16 September 2026. All 297 landings and 262 discovered English documents (31 HTML and 231 PDF) are retained; 35 source-complete or anomalous landings expose no separate document. The current revised sts_inpr_m cross-check contains 1,914 non-null EA21, Germany and France observations from January 2000 through July 2026 for the qualified monthly and annual percentage-change measures.",
+      "known_breaks": [
+        "The searchable publication lineage starts in January 2002; current-series observations before the first source-dated release remain an explicit archive gap.",
+        "The broad Atom search repeats the identical excluded job-vacancy URI 3-18122017-bp twice on page 5; raw and unique result counts are retained separately.",
+        "Headline wording changes from euro-zone through euro area and parallel EU formulations; the exact Industrial production prefix remains stable across the selected lineage.",
+        "The malformed product code 4-1703204-bp encodes 17 March 2004 while both Atom and landing metadata say 21 March; its empty migrated landing also requires the January 2004 reference month to remain an explicit one-release cadence inference.",
+        "The 4-14092020-ap PDF repeats June 2020 where May belongs in its otherwise contiguous February-through-July monthly table header; the exact observed sequence has one code-scoped correction and no general silent month repair.",
+        "Thirty landing pages are source-dated one day before their product codes; those offsets and the malformed-code four-day conflict remain explicit rather than normalized away.",
+        "Euro-area composition and industrial-classification changes must remain source-dated rather than projected backward from the current EA21/B-D dissemination cube."
+      ],
+      "revision_behavior": "Each source-dated headline and parseable publication-table value remains distinct evidence. Repeated source-era cells are compared without collapsing revisions. The current sts_inpr_m JSON-stat response is a revised-series cross-check only and is never substituted for a historical published value.",
+      "rate_limit": "The search and product surfaces exposed an observed five-request rolling window during qualification; refreshes use sequential requests, at least 13 seconds between network requests, explicit 429 retry-after handling, bounded retries, and an identifying contact user agent.",
+      "authentication": "none",
+      "credential_env_name": null,
+      "credential_header_name": null,
+      "credential_parameter_name": null,
+      "terms_uri": "https://ec.europa.eu/eurostat/help/copyright-notice",
+      "fallback_source_keys": [],
+      "parser_id": "official.eurostat-industrial-production.v1",
+      "parser_version": "1",
+      "replay_strategy": "Retain exact bytes for all 13 populated CAT_PREREL Atom pages, the bounded sts_inpr_m response, all selected source-dated release landings, and every discovered English HTML/PDF release document. Bind raw and unique search counts, the explicit duplicate, selection and exclusions, request and redirect identities, byte lengths, SHA-256 digests, product/page dates, source-authored timestamps, reference months, publication lags, historical euro-area composition, adjustment and measure identity, published values, revision chains, and revised-current comparisons before accepting replay.",
+      "adapter_owner": "market-context/ea",
+      "verification_status": "empirically-verified",
+      "reviewed_on": "2026-09-18",
+      "verification_evidence_uris": [
+        "https://ec.europa.eu/eurostat/search?text=industrial%20production",
+        "https://ec.europa.eu/eurostat/api/dissemination/statistics/1.0/data/sts_inpr_m",
+        "https://ec.europa.eu/eurostat/en/web/products-euro-indicators/-/4-21012002-ap",
+        "https://ec.europa.eu/eurostat/en/web/products-euro-indicators/w/4-16092026-ap",
+        "https://ec.europa.eu/eurostat/cache/metadata/en/sts_inpr_m_esms.htm"
+      ],
+      "redistribution_notes": "The package retains a compact hash-bound manifest; exact Eurostat search, dataset and release bytes remain an external operator-owned corpus subject to Eurostat attribution and copyright terms.",
+      "limitations": [
+        "No market-consensus history is supplied, so numeric surprise is not manufactured.",
+        "Legacy release evidence remains date-only unless a source-authored landing timestamp establishes a stronger clock.",
+        "Eurostat member-state rows qualify harmonised Germany and France values, not independent national-producer release vintages.",
+        "The current revised dissemination cube is comparison evidence and cannot reconstruct missing publication vintages."
       ]
     },
     {

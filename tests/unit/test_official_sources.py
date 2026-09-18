@@ -195,7 +195,7 @@ def test_packaged_registry_is_a_complete_reviewed_21_economy_matrix(
     assert packaged_official_source_registry_path().is_file()
     assert registry.schema_version == OFFICIAL_SOURCE_REGISTRY_SCHEMA_VERSION
     assert registry.scoped_economies == SCOPED_ECONOMIES
-    assert len(registry.sources) == 73
+    assert len(registry.sources) == 74
     matrix = official_source_matrix(registry)
     assert set(matrix) == set(SCOPED_ECONOMIES)
     assert sum(len(row) for row in matrix.values()) == 21 * len(
@@ -264,6 +264,25 @@ def test_packaged_registry_is_a_complete_reviewed_21_economy_matrix(
     )
     assert unemployment.source_table_ids == ("une_rt_m",)
     assert unemployment.parser_id == "official.eurostat-unemployment.v1"
+    industrial_production = registry.source("ea.eurostat.industrial-production")
+    assert industrial_production.roles == (
+        OfficialSourceRole.OFFICIAL_ARCHIVE,
+        OfficialSourceRole.RELEASE_CALENDAR,
+    )
+    assert industrial_production.formats == (
+        OfficialSourceFormat.ATOM,
+        OfficialSourceFormat.JSON_STAT,
+        OfficialSourceFormat.HTML,
+        OfficialSourceFormat.PDF,
+    )
+    assert industrial_production.source_table_ids == ("sts_inpr_m",)
+    assert industrial_production.parser_id == (
+        "official.eurostat-industrial-production.v1"
+    )
+    assert (
+        industrial_production.verification_status
+        is OfficialSourceVerificationStatus.EMPIRICALLY_VERIFIED
+    )
 
 
 def test_registry_round_trip_and_identity_cover_source_endpoint_and_parser(

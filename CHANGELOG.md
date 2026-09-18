@@ -2,6 +2,14 @@
 
 ### Added
 
+- **market context**: qualify the complete January 2002 through September 2026
+  Eurostat monthly-industrial-production publication lineage, preserve
+  source-era euro-area composition, signed headline movements, and supported
+  EA/Germany/France monthly and annual table values, retain the bounded Atom,
+  landing, and English-document corpus with explicit duplicate and page-date
+  evidence, and bind an independent `sts_inpr_m` revised-series cross-check
+  without substituting current values for historical publication vintages
+  (#539).
 - **market context**: qualify 296 source-dated Eurostat monthly-unemployment
   publications from January 2002 through September 2026, preserve the
   source-era euro-area composition, headline direction and rate, supported
