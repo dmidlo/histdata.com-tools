@@ -195,7 +195,7 @@ def test_packaged_registry_is_a_complete_reviewed_21_economy_matrix(
     assert packaged_official_source_registry_path().is_file()
     assert registry.schema_version == OFFICIAL_SOURCE_REGISTRY_SCHEMA_VERSION
     assert registry.scoped_economies == SCOPED_ECONOMIES
-    assert len(registry.sources) == 74
+    assert len(registry.sources) == 75
     matrix = official_source_matrix(registry)
     assert set(matrix) == set(SCOPED_ECONOMIES)
     assert sum(len(row) for row in matrix.values()) == 21 * len(
@@ -281,6 +281,25 @@ def test_packaged_registry_is_a_complete_reviewed_21_economy_matrix(
     )
     assert (
         industrial_production.verification_status
+        is OfficialSourceVerificationStatus.EMPIRICALLY_VERIFIED
+    )
+    construction_output = registry.source("ea.eurostat.construction-output")
+    assert construction_output.roles == (
+        OfficialSourceRole.OFFICIAL_ARCHIVE,
+        OfficialSourceRole.RELEASE_CALENDAR,
+    )
+    assert construction_output.formats == (
+        OfficialSourceFormat.ATOM,
+        OfficialSourceFormat.JSON_STAT,
+        OfficialSourceFormat.HTML,
+        OfficialSourceFormat.PDF,
+    )
+    assert construction_output.source_table_ids == ("sts_copr_m",)
+    assert construction_output.parser_id == (
+        "official.eurostat-construction-output.v1"
+    )
+    assert (
+        construction_output.verification_status
         is OfficialSourceVerificationStatus.EMPIRICALLY_VERIFIED
     )
 

@@ -2,6 +2,14 @@
 
 ### Added
 
+- **market context**: qualify the complete March 2002 through September 2026
+  Eurostat construction-output publication lineage across its quarterly and
+  monthly eras, preserve duplicate and gap semantics, source-era euro-area
+  composition, signed headline movements, and supported EA/Germany/France
+  publication-table values, retain all 257 landings and 225 discovered English
+  documents, and bind the independent revised `sts_copr_m` monthly-series
+  cross-check without projecting current values into historical vintages
+  (#539).
 - **market context**: qualify the complete January 2002 through September 2026
   Eurostat monthly-industrial-production publication lineage, preserve
   source-era euro-area composition, signed headline movements, and supported

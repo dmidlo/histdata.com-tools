@@ -78,7 +78,7 @@ def test_packaged_hicp_archive_quantifies_both_first_published_tables() -> None:
     assert manifest.total_content_bytes == 189_367_122
     assert manifest.manifest_id == (
         "eurostat-hicp-archive-manifest:sha256:"
-        "7f5cb806de854995afc58ff4419cb34a3aeebcfa980d263afb3b17ce7edc4c54"
+        "fa1755020e55acf991a804d157aaf43ef1095975a8009578d374e5a761d4c884"
     )
     exclusion = manifest.index_exclusions[0]
     assert exclusion.index_page_number == 103

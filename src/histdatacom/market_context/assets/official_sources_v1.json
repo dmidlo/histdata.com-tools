@@ -1827,6 +1827,107 @@
     },
     {
       "schema_version": "histdatacom.official-source-entry.v1",
+      "source_key": "ea.eurostat.construction-output",
+      "economy_code": "EA",
+      "economy_name": "Euro Area",
+      "institution": "Eurostat",
+      "jurisdiction": "European Union / euro area",
+      "legal_producer": true,
+      "roles": [
+        "official-archive",
+        "release-calendar"
+      ],
+      "event_families": [
+        "housing"
+      ],
+      "indicator_ids": [
+        "housing-and-construction"
+      ],
+      "formats": [
+        "atom",
+        "json-stat",
+        "html",
+        "pdf"
+      ],
+      "capabilities": [
+        "current-values",
+        "historical-observations",
+        "historical-vintages",
+        "publication-metadata",
+        "schedule-metadata",
+        "revision-metadata",
+        "series-metadata",
+        "archive-enumeration"
+      ],
+      "endpoint_uri_template": "https://ec.europa.eu/eurostat/search",
+      "allowed_hosts": [
+        "ec.europa.eu"
+      ],
+      "expected_media_types": [
+        "application/atom+xml",
+        "application/json",
+        "text/html",
+        "application/pdf"
+      ],
+      "source_series_ids": [],
+      "source_table_ids": [
+        "sts_copr_m"
+      ],
+      "source_release_ids": [
+        "production in construction"
+      ],
+      "release_calendar_uri": "https://ec.europa.eu/eurostat/news/release-calendar",
+      "archive_uri": "https://ec.europa.eu/eurostat/search?text=production%20in%20construction",
+      "source_timezone": "Europe/Brussels",
+      "availability_time_precision": "date-only",
+      "dst_convention": "Source-authored exact timestamps are retained where the modern landing exposes them; legacy Atom timestamps remain metadata rather than an inferred historical release clock.",
+      "historical_depth": "The retained CAT_PREREL Atom search contains 916 raw entries and 915 unique alternate URIs at 18 September 2026. A deterministic four-era title predicate selects 257 construction-output releases from 13 March 2002 through 18 September 2026 and explicitly retains 658 unique exclusions. All 257 landings and 225 discovered English documents (11 HTML and 214 PDF) are retained; 32 self-contained modern landings expose no separate document. Twenty-one releases cover 20 unique quarters from 2001-Q4 through 2006-Q3 before 236 releases cover 236 unique months from November 2006 through July 2026. The current revised sts_copr_m cross-check contains 1,914 non-null EA21, Germany and France observations from January 2000 through July 2026 for the monthly and annual percentage-change measures.",
+      "known_breaks": [
+        "The searchable publication lineage starts in March 2002; current-series observations before the first source-dated release remain an explicit archive gap.",
+        "The early construction-output publication lineage is quarterly before changing to monthly in 2007; quarter and month identities must not be collapsed.",
+        "The broad Atom search repeats the identical excluded job-vacancy URI 3-18122017-bp twice on page 3; raw and unique result counts are retained separately.",
+        "Headline wording changes across Production in the construction sector, Construction output, Euro area production in construction, and Production in construction title eras.",
+        "The 4-19092011-ap PDF repeats June 2011 where May belongs in its otherwise contiguous February-through-July monthly table header; the exact observed sequence has one code-scoped correction and no general silent month repair.",
+        "April 2015 has no selected monthly release; it remains an explicit gap rather than being reconstructed from the current cube.",
+        "The 4-19052016-ap Atom entry carries an unrelated inflation summary mentioning April 2016, while its landing and attached construction release consistently identify March 2016; document and landing evidence take precedence over the Atom fallback.",
+        "The 4-19022018-ap release opens with a rebasing notice for reference month January 2018 before its December 2017 construction headline; the qualified month-compared-with clause takes precedence over the incidental methodology month.",
+        "The February 2020 publication omits France's February monthly and annual cells, and the March 2020 publication omits the France row from both supported tables; those source-authored pandemic-era gaps remain absent rather than being filled from the current cube.",
+        "The eleven earliest Atom timestamps and source-authored landing dates precede their product-code dates by one UTC/calendar day; both identities remain retained rather than silently normalized.",
+        "Six consecutive landing-only releases from October 2024 through March 2025 expose the qualified headline but no parseable EA/Germany/France source table; missing table cells are not reconstructed from the current cube.",
+        "Euro-area composition and construction-classification changes must remain source-dated rather than projected backward from the current EA21/F dissemination cube."
+      ],
+      "revision_behavior": "Each source-dated headline and parseable publication-table value remains distinct evidence. Repeated source-era cells are compared only at like frequency without collapsing revisions. The current sts_copr_m JSON-stat response is a revised monthly-series cross-check only and is never substituted for a historical published value.",
+      "rate_limit": "The search and product surfaces expose an observed five-request rolling window; refreshes use sequential requests, at least 13 seconds between network requests, explicit 429 retry-after handling, bounded retries, and an identifying contact user agent.",
+      "authentication": "none",
+      "credential_env_name": null,
+      "credential_header_name": null,
+      "credential_parameter_name": null,
+      "terms_uri": "https://ec.europa.eu/eurostat/help/copyright-notice",
+      "fallback_source_keys": [],
+      "parser_id": "official.eurostat-construction-output.v1",
+      "parser_version": "1",
+      "replay_strategy": "Retain exact bytes for all 10 populated CAT_PREREL Atom pages, the bounded sts_copr_m response, every selected source-dated release landing, and every discovered English HTML/PDF document. Bind raw and unique search counts, the explicit duplicate, selection and exclusions, request and redirect identities, byte lengths, SHA-256 digests, source dates and timestamps, monthly or quarterly reference periods, publication lags, historical euro-area composition, adjustment and measure identity, published values, like-frequency revisions, and revised-current comparisons before accepting replay.",
+      "adapter_owner": "market-context/ea",
+      "verification_status": "empirically-verified",
+      "reviewed_on": "2026-09-18",
+      "verification_evidence_uris": [
+        "https://ec.europa.eu/eurostat/search?text=production%20in%20construction",
+        "https://ec.europa.eu/eurostat/api/dissemination/statistics/1.0/data/sts_copr_m",
+        "https://ec.europa.eu/eurostat/en/web/products-euro-indicators/-/4-13032002-ap",
+        "https://ec.europa.eu/eurostat/en/web/products-euro-indicators/w/4-18092026-ap",
+        "https://ec.europa.eu/eurostat/cache/metadata/en/sts_copr_m_esms.htm"
+      ],
+      "redistribution_notes": "The package retains a compact hash-bound manifest; exact Eurostat search, dataset and release bytes remain an external operator-owned corpus subject to Eurostat attribution and copyright terms.",
+      "limitations": [
+        "No market-consensus history is supplied, so numeric surprise is not manufactured.",
+        "Legacy release evidence remains date-only unless a source-authored landing timestamp establishes a stronger clock.",
+        "Quarterly source releases are not directly comparable with monthly current-dataset cells.",
+        "Six landing-only releases from October 2024 through March 2025 retain headline evidence without manufacturing absent source-table cells.",
+        "Eurostat member-state rows qualify harmonised Germany and France values, not independent national-producer release vintages."
+      ]
+    },
+    {
+      "schema_version": "histdatacom.official-source-entry.v1",
       "source_key": "ea.eurostat.industrial-production",
       "economy_code": "EA",
       "economy_name": "Euro Area",

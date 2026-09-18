@@ -14,7 +14,7 @@ capability until its first-party fixture qualification passes.
 ## Reviewed scope and authority rule
 
 The packaged registry is
-`histdatacom/market_context/assets/official_sources_v1.json`. Its 73 entries
+`histdatacom/market_context/assets/official_sources_v1.json`. Its 75 entries
 cover every cell in the 21-economy by 12-event-family matrix. Exactly one entry
 with role `primary-producer` must exist in every cell. Registry construction
 fails on a missing or ambiguous cell.
@@ -129,6 +129,26 @@ retained `sts_inpr_m` JSON-stat table contains
 1,914 current revised observations for both measures across EA21, Germany, and
 France from January 2000 through July 2026; it is not a replacement for
 historical release values or independent national-producer publications.
+
+The supplemental Eurostat construction-output entry is
+`empirically-verified` for the harmonised aggregate publication lineage. Ten
+official Atom-search pages enumerate 916 raw results and 915 unique alternate
+URIs, including one identical duplicate, and select 257 source-dated releases
+from March 2002 through September 2026 while preserving all 658 unique
+exclusions. The release lineage changes from quarterly to monthly frequency;
+the archive keeps those identities separate, preserves the repeated 2002-Q4
+publication pair, and does not manufacture the missing April 2015 release. All
+257 landings and 225 discovered English documents (11 HTML and 214 PDF) are
+retained; 32 self-contained modern landings expose no separate document. Six
+of those landings, from October 2024 through March 2025, retain headline
+evidence without a parseable source table. Source-era
+HTML/PDF tables retain supported euro-area, German, and French percentage
+changes and membership composition, including one product-code-scoped repair
+for a September 2011 table header that repeats June where May belongs. The
+separately retained `sts_copr_m` JSON-stat table contains 1,914 current revised
+monthly observations across EA21, Germany, and France from January 2000
+through July 2026; it is not a replacement for historical release values,
+quarterly evidence, or independent national-producer publications.
 
 The Federal Reserve G.17 industrial-production entry is the first route raised
 to `empirically-verified`: its official release index and all 319 enumerated
