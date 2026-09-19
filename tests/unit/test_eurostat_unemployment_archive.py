@@ -204,11 +204,11 @@ def test_packaged_unemployment_archive_quantifies_the_complete_corpus() -> None:
     assert manifest.total_content_bytes == 134_483_606
     assert manifest.manifest_id == (
         "eurostat-unemployment-archive-manifest:sha256:"
-        "dcf73965eec2d14cc9dbb4deabd8fccf0efd3da72c748a5688d706f2c225d54e"
+        "1a283c48eda4f9e99a85f6c08c72dec398b4f15e6eb2c7b69998cad6a678464a"
     )
     assert path.stat().st_size == 3_577_040
     assert sha256(path.read_bytes()).hexdigest() == (
-        "939b5ecb1798269361a7df5e4076529e5f03400179a12cbc5da27f82e816f196"
+        "dbb7d86b98b6e25ad75b71b48086083f3387b5e7e15d726a8c5f7ca151d35e4e"
     )
 
 

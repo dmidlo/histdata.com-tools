@@ -70,7 +70,7 @@ def test_packaged_insee_gdp_archive_quantifies_paired_lineage() -> None:
     assert manifest.nonzero_revision_count == 17
     assert manifest.manifest_id == (
         "insee-gdp-archive-manifest:sha256:"
-        "a80302d8e09590e63aba5a6952a4c9048acc2aa25508d981cb7b5a8014b27cef"
+        "8e5d3ffbb100fe26856724ee3312bdec1e0ab054c32fae2c9546e3adadd1d490"
     )
     assert packaged_insee_gdp_manifest_path().is_file()
 
@@ -83,7 +83,7 @@ def test_insee_gdp_registry_entry_is_empirically_verified_and_non_primary() -> (
 
     assert registry.registry_id == (
         "official-source-registry:sha256:"
-        "e09188b0cf0a25d69b412a8d7c2e62fcf1478d6e6b16ecf97ef1a2bbdbdb52b8"
+        "a57df74a778b8a96b21912ea872c275fe144f89dd37205ffae08ff6f0917bf37"
     )
     assert source.source_id == (
         "official-source:sha256:"

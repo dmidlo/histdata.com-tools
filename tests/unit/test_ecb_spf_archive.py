@@ -96,7 +96,7 @@ def test_packaged_spf_manifest_quantifies_the_complete_archive() -> None:
     assert manifest.microdata_member_count == 111
     assert manifest.manifest_id == (
         "ecb-spf-archive-manifest:sha256:"
-        "d2d5e0410f7a518a44d3dfc452d69a5bcc80606d7f782e562f225a98c1c84558"
+        "c8a810c90151589814c37b865612d7a693d7e7e0cb0f40efc12d8de562e7d7fa"
     )
     assert packaged_ecb_spf_manifest_path().is_file()
 

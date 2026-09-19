@@ -2,6 +2,14 @@
 
 ### Added
 
+- **market context**: qualify 203 source-dated INSEE monthly national
+  business-climate releases across the July 2009 through August 2026 legacy
+  and current subtitle eras; preserve three genuine August source gaps, exact
+  publication clocks, semantic table locators and five controlled
+  source-era paragraph fallbacks; retain 320 current BDM observations for
+  all-sector metropolitan-France series `001565530` only as a latest-revised
+  cross-check, without manufacturing missing releases, consensus, surprise,
+  or replacement vintages (#539).
 - **market context**: qualify all 111 ECB Survey of Professional Forecasters
   rounds from 1999-Q1 through 2026-Q3; retain the two official indexes, every
   detailed result page, the 111-member respondent microdata ZIP, and the

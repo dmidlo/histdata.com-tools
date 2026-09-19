@@ -1,6 +1,6 @@
 {
   "schema_version": "histdatacom.official-source-registry.v1",
-  "reviewed_on": "2026-09-18",
+  "reviewed_on": "2026-09-19",
   "scoped_economies": [
     "AU",
     "CA",
@@ -5205,6 +5205,101 @@
       "limitations": [
         "The archive does not fabricate occurrences for the four documented August source gaps.",
         "The withdrawn January 2023 release is not assigned either its erroneous value or a later revised value.",
+        "No market-consensus history is available, so surprise values are not manufactured.",
+        "Latest revised BDM observations are never represented as first-published vintages."
+      ]
+    },
+    {
+      "schema_version": "histdatacom.official-source-entry.v1",
+      "source_key": "fr.insee.business-climate",
+      "economy_code": "FR",
+      "economy_name": "France",
+      "institution": "Institut national de la statistique et des études économiques",
+      "jurisdiction": "French Republic",
+      "legal_producer": true,
+      "roles": [
+        "official-archive",
+        "release-calendar"
+      ],
+      "event_families": [
+        "confidence-survey"
+      ],
+      "indicator_ids": [
+        "official-confidence-and-tendency-surveys"
+      ],
+      "formats": [
+        "json",
+        "html",
+        "sdmx-2.1"
+      ],
+      "capabilities": [
+        "current-values",
+        "historical-observations",
+        "historical-vintages",
+        "publication-metadata",
+        "schedule-metadata",
+        "revision-metadata",
+        "series-metadata",
+        "archive-enumeration"
+      ],
+      "endpoint_uri_template": "https://www.insee.fr/en/solr/consultation",
+      "allowed_hosts": [
+        "www.insee.fr",
+        "bdm.insee.fr"
+      ],
+      "expected_media_types": [
+        "application/json",
+        "text/html",
+        "application/xml"
+      ],
+      "source_series_ids": [
+        "001565530"
+      ],
+      "source_table_ids": [
+        "103047029"
+      ],
+      "source_release_ids": [
+        "Business climate indicator and turning point indicator",
+        "Business indicator"
+      ],
+      "release_calendar_uri": "https://www.insee.fr/en/information/2107811",
+      "archive_uri": "https://www.insee.fr/en/solr/consultation",
+      "source_timezone": "Europe/Paris",
+      "availability_time_precision": "exact-second",
+      "dst_convention": "Solr dateDiffusion timestamps are UTC; retain exact lexical precision and convert with Europe/Paris from the IANA zone database.",
+      "historical_depth": "The two qualified English monthly national business-climate release-page lineages cover 203 of 206 months from July 2009 through August 2026, with three August source-artifact gaps through 2011; current revised all-sector metropolitan-France BDM observations from January 2000 are retained only as an explicit cross-check.",
+      "known_breaks": [
+        "The official English lineages omit August 2009, 2010, and 2011; no occurrences are fabricated for those source gaps.",
+        "The source subtitle changes from 'Business climate indicator and turning point indicator' to 'Business indicator' in January 2021 without changing the qualified all-sector climate identity.",
+        "Release tables change from a legacy multi-sector climate and turning-point layout to a dedicated normalized composite table; the parser binds semantic labels and the exact reference month.",
+        "The current BDM series is revised and backcast latest-state data, not a substitute for contemporaneous release-page values."
+      ],
+      "revision_behavior": "Release-page values are preserved as distinct source-dated occurrences with explicit metric, unit, source-defined composite adjustment, methodology, geography, and locator. Current BDM observations remain separately labelled latest-state cross-checks and are compared only for the exact all-sector business-climate identity.",
+      "rate_limit": "No stable public limit is published; refreshes use bounded sequential requests, retained-file resume, Retry-After handling, exponential backoff, and six attempts.",
+      "authentication": "none",
+      "credential_env_name": null,
+      "credential_header_name": null,
+      "credential_parameter_name": null,
+      "credential_path_placeholder": null,
+      "terms_uri": null,
+      "fallback_source_keys": [],
+      "parser_id": "official.insee-business-climate.v1",
+      "parser_version": "1",
+      "replay_strategy": "Retain the exact POST bodies and responses for both bounded exact English Solr queries, every selected release page, the exact BDM family-catalog response, and the bounded SDMX response; bind request/parser identities, content lengths and SHA-256 digests, complete result accounting, exact source timestamps, semantic value locators, the three documented source gaps, and exact-scope latest-revised comparisons before accepting offline replay.",
+      "adapter_owner": "market-context/fr",
+      "verification_status": "empirically-verified",
+      "reviewed_on": "2026-09-19",
+      "verification_evidence_uris": [
+        "https://www.insee.fr/en/solr/consultation",
+        "https://www.insee.fr/en/statistiques/1561614",
+        "https://www.insee.fr/en/statistiques/9038023",
+        "https://www.insee.fr/en/statistiques/series/ajax/consultation",
+        "https://bdm.insee.fr/series/sdmx/data/SERIES_BDM/001565530?startPeriod=2000-01&endPeriod=2026-08"
+      ],
+      "redistribution_notes": "The package retains a compact hash-bound normalized manifest; exact Solr, HTML, catalog, and SDMX response bytes remain in an external operator-owned corpus subject to INSEE terms and attribution.",
+      "limitations": [
+        "The archive does not fabricate occurrences for the three documented August source gaps.",
+        "Sector-specific business climates and the employment and turning-point indicators require separate typed identities.",
         "No market-consensus history is available, so surprise values are not manufactured.",
         "Latest revised BDM observations are never represented as first-published vintages."
       ]
