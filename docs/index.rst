@@ -21,6 +21,7 @@ Data and reconstruction foundations
    observation-process-uncertainty
    market-context-contracts
    economic-calendar-contracts
+   forecast-contracts
    economic-indicator-catalog
    release-vintage-reconstruction
    release-schedule-reconstruction
@@ -66,6 +67,7 @@ Empirical reconstruction pipeline
    reconstruction-ensemble-calibration-contracts
    reconstruction-plan-contracts
    broker-capture-contracts
+   broker-plugin-sdk
    broker-delivery-fingerprint-contracts
    broker-delivery-transfer-contracts
 

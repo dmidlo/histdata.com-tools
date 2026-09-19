@@ -2,6 +2,16 @@
 
 ### Added
 
+- **broker plugins**: freeze a dependency-isolated public SDK v1.0.0 with
+  immutable canonical lifecycle, instrument, event, clock, health, diagnostic,
+  and extension contracts; verify external plugin execution and installed-wheel
+  typing without private host imports (#615).
+- **forecasting**: add immutable vintage-input, horizon, forecast, scoring, and
+  report contracts with exact replay, first-release/revision separation,
+  cutoff-safe normalization, and content-addressed persistence (#560).
+- **reconstruction**: qualify exact hierarchical bar projection across seven
+  UTC intervals and three scopes, classify every v1 field, and require verified
+  event support for non-composable fields and full parent identities (#648).
 - **market context**: qualify all 208 source-dated INSEE monthly national
   industrial-production releases from April 2009 through July 2026; classify
   all 218 bounded search results, preserve exact publication clocks and three
@@ -280,6 +290,13 @@
 
 ### Fixed
 
+- **data quality**: reuse bounded, content/context-keyed source-finding
+  discovery across report audits while rereading current source, preserving
+  immutable results, live catalog/report evaluation, and exact payload bytes;
+  invalidate on source and attribution-context changes (#748).
+- **market context**: parse retained Eurostat basic numeric timezone offsets
+  on Python 3.10 without changing source timestamp text, archive identities,
+  timezone requirements, or malformed-input refusals (#747).
 - **reconstruction**: preserve each operator-supplied artifact, output,
   checkpoint, and scratch base across adaptive plan-set shards so a campaign
   cannot silently redirect product and staging data into the local artifact

@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import ast
-from collections import Counter
+from collections import Counter, OrderedDict
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
+import hashlib
 import json
 from pathlib import Path
+from threading import Lock
 from typing import TypeVar, cast
 
 from histdatacom.data_quality.contracts import (
@@ -133,6 +135,11 @@ _FINDING_CODE_RULE_PREFIXES = (
     ("FINGERPRINT_", "fingerprint.series"),
 )
 _T = TypeVar("_T")
+_SOURCE_FINDINGS_CACHE_LIMIT = 128
+_SOURCE_FINDINGS_CACHE_SOURCE_BYTE_LIMIT = 512 * 1024
+_SOURCE_FINDINGS_CACHE_ITEM_LIMIT = 1024
+_SOURCE_FINDINGS_CACHE_TEXT_BYTE_LIMIT = 256 * 1024
+_SourceFindingsCacheKey = tuple[bytes, bytes]
 
 
 @dataclass(frozen=True, slots=True)
@@ -149,6 +156,14 @@ class KnownQualityFindingCode:
     finding_code_prefix: str = ""
     attribution_status: str = "exact"
     attribution_reason: str = "provided_rule_id"
+
+
+# Retain neither source text nor ASTs. Both entry count and per-entry evidence
+# are bounded; larger inputs still receive the same uncached analysis.
+_SOURCE_FINDINGS_CACHE: OrderedDict[
+    _SourceFindingsCacheKey, tuple[KnownQualityFindingCode, ...]
+] = OrderedDict()
+_SOURCE_FINDINGS_CACHE_LOCK = Lock()
 
 
 @dataclass(frozen=True, slots=True)
@@ -578,9 +593,94 @@ def _known_findings_from_source(
     root: Path,
 ) -> tuple[KnownQualityFindingCode, ...]:
     try:
-        tree = ast.parse(path.read_text(encoding="utf-8"))
-    except (OSError, SyntaxError):
+        source = path.read_text(encoding="utf-8")
+    except OSError:
         return ()
+    # Always read first: stat metadata cannot detect same-size/restored-mtime
+    # edits, and a cached success must never hide a current read failure.
+    prefixes = _FINDING_CODE_RULE_PREFIXES
+    key = _source_findings_cache_key(source, path, root, prefixes)
+    if key is not None:
+        with _SOURCE_FINDINGS_CACHE_LOCK:
+            cached = _SOURCE_FINDINGS_CACHE.get(key)
+            if cached is not None:
+                _SOURCE_FINDINGS_CACHE.move_to_end(key)
+                return cached
+    try:
+        findings = _parse_known_findings(source, path, root, prefixes)
+    except SyntaxError:
+        return ()
+    if key is not None and _source_findings_fit_cache(findings):
+        with _SOURCE_FINDINGS_CACHE_LOCK:
+            _SOURCE_FINDINGS_CACHE[key] = findings
+            _SOURCE_FINDINGS_CACHE.move_to_end(key)
+            while len(_SOURCE_FINDINGS_CACHE) > _SOURCE_FINDINGS_CACHE_LIMIT:
+                _SOURCE_FINDINGS_CACHE.popitem(last=False)
+    return findings
+
+
+def _source_findings_cache_key(
+    source: str,
+    path: Path,
+    root: Path,
+    prefixes: tuple[tuple[str, str], ...],
+) -> _SourceFindingsCacheKey | None:
+    if len(source) > _SOURCE_FINDINGS_CACHE_SOURCE_BYTE_LIMIT:
+        return None
+    encoded = source.encode("utf-8")
+    if len(encoded) > _SOURCE_FINDINGS_CACHE_SOURCE_BYTE_LIMIT:
+        return None
+    context = json.dumps(
+        (
+            str(path.absolute()),
+            str(root.absolute()),
+            _relative_source(path, root=root, line_number=0),
+            _source_family_for_path(path),
+            prefixes,
+        ),
+        ensure_ascii=True,
+        separators=(",", ":"),
+    ).encode("ascii")
+    return hashlib.sha256(encoded).digest(), hashlib.sha256(context).digest()
+
+
+def _source_findings_fit_cache(
+    findings: tuple[KnownQualityFindingCode, ...],
+) -> bool:
+    if len(findings) > _SOURCE_FINDINGS_CACHE_ITEM_LIMIT:
+        return False
+    text_bytes = 0
+    for finding in findings:
+        for value in (
+            finding.rule_id,
+            finding.finding_code,
+            finding.severity.value,
+            finding.source,
+            finding.severity_source,
+            finding.source_family,
+            finding.source_helper,
+            finding.finding_code_prefix,
+            finding.attribution_status,
+            finding.attribution_reason,
+        ):
+            try:
+                text_bytes += len(value.encode("utf-8"))
+            except UnicodeEncodeError:
+                # Valid source may contain escaped surrogate literals. Their
+                # discovery remains valid, but need not be retained.
+                return False
+            if text_bytes > _SOURCE_FINDINGS_CACHE_TEXT_BYTE_LIMIT:
+                return False
+    return True
+
+
+def _parse_known_findings(
+    source: str,
+    path: Path,
+    root: Path,
+    prefixes: tuple[tuple[str, str], ...],
+) -> tuple[KnownQualityFindingCode, ...]:
+    tree = ast.parse(source)
     constants = _module_string_constants(tree)
     class_rule_ids = _class_rule_ids(tree, constants)
     parents = _parent_map(tree)
@@ -601,6 +701,7 @@ def _known_findings_from_source(
             class_rule_ids=class_rule_ids,
             parents=parents,
             source_family=source_family,
+            finding_code_rule_prefixes=prefixes,
         )
         source_helper = _nearest_function_name(node, parents)
         source = _relative_source(path, root=root, line_number=node.lineno)
@@ -613,7 +714,7 @@ def _known_findings_from_source(
                 severity_source=severity_source,
                 source_family=source_family,
                 source_helper=source_helper,
-                finding_code_prefix=_finding_code_prefix(code),
+                finding_code_prefix=_finding_code_prefix(code, prefixes),
                 attribution_status=attribution.status,
                 attribution_reason=attribution.reason,
             )
@@ -1660,6 +1761,7 @@ def _rule_attribution_from_call(
     class_rule_ids: Mapping[str, str],
     parents: Mapping[ast.AST, ast.AST],
     source_family: str,
+    finding_code_rule_prefixes: tuple[tuple[str, str], ...],
 ) -> _RuleAttribution:
     explicit = _explicit_rule_attribution(
         node,
@@ -1686,7 +1788,9 @@ def _rule_attribution_from_call(
             reason="unique_helper_rule",
         )
 
-    prefix_rule_id = _finding_code_rule_id(finding_code)
+    prefix_rule_id = _finding_code_rule_id(
+        finding_code, finding_code_rule_prefixes
+    )
     if prefix_rule_id and (
         not helper_candidates or prefix_rule_id in helper_candidates
     ):
@@ -2117,15 +2221,22 @@ def _annotation_name(node: ast.AST | None) -> str:
     return ""
 
 
-def _finding_code_rule_id(finding_code: str) -> str:
-    for prefix, rule_id in _FINDING_CODE_RULE_PREFIXES:
+def _finding_code_rule_id(
+    finding_code: str, prefixes: tuple[tuple[str, str], ...]
+) -> str:
+    for prefix, rule_id in prefixes:
         if finding_code.startswith(prefix):
             return rule_id
     return ""
 
 
-def _finding_code_prefix(finding_code: str) -> str:
-    for prefix, _rule_id in _FINDING_CODE_RULE_PREFIXES:
+def _finding_code_prefix(
+    finding_code: str,
+    prefixes: tuple[tuple[str, str], ...] | None = None,
+) -> str:
+    for prefix, _rule_id in (
+        _FINDING_CODE_RULE_PREFIXES if prefixes is None else prefixes
+    ):
         if finding_code.startswith(prefix):
             return prefix.removesuffix("_")
     parts = [part for part in finding_code.split("_") if part]

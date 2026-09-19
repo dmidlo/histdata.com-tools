@@ -318,6 +318,41 @@ archive, permission, network, report, or catalog mutation.
 
 ## Update Workflow
 
+### Source-discovery reuse
+
+Remediation-catalog audits reuse immutable per-file finding discovery, not
+finished audit outcomes. Every lookup rereads UTF-8 source with the existing
+universal-newline behavior and hashes that text together with path/root,
+relative source label, source family, and captured attribution-prefix policy.
+Current file membership, catalog rules, reports, and recursion context are
+still evaluated. Same-size edits with restored modification times invalidate
+discovery; read/syntax failures never fall back to cached successes.
+
+The synchronized process-local LRU retains at most 128 entries. Each entry is
+limited to 1,024 frozen findings and 256 KiB of UTF-8 string content; sources
+above 512 KiB bypass caching. Unencodable escaped-surrogate findings also
+bypass retention without changing their discovery behavior. Only fixed-size
+digest keys and immutable results are retained, not source text or ASTs.
+
+The #748 qualification compared exact output bytes for six real-source-tree
+operations before/after the change, both cold and warm. Representative Python
+3.13.5 measurements on the development machine were:
+
+| Operation | Before | After, cold | After, warm |
+| --- | ---: | ---: | ---: |
+| Source discovery | 1.54 s | 1.53 s | 0.0034 s |
+| Full report JSON | 6.04 s | 1.58 s | 0.055 s |
+| Fingerprint audit | 18.06 s | 1.63 s | 0.162 s |
+
+These are comparable single samples collected while another test suite was
+running, not statistical benchmarks or portable latency guarantees. Cold
+analysis remains expensive. Regression tests compare uncached/cold/reused
+rendering and verify invalidation, bounded retention, concurrency, live
+catalog/report changes, and existing refusal semantics. No report schema or
+golden fixture change is implied by this optimization.
+
+### Updating golden fixtures
+
 Do not update golden fixtures as a side effect of routine test runs. When a
 report shape intentionally changes, first decide whether the change is
 compatible with `histdatacom.quality-report.v1`. If it is compatible, regenerate

@@ -238,3 +238,102 @@ support.
 
 Derived bars are useful views, not historical truth and not evidence that a
 synthetic reconstruction is valid by themselves.
+
+## Qualified hierarchical aggregation
+
+`histdatacom.synthetic.bar_hierarchy` adds an explicit, fail-closed hierarchy
+over already qualified `DerivedBarV1` rows. It does not change the existing v1
+row, policy, event digest, or bar identity. Callers must first verify the source
+publication using the existing verification surface; structural validation and
+hierarchical replay do not establish independent authenticity of input bars.
+
+There are two deliberately different operations:
+
+- `aggregate_qualified_bar_projection()` computes the exact bar-only subset
+  without loading events. Its result is a partial field mapping, not a
+  `DerivedBarV1`; the eight event-dependent fields listed below are absent.
+- `reconstruct_bar_from_qualified_children()` accepts the exact ordered
+  in-parent events, verifies that replay reproduces every child field and ID,
+  and produces a complete, identity-equivalent `DerivedBarV1`. It requires
+  event support and is **not** a tick-free storage optimization.
+
+Both require one symbol, scope, source product, run, member, and policy. The
+supplied policy must include both intervals. Children must be chronological,
+non-partial, equal-duration, UTC epoch-aligned rows that exactly partition the
+explicit parent bounds. Missing, duplicate, reordered, mixed-identity or
+query-partial children fail closed. A finer interval cannot be synthesized
+from a coarser one. A same-interval singleton is an identity projection; this
+is the base case for `1m`, since no smaller supported interval exists.
+
+An absent child bin is not filled, even when its absence reflects a known
+market closure. Thus a sparse interval may have a valid directly aggregated
+event bar but cannot make this hierarchy's complete-partition claim. Empty
+children produce no synthetic row: requesting such a parent raises an explicit
+empty-bin refusal. Weekly, session, and non-UTC alignments are unsupported and
+require a successor contract, not a reinterpretation of `1d`.
+
+### Exhaustive field rules
+
+`bar_hierarchy_field_rules()` declares a rule for every serialized v1 field and
+refuses a schema whose field set is no longer covered. The regression suite
+checks the exact field inventory.
+
+| Fields | Qualified hierarchy rule |
+| --- | --- |
+| `schema_version`, `event_schema_version`, `source_product_manifest_id`, `policy_id`, `rounding_digits`, `run_id`, `ensemble_member_id`, `symbol`, `scope` | Require exact equality across children. |
+| `volume_state`, `volume`, `event_schema_augmented`, `raw_m1_input`, `centralized_traded_volume_claim` | Preserve equal frozen v1 constants; volume remains unavailable/null. |
+| `interval_code`, `interval_ns`, `bar_start_ns`, `bar_end_ns` | Use the explicitly validated parent interval and UTC-aligned half-open bounds. |
+| `first_event_id`, `first_event_time_ns` | First child endpoint. |
+| `last_event_id`, `last_event_time_ns` | Last child endpoint. |
+| `bid_open`, `ask_open`, `mid_open`, `spread_open` | First child open. |
+| `bid_high`, `ask_high`, `mid_high`, `spread_high` | Maximum child high, independently for each price series. |
+| `bid_low`, `ask_low`, `mid_low`, `spread_low` | Minimum child low, independently for each price series. |
+| `bid_close`, `ask_close`, `mid_close`, `spread_close` | Last child close. |
+| `event_count`, `observed_event_count`, `synthetic_event_count`, `quote_update_count`, `confidence_support_count` | Exact integer sum. |
+| `activity_duration_ns` | Last event time minus first event time; never sum child durations. |
+| `tick_intensity_per_second` | Recompute total event count over positive parent activity duration with the unchanged policy rounding; null for zero duration. |
+| `is_partial_start`, `is_partial_end` | False only after rejecting all partial children and verifying exact partition coverage. |
+| `source_version_ids`, `generator_ids`, `generator_versions`, `generator_config_ids`, `reference_ids`, `motif_ids`, `feed_epoch_ids`, `broker_profile_ids`, `constraint_set_ids` | Sorted set union, bounded by the existing policy's provenance cap. |
+| `mean_spread`, `mean_event_confidence` | `must_recompute_from_events`: preserve the existing ordered floating accumulation and round only at the parent. |
+| `transition_count`, `price_change_count`, `stale_quote_count`, `stale_quote_rate` | `must_recompute_from_events`: verify raw-quote incoming carry, then require exact additive count reconciliation and recompute the parent rate. |
+| `event_content_sha256` | `must_recompute_from_events`: hash the ordered canonical in-parent event projection; child digests are not concatenable hash state. |
+| `bar_id` | `must_recompute_from_events`: derive the unchanged identity from the complete parent payload, including its correct event digest and reductions. |
+
+An event-count-weighted mean is valid only when sufficient unrounded support
+is retained. Rounded child means are not such support: with precision one,
+five equal-count child spreads `0.14, 0.14, 0.04, 0.04, 0.04` store means
+`0.1, 0.1, 0.0, 0.0, 0.0`. Combining those produces `0.0` after rounding,
+whereas the direct parent mean is `0.1`. The same problem applies to confidence
+means, with their distinct non-null support count. Neither rounded-mean
+composition nor an invented floating tolerance is allowed.
+
+Likewise, different raw quotes can round to identical child endpoints.
+Comparing those endpoints cannot safely distinguish a changed transition from
+a stale one. If the first child has incoming carry, the full reconstruction
+requires `previous_event`, the last same-symbol/scope source event before the
+parent. This event participates solely in transition classification; it is
+excluded from parent OHLC, counts, duration, confidence, and event digest.
+Replay must reproduce every child's incoming transition result exactly.
+Independently reset child bars therefore cannot silently become a continuous
+parent. The caller remains responsible for the preceding event's source
+provenance: v1 records transition results, not the incoming quote's identity.
+
+### Frozen equivalence matrix and storage choice
+
+The focused regression matrix compares direct aggregation with finest-child
+aggregation for all seven intervals (`1m`, `5m`, `15m`, `30m`, `1h`, `4h`, `1d`)
+and all three scopes (`observed`, `synthetic`, `merged`). Every complete row
+field, endpoint, count, categorical value, content hash and bar ID must be
+exactly equal; this implementation introduces no numerical tolerance. The
+`1m` row is the explicitly labeled identity base case; every larger interval
+uses qualified `1m` children. Duplicate timestamps retain canonical event
+sequence ordering. Separate cases cover incoming carry across a closure,
+rounded-endpoint collisions, rounded-mean counterexamples, the three-child
+OHLC/count/spread reference, malformed support, and partition failures.
+
+A storage-efficient pyramid may retain qualified fine bars and compute the
+declared bar-only subset on demand. Applications requiring complete v1 rows,
+scientific transition metrics, means, or matching v1 identities must retain or
+reread verified event support. Removing events and claiming those omitted
+fields would require a successor sufficient-statistics and identity contract;
+this module makes no such claim.

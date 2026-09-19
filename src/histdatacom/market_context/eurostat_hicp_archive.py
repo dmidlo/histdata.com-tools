@@ -16,13 +16,16 @@ import math
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date
 from enum import Enum
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any, Final, cast
 from urllib.parse import urljoin, urlsplit
 
+from histdatacom.market_context._source_timestamps import (
+    parse_source_iso_datetime,
+)
 from histdatacom.market_context.contracts import canonical_contract_json
 from histdatacom.market_context.official_sources import (
     OfficialRawSnapshotV1,
@@ -853,7 +856,7 @@ class EurostatHicpDatasetV1:
         label = _required_text(self.label, "label")
         updated = _required_text(self.updated_at, "updated_at")
         try:
-            datetime.fromisoformat(updated)
+            parse_source_iso_datetime(updated)
         except ValueError as exc:
             raise ValueError(
                 "Eurostat HICP dataset update time is invalid"

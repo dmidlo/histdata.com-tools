@@ -16,7 +16,7 @@ import re
 from calendar import monthrange
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date
 from enum import Enum
 from html.parser import HTMLParser
 from io import BytesIO
@@ -31,6 +31,9 @@ from defusedxml.ElementTree import fromstring as safe_xml_fromstring
 from pypdf import PdfReader
 from pypdf.errors import PdfReadError
 
+from histdatacom.market_context._source_timestamps import (
+    parse_source_iso_datetime,
+)
 from histdatacom.market_context.contracts import canonical_contract_json
 from histdatacom.market_context.official_sources import (
     OfficialRawSnapshotV1,
@@ -242,7 +245,7 @@ def _iso_date(value: object, name: str) -> str:
 def _iso_datetime(value: object, name: str) -> str:
     result = _required_text(value, name)
     try:
-        parsed = datetime.fromisoformat(result.replace("Z", "+00:00"))
+        parsed = parse_source_iso_datetime(result.replace("Z", "+00:00"))
     except ValueError as exc:
         raise ValueError(f"{name} must be an ISO timestamp") from exc
     if parsed.tzinfo is None:
@@ -2244,7 +2247,7 @@ def _parse_release_landing(
     published_at = published_values[0] if published_values else None
     if published_at is not None:
         page_dates.add(
-            datetime.fromisoformat(published_at.replace("Z", "+00:00"))
+            parse_source_iso_datetime(published_at.replace("Z", "+00:00"))
             .date()
             .isoformat()
         )
@@ -3074,7 +3077,7 @@ class EurostatIndustrialProductionReleaseV1:
         published_at = _optional_text(self.published_at, "published_at")
         if published_at is not None:
             published_at = _iso_datetime(published_at, "published_at")
-            published_date = datetime.fromisoformat(
+            published_date = parse_source_iso_datetime(
                 published_at.replace("Z", "+00:00")
             ).date()
             if published_date.isoformat() != page_date:
