@@ -2,6 +2,14 @@
 
 ### Added
 
+- **market context**: qualify all 208 source-dated INSEE monthly national
+  industrial-production releases from April 2009 through July 2026; classify
+  all 218 bounded search results, preserve exact publication clocks and three
+  explicit source metadata defects, retain 416 SA-WDA whole-industry and
+  manufacturing changes across four base/layout eras, enumerate the complete
+  1,092-series BDM family catalog, and keep 638 current BDM index observations
+  only as latest-revised inputs to 416 separately labelled growth comparisons,
+  without manufacturing consensus, surprise, or replacement vintages (#539).
 - **market context**: qualify 203 source-dated INSEE monthly national
   business-climate releases across the July 2009 through August 2026 legacy
   and current subtitle eras; preserve three genuine August source gaps, exact

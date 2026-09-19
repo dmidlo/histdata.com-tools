@@ -35,6 +35,7 @@ from histdatacom.market_context.official_adapters import (
     OfficialInseeBusinessClimateParserV1,
     OfficialInseeConsumerConfidenceParserV1,
     OfficialInseeCpiParserV1,
+    OfficialInseeIndustrialProductionParserV1,
     OfficialInseeIloUnemploymentParserV1,
     OfficialInseeQuarterlyGdpParserV1,
     OfficialParserError,
@@ -167,7 +168,7 @@ def test_built_in_parsers_cover_every_registered_source_and_format(
     registry: OfficialSourceRegistryV1,
 ) -> None:
     parsers = built_in_official_source_parsers()
-    assert len(parsers) == 39
+    assert len(parsers) == 40
     assert isinstance(
         parsers["official.ecb-balance-of-payments.v1"],
         OfficialEcbBalanceOfPaymentsParserV1,
@@ -183,6 +184,10 @@ def test_built_in_parsers_cover_every_registered_source_and_format(
     assert isinstance(
         parsers["official.insee-business-climate.v1"],
         OfficialInseeBusinessClimateParserV1,
+    )
+    assert isinstance(
+        parsers["official.insee-industrial-production.v1"],
+        OfficialInseeIndustrialProductionParserV1,
     )
     assert isinstance(
         parsers["official.insee-consumer-confidence.v1"],

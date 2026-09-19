@@ -115,7 +115,7 @@ def test_packaged_ecb_archive_quantifies_the_complete_decision_series() -> None:
     assert manifest.emergency_count == 2
     assert manifest.manifest_id == (
         "ecb-archive-manifest:sha256:"
-        "5bbd8aa0833e31896dfdb055832a79d8fb4ecb6ce41b3043599f970eaf92e1e7"
+        "672c609915e0fb80e2dab1fe6ec5539d0b53cfc5258b08ef50579a7507feee49"
     )
 
 

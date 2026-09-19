@@ -945,6 +945,26 @@ class OfficialInseeBusinessClimateParserV1(OfficialHtmlParserV1):
         return super().parse(snapshot, max_events=max_events)
 
 
+class OfficialInseeIndustrialProductionParserV1(OfficialHtmlParserV1):
+    """Bind INSEE industrial-production Solr, HTML, and BDM artifacts."""
+
+    parser_id = "official.insee-industrial-production.v1"
+    supported_formats: tuple[OfficialSourceFormat, ...] = (
+        OfficialSourceFormat.JSON,
+        OfficialSourceFormat.HTML,
+        OfficialSourceFormat.SDMX_21,
+    )
+
+    def parse(
+        self, snapshot: OfficialRawSnapshotV1, *, max_events: int
+    ) -> Sequence[Mapping[str, JSONValue]]:
+        if snapshot.request.source_format is OfficialSourceFormat.JSON:
+            return _parse_json(self, snapshot, max_events=max_events)
+        if snapshot.request.source_format is OfficialSourceFormat.SDMX_21:
+            return _parse_sdmx(self, snapshot, max_events=max_events)
+        return super().parse(snapshot, max_events=max_events)
+
+
 class OfficialInseeConsumerConfidenceParserV1(OfficialHtmlParserV1):
     """Bind INSEE confidence Solr, release HTML, and BDM artifacts."""
 
@@ -1277,6 +1297,7 @@ _BUILT_IN_PARSER_TYPES: tuple[type[_BaseOfficialParser], ...] = (
     OfficialInseeBusinessClimateParserV1,
     OfficialInseeCpiParserV1,
     OfficialInseeConsumerConfidenceParserV1,
+    OfficialInseeIndustrialProductionParserV1,
     OfficialInseeIloUnemploymentParserV1,
     OfficialInseeQuarterlyGdpParserV1,
     OfficialEurostatConstructionOutputParserV1,
@@ -3416,6 +3437,7 @@ __all__ = [
     "OfficialInseeConsumerConfidenceParserV1",
     "OfficialInseeCpiParserV1",
     "OfficialInseeIloUnemploymentParserV1",
+    "OfficialInseeIndustrialProductionParserV1",
     "OfficialInseeQuarterlyGdpParserV1",
     "OfficialJsonParserV1",
     "OfficialJsonStatParserV1",
