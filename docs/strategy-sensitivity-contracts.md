@@ -58,6 +58,15 @@ the support difference explicit.
   events after the caller supplies the point-in-time session/event context; and
 - `from_derived_bar()` uses the verified bar close and never invents volume.
 
+The legacy `from_derived_bar()` adapter preserves its v1 timestamp meaning:
+the last contributing event time, **not** bar finalization or causal availability.
+It does not establish that a completed candle was available at that time. Use
+it only as a diagnostic projection with independently enforced information
+admissibility; its timestamp alone cannot justify a closed-bar forecasting or
+trading claim. The successor [causal bar-feature contract](causal-bar-features.md)
+requires separate availability evidence and binds the exact decision-time
+snapshot through its consumer path instead of reinterpreting this v1 helper.
+
 Quote streams must be strictly ordered by
 `(event_time_ns,event_sequence,quote_id)`, stay inside the case window, and
 match its symbol, ensemble member, and broker profile where declared.

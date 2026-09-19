@@ -18,6 +18,41 @@ from .contracts import (
     capture_forecast_inputs,
 )
 from .scoring import ForecastScaleV1, ForecastScoreReportV1, ForecastScoreV1
+from .feature_adapters import (
+    calendar_actual_feature_key,
+    calendar_consensus_feature_key,
+    calendar_feature_records,
+    observed_bar_feature,
+)
+from .feature_artifacts import read_feature_artifact, write_feature_artifact
+from .feature_contracts import (
+    FeatureCellStatus,
+    FeatureColumnV1,
+    FeatureDefinitionV1,
+    FeatureEvidenceV1,
+    FeatureKind,
+    FeatureObservationV1,
+    FeaturePeriodV1,
+    FeatureRequestV1,
+    FeatureScheduleV1,
+    FeatureSourceMode,
+    FeatureTransformKind,
+    FeatureTransformV1,
+)
+from .feature_forecasts import (
+    ForecastFeatureInputsV1,
+    ForecastFeatureModelV1,
+    ForecastFeatureScoreV1,
+    ForecastFeatureSnapshotV1,
+    capture_forecast_feature_inputs,
+    forecast_feature_baseline,
+    train_feature_baseline,
+)
+from .feature_store import (
+    FeatureCellV1,
+    FeatureMatrixSnapshotV1,
+    VintageFeatureStoreV1,
+)
 
 __all__ = [
     "ConsensusReferenceV1",
@@ -25,6 +60,10 @@ __all__ = [
     "ForecastCutoffV1",
     "ForecastDistributionV1",
     "ForecastHorizon",
+    "ForecastFeatureInputsV1",
+    "ForecastFeatureModelV1",
+    "ForecastFeatureScoreV1",
+    "ForecastFeatureSnapshotV1",
     "ForecastInputsV1",
     "ForecastModelIdentityV1",
     "ForecastScaleV1",
@@ -36,7 +75,31 @@ __all__ = [
     "PointStatistic",
     "RevisionMeasure",
     "SurpriseReference",
+    "FeatureCellStatus",
+    "FeatureCellV1",
+    "FeatureColumnV1",
+    "FeatureDefinitionV1",
+    "FeatureEvidenceV1",
+    "FeatureKind",
+    "FeatureMatrixSnapshotV1",
+    "FeatureObservationV1",
+    "FeaturePeriodV1",
+    "FeatureRequestV1",
+    "FeatureScheduleV1",
+    "FeatureSourceMode",
+    "FeatureTransformKind",
+    "FeatureTransformV1",
+    "VintageFeatureStoreV1",
+    "calendar_actual_feature_key",
+    "calendar_consensus_feature_key",
+    "calendar_feature_records",
+    "capture_forecast_feature_inputs",
     "capture_forecast_inputs",
+    "forecast_feature_baseline",
+    "observed_bar_feature",
+    "read_feature_artifact",
     "read_forecast_artifact",
+    "train_feature_baseline",
+    "write_feature_artifact",
     "write_forecast_artifact",
 ]

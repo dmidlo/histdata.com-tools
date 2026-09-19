@@ -393,6 +393,7 @@ Info:
 
 Commands:
   analytics   Run offline data analytics operations
+  broker-plugins  Inspect installed broker plugins offline
   cleanup     Remove transient source artifacts
   datasets    Resolve and verify versioned local datasets
   groups      List instrument groups and major triangles
@@ -402,6 +403,7 @@ Commands:
   runtime     Inspect and manage the orchestration runtime
 
 Run `histdatacom analytics --help` for analytics commands.
+Run `histdatacom broker-plugins --help` for plugin inventory.
 Run `histdatacom cleanup --help` for cleanup commands.
 Run `histdatacom datasets --help` for dataset commands.
 Run `histdatacom groups --help` for group discovery commands.

@@ -1415,6 +1415,7 @@ def main(
         cli_args,
         {
             "analytics",
+            "broker-plugins",
             "cleanup",
             "datasets",
             "groups",
@@ -1424,6 +1425,12 @@ def main(
             "runtime",
         },
     )
+    if not options and routed_command == "broker-plugins":
+        from histdatacom.broker_plugin_registry.cli import main as plugins_main
+
+        return plugins_main(
+            remove_routed_command_from_cli_args(cli_args, "broker-plugins")
+        )
     if not options and routed_command == "cleanup":
         from histdatacom.cleanup_cli import main as cleanup_main
 

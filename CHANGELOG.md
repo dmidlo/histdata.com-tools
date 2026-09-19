@@ -2,6 +2,18 @@
 
 ### Added
 
+- **broker plugins**: discover separately installed wheels through a frozen
+  metadata-only entry-point group; inspect and select bounded, deterministic
+  declarations without importing plugins or reading secrets; preserve exact
+  software inventories in capture and experiment bindings (#616).
+- **forecasting**: add a bounded real-time vintage feature store with ragged
+  missingness, cutoff-qualified metadata and schedules, separate revision news,
+  causal transforms, and full feature-aware training, prediction, scoring and
+  artifact replay without changing the calendar-only v1 contracts (#561).
+- **reconstruction**: add causal closed-bar snapshots with explicit availability
+  declarations, fixed-window indicators, exact replayed evidence and missingness;
+  integrate additive motif, strategy, fingerprint and training consumers while
+  keeping legacy contracts and scientific qualification gates unchanged (#649).
 - **broker plugins**: freeze a dependency-isolated public SDK v1.0.0 with
   immutable canonical lifecycle, instrument, event, clock, health, diagnostic,
   and extension contracts; verify external plugin execution and installed-wheel

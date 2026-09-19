@@ -162,6 +162,7 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
             epilog=(
                 "Commands:\n"
                 "  analytics   Run offline data analytics operations\n"
+                "  broker-plugins  Inspect installed broker plugins offline\n"
                 "  cleanup     Remove transient source artifacts\n"
                 "  datasets    Resolve and verify versioned local datasets\n"
                 "  groups      List instrument groups and major triangles\n"
@@ -170,6 +171,7 @@ class ArgParser(argparse.ArgumentParser):  # noqa:H601
                 "  reconstruction  Plan, run, and inspect reconstruction\n"
                 "  runtime     Inspect and manage the orchestration runtime\n\n"
                 "Run `histdatacom analytics --help` for analytics commands.\n"
+                "Run `histdatacom broker-plugins --help` for plugin inventory.\n"
                 "Run `histdatacom cleanup --help` for cleanup commands.\n"
                 "Run `histdatacom datasets --help` for dataset commands.\n"
                 "Run `histdatacom groups --help` for group discovery commands.\n"
