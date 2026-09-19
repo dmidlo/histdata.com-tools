@@ -112,6 +112,16 @@ separately labelled latest-revised cross-checks; they are not historical
 publication vintages. See the [euro-area, Germany, and France
 backfill](euro-area-germany-france-backfill.md).
 
+The supplemental INSEE quarterly-GDP entry is `empirically-verified` for
+France's paired national publication stages. One bounded English Solr query
+accounts for all 336 results and selects 40 gap-free first estimates plus 40
+gap-free detailed releases from 2016-Q3 through 2026-Q2. The release pages
+retain source-authored headline q/q values and 40 directly comparable stage
+deltas. Base-2020 BDM series `011794844` from 2000-Q1 remains a separately
+labelled latest-revised cross-check, not a historical publication vintage. See
+the [euro-area, Germany, and France
+backfill](euro-area-germany-france-backfill.md).
+
 The supplemental Eurostat GDP entry is `empirically-verified` for the
 quarterly euro-area publication lineage. Ten official Atom-search pages, 279
 source-dated landing pages, and all 248 discovered English release documents

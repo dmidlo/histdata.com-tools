@@ -119,7 +119,8 @@ shapes and official fixture URIs for BLS JSON, ECB SDMX, Eurostat GDP,
 monthly-unemployment, monthly-industrial-production, construction-output,
 monthly-retail-trade, monthly-goods-trade, and quarterly-labour-cost
 Atom/JSON-stat inputs, the ECB balance-of-payments FOEDB JSON plus release
-HTML/PDF corpus, INSEE CPI Solr JSON, release HTML, and BDM SDMX, Statistics
+HTML/PDF corpus, INSEE CPI and quarterly-GDP Solr JSON, release HTML, and BDM
+SDMX, Statistics
 Norway JSON-stat, RBNZ spreadsheets, Federal Reserve HTML/PDF, and RBA archive
 indexes. Separate
 fixtures cover SDMX

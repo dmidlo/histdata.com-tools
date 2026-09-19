@@ -268,11 +268,11 @@ def test_packaged_archive_quantifies_the_complete_corpus() -> None:
     )
     assert manifest.manifest_id == (
         "eurostat-labour-cost-archive-manifest:sha256:"
-        "a393c7d209dca0901d348f50ce62317a7fded2a17df915dcf3a6943a07f23851"
+        "1401dac438d4421bc2485f4c8b382a4c3a393341ae5175e6aa19d1aac01bc489"
     )
     assert path.stat().st_size == 2_961_196
     assert sha256(path.read_bytes()).hexdigest() == (
-        "c09b5fd3670d7ddf7199416d27c92a3af6b931082560f925bf1e210a0130e2d8"
+        "32093a6344205010ecea0b20a0925ad1b31b2f38fb53764b38de4874a2051145"
     )
 
 

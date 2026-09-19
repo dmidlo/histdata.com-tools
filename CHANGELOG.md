@@ -2,6 +2,12 @@
 
 ### Added
 
+- **market context**: qualify 40 paired INSEE quarterly-GDP first estimates
+  and detailed releases from 2016-Q3 through 2026-Q2; account for all 336
+  bounded search results, preserve exact publication clocks and semantic table
+  locators, quantify 40 signed stage revisions, and retain base-2020 BDM series
+  `011794844` only as a separately labelled latest-revised cross-check without
+  manufacturing earlier paired stages, consensus, or surprise values (#539).
 - **market context**: qualify the gap-free May 2009 through August 2026 INSEE
   final CPI release lineage and January 2016 through August 2026 provisional
   lineage; preserve all 583 bounded search results, exact source timestamps,
