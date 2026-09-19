@@ -71,7 +71,7 @@ def test_packaged_insee_cpi_archive_quantifies_complete_lineage() -> None:
     assert manifest.nonzero_revision_count == 106
     assert manifest.manifest_id == (
         "insee-cpi-archive-manifest:sha256:"
-        "53de431fe631f386260ed02999256738f00126cedc8b0e53667344cc76b0ced0"
+        "27547e62d679aa01e154bc4b2df817b7a222cef9faf62574ed0b4b9aeec8bb99"
     )
     assert packaged_insee_cpi_manifest_path().is_file()
 

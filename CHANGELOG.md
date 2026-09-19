@@ -2,6 +2,13 @@
 
 ### Added
 
+- **market context**: qualify 69 source-dated INSEE quarterly ILO-unemployment
+  releases from 2009-Q1 through 2026-Q2, preserve the documented 2013-Q1
+  source-artifact gap, exact publication clocks, scope-labelled total rates
+  across changing geographic and table eras, and 94 current BDM observations
+  for series `011818543` as a separately labelled latest-revised cross-check;
+  compare only the one exact-scope France occurrence and do not manufacture
+  the missing release, consensus, surprise, or historical revisions (#539).
 - **market context**: qualify 40 paired INSEE quarterly-GDP first estimates
   and detailed releases from 2016-Q3 through 2026-Q2; account for all 336
   bounded search results, preserve exact publication clocks and semantic table

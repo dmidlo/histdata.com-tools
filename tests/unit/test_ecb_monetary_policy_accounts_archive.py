@@ -50,11 +50,11 @@ def test_packaged_ecb_accounts_quantify_the_complete_foedb_series() -> None:
     assert manifest.maximum_release_lag_days == 64
     assert manifest.manifest_id == (
         "ecb-account-archive-manifest:sha256:"
-        "cc661ae489915e7cfcaba859f6cec1fd6388becb59c6ee067da081a039f60cbc"
+        "87bc369afdfe14ba8009bdcd9ea9f33ff430c87b91fc14a4f49addf352c52bf5"
     )
     assert manifest.decision_archive_manifest_id == (
         "ecb-archive-manifest:sha256:"
-        "06229356def64b68871de49d7d29015b8fd131a15d449bfbb245687fcd8464de"
+        "db5c97e3b2598712410b044812149d8883ccefe489357fd28e2d08d317fa3a97"
     )
     assert packaged_ecb_monetary_policy_accounts_manifest_path().is_file()
 
