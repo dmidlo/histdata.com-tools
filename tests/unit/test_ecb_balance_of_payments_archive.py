@@ -60,7 +60,7 @@ def test_packaged_ecb_bop_archive_quantifies_complete_monthly_lineage() -> None:
     assert manifest.revision_disclosure_count == 293
     assert manifest.manifest_id == (
         "ecb-balance-of-payments-archive-manifest:sha256:"
-        "e3f61f20bed7d4a83899f1f740da778327305053ea0174ed13a0a1c10cb03ea3"
+        "5d9d17be8c108871b4719f717db6d29595008095f338c6a63b14cf09a7d24c33"
     )
     assert packaged_ecb_balance_of_payments_manifest_path().is_file()
 

@@ -5017,6 +5017,101 @@
     },
     {
       "schema_version": "histdatacom.official-source-entry.v1",
+      "source_key": "fr.insee.consumer-confidence",
+      "economy_code": "FR",
+      "economy_name": "France",
+      "institution": "Institut national de la statistique et des études économiques",
+      "jurisdiction": "French Republic",
+      "legal_producer": true,
+      "roles": [
+        "official-archive",
+        "release-calendar"
+      ],
+      "event_families": [
+        "confidence-survey"
+      ],
+      "indicator_ids": [
+        "official-confidence-and-tendency-surveys"
+      ],
+      "formats": [
+        "json",
+        "html",
+        "sdmx-2.1"
+      ],
+      "capabilities": [
+        "current-values",
+        "historical-observations",
+        "historical-vintages",
+        "publication-metadata",
+        "schedule-metadata",
+        "revision-metadata",
+        "series-metadata",
+        "archive-enumeration"
+      ],
+      "endpoint_uri_template": "https://www.insee.fr/en/solr/consultation",
+      "allowed_hosts": [
+        "www.insee.fr",
+        "bdm.insee.fr"
+      ],
+      "expected_media_types": [
+        "application/json",
+        "text/html",
+        "application/xml"
+      ],
+      "source_series_ids": [
+        "001587668"
+      ],
+      "source_table_ids": [
+        "102414547"
+      ],
+      "source_release_ids": [
+        "Monthly consumer confidence survey"
+      ],
+      "release_calendar_uri": "https://www.insee.fr/en/information/2107811",
+      "archive_uri": "https://www.insee.fr/en/solr/consultation",
+      "source_timezone": "Europe/Paris",
+      "availability_time_precision": "exact-second",
+      "dst_convention": "Solr dateDiffusion timestamps are UTC; retain exact lexical precision and convert with Europe/Paris from the IANA zone database.",
+      "historical_depth": "The qualified English monthly consumer-confidence release-page lineage covers 203 of 207 months from June 2009 through August 2026, with four August source-artifact gaps through 2012; current revised first-factor BDM observations from January 2000 are retained only as an explicit cross-check.",
+      "known_breaks": [
+        "The official English lineage omits August 2009, 2010, 2011, and 2012; no occurrences are fabricated for those source gaps.",
+        "The September 2011 English subtitle retains the source-authored spelling Septembre.",
+        "INSEE withdrew the January 2023 publication body after detecting a significant error and links to the February correction; the archive retains that release with no published value.",
+        "Release pages expose arithmetic-mean, normalized-synthetic-index, and factor-analysis methodology evidence across presentation eras; the adapter binds the observed method and compares only exact first-factor matches.",
+        "The current BDM series is revised and backcast latest-state data, not a substitute for contemporaneous release-page values."
+      ],
+      "revision_behavior": "Release-page values are preserved as distinct source-dated occurrences with explicit method, metric, unit, adjustment, geography, and source locator. Current BDM observations remain separately labelled latest-state cross-checks and are compared only for exact factor-analysis method matches.",
+      "rate_limit": "No stable public limit is published; refreshes use bounded sequential requests, retained-file resume, Retry-After handling, exponential backoff, and six attempts.",
+      "authentication": "none",
+      "credential_env_name": null,
+      "credential_header_name": null,
+      "credential_parameter_name": null,
+      "credential_path_placeholder": null,
+      "terms_uri": null,
+      "fallback_source_keys": [],
+      "parser_id": "official.insee-consumer-confidence.v1",
+      "parser_version": "1",
+      "replay_strategy": "Retain the exact POST body and response for the bounded English Solr query, every selected release page, the exact BDM family-catalog response, and the bounded SDMX response; bind request/parser identities, content lengths and SHA-256 digests, complete selected and excluded result accounting, exact source timestamps, semantic value locators and methods, the four documented source gaps, and exact-method latest-revised comparisons before accepting offline replay.",
+      "adapter_owner": "market-context/fr",
+      "verification_status": "empirically-verified",
+      "reviewed_on": "2026-09-18",
+      "verification_evidence_uris": [
+        "https://www.insee.fr/en/solr/consultation",
+        "https://www.insee.fr/en/statistiques/1561597",
+        "https://www.insee.fr/en/statistiques/9038311",
+        "https://www.insee.fr/en/statistiques/series/ajax/consultation",
+        "https://bdm.insee.fr/series/sdmx/data/SERIES_BDM/001587668?startPeriod=2000-01&endPeriod=2026-08"
+      ],
+      "redistribution_notes": "The package retains a compact hash-bound normalized manifest; exact Solr, HTML, catalog, and SDMX response bytes remain in an external operator-owned corpus subject to INSEE terms and attribution.",
+      "limitations": [
+        "The archive does not fabricate occurrences for the four documented August source gaps.",
+        "The withdrawn January 2023 release is not assigned either its erroneous value or a later revised value.",
+        "No market-consensus history is available, so surprise values are not manufactured.",
+        "Latest revised BDM observations are never represented as first-published vintages."
+      ]
+    },
+    {
+      "schema_version": "histdatacom.official-source-entry.v1",
       "source_key": "fr.insee.ilo-unemployment",
       "economy_code": "FR",
       "economy_name": "France",

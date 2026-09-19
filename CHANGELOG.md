@@ -2,6 +2,14 @@
 
 ### Added
 
+- **market context**: qualify 203 source-dated INSEE monthly
+  consumer-confidence releases from June 2009 through August 2026; preserve
+  four genuine August source gaps, exact publication clocks, changing
+  arithmetic-mean/synthetic-index/factor-analysis methodology, and the
+  explicitly withdrawn January 2023 value with its official February
+  correction link; retain 320 current BDM observations for series `001587668`
+  only as a latest-revised cross-check, with 93 exact-method comparisons and
+  no manufactured consensus, surprise, or replacement vintage (#539).
 - **market context**: qualify 69 source-dated INSEE quarterly ILO-unemployment
   releases from 2009-Q1 through 2026-Q2, preserve the documented 2013-Q1
   source-artifact gap, exact publication clocks, scope-labelled total rates

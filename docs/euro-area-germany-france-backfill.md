@@ -26,7 +26,7 @@ guess or a third-party calendar. Replay retains and verifies:
 
 The retained corpus contains 42,121,110 bytes and 383 distinct SHA-256
 digests. Its compact packaged receipt is
-`ecb-archive-manifest:sha256:db5c97e3b2598712410b044812149d8883ccefe489357fd28e2d08d317fa3a97`.
+`ecb-archive-manifest:sha256:ead8e30609b54a9fb074f71b998ae7902188b53f85a85e961b433183749a4a66`.
 
 Each decision preserves a native `RATE_SET` with separate components for the
 main refinancing operations, marginal lending facility, and deposit facility.
@@ -70,7 +70,7 @@ qualifies all 96 FOEDB type-20 accounts published from 19 February 2015 through
 27 August 2026. The selection retains 83 versioned FOEDB database artifacts
 and all 96 official HTML pages: 179 artifacts, 26,253,142 bytes, and 179 unique
 SHA-256 digests. Its packaged receipt is
-`ecb-account-archive-manifest:sha256:87bc369afdfe14ba8009bdcd9ea9f33ff430c87b91fc14a4f49addf352c52bf5`.
+`ecb-account-archive-manifest:sha256:9a30d9e1cb417caa219129210df3b23ff00f1d7475d6df0ecdc2c0fcd6cf1964`.
 
 Replay parses the source-authored meeting dates rather than inferring them from
 publication dates. It preserves three observed title eras (35 generic titles,
@@ -106,7 +106,7 @@ that FOEDB stores under the same broad type and historical path family.
 Replay retains the 83 versioned FOEDB artifacts and all 270 official statement
 pages: 353 artifacts, 48,734,109 bytes, and 353 unique SHA-256 digests. Its
 packaged receipt is
-`ecb-statement-archive-manifest:sha256:dc266686dc264e11d3b7b90014b3aeabdfc485553b785532f1664dda66938d8c`.
+`ecb-statement-archive-manifest:sha256:1480419f093a3ff2fc4ed0caceb2c3dec07e1d36b8dcff2bf941998fcdf2028a`.
 Every page contains exactly one of nine observed historical heading forms and
 every retained statement links to exactly one qualified decision occurrence.
 
@@ -139,7 +139,7 @@ projection rounds for 2000 through May 2004 from unrelated publications.
 Replay retains the 83 versioned FOEDB artifacts, the all-releases index, 90
 official PDFs, and the 31 available HTML counterparts: 205 artifacts,
 43,393,009 bytes, and 205 distinct SHA-256 digests. Its packaged receipt is
-`ecb-projection-archive-manifest:sha256:5b730007a8f5610d9791462bd4e6c48e1247865c1d7e2047034f84c67029ee10`.
+`ecb-projection-archive-manifest:sha256:41a3ae4cc6a7b162f75100be13e1e498049c3f024e8eb58a6bafcc303b5b93f5`.
 The inventory contains 45 ECB staff rounds in March/September and 45
 Eurosystem staff rounds in June/December. It also preserves the September 2006
 round's early 31 August publication date instead of forcing the release date
@@ -184,7 +184,7 @@ Replay retains the 83 versioned FOEDB artifacts and every document named by
 the 321 selected records: 248 PDFs and 96 HTML pages. The resulting 427
 artifacts contain 62,669,957 bytes and 427 distinct SHA-256 digests. The
 packaged receipt is
-`ecb-monetary-developments-archive-manifest:sha256:366f1f829dd61674269a2fb7befd17251fe6e1567262740776328665dc620926`.
+`ecb-monetary-developments-archive-manifest:sha256:b327371e16070f27be2525f395314da0d72352276ea09a7ac5f3d3a96c8bf22f`.
 The in-window source-format eras comprise 224 PDF-only releases, 73 HTML-only
 releases, and 23 releases with both English HTML and a localized PDF. Localized
 PDFs remain hashed evidence; values come from the corresponding English HTML.
@@ -279,9 +279,9 @@ retained as an explicit source-date correction. No intraday clock is inferred.
 
 The compact receipt binds 829 raw artifacts, 189,367,122 bytes, and 829
 distinct SHA-256 digests. Its identity is
-`eurostat-hicp-archive-manifest:sha256:249385d6ffb0db4bcbe4d9f5e7ce00e7257c3ca380ee0cd8a023b812035a7537`.
+`eurostat-hicp-archive-manifest:sha256:a26c6f405dfaa4bc5303cbae29749bf98a2ab7ae58ce5074aace1e0b5008ca56`.
 The current registry-bound packaged JSON is 2,988,977 bytes with SHA-256
-`0edbd074bea4fc40fc9c9fbf0109849bef958e357c4a6d530c12fb3e93fab227`.
+`fda1006c8ee7ed8eba9d0fa95bc3cdcb23944c19020aae54662abb3160bdeca4`.
 The release-page/date audit records 40 page offsets and 15 migrated-card
 offsets of one day.
 
@@ -361,9 +361,9 @@ earlier flash and first-estimate artifacts remain unavailable. The compact
 receipt binds 538 raw artifacts and 538 distinct SHA-256 digests totaling
 118,956,446 bytes: ten search pages, one revised-series response, 279
 source-dated landings, and 248 English release documents. Its identity is
-`eurostat-gdp-archive-manifest:sha256:c7c4a03e7e24add77554e2d7e81e62e1dfe4697f1ae0e852bb1df6230d0f56b7`.
+`eurostat-gdp-archive-manifest:sha256:08dae50c2631feef40c532c0c860d7e136ed158395b70d86aa2406b685edee65`.
 The current registry-bound packaged JSON is 1,973,058 bytes with SHA-256
-`65ac3b38661b12d6daaf895a622583f8587860b7e31a977bee824fcae6e74dcf`.
+`e1e2e87d8b5039d32cfa1b93a6b10616d04350b51f038d7c41eb962e53c82079`.
 
 The independently retained `namq_10_gdp` JSON-stat response contributes 636
 current revised observations: quarter-over-quarter and year-over-year real-GDP
@@ -453,9 +453,9 @@ release-to-release cells, of which 4,358 changed, plus 5,590 comparisons with
 the current dataset, of which 5,384 changed. The 493 retained artifacts have
 493 unique digests and total 149,658,751 bytes. Two independent offline
 rebuilds produced the same 6,690,664-byte canonical JSON file, manifest
-identity `f65fb8d0a78795a7e7dcea75455cf14a160c29cca26fe1a321c285e31ec4d9c9`,
+identity `7003f1ca2ba3af1e7c4bbfa1fe5584e51c6236c66011bcc1cbf66fd27c5a336a`,
 and file SHA-256
-`bcb1dc3b57a4d1408d2c6674de062489d6e9488e54354df94cb8c94316d0f5d4`.
+`6f16761f266d6d2d58c50f4c3b81ecb07f4c160d102cb68db3cac85dee74f714`.
 
 An operator with the exact retained corpus can rebuild or replay the receipt
 with:
@@ -529,10 +529,10 @@ records 3,146 within-scope consecutive revision comparisons, of which 1,144
 change, plus 2,683 comparisons with the retained current dataset, of which
 2,248 differ. The receipt binds 565 raw artifacts and 565 distinct SHA-256
 digests totaling 134,483,606 bytes. Its identity is
-`eurostat-unemployment-archive-manifest:sha256:6853481b8739ed84d73ae535ea0bc8adf3fdaf60660869a0947a3e1c993064c0`.
+`eurostat-unemployment-archive-manifest:sha256:1c2ab74de78baa046becd1eb63284226d1cd4cb25dcce624afd48b2af26c5fc2`.
 Two fresh offline rebuilds produced byte-identical 3,577,040-byte packaged JSON
 with SHA-256
-`53eefe834c061461242349cb7033f787b2cb14ab5d6f8b3415f858aac88e6274`.
+`ca1d4b576edf1f161d583e256a32c959d1fdf3a8239b85aa99c30373f4529260`.
 
 The independently retained `une_rt_m` JSON-stat response declares the monthly
 cube from January 2000 through August 2026 and contains 957 non-null revised
@@ -601,10 +601,10 @@ within-scope consecutive revision comparisons, of which 4,660 change, plus
 6,936 comparisons with the retained current dataset, of which 6,473 differ.
 The receipt binds 573 raw artifacts and 573 distinct SHA-256 digests totaling
 151,722,249 bytes. Its identity is
-`eurostat-industrial-production-archive-manifest:sha256:a286279197c5a81999a0b8b6b98cf10dfe82ff06352d52b922b4899e013f5763`.
+`eurostat-industrial-production-archive-manifest:sha256:872d8c6ae052e559710623403d49f4f97fb4dd969332a3772cef22e7c8d87ea6`.
 Two fresh offline rebuilds produced byte-identical 7,767,781-byte packaged JSON
 with SHA-256
-`f2e076b818d978a60a9facad1e849d572a6ea933b288a3ee17e5bb4507b07e8d`.
+`e2ab13f3a2a3ac3fb0a76a8304d6e459fe91e3851bcf9927728be1e3be43efce`.
 
 The independently retained `sts_inpr_m` JSON-stat response declares January
 2000 through July 2026 and contains 1,914 non-null revised observations: both
@@ -686,10 +686,10 @@ euro-area composition.
 
 The receipt binds 571 raw artifacts and 571 distinct SHA-256 digests totaling
 156,617,385 bytes. Its identity is
-`eurostat-retail-trade-archive-manifest:sha256:a30a93b79de494781f442ec8de02da249b76a49a266f6fa7017e24462faa4cea`.
+`eurostat-retail-trade-archive-manifest:sha256:f467e28bf91e58608b0233716d2288e98a974710c97a267e6b2ddac5e11fea61`.
 Two fresh offline rebuilds produced byte-identical 6,566,066-byte canonical
 JSON with SHA-256
-`b166c4403621e6c7ba4485888dbbfcb99bf4462bf70cd63dcaab82d23a915911`.
+`eb259279f9dd3a0d9bb1d3cf33582100109ce5791803c0fca831ae5964989196`.
 
 An operator with the exact retained corpus can rebuild or replay the receipt
 with:
@@ -764,9 +764,9 @@ change. It also records 84 comparisons with the current EA21 dataset, of which
 67 differ. Its 319 retained artifacts have 319 distinct SHA-256 digests and
 total 104,536,218 bytes. Two fresh offline rebuilds produced byte-identical
 2,816,352-byte canonical JSON with manifest identity
-`eurostat-international-trade-goods-archive-manifest:sha256:2e7b0bb389aeea4040569b09bbf41cee32c8079083b67b8825d75ffbf8eca148`
+`eurostat-international-trade-goods-archive-manifest:sha256:2de70fec92dd6a176cc16ce5aa83469fabc624eb3deb1407d67e0c8adc786907`
 and file SHA-256
-`9a7aca343ff342b558bf64e1564cc018a57ed2fa3908f6a7a4eb2287987afa50`.
+`3ecaa4493508c3e51dd21adaee5504d51808b8ea68d9d3cbc824a3ca647d7621`.
 
 An operator with the exact retained corpus can rebuild or replay the receipt
 with:
@@ -830,9 +830,9 @@ is revised-series evidence, not a reconstruction of historical vintages.
 The receipt binds 192 distinct official artifacts totaling 51,057,206 bytes.
 Two fresh offline rebuilds produced byte-identical 2,961,196-byte canonical
 JSON with manifest identity
-`eurostat-labour-cost-archive-manifest:sha256:37b9bc3aa2eea6b76e85d6b10e75011e72f6b603f01fd16dc596eafc782abd7c`
+`eurostat-labour-cost-archive-manifest:sha256:e849ce9ddc66cbec2c2b8f19d2cad0036aef2bb90c56df59e9e646771bae4b75`
 and file SHA-256
-`243a1d0c6972ec7bab5c46e619a90e9ef69e51e61463e33b6814cd4e3c70411f`.
+`f8dcd526297dd6beecff6b55dfc02fd03659c4c089dafab7910fe8ada78bd332`.
 
 An operator with the exact retained corpus can rebuild or replay the receipt
 with:
@@ -887,9 +887,9 @@ projected backward or represented as historical release evidence.
 
 Two fresh offline rebuilds produced byte-identical 1,431,830-byte canonical
 JSON with manifest identity
-`ecb-balance-of-payments-archive-manifest:sha256:e3f61f20bed7d4a83899f1f740da778327305053ea0174ed13a0a1c10cb03ea3`
+`ecb-balance-of-payments-archive-manifest:sha256:5d9d17be8c108871b4719f717db6d29595008095f338c6a63b14cf09a7d24c33`
 and file SHA-256
-`f19622cbd5d527abbe2abe26fc6993e521570ee801aecf5804ee493b8e6a0b26`.
+`03630a3d923ff749fdd311131659745b6354f91ce2e061ebf77b9f070e4bff9e`.
 
 An operator with the exact retained corpus can rebuild or replay the receipt
 with:
@@ -936,9 +936,9 @@ market consensus, or surprise value is fabricated.
 The receipt binds 343 distinct official artifacts totaling 29,835,873 bytes.
 Two offline rebuilds produced byte-identical 1,013,056-byte canonical JSON with
 manifest identity
-`insee-cpi-archive-manifest:sha256:27547e62d679aa01e154bc4b2df817b7a222cef9faf62574ed0b4b9aeec8bb99`
+`insee-cpi-archive-manifest:sha256:4b02397f5d5c4e52162c47e74bafebeaf9994c579e571d317b28072fd1b17853`
 and file SHA-256
-`52279abbbe4f2bbedfa719adea2e73f8beebedbc905cd49960951d9c0d120d03`.
+`e2c71467e6a80c89c29086daa5beb0fa81e66272cada08461c414914db88e70d`.
 
 An operator with the exact retained corpus can rebuild and replay the receipt
 without network access:
@@ -982,9 +982,9 @@ values are not inferred by this slice.
 The receipt binds 82 distinct official artifacts totaling 10,434,107 bytes.
 Two fresh offline rebuilds produced byte-identical 190,282-byte canonical JSON
 with manifest identity
-`insee-gdp-archive-manifest:sha256:c706b35041df30795bbdbdb6549096bb4f924e4dd0ce0ca73b92e771b5844be2`
+`insee-gdp-archive-manifest:sha256:9889cfc750522437c3ddcc5960406214248c5240f451acae7d8a797cf8e74b2d`
 and file SHA-256
-`92f2f706accec16626d2e7ce1b7e0b7044f2734d0de80c3b63ebf1e6af450b65`.
+`3e93ab8d211e66ace0325b0abac4d7502061ed12da7d5cd92847bb100f0560ec`.
 
 An operator with the exact retained corpus can rebuild and replay the receipt
 without network access:
@@ -1032,9 +1032,9 @@ revisions are not manufactured.
 The receipt binds 72 distinct official artifacts totaling 10,889,565 bytes.
 Two offline rebuilds produced byte-identical 150,343-byte canonical JSON with
 manifest identity
-`insee-unemployment-archive-manifest:sha256:4872670d7e80e9fab2cafc2b2642f54b44e8b2a5d15e9061735abf3717ab693e`
+`insee-unemployment-archive-manifest:sha256:2b80a04fe524e3df16a2482db4c845f0f2129520a1658e708135bbfe1c604c45`
 and file SHA-256
-`d9b3bc0b977b0c35dc773b7cfe3c324876acf8b77ec83f1f1f303686084bd0a5`.
+`68acf0cdaca2c9b2a54858bdeaa926328f8d32d5c8983b7ec41001b3990bf8e1`.
 
 An operator with the exact retained corpus can rebuild and replay the receipt
 without network access:
@@ -1043,6 +1043,54 @@ without network access:
 uv run python scripts/refresh_insee_unemployment_archive.py \
   --as-of 2026-09-18 \
   --source-directory /path/to/retained-insee-unemployment-corpus
+```
+
+`--fetch-missing` is explicit. Acquisition is sequential and resumable, limits
+responses to 64 MiB, uses registered INSEE hosts and formats, honors
+`Retry-After`, applies bounded exponential backoff, and stops after six
+attempts.
+
+## INSEE French monthly consumer-confidence archive
+
+`histdatacom.market_context.insee_consumer_confidence_archive` qualifies the
+official monthly household-confidence publication lineage directly from
+INSEE. The bounded English Solr query returned 215 results as of 31 August
+2026. The exact subtitle rule retains 203 releases from June 2009 through
+August 2026 and classifies all 12 other results. Four absent August releases
+in 2009 through 2012 remain explicit source-artifact gaps; the archive does not
+invent them.
+
+Every selected page preserves its exact Solr `dateDiffusion` timestamp in UTC
+and `Europe/Paris`, source title and subtitle, content digest, and semantic
+table locator. The 202 retained values keep their source-authored lexical
+form, France scope, seasonal adjustment, normalized-index unit, and observed
+arithmetic-mean, normalized-synthetic-index, or factor-analysis method. INSEE
+withdrew the January 2023 publication body after identifying a significant
+error. That release remains in the inventory with no value and with INSEE's
+explicit February correction URI; neither the erroneous value nor a later
+revision is substituted into the historical occurrence.
+
+The exact BDM family catalog identifies first-factor series `001587668`. Its
+SDMX response retains 320 latest-revised observations from January 2000
+through August 2026. The 93 comparisons join only release values that declare
+the same factor-analysis method and reference month. Current backcast values
+never replace source-dated release values, and unavailable market consensus or
+surprise history is not manufactured.
+
+The receipt binds 206 distinct official artifacts totaling 38,294,506 bytes.
+Two offline rebuilds produced byte-identical 354,429-byte canonical JSON with
+manifest identity
+`insee-consumer-confidence-archive-manifest:sha256:8c6d64176da7de47619fc2355ad80763a07311ec41ca3874ab6aa1ec71969946`
+and file SHA-256
+`c88bbee69ff5cd3b849ec176446a1123da83de0dab74a05a37b98164b2355063`.
+
+An operator with the exact retained corpus can rebuild and replay the receipt
+without network access:
+
+```console
+uv run python scripts/refresh_insee_consumer_confidence_archive.py \
+  --as-of 2026-08-31 \
+  --source-directory /path/to/retained-insee-consumer-confidence-corpus
 ```
 
 `--fetch-missing` is explicit. Acquisition is sequential and resumable, limits
@@ -1060,7 +1108,8 @@ complete four ECB monetary-policy artifact families, the selected euro-area
 money/credit lineage, the harmonized inflation and aggregate-GDP anchors, and
 the first labour-market, earnings, production, external-account, and French
 national-inflation, quarterly-GDP-stage, and quarterly-ILO-unemployment slices,
-not issue #539 as a whole. Other euro-area employment, earnings, and survey
+plus the first French confidence-survey slice, not issue #539 as a whole.
+Other euro-area employment, earnings, and survey
 releases, the remaining ECB statistical families, Destatis and Bundesbank
 programs for Germany, and the remaining INSEE and Banque de France programs
 for France still require their own empirical archive qualifications before the
@@ -1097,3 +1146,5 @@ Official entrypoints:
 - [INSEE quarterly GDP series](https://bdm.insee.fr/series/sdmx/data/CNT-2020-PIB-EQB-RF?startPeriod=2000-Q1&endPeriod=2026-Q2)
 - [INSEE quarterly ILO-unemployment release](https://www.insee.fr/en/statistiques/9033057)
 - [INSEE BDM SDMX unemployment series](https://bdm.insee.fr/series/sdmx/data/SERIES_BDM/011818543?startPeriod=2000-Q1&endPeriod=2026-Q2)
+- [INSEE monthly consumer-confidence release](https://www.insee.fr/en/statistiques/9038311)
+- [INSEE BDM SDMX consumer-confidence series](https://bdm.insee.fr/series/sdmx/data/SERIES_BDM/001587668?startPeriod=2000-01&endPeriod=2026-08)

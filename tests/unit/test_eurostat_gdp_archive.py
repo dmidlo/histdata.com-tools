@@ -10,7 +10,6 @@ import pytest
 from pypdf.errors import PdfReadError
 
 import histdatacom.market_context.eurostat_gdp_archive as gdp_archive
-
 from histdatacom.market_context import (
     EUROSTAT_GDP_AS_OF_DATE,
     EUROSTAT_GDP_DOCUMENT_COUNT,
@@ -117,7 +116,7 @@ def test_packaged_gdp_archive_quantifies_inventory_dataset_and_releases() -> (
     assert manifest.total_content_bytes == 118_956_446
     assert manifest.manifest_id == (
         "eurostat-gdp-archive-manifest:sha256:"
-        "c7c4a03e7e24add77554e2d7e81e62e1dfe4697f1ae0e852bb1df6230d0f56b7"
+        "08dae50c2631feef40c532c0c860d7e136ed158395b70d86aa2406b685edee65"
     )
     assert packaged_eurostat_gdp_manifest_path().is_file()
 
