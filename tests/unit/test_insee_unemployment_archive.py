@@ -61,7 +61,7 @@ def test_packaged_insee_unemployment_archive_quantifies_lineage() -> None:
     assert manifest.compatible_comparison_count == 1
     assert manifest.manifest_id == (
         "insee-unemployment-archive-manifest:sha256:"
-        "2b80a04fe524e3df16a2482db4c845f0f2129520a1658e708135bbfe1c604c45"
+        "0a960d98dbcf0fa70e706afb23e3e2ffb2086338db118c6c6ff55a0997d0c8dd"
     )
     assert packaged_insee_unemployment_manifest_path().is_file()
 
@@ -72,7 +72,7 @@ def test_insee_unemployment_registry_entry_is_empirically_verified() -> None:
 
     assert registry.registry_id == (
         "official-source-registry:sha256:"
-        "810006f91427c3d8b85d58c004132a9d06281293504dece156f7c92f4c09923d"
+        "e09188b0cf0a25d69b412a8d7c2e62fcf1478d6e6b16ecf97ef1a2bbdbdb52b8"
     )
     assert source.source_id == (
         "official-source:sha256:"

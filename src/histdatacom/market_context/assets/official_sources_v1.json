@@ -2296,6 +2296,105 @@
     },
     {
       "schema_version": "histdatacom.official-source-entry.v1",
+      "source_key": "ea.ecb.spf",
+      "economy_code": "EA",
+      "economy_name": "Euro Area",
+      "institution": "European Central Bank",
+      "jurisdiction": "European Union / euro area",
+      "legal_producer": true,
+      "roles": [
+        "official-archive"
+      ],
+      "event_families": [
+        "inflation-prices",
+        "labour-market",
+        "gdp-national-accounts"
+      ],
+      "indicator_ids": [
+        "consumer-and-producer-prices",
+        "employment-unemployment-and-earnings",
+        "gdp-and-national-accounts"
+      ],
+      "formats": [
+        "html",
+        "archive",
+        "pdf"
+      ],
+      "capabilities": [
+        "historical-observations",
+        "historical-vintages",
+        "publication-metadata",
+        "series-metadata",
+        "forecast-survey",
+        "archive-enumeration"
+      ],
+      "endpoint_uri_template": "https://www.ecb.europa.eu/stats/ecb_surveys/survey_of_professional_forecasters/html/all_data.en.html",
+      "allowed_hosts": [
+        "www.ecb.europa.eu"
+      ],
+      "expected_media_types": [
+        "text/html",
+        "application/zip",
+        "application/pdf"
+      ],
+      "source_series_ids": [
+        "SPF HICP point forecasts",
+        "SPF core HICP point forecasts",
+        "SPF real GDP growth point forecasts",
+        "SPF unemployment point forecasts"
+      ],
+      "source_table_ids": [
+        "ECB SPF detailed results by round",
+        "SPF_individual_forecasts.zip"
+      ],
+      "source_release_ids": [
+        "ECB Survey of Professional Forecasters <year> Q<quarter>"
+      ],
+      "release_calendar_uri": "https://www.ecb.europa.eu/stats/ecb_surveys/survey_of_professional_forecasters/html/all-releases.en.html",
+      "archive_uri": "https://www.ecb.europa.eu/stats/ecb_surveys/survey_of_professional_forecasters/html/all_data.en.html",
+      "source_timezone": "Europe/Berlin",
+      "availability_time_precision": "date-only",
+      "dst_convention": "Modern report dates are source-authored calendar dates. Pre-2015 migrated round-page metadata is not treated as an original release date; those vintages retain only their official survey-round boundary.",
+      "historical_depth": "The all-data index exposes 111 gap-free quarterly rounds from 1999-Q1 through 2026-Q3. The independent microdata archive contains one CSV member for every listed round; the all-reports archive supplies exact report dates from 2015-Q1 onward.",
+      "known_breaks": [
+        "The all-reports archive begins exact round-level report dating at 2015-Q1; earlier round pages carry later migration metadata and remain survey-quarter-only availability evidence.",
+        "Core HICP forecast tables are a later addition and are not projected backward into rounds that publish only headline HICP, GDP growth, and unemployment.",
+        "Forecast horizons change with each round and remain source-labelled annual, rolling-month, or longer-term targets rather than being coerced into one fixed horizon taxonomy."
+      ],
+      "revision_behavior": "Each quarterly survey is an immutable point-in-time forecast vintage. Later rounds do not overwrite earlier expectations, and SPF values are neither ECB staff projections nor event-level market consensus observations.",
+      "rate_limit": "No stable archive-specific limit is published; refreshes use sequential requests, bounded response sizes, retry-after handling, exponential backoff, and an identifying contact user agent.",
+      "authentication": "none",
+      "credential_env_name": null,
+      "credential_header_name": null,
+      "credential_parameter_name": null,
+      "terms_uri": "https://www.ecb.europa.eu/services/disclaimer/html/index.en.html",
+      "fallback_source_keys": [
+        "ea.ecb.data-portal"
+      ],
+      "parser_id": "official.ecb-spf.v1",
+      "parser_version": "1",
+      "replay_strategy": "Retain exact bytes for both official archive indexes, all 111 detailed-result pages, the all-round microdata ZIP, and the dataset-description PDF; bind every request, digest, round, availability precision, concept, source horizon, mean, dispersion, reply count, and locator before accepting replay.",
+      "adapter_owner": "market-context/ea",
+      "verification_status": "empirically-verified",
+      "reviewed_on": "2026-09-18",
+      "verification_evidence_uris": [
+        "https://www.ecb.europa.eu/stats/ecb_surveys/survey_of_professional_forecasters/html/all_data.en.html",
+        "https://www.ecb.europa.eu/stats/ecb_surveys/survey_of_professional_forecasters/html/all-releases.en.html",
+        "https://www.ecb.europa.eu/stats/prices/indic/forecast/shared/files/SPF_individual_forecasts.zip",
+        "https://www.ecb.europa.eu/stats/prices/indic/forecast/shared/files/SPF_dataset_description.pdf",
+        "https://www.ecb.europa.eu/stats/ecb_surveys/survey_of_professional_forecasters/html/table_3_1999q1.en.html",
+        "https://www.ecb.europa.eu/stats/ecb_surveys/survey_of_professional_forecasters/html/table_3_2026q3.en.html"
+      ],
+      "redistribution_notes": "The package retains a compact hash-bound manifest; exact ECB pages, microdata, and documentation remain an external operator-owned corpus subject to ECB terms and attribution.",
+      "limitations": [
+        "Pre-2015 report days are not inferred from migrated page metadata or quarter cadence.",
+        "SPF expectations are independent professional forecasts and are not relabelled as ECB or Eurosystem staff projections.",
+        "Quarterly SPF vintages are not event-level market consensus and cannot supply a release-specific surprise value.",
+        "The compact receipt retains published aggregate means, dispersion, reply counts, and exact raw-artifact hashes; the individual respondent microdata remains in the external retained ZIP."
+      ]
+    },
+    {
+      "schema_version": "histdatacom.official-source-entry.v1",
       "source_key": "ea.ecb.data-portal",
       "economy_code": "EA",
       "economy_name": "Euro Area",

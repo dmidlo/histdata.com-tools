@@ -24,6 +24,7 @@ from histdatacom.market_context.official_adapters import (
     OfficialDataCatalogParserV1,
     OfficialDolEtaInitialClaimsParserV1,
     OfficialEcbBalanceOfPaymentsParserV1,
+    OfficialEcbSpfParserV1,
     OfficialEurostatGdpParserV1,
     OfficialEurostatHicpParserV1,
     OfficialEurostatInternationalTradeGoodsParserV1,
@@ -165,10 +166,14 @@ def test_built_in_parsers_cover_every_registered_source_and_format(
     registry: OfficialSourceRegistryV1,
 ) -> None:
     parsers = built_in_official_source_parsers()
-    assert len(parsers) == 37
+    assert len(parsers) == 38
     assert isinstance(
         parsers["official.ecb-balance-of-payments.v1"],
         OfficialEcbBalanceOfPaymentsParserV1,
+    )
+    assert isinstance(
+        parsers["official.ecb-spf.v1"],
+        OfficialEcbSpfParserV1,
     )
     assert isinstance(
         parsers["official.insee-cpi.v1"],

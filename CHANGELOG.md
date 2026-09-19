@@ -2,6 +2,13 @@
 
 ### Added
 
+- **market context**: qualify all 111 ECB Survey of Professional Forecasters
+  rounds from 1999-Q1 through 2026-Q3; retain the two official indexes, every
+  detailed result page, the 111-member respondent microdata ZIP, and the
+  dataset-description PDF; preserve 2,130 source-labelled aggregate forecasts
+  and exact report dates only where the 2015-onward archive supplies them,
+  without treating migration metadata as historical availability or SPF as
+  staff projections, event consensus, realized releases, or surprise (#539).
 - **market context**: qualify 203 source-dated INSEE monthly
   consumer-confidence releases from June 2009 through August 2026; preserve
   four genuine August source gaps, exact publication clocks, changing

@@ -847,6 +847,24 @@ class OfficialEcbBalanceOfPaymentsParserV1(OfficialHtmlParserV1):
         return super().parse(snapshot, max_events=max_events)
 
 
+class OfficialEcbSpfParserV1(OfficialHtmlParserV1):
+    """Bind ECB SPF indexes, round pages, microdata, and documentation."""
+
+    parser_id = "official.ecb-spf.v1"
+    supported_formats: tuple[OfficialSourceFormat, ...] = (
+        OfficialSourceFormat.HTML,
+        OfficialSourceFormat.ARCHIVE,
+        OfficialSourceFormat.PDF,
+    )
+
+    def parse(
+        self, snapshot: OfficialRawSnapshotV1, *, max_events: int
+    ) -> Sequence[Mapping[str, JSONValue]]:
+        if snapshot.request.source_format is OfficialSourceFormat.ARCHIVE:
+            return _parse_archive(self, snapshot, max_events=max_events)
+        return super().parse(snapshot, max_events=max_events)
+
+
 class OfficialInseeCpiParserV1(OfficialHtmlParserV1):
     """Bind INSEE CPI Solr, release HTML, and BDM SDMX artifacts."""
 
@@ -1235,6 +1253,7 @@ _BUILT_IN_PARSER_TYPES: tuple[type[_BaseOfficialParser], ...] = (
     OfficialDolEtaInitialClaimsParserV1,
     OfficialEcbBalanceOfPaymentsParserV1,
     OfficialEcbMonetaryPolicyParserV1,
+    OfficialEcbSpfParserV1,
     OfficialInseeCpiParserV1,
     OfficialInseeConsumerConfidenceParserV1,
     OfficialInseeIloUnemploymentParserV1,
@@ -3360,6 +3379,7 @@ __all__ = [
     "OfficialDataCatalogParserV1",
     "OfficialEcbBalanceOfPaymentsParserV1",
     "OfficialEcbMonetaryPolicyParserV1",
+    "OfficialEcbSpfParserV1",
     "OfficialEurostatConstructionOutputParserV1",
     "OfficialEurostatGdpParserV1",
     "OfficialEurostatHicpParserV1",
