@@ -1,0 +1,508 @@
+{
+  "schema_version": "histdatacom.attribution-requirements.v1",
+  "version": "1.0.0",
+  "issue": 719,
+  "scope": "public_contract_and_synthetic_conformance_only",
+  "owner_scope": "https://github.com/dmidlo/histdata.com-tools/issues/719#issuecomment-5363602471",
+  "maturity_semantics": "The test mappings identify executed synthetic conformance, not release qualification or historical/private scientific evidence. Final run evidence belongs to the coordinator's gate records.",
+  "global_programs": {
+    "requirements_691": "scoped_atoms_only_global_program_incomplete",
+    "maturity_525": "scoped_states_only_global_program_incomplete"
+  },
+  "public_requirements": [
+    {
+      "id": "identity",
+      "requirement": "Versioned immutable explanation and exact snapshot/model/projection/preprocessing/lineage identities",
+      "api": "DecisionAttributionV1",
+      "tests": [
+        "tests/unit/test_attribution_contracts.py::test_full_executed_registry_canonical_roundtrip_and_immutability"
+      ],
+      "planned": true,
+      "implemented": true,
+      "execution_scope": "synthetic_conformance_only",
+      "scientifically_passed": false
+    },
+    {
+      "id": "policy-registry",
+      "requirement": "SemVer policy registry and exact method/background/group/work/correlation successor identities",
+      "api": "ExplanationPolicyRegistryV1",
+      "tests": [
+        "tests/unit/test_attribution_contracts.py::test_material_policy_changes_require_successor_identity"
+      ],
+      "planned": true,
+      "implemented": true,
+      "execution_scope": "synthetic_conformance_only",
+      "scientifically_passed": false
+    },
+    {
+      "id": "semver",
+      "requirement": "Policy, registry and taxonomy use canonical release SemVer",
+      "api": "AttributionTaxonomyV1",
+      "tests": [
+        "tests/unit/test_attribution_contracts.py::test_registry_and_taxonomy_use_canonical_release_semver"
+      ],
+      "planned": true,
+      "implemented": true,
+      "execution_scope": "synthetic_conformance_only",
+      "scientifically_passed": false
+    },
+    {
+      "id": "output-semantics",
+      "requirement": "Explained dimension/class/horizon and units remain explicit and replay-bound",
+      "api": "ExplainedOutputV1",
+      "tests": [
+        "tests/unit/test_attribution_reference.py::test_three_player_oracle_and_direct_groups_are_not_singleton_sums"
+      ],
+      "planned": true,
+      "implemented": true,
+      "execution_scope": "synthetic_conformance_only",
+      "scientifically_passed": false
+    },
+    {
+      "id": "raw-calibrated-final",
+      "requirement": "Raw model, calibrated output and final action are distinct exact sidecar values",
+      "api": "ReferenceDecisionV1",
+      "tests": [
+        "tests/unit/test_attribution_registry.py::test_eight_executed_stages_retain_clipping_and_active_constraints"
+      ],
+      "planned": true,
+      "implemented": true,
+      "execution_scope": "synthetic_conformance_only",
+      "scientifically_passed": false
+    },
+    {
+      "id": "shapley",
+      "requirement": "Actual admitted polynomial/background coalition execution with independent exact (5,4) oracle",
+      "api": "explain_reference",
+      "tests": [
+        "tests/unit/test_attribution_reference.py::test_independent_two_feature_shapley_and_interaction_accounting"
+      ],
+      "planned": true,
+      "implemented": true,
+      "execution_scope": "synthetic_conformance_only",
+      "scientifically_passed": false
+    },
+    {
+      "id": "permutation-oracle",
+      "requirement": "Independent permutation oracle at multiple exact points",
+      "api": "explain_reference",
+      "tests": [
+        "tests/unit/test_attribution_reference.py::test_permutation_oracle_at_several_exact_points"
+      ],
+      "planned": true,
+      "implemented": true,
+      "execution_scope": "synthetic_conformance_only",
+      "scientifically_passed": false
+    },
+    {
+      "id": "conservation",
+      "requirement": "Both serialized singleton and group contributions obey frozen tolerances",
+      "api": "DecisionAttributionV1",
+      "tests": [
+        "tests/unit/test_attribution_artifacts.py::test_serialized_group_conservation_is_not_implied_by_singletons"
+      ],
+      "planned": true,
+      "implemented": true,
+      "execution_scope": "synthetic_conformance_only",
+      "scientifically_passed": false
+    },
+    {
+      "id": "interactions",
+      "requirement": "Structured pair dividends retain defined non-double-counted interaction semantics",
+      "api": "InteractionContributionV1",
+      "tests": [
+        "tests/unit/test_attribution_reference.py::test_independent_two_feature_shapley_and_interaction_accounting"
+      ],
+      "planned": true,
+      "implemented": true,
+      "execution_scope": "synthetic_conformance_only",
+      "scientifically_passed": false
+    },
+    {
+      "id": "work-diagnostics",
+      "requirement": "Exact model evaluation inventory, residuals and before-work budget refusal",
+      "api": "ExplanationPolicyV1",
+      "tests": [
+        "tests/unit/test_attribution_reference.py::test_unsupported_states_are_not_fabricated_outputs"
+      ],
+      "planned": true,
+      "implemented": true,
+      "execution_scope": "synthetic_conformance_only",
+      "scientifically_passed": false
+    },
+    {
+      "id": "all-planes",
+      "requirement": "Tick/activity/bar/indicator/triangle/calendar/forecast/positioning/strategy/flow/broker/regime/uncertainty/missingness taxonomy",
+      "api": "attribution_feature_groups",
+      "tests": [
+        "tests/unit/test_attribution_contracts.py::test_every_wide_feature_plane_has_public_group_membership"
+      ],
+      "planned": true,
+      "implemented": true,
+      "execution_scope": "synthetic_conformance_only",
+      "scientifically_passed": false
+    },
+    {
+      "id": "all-widths",
+      "requirement": "All seven timeframes retain distinct grouping semantics",
+      "api": "AttributionFeatureV1",
+      "tests": [
+        "tests/unit/test_attribution_contracts.py::test_all_seven_timeframes_remain_distinct"
+      ],
+      "planned": true,
+      "implemented": true,
+      "execution_scope": "synthetic_conformance_only",
+      "scientifically_passed": false
+    },
+    {
+      "id": "wide-taxonomy",
+      "requirement": "Complete separate content-bound shard resolution, 10001 actual synthetic declarations and no truncation",
+      "api": "resolve_attribution_taxonomy",
+      "tests": [
+        "tests/unit/test_attribution_contracts.py::test_ten_thousand_logical_features_use_complete_separate_shards"
+      ],
+      "planned": true,
+      "implemented": true,
+      "execution_scope": "synthetic_conformance_only",
+      "scientifically_passed": false
+    },
+    {
+      "id": "strategy-hierarchy",
+      "requirement": "FXES ID, family, input-dependency and population metadata levels without compiled-bank claim",
+      "api": "attribution_feature_groups",
+      "tests": [
+        "tests/unit/test_attribution_contracts.py::test_every_wide_feature_plane_has_public_group_membership"
+      ],
+      "planned": true,
+      "implemented": true,
+      "execution_scope": "synthetic_conformance_only",
+      "scientifically_passed": false
+    },
+    {
+      "id": "no-double-counting",
+      "requirement": "Reporting cuts partition selected coordinates; overlapping ancestors/children refuse",
+      "api": "ExplanationPolicyV1",
+      "tests": [
+        "tests/unit/test_attribution_reference.py::test_group_partition_no_double_counting_and_direct_distinct_identity"
+      ],
+      "planned": true,
+      "implemented": true,
+      "execution_scope": "synthetic_conformance_only",
+      "scientifically_passed": false
+    },
+    {
+      "id": "direct-groups",
+      "requirement": "Direct group-coalition and singleton-sum semantics remain distinct and can differ numerically",
+      "api": "GroupMethod",
+      "tests": [
+        "tests/unit/test_attribution_reference.py::test_three_player_oracle_and_direct_groups_are_not_singleton_sums"
+      ],
+      "planned": true,
+      "implemented": true,
+      "execution_scope": "synthetic_conformance_only",
+      "scientifically_passed": false
+    },
+    {
+      "id": "ambiguity",
+      "requirement": "Measured background range and sibling ablation yield nonidentified singleton state",
+      "api": "AttributionAmbiguityV1",
+      "tests": [
+        "tests/unit/test_attribution_reference.py::test_background_sibling_ambiguity_and_correlated_effective_dimension"
+      ],
+      "planned": true,
+      "implemented": true,
+      "execution_scope": "synthetic_conformance_only",
+      "scientifically_passed": false
+    },
+    {
+      "id": "effective-dimension",
+      "requirement": "Retained background correlation dimension is distinct from nominal width and independence",
+      "api": "DecisionAttributionV1",
+      "tests": [
+        "tests/unit/test_attribution_reference.py::test_background_sibling_ambiguity_and_correlated_effective_dimension"
+      ],
+      "planned": true,
+      "implemented": true,
+      "execution_scope": "synthetic_conformance_only",
+      "scientifically_passed": false
+    },
+    {
+      "id": "unsupported",
+      "requirement": "Future/unknown/protected/domain/work failures produce explicit unavailable outputs",
+      "api": "AttributionState",
+      "tests": [
+        "tests/unit/test_attribution_reference.py::test_unsupported_states_are_not_fabricated_outputs"
+      ],
+      "planned": true,
+      "implemented": true,
+      "execution_scope": "synthetic_conformance_only",
+      "scientifically_passed": false
+    },
+    {
+      "id": "causal-nonclaim",
+      "requirement": "Mandatory model-attribution-not-market-causality statement in artifacts and reports",
+      "api": "DecisionAttributionV1",
+      "tests": [
+        "tests/unit/test_attribution_reports.py::test_summary_or_nonclaim_tampering_refuses_even_with_new_outer_id"
+      ],
+      "planned": true,
+      "implemented": true,
+      "execution_scope": "synthetic_conformance_only",
+      "scientifically_passed": false
+    },
+    {
+      "id": "semantic-spaces",
+      "requirement": "Raw/transformed/latent/grouped spaces; only executed qualified diagonal raw mapping",
+      "api": "MappedAttributionV1",
+      "tests": [
+        "tests/unit/test_attribution_reference.py::test_diagonal_mapping_replays_values_and_refuses_latent_relabel"
+      ],
+      "planned": true,
+      "implemented": true,
+      "execution_scope": "synthetic_conformance_only",
+      "scientifically_passed": false
+    },
+    {
+      "id": "masks",
+      "requirement": "Imputation requires retained mask and complete target/background axis-renamed ownership",
+      "api": "MappedAttributionV1",
+      "tests": [
+        "tests/unit/test_attribution_closure.py::test_swapped_equal_valued_masks_cannot_claim_coordinate_mapping"
+      ],
+      "planned": true,
+      "implemented": true,
+      "execution_scope": "synthetic_conformance_only",
+      "scientifically_passed": false
+    },
+    {
+      "id": "eight-stages",
+      "requirement": "Separate model/calibration/policy/sizing/portfolio/margin/validity/execution equations, reasons and constraints",
+      "api": "ReferenceDecisionV1",
+      "tests": [
+        "tests/unit/test_attribution_registry.py::test_eight_executed_stages_retain_clipping_and_active_constraints"
+      ],
+      "planned": true,
+      "implemented": true,
+      "execution_scope": "synthetic_conformance_only",
+      "scientifically_passed": false
+    },
+    {
+      "id": "zero-cause",
+      "requirement": "Positive model score may yield zero through costs/validity/execution without false neutrality",
+      "api": "execute_reference_decision",
+      "tests": [
+        "tests/unit/test_attribution_registry.py::test_zero_action_does_not_claim_neutral_positive_model"
+      ],
+      "planned": true,
+      "implemented": true,
+      "execution_scope": "synthetic_conformance_only",
+      "scientifically_passed": false
+    },
+    {
+      "id": "sizing",
+      "requirement": "Calibration and turnover/hysteresis/position clipping retain independent stages",
+      "api": "ReferenceDecisionPolicyV1",
+      "tests": [
+        "tests/unit/test_attribution_registry.py::test_hysteresis_uses_previous_position_and_calibration_has_own_stage"
+      ],
+      "planned": true,
+      "implemented": true,
+      "execution_scope": "synthetic_conformance_only",
+      "scientifically_passed": false
+    },
+    {
+      "id": "native-intervention",
+      "requirement": "Actual native three-leg events/tuple/residual regeneration before and after primitive changes",
+      "api": "NativeTriangleInterventionV1",
+      "tests": [
+        "tests/unit/test_attribution_reference.py::test_native_triangle_intervention_recomputes_all_dependent_features"
+      ],
+      "planned": true,
+      "implemented": true,
+      "execution_scope": "synthetic_conformance_only",
+      "scientifically_passed": false
+    },
+    {
+      "id": "intervention-constraints",
+      "requirement": "Triangle/unit/time/session/universe constraints and no arbitrary stale dependent context",
+      "api": "TriangleInterventionScenarioV1",
+      "tests": [
+        "tests/unit/test_attribution_reference.py::test_native_counterfactual_rejects_time_universe_units_session"
+      ],
+      "planned": true,
+      "implemented": true,
+      "execution_scope": "synthetic_conformance_only",
+      "scientifically_passed": false
+    },
+    {
+      "id": "dependency-closure",
+      "requirement": "Closed native intervention refuses unverifiable external context instead of freezing dependent features",
+      "api": "TriangleInterventionScenarioV1",
+      "tests": [
+        "tests/unit/test_attribution_closure.py::test_arbitrary_price_dependent_context_is_not_a_closed_intervention"
+      ],
+      "planned": true,
+      "implemented": true,
+      "execution_scope": "synthetic_conformance_only",
+      "scientifically_passed": false
+    },
+    {
+      "id": "counterfactual-proof",
+      "requirement": "Output changes require executed models, not declared or arbitrary outputs",
+      "api": "CounterfactualAttributionV1",
+      "tests": [
+        "tests/unit/test_attribution_semantic_boundaries.py::test_native_intervention_does_not_certify_declared_model_outputs"
+      ],
+      "planned": true,
+      "implemented": true,
+      "execution_scope": "synthetic_conformance_only",
+      "scientifically_passed": false
+    },
+    {
+      "id": "stratification",
+      "requirement": "Result-derived pair/regime/era/domain/support/session/broker-state distributions and all applicable contrasts",
+      "api": "build_attribution_report",
+      "tests": [
+        "tests/unit/test_attribution_reports.py::test_every_stratum_and_domain_difference_is_retained_not_pooled"
+      ],
+      "planned": true,
+      "implemented": true,
+      "execution_scope": "synthetic_conformance_only",
+      "scientifically_passed": false
+    },
+    {
+      "id": "hhi",
+      "requirement": "Mean/median absolute group values, signed distributions, HHI and effective contributing groups",
+      "api": "AttributionReportV1",
+      "tests": [
+        "tests/unit/test_attribution_reports.py::test_group_hhi_exact_math_and_signed_distributions"
+      ],
+      "planned": true,
+      "implemented": true,
+      "execution_scope": "synthetic_conformance_only",
+      "scientifically_passed": false
+    },
+    {
+      "id": "zero-hhi",
+      "requirement": "Zero total absolute contribution produces unavailable concentration",
+      "api": "AttributionReportV1",
+      "tests": [
+        "tests/unit/test_attribution_reports.py::test_zero_total_attribution_has_unavailable_concentration_not_infinite"
+      ],
+      "planned": true,
+      "implemented": true,
+      "execution_scope": "synthetic_conformance_only",
+      "scientifically_passed": false
+    },
+    {
+      "id": "comparison-semantics",
+      "requirement": "Full exact stack/feature/output identity and disclosed cross-stratum background changes",
+      "api": "AttributionReportV1",
+      "tests": [
+        "tests/unit/test_attribution_semantic_boundaries.py::test_changed_background_is_refused_within_stratum_and_disclosed_across_it"
+      ],
+      "planned": true,
+      "implemented": true,
+      "execution_scope": "synthetic_conformance_only",
+      "scientifically_passed": false
+    },
+    {
+      "id": "experiment-plan",
+      "requirement": "Noncircular frozen plan uses exact existing MODEL_CONFIGURATION reference without changing718",
+      "api": "ExplanationPlanV1",
+      "tests": [
+        "tests/unit/test_attribution_registry.py::test_existing_experiment_plan_binding_and_posthoc_history"
+      ],
+      "planned": true,
+      "implemented": true,
+      "execution_scope": "synthetic_conformance_only",
+      "scientifically_passed": false
+    },
+    {
+      "id": "asof-linkage",
+      "requirement": "Scientific results require prior method/explanation; posthoc sidecar preserves existing result/action identities",
+      "api": "AttributionExperimentLinkV1",
+      "tests": [
+        "tests/unit/test_attribution_bridge.py::test_later_explanation_preserves_historical_result_and_action_identity"
+      ],
+      "planned": true,
+      "implemented": true,
+      "execution_scope": "synthetic_conformance_only",
+      "scientifically_passed": false
+    },
+    {
+      "id": "action-stack",
+      "requirement": "Exact original action model/preprocessing/schema/score and reason ancestry; mismatches refuse",
+      "api": "AttributionRegistryV1",
+      "tests": [
+        "tests/unit/test_attribution_registry.py::test_exact_plan_refs_and_action_score_cannot_be_resealed"
+      ],
+      "planned": true,
+      "implemented": true,
+      "execution_scope": "synthetic_conformance_only",
+      "scientifically_passed": false
+    },
+    {
+      "id": "reverse-lineage",
+      "requirement": "Retained experiment/result/action links resolve exact explanation identities",
+      "api": "AttributionRegistryV1",
+      "tests": [
+        "tests/unit/test_attribution_registry.py::test_reverse_lineage_contains_original_results_and_actions"
+      ],
+      "planned": true,
+      "implemented": true,
+      "execution_scope": "synthetic_conformance_only",
+      "scientifically_passed": false
+    },
+    {
+      "id": "persistence",
+      "requirement": "Strict bounded canonical/no-clobber/fresh computational replay with race/FIFO/symlink controls",
+      "api": "read_attribution_artifact",
+      "tests": [
+        "tests/unit/test_attribution_artifacts.py::test_resealed_outputs_require_actual_model_replay"
+      ],
+      "planned": true,
+      "implemented": true,
+      "execution_scope": "synthetic_conformance_only",
+      "scientifically_passed": false
+    },
+    {
+      "id": "maturity",
+      "requirement": "Scoped public requirement inventory keeps implementation/synthetic execution/scientific qualification separate",
+      "api": "requirements_v1.json",
+      "tests": [
+        "tests/unit/test_attribution_contracts.py::test_packaged_requirement_atoms_are_scoped_and_resolve_tests"
+      ],
+      "planned": true,
+      "implemented": true,
+      "execution_scope": "synthetic_conformance_only",
+      "scientifically_passed": false
+    }
+  ],
+  "private_execution_exclusions": [
+    "Private fitted models, production explainers, actual broker deployments and live monitoring are not executed.",
+    "The synthetic taxonomy is not a compiled1000-strategy bank or a physically qualified10000-column historical corpus.",
+    "The eight-stage fixture policy does not implement or certify the complete private714/704/705/713 engines.",
+    "External artifact references remain declared-unverified; hashes and caller clocks do not prove authenticity or historical availability.",
+    "The native counterfactual admits only its regenerated triangle fields; nonempty external context and other interventions refuse.",
+    "Model attribution and concentration do not establish historical causality or independent market evidence.",
+    "Concrete empirical observed-versus-synthetic, era/regime and live-broker attribution reports remain private work; this package executes their public result-derived report contract with synthetic inputs.",
+    "Public718 model-configuration and sidecar linkage does not claim a private693/716 deployment registry exists or rewrite old experiment schemas."
+  ],
+  "bounds": {
+    "artifact_bytes": 8388608,
+    "expanded_nodes": 131072,
+    "depth": 20,
+    "collection_items": 4096,
+    "text_characters": 65536,
+    "selected_model_features": 8,
+    "model_terms": 128,
+    "background_samples": 32,
+    "model_evaluations": 65536,
+    "taxonomy_shards": 64,
+    "features_per_shard": 256,
+    "logical_features": 16384,
+    "taxonomy_aggregate_bytes": 134217728,
+    "embedded_experiment_json_characters": 65536
+  }
+}

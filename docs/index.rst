@@ -46,6 +46,7 @@ Data and reconstruction foundations
    reconstruction-math-verification
    reconstruction-experiment-contracts
    experiment-bundles
+   decision-attribution
    reconstruction-schema-compatibility
    schema-compatibility
    schema-semantic-proofs
@@ -122,6 +123,7 @@ Data quality
    training-row-contracts
    training-join-contracts
    training-temporal-contracts
+   training-overlap-contracts
    training-weight-contracts
    training-weight-followup-study
    training-weight-diagnostic-tooling

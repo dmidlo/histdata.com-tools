@@ -191,9 +191,11 @@ CLASS_READERS = {
     ),
 }
 SERIALIZER_EXEMPTIONS = {
+    "histdatacom.attribution._wire.Record": "Abstract frozen-dataclass serializer template; it has no standalone fields or payload. Concrete embedded attribution records and versioned artifact subclasses are inventoried separately.",
     "histdatacom.experiments._wire.Record": "Abstract frozen-dataclass serializer template; it has no standalone fields or payload. Concrete embedded records and versioned artifact subclasses are inventoried separately.",
 }
 FUNCTION_EXEMPTIONS = {
+    "histdatacom.attribution._wire.Artifact.artifact_id": "Derived digest property for the abstract attribution envelope, not an independent serialized family. Every concrete attribution artifact's actual envelope reader/writer is inventoried separately.",
     "histdatacom.experiments._wire.Artifact.artifact_id": "Derived digest property for the abstract artifact envelope, not an independent serialized family. Every concrete experiment artifact's actual envelope reader/writer is inventoried separately.",
 }
 

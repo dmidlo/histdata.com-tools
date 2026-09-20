@@ -197,6 +197,10 @@ histdatacom-orchestration-worker = "histdatacom.orchestration.worker:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
+"histdatacom.attribution" = [
+    "assets/*.json",
+    "py.typed",
+]
 "histdatacom.broker_plugin_security" = [
     "py.typed",
 ]

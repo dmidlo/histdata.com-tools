@@ -2,6 +2,14 @@
 
 ### Added
 
+- **overlap ownership**: add source-replayed sliding-window lineage, explicit
+  boundary/state rules and bounded descendant evidence mass; keep overlapping
+  windows, members and scenarios from silently multiplying historical evidence
+  or crossing protected chronological splits (#656).
+- **decision attribution**: add public explanation-policy and attribution
+  contracts with executable synthetic reference accounting, grouped ambiguity,
+  decision-stage provenance and causal-nonclaim semantics; keep private model
+  explanations and empirical qualification outside public conformance (#719).
 - **training joins**: add source-replayed wide feature joins with explicit
   namespaces, entity ownership, availability/staleness rules, closed-bar
   selection and value-free refusal provenance; preserve row grain and unknown
