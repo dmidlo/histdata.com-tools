@@ -2,6 +2,12 @@
 
 ### Added
 
+- **training**: add bounded historical-unit evidence mass across six member
+  policies, separate weight-concentration and member-correlation diagnostics,
+  whole-unit inference, source-bound research replay and supervised attempts;
+  synthetic members do not create additional independent history. Retain the
+  first preregistered attempt's all-refused result without a qualification
+  claim, and handle empty campaign exports explicitly (#607 remains open).
 - **broker plugins**: add explicit trust tiers, ephemeral secret-provider
   delivery, known-private-material refusal, sanitized software provenance and
   separate security receipts; qualify opt-in macOS kernel isolation with

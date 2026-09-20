@@ -116,6 +116,7 @@ Data quality
 
    data-quality/report-compatibility
    training-row-contracts
+   training-weight-contracts
 
 Temporal runtime and operations
 -------------------------------
