@@ -2,6 +2,10 @@
 
 ### Added
 
+- **training diagnostics**: implement a separately gated source census and
+  native generator trace with bounded, atomic artifacts and a complete 234-cell
+  attempt ledger; qualify with synthetic fixtures only, without empirical
+  execution or acceptance (#751; #607 remains open).
 - **training docs**: design a separate bounded feasibility study and fresh-data
   confirmation gates for synthetic-member weighting; preserve the failed first
   attempt and leave empirical execution explicitly unapproved (#750, #607).

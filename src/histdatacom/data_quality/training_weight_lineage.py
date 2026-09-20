@@ -340,6 +340,24 @@ def _probe_rows(
     return tuple(selected)
 
 
+def _weight_anchor_support(
+    raw: list[_ObservedRow], start: int, end: int
+) -> tuple[_ObservedRow, ...] | None:
+    """The unchanged last-left / first-right physical-ordinal selection."""
+    left = [i for i, r in enumerate(raw) if r.event_time_ns <= start]
+    right = [i for i, r in enumerate(raw) if r.event_time_ns >= end]
+    if not left or not right:
+        return None
+    return tuple(raw[left[-1] : right[0] + 1])
+
+
+def _thin_weight_support(
+    support: tuple[_ObservedRow, ...],
+) -> tuple[_ObservedRow, ...]:
+    """Preserve both endpoints and interior ordinals 0, 4, 8, ... ."""
+    return (support[0], *support[1:-1:4], support[-1])
+
+
 def _selected_days(
     plan: TrainingWeightSourcePlanV1, verified: _VerifiedSource
 ) -> tuple[
@@ -379,15 +397,13 @@ def _selected_days(
         for symbol, raw in symbols.items():
             if reason is not None:
                 break
-            left = [i for i, r in enumerate(raw) if r.event_time_ns <= start]
-            right = [i for i, r in enumerate(raw) if r.event_time_ns >= end]
-            if not left or not right:
+            support = _weight_anchor_support(raw, start, end)
+            if support is None:
                 reason = WeightDayRefusal.MISSING_BOUNDARY
                 break
             if sum(start <= r.event_time_ns < end for r in raw) < 64:
                 reason = WeightDayRefusal.INSUFFICIENT_ROWS
                 break
-            support = tuple(raw[left[-1] : right[0] + 1])
             if any(
                 r.bid <= 0
                 or r.ask < r.bid
@@ -396,7 +412,7 @@ def _selected_days(
             ):
                 reason = WeightDayRefusal.INVALID_QUOTES
                 break
-            subset = (support[0], *support[1:-1:4], support[-1])
+            subset = _thin_weight_support(support)
             try:
                 _probe_rows(support, start)
                 _probe_rows(subset, start)
@@ -502,6 +518,29 @@ def create_training_weight_degradation(
             approval, "degraded-subset-materialization"
         )
     parent = verify_training_source(plan.parent_source)
+    return _create_training_weight_degradation_from_verified(
+        plan, parent, directory
+    )
+
+
+def _create_training_weight_degradation_from_verified(
+    plan: TrainingWeightSourcePlanV1,
+    parent: _VerifiedSource,
+    directory: str | Path,
+) -> TrainingWeightDegradation:
+    """Internal materialization after the caller's authorized source read.
+
+    This does not authenticate a process-local object or authorize any read.
+    The legacy public entry point retains its original approval and source
+    verification. A separately authorized diagnostic runner may reuse its
+    already verified snapshot without minting a legacy execution approval.
+    """
+    if (
+        type(plan) is not TrainingWeightSourcePlanV1
+        or type(parent) is not _VerifiedSource
+        or parent.source != plan.parent_source
+    ):
+        raise ValueError("degradation requires the exact verified source plan")
     ownership = _ownership(parent)
     selected, refused = _selected_days(plan, parent)
     if not selected:

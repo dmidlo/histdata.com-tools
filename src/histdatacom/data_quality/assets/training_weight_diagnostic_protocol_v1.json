@@ -1,0 +1,258 @@
+{
+  "schema_version": "histdatacom.training-weight-diagnostic-protocol.v1",
+  "version": "1.0.0",
+  "design": {
+    "name": "training-weight-followup-design",
+    "version": "1.0.0",
+    "commit": "e4527dbe6789e66784e4539f5d92eaf2a6b84fd9",
+    "path": "docs/training-weight-followup-study.md"
+  },
+  "original_protocol": {
+    "path": "training_weight_preregistration_v1.json",
+    "commit": "4e1eadf6862a192906d2c8f69efd356578252044",
+    "file_sha256": "025178395cc8da1224132e8a480428e7ea7324e56c2859a2cf9a9f1d5d703b55",
+    "canonical_sha256": "81ea99e7fe6dbef60aa566fbd4173b05fa479a25f8fee130bc9642a9088eaaf0",
+    "input_allowlist_fields": [
+      "source_partitions",
+      "fixed_model.index_path",
+      "fixed_model.training_sources",
+      "epoch_mapping"
+    ],
+    "epoch_size_bytes": 246353
+  },
+  "evidence_kind": "exploratory_diagnostic_not_attempt001_replay_or_confirmation",
+  "fixture_evidence_kind": "synthetic_diagnostic_fixture_not_empirical_evidence",
+  "schedule": [
+    {
+      "period": "201001",
+      "role": "calibration",
+      "dates": [
+        "2010-01-01",
+        "2010-01-04",
+        "2010-01-05",
+        "2010-01-06",
+        "2010-01-07",
+        "2010-01-08",
+        "2010-01-11",
+        "2010-01-12",
+        "2010-01-13",
+        "2010-01-14",
+        "2010-01-15",
+        "2010-01-18",
+        "2010-01-19",
+        "2010-01-20",
+        "2010-01-21",
+        "2010-01-22",
+        "2010-01-25",
+        "2010-01-26",
+        "2010-01-27",
+        "2010-01-28",
+        "2010-01-29"
+      ]
+    },
+    {
+      "period": "201101",
+      "role": "calibration",
+      "dates": [
+        "2011-01-03",
+        "2011-01-04",
+        "2011-01-05",
+        "2011-01-06",
+        "2011-01-07",
+        "2011-01-10",
+        "2011-01-11",
+        "2011-01-12",
+        "2011-01-13",
+        "2011-01-14",
+        "2011-01-17",
+        "2011-01-18",
+        "2011-01-19",
+        "2011-01-20",
+        "2011-01-21",
+        "2011-01-24",
+        "2011-01-25",
+        "2011-01-26",
+        "2011-01-27",
+        "2011-01-28",
+        "2011-01-31"
+      ]
+    },
+    {
+      "period": "201102",
+      "role": "application",
+      "dates": [
+        "2011-02-01",
+        "2011-02-02",
+        "2011-02-03",
+        "2011-02-04",
+        "2011-02-07",
+        "2011-02-08",
+        "2011-02-09",
+        "2011-02-10",
+        "2011-02-11",
+        "2011-02-14",
+        "2011-02-15",
+        "2011-02-16",
+        "2011-02-17",
+        "2011-02-18",
+        "2011-02-21",
+        "2011-02-22",
+        "2011-02-23",
+        "2011-02-24",
+        "2011-02-25",
+        "2011-02-28"
+      ]
+    }
+  ],
+  "symbols": [
+    "EURGBP",
+    "EURUSD",
+    "GBPUSD"
+  ],
+  "source_census": {
+    "scheduled_days": 62,
+    "scheduled_cells": 186,
+    "expected_bridge_days_by_period": {
+      "201001": 17,
+      "201101": 8,
+      "201102": 6
+    },
+    "expected_source_refused_days": 31,
+    "mismatch_action": "abort-before-generator-diagnostics",
+    "report": "independent-parent-subset-gates-with-prerequisites-and-completeness",
+    "forbidden_outputs": [
+      "hidden-bid-ask",
+      "reconstruction-errors",
+      "policy-losses",
+      "quality-rankings"
+    ]
+  },
+  "generator_diagnosis": {
+    "selected_days": [
+      {
+        "date": "2010-01-04",
+        "original_reason": "candidate:engine:unsupported_transform"
+      },
+      {
+        "date": "2010-01-15",
+        "original_reason": "candidate:candidate_expanded_node_budget"
+      },
+      {
+        "date": "2011-01-04",
+        "original_reason": "candidate:engine:unsupported_transform"
+      },
+      {
+        "date": "2011-02-02",
+        "original_reason": "candidate:engine:unsupported_transform"
+      }
+    ],
+    "selection": "earliest-date-in-each-original-month-and-candidate-refusal-code-cell",
+    "member_base_seeds": [
+      60701,
+      60702,
+      60703,
+      60704
+    ],
+    "member_labels": [
+      "member-60701",
+      "member-60702",
+      "member-60703",
+      "member-60704"
+    ],
+    "scheduled_cells": 48,
+    "source_admitted_not_selected_days": 27,
+    "source_refused_days": 31,
+    "generator_id": "histdatacom.empirical-motif-resampling",
+    "generator_version": "1.2.0",
+    "generator_config": {
+      "closed_session_states": [
+        "closed",
+        "market_closed",
+        "weekend_closed"
+      ],
+      "confidence_rounding_digits": 12,
+      "config_id": "empirical-motif-generator-config:sha256:660cac115113ef07c3e0dd478512bcaa8c486627e3dd0b679cf89fb20a8a2d66",
+      "constraint_set_id": "histdatacom.constraint-set.candidate-pre-carving.v1",
+      "estimated_bytes_per_event": 512,
+      "execution_limits_in_config_identity": false,
+      "fallback_price_precision_digits": 8,
+      "generator_id": "histdatacom.empirical-motif-resampling",
+      "generator_version": "1.2.0",
+      "max_events_per_interval": 50000,
+      "max_transformations_per_interval": 25000,
+      "schema_version": "histdatacom.empirical-motif-generator-config.v1"
+    },
+    "maximum_retrieved_matches": 64,
+    "ordering": "ascending-date-then-member-base-seed-then-symbol",
+    "cell_stop": "first-deterministic-refusal-no-backtracking-or-seed-search",
+    "operational_failure": "abort-whole-attempt",
+    "trace": "exact-query-condition-target-time-vector-run-and-segment-seeds-ordered-retrieved-matches-and-previous-selected-transforms",
+    "scale_summary": "only-actually-retrieved-matches-normal-and-terminal-scale-extrema-counts-below-inside-above",
+    "partial_counts": "explicit-incomplete-lower-bounds",
+    "day_aggregate": "all-shared-query-and-native-content-charged-to-complete-day",
+    "realization": "new-package-fingerprint-new-stochastic-model-not-attempt001-replay"
+  },
+  "support": {
+    "core_start_utc": "08:00:00",
+    "core_end_utc": "08:10:00",
+    "core_interval": "half-open",
+    "support_start_utc": "07:59:00",
+    "support_end_utc": "08:11:00",
+    "minimum_core_parent_rows": 64,
+    "maximum_support_rows_per_symbol": 4096,
+    "probe_count": 600,
+    "probe_spacing_ns": 1000000000,
+    "maximum_probe_age_ns": 60000000000,
+    "degradation": "retain-boundaries-and-every-fourth-interior-source-row.v1",
+    "physical_order": "preserve-ordinals-and-duplicate-timestamp-order",
+    "quotes": "raw-uncorrected-finite-positive-noncrossed-or-explicit-refusal"
+  },
+  "limits": {
+    "maximum_source_partition_bytes": 134217728,
+    "maximum_source_rows_per_month": 2000000,
+    "maximum_model_index_bytes": 2097152,
+    "maximum_model_source_bytes": 2147483648,
+    "maximum_artifact_bytes": 8388608,
+    "maximum_collection_items": 4096,
+    "maximum_depth": 16,
+    "maximum_total_expanded_nodes": 131072,
+    "maximum_native_events_per_day_member": 4096,
+    "maximum_days_per_shard": 8,
+    "source_month_runtime_seconds": 300,
+    "generator_day_runtime_seconds": 120,
+    "maximum_attempt_runtime_seconds": 10800
+  },
+  "execution_gate": {
+    "execution_approved": false,
+    "proposed_initial_attempt": "issue607-followup-diagnostic-001",
+    "allowed_operations": [
+      "diagnostic-artifact-replay",
+      "diagnostic-generator-trace",
+      "diagnostic-input-verification",
+      "diagnostic-source-census"
+    ],
+    "approval": "separate-external-coordinator-declaration-bound-to-committed-protocol-final-package-runtime-and-exact-plan",
+    "replay": "new-distinct-attempt-label-output-directory-and-approval",
+    "automatic_retry": false,
+    "automatic_resume": false,
+    "publication": "started-and-progress-before-work-content-addressed-no-clobber-components-terminal-last",
+    "forbidden_operations": [
+      "calibration-fit",
+      "application-outcome-inspection",
+      "policy-comparison",
+      "confirmation",
+      "protected-input-access"
+    ]
+  },
+  "nonclaims": [
+    "not-attempt001-reclassification",
+    "not-confirmation",
+    "not-scientific-qualification",
+    "not-policy-performance",
+    "not-failure-prevalence",
+    "not-recovered-unrecorded-draw",
+    "not-hostile-same-user-security",
+    "not-approval-from-asset-or-construction",
+    "not-git-ancestry-proof-from-installed-runtime"
+  ]
+}

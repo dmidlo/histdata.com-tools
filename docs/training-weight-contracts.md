@@ -19,6 +19,11 @@ specifies exploratory diagnosis and the gates for a later confirmation. It
 preserves this protocol and failed attempt; the design is not an execution
 approval or new empirical result.
 
+The additive [diagnostic tooling](training-weight-diagnostic-tooling.md)
+implements that design's A/B stages with synthetic-only qualification and a
+separate execution gate. It does not change the original attempt or authorize
+another empirical run.
+
 ## Frozen protocol and evidence ownership
 
 The authority is

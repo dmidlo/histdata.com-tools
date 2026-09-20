@@ -17,7 +17,9 @@ import hashlib
 import json
 import math
 from bisect import bisect_left
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field, replace
 from enum import Enum
 from typing import Any
@@ -829,6 +831,68 @@ class _PlannedTransform:
     event_count: int
 
 
+@dataclass(frozen=True, slots=True)
+class _MotifPlanningObservation:
+    """Internal immutable diagnostic snapshot; never a generation input.
+
+    A failed plan normally discards its successful prefix. An opt-in observer
+    can retain it without changing the greedy choices, seeds or native output.
+    An observer exception propagates as an operational diagnostic failure.
+    """
+
+    event_times: tuple[int, ...]
+    cadence_ns: int
+    left_time_ns: int
+    prefix: tuple[EmpiricalMotifTransformationV1, ...]
+    output_cursor: int
+    segment_ordinal: int | None
+    segment_seed: int | None
+    refusal: str | None
+
+
+_MOTIF_PLANNING_OBSERVER: ContextVar[
+    Callable[[_MotifPlanningObservation], None] | None
+] = ContextVar("motif_planning_diagnostic_observer", default=None)
+
+
+@contextmanager
+def _observe_motif_planning(
+    observer: Callable[[_MotifPlanningObservation], None],
+) -> Iterator[None]:
+    """Observe this context only; no process-global callback or result cache."""
+    token = _MOTIF_PLANNING_OBSERVER.set(observer)
+    try:
+        yield
+    finally:
+        _MOTIF_PLANNING_OBSERVER.reset(token)
+
+
+def _notify_motif_plan(
+    event_times: tuple[int, ...],
+    cadence_ns: int,
+    left_time_ns: int,
+    plans: list[_PlannedTransform],
+    cursor: int,
+    segment: int | None,
+    seed: int | None,
+    refusal: str | None,
+) -> None:
+    observer = _MOTIF_PLANNING_OBSERVER.get()
+    if observer is not None:
+        observer(
+            _MotifPlanningObservation(
+                event_times,
+                cadence_ns,
+                left_time_ns,
+                tuple(plan.record for plan in plans),
+                cursor,
+                segment,
+                seed,
+                refusal,
+            )
+        )
+
+
 def generate_empirical_motif_candidates(
     *,
     run: ReconstructionRunV1,
@@ -1430,6 +1494,16 @@ def _plan_transforms(
     while cursor < len(event_times):
         segment_ordinal = len(plans) + 1
         if segment_ordinal > config.max_transformations_per_interval:
+            _notify_motif_plan(
+                event_times,
+                cadence_ns,
+                left_time_ns,
+                plans,
+                cursor,
+                segment_ordinal,
+                None,
+                "transformation_count_limit",
+            )
             return (), "transformation count exceeds configured interval limit"
         seed = run.seed_for(
             ensemble_member_id,
@@ -1475,6 +1549,16 @@ def _plan_transforms(
             if chosen is not None:
                 break
         if chosen is None:
+            _notify_motif_plan(
+                event_times,
+                cadence_ns,
+                left_time_ns,
+                plans,
+                cursor,
+                segment_ordinal,
+                seed,
+                "no_admissible_retrieved_time_scale",
+            )
             return (
                 (),
                 "no retrieved fragment supports the required cadence/time scale "
@@ -1523,6 +1607,9 @@ def _plan_transforms(
             )
         )
         cursor += event_count
+    _notify_motif_plan(
+        event_times, cadence_ns, left_time_ns, plans, cursor, None, None, None
+    )
     return tuple(plans), None
 
 

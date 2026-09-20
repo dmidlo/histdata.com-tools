@@ -118,6 +118,7 @@ Data quality
    training-row-contracts
    training-weight-contracts
    training-weight-followup-study
+   training-weight-diagnostic-tooling
 
 Temporal runtime and operations
 -------------------------------
