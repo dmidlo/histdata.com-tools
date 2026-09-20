@@ -1,0 +1,940 @@
+{
+  "schema_version": "histdatacom.training-weight-preregistration.v1",
+  "version": "1.0.0",
+  "issue": 607,
+  "protocol_name": "fixed-model-triangle-day-mass-and-metric-radius-v1",
+  "implementation_base_commit": "e9e3a2f086d420b4de236c8cd6866a7e08707302",
+  "execution_gate": {
+    "state": "requires-separately-recorded-coordinator-approved-policy-commit",
+    "before": [
+      "source-window-decoding",
+      "degraded-subset-materialization",
+      "candidate-generation",
+      "calibration-fit",
+      "application-outcome-inspection",
+      "policy-comparison"
+    ],
+    "allowed_before_gate": [
+      "metadata-and-header-inventory",
+      "source-byte-hash-verification",
+      "contracts-and-math",
+      "synthetic-fixture-tests"
+    ],
+    "authorization_binds": [
+      "exact-policy-file-sha256",
+      "exact-policy-git-blob",
+      "reviewed-policy-commit",
+      "implemented-adapter-source-fingerprint"
+    ],
+    "no_outcome_dependent_amendment": true
+  },
+  "roles": {
+    "model_train_periods": [
+      "201901",
+      "202001",
+      "202101",
+      "202201",
+      "202301"
+    ],
+    "calibration_periods": [
+      "201001",
+      "201101"
+    ],
+    "application_periods": [
+      "201102"
+    ],
+    "other_period_access": "refuse",
+    "protected_access": "no-current-or-final-holdout-access-or-whole-corpus-replay",
+    "application_truth_role": "evaluation-only-after-allocations-are-persisted",
+    "calibration_truth_role": "joint-score-fit-only-not-generator-query"
+  },
+  "source_partitions": [
+    {
+      "symbol": "EURGBP",
+      "period": "201001",
+      "relative_path": "eurgbp/2010/1/.data",
+      "sha256": "2585718dd7cc39a093169cd8137064d6143c0afa10264d6a6074f2f66c09f461",
+      "size_bytes": 9689951,
+      "row_count": 346010
+    },
+    {
+      "symbol": "EURUSD",
+      "period": "201001",
+      "relative_path": "eurusd/2010/1/.data",
+      "sha256": "67e0168aedb2772e3f6561ab43b5fa4d458d33692b3d34ddcffe355f7606312c",
+      "size_bytes": 7206239,
+      "row_count": 257305
+    },
+    {
+      "symbol": "GBPUSD",
+      "period": "201001",
+      "relative_path": "gbpusd/2010/1/.data",
+      "sha256": "38bcc80529c73a9b7ec2499ff9432989ed5328c5842b2c555c94ac1bc23e9103",
+      "size_bytes": 15080703,
+      "row_count": 538516
+    },
+    {
+      "symbol": "EURGBP",
+      "period": "201101",
+      "relative_path": "eurgbp/2011/1/.data",
+      "sha256": "14434df02bdc1dd9fcc78f42b429160d1879d9554f5d40f8259cd4b9f1fdb5c5",
+      "size_bytes": 7405855,
+      "row_count": 264433
+    },
+    {
+      "symbol": "EURUSD",
+      "period": "201101",
+      "relative_path": "eurusd/2011/1/.data",
+      "sha256": "01bcc84bfe25dd5c05b67fda0533cd0dfe01ce5ff87676bc6968241bf4cdff2c",
+      "size_bytes": 9977823,
+      "row_count": 356294
+    },
+    {
+      "symbol": "GBPUSD",
+      "period": "201101",
+      "relative_path": "gbpusd/2011/1/.data",
+      "sha256": "4cd343ef56fa8cf073a3ecfc332903bb352df1a22e1d0cfcadd5a99b51308ab3",
+      "size_bytes": 10531407,
+      "row_count": 376050
+    },
+    {
+      "symbol": "EURGBP",
+      "period": "201102",
+      "relative_path": "eurgbp/2011/2/.data",
+      "sha256": "4c922704e4b6511f8547dd62afe52fa9e0eb1d37848e9e8cb5cb21026284145e",
+      "size_bytes": 6205551,
+      "row_count": 221578
+    },
+    {
+      "symbol": "EURUSD",
+      "period": "201102",
+      "relative_path": "eurusd/2011/2/.data",
+      "sha256": "e792ce26298cd34cd425fae1d91673e77ae563c883ba2320b6a42c068ed2d931",
+      "size_bytes": 8422815,
+      "row_count": 300757
+    },
+    {
+      "symbol": "GBPUSD",
+      "period": "201102",
+      "relative_path": "gbpusd/2011/2/.data",
+      "sha256": "cdd46529c46787af349269e5c02160e045fc7b6c1f2fb8aeab1a19655f59755a",
+      "size_bytes": 9194015,
+      "row_count": 328302
+    }
+  ],
+  "source_roots": {
+    "tick_path_basis": "operator-supplied-root-with-frozen-relative-paths",
+    "source_format": "Arrow IPC file: datetime=int64 milliseconds UTC,bid=float64,ask=float64,vol=int32",
+    "source_change_policy": "verify-full-physical-hash-before-and-after-reading",
+    "raw_volume": "provenance-only-not-model-facing-activity",
+    "quote_order": "reject-negative-spread-no-silent-correction",
+    "row_identity": "parent-zero-based-physical-ordinal-plus-explicit-one-based-adapter-ordinal-map",
+    "subset_identity": "fresh-catalog-observed-subset-not-unabridged-parent",
+    "truth_separation": "unselected-parent-values-and-grid-truth-must-not-enter-generator-query-or-weight-allocation"
+  },
+  "epoch_mapping": {
+    "path": "data/.histdatacom/analytics/feed-epochs-v2-issue-460/feed-epochs-v2-definition.json",
+    "sha256": "28f41c7f6081e5eb6e30ed3d1a11229e33da19dc8d6e4197fcf17098cd0c15b1",
+    "definition_id": "feed-epoch-definition-v2:sha256:2f86f1d8676d1f8b8bd0f29bd172011546ad9c6a0f46f6e2ad8eed21f8b6fa81",
+    "historical_epoch_id": "feed-epoch-interval-v2:sha256:81a0366d3e92b533115e26e201580667af92bcfcce6c1f55faa26c8bb9aab3bf",
+    "historical_epoch_label": "technology_epoch_03",
+    "historical_period_start": "200905",
+    "historical_period_end": "201811",
+    "model_epoch_label": "technology_epoch_04",
+    "query_feed_epoch_value": "technology_epoch_03",
+    "query_epoch_derivation": "verify source support inside the exact historical epoch interval; pass its frozen label technology_epoch_03 unchanged to reference_motif_condition_from_quotes; retain interval ID separately",
+    "epoch_transport": "no relabeling to technology_epoch_04; only the frozen index backoff_levels may relax epoch matching; retain the actual backoff and selected fragment epoch",
+    "interpretation": "fixed-ex-post-epoch-model-not-historical-knowledge"
+  },
+  "fixed_model": {
+    "kind": "closed-immutable-train-only-nearest-neighbor-index",
+    "index_path": "data/.histdatacom/analytics/modern-reference-motif-issue-464-final-v4/modern-reference-motif-index-048dd46deabf66643fc55b9cb2a996828c88f8c099a9d9573a4d29a632bce9a3.json",
+    "index_sha256": "048dd46deabf66643fc55b9cb2a996828c88f8c099a9d9573a4d29a632bce9a3",
+    "index_size_bytes": 777874,
+    "index_id": "reference-motif-index:sha256:b5d5e7d9580fac375c42677fe5d03be96fafc190f799364a52566af7aa5a2589",
+    "fragment_count": 256,
+    "training_day_count": 20,
+    "index_config": {
+      "backoff_levels": [
+        "exact",
+        "symbol_epoch_session_event",
+        "symbol_epoch_session",
+        "symbol_epoch_state",
+        "symbol_epoch",
+        "currency_epoch",
+        "symbol",
+        "epoch",
+        "global"
+      ],
+      "bounded_selection": "stable_hash_priority",
+      "categorical_mismatch_penalty": 0.25,
+      "config_id": "reference-motif-index-config:sha256:f10a1c7d046d50ad5b2b2f0a0b9a2a50684b4a371dd914f0da043a12f149f40f",
+      "cross_split_near_duplicate_policy": "fail_closed",
+      "indexable_split": "train",
+      "max_artifact_bytes": 67108864,
+      "max_events_per_fragment": 3,
+      "max_fragments": 256,
+      "max_matches": 64,
+      "max_source_windows": 10000,
+      "metric_scales": {
+        "interarrival_ns": 1000000000,
+        "price_precision_digits": 1,
+        "range_value": 0.001,
+        "return_value": 0.001,
+        "source_quality_score": 1,
+        "spread": 0.0001,
+        "tick_intensity": 1,
+        "timestamp_precision_ns": 1000000,
+        "volatility": 0.001
+      },
+      "metric_weights": {
+        "interarrival_ns": 1,
+        "price_precision_digits": 1,
+        "range_value": 1,
+        "return_value": 1,
+        "source_quality_score": 1,
+        "spread": 1,
+        "tick_intensity": 1,
+        "timestamp_precision_ns": 1,
+        "volatility": 1
+      },
+      "min_cell_support": 1,
+      "min_events_per_fragment": 3,
+      "missing_metric_penalty": 1,
+      "near_duplicate_rounding_digits": 4,
+      "rounding_digits": 12,
+      "schema_version": "histdatacom.reference-motif-index-config.v1",
+      "source_overlap_guard_ns": 1800000000000
+    },
+    "training_sources": [
+      {
+        "kind": "histdata_ascii_tick_arrow",
+        "metadata": {
+          "evidence_id": "feed-epoch-evidence-v2:sha256:e395dc2989ec8d46ed4efeee6cc913c479c72b96a30b5933b9dc961bdc060696",
+          "period": "201901",
+          "symbol": "EURGBP"
+        },
+        "path": "eurgbp/2019/1/.data",
+        "sha256": "51b7c79f640098e9d109111358148c0f67d2e3f00e1bcf39c037a899d374c9fa",
+        "size_bytes": 85179519
+      },
+      {
+        "kind": "histdata_ascii_tick_arrow",
+        "metadata": {
+          "evidence_id": "feed-epoch-evidence-v2:sha256:bf4141a4b885e15b40082ac35c5342e643d4b1362e20dd98f9d44749ea0777b7",
+          "period": "202001",
+          "symbol": "EURGBP"
+        },
+        "path": "eurgbp/2020/1/.data",
+        "sha256": "f4a6c73c14876bae83bdfc28f6fc6139c070b481a5de7ee5b0d06b12d11c626f",
+        "size_bytes": 48809823
+      },
+      {
+        "kind": "histdata_ascii_tick_arrow",
+        "metadata": {
+          "evidence_id": "feed-epoch-evidence-v2:sha256:c80a3b644a2f6f6aebb211b57fd8eaea67a7d1994c74e526f962aca5d244d8d0",
+          "period": "202101",
+          "symbol": "EURGBP"
+        },
+        "path": "eurgbp/2021/1/.data",
+        "sha256": "2b981c6a33306060c9d4b45fc6bba59615cc5067f8ee3a2d05086fd7ac64109c",
+        "size_bytes": 54524623
+      },
+      {
+        "kind": "histdata_ascii_tick_arrow",
+        "metadata": {
+          "evidence_id": "feed-epoch-evidence-v2:sha256:c93775c4a2976119db0b5d34c0aef31b38b7b7e4c602f108a26eaa1036fb02bf",
+          "period": "202201",
+          "symbol": "EURGBP"
+        },
+        "path": "eurgbp/2022/1/.data",
+        "sha256": "23fce98f0403187f8873f50d721d5bac8f1a55b805a1d466eab1b8c91a7f52ef",
+        "size_bytes": 42155519
+      },
+      {
+        "kind": "histdata_ascii_tick_arrow",
+        "metadata": {
+          "evidence_id": "feed-epoch-evidence-v2:sha256:6cc51ab181a949035a669dec34ffa0ed48f5185593c8761dff5e226b2fb4d3eb",
+          "period": "202301",
+          "symbol": "EURGBP"
+        },
+        "path": "eurgbp/2023/1/.data",
+        "sha256": "9a8193960d5befde58841fcbdee20cf56bf2d02116ec57adeb4749f8e6490aef",
+        "size_bytes": 76924255
+      },
+      {
+        "kind": "histdata_ascii_tick_arrow",
+        "metadata": {
+          "evidence_id": "feed-epoch-evidence-v2:sha256:2a031e6a00106e49fe46f3a982cead431a40543805e99e7506814e3a06cd3186",
+          "period": "201901",
+          "symbol": "EURUSD"
+        },
+        "path": "eurusd/2019/1/.data",
+        "sha256": "cdb1a5564c70056723d36c409eae63c562be79dfa5491844a6590fe32f742c87",
+        "size_bytes": 97868991
+      },
+      {
+        "kind": "histdata_ascii_tick_arrow",
+        "metadata": {
+          "evidence_id": "feed-epoch-evidence-v2:sha256:9e350b72c1167c549535fa9e55e2960e08de307415a554dac0d90d9fe8f2823d",
+          "period": "202001",
+          "symbol": "EURUSD"
+        },
+        "path": "eurusd/2020/1/.data",
+        "sha256": "e9e24b9892fc575c84044fc942be2e58e96ada170aee1c2a3bff01ed253e4094",
+        "size_bytes": 45862575
+      },
+      {
+        "kind": "histdata_ascii_tick_arrow",
+        "metadata": {
+          "evidence_id": "feed-epoch-evidence-v2:sha256:ad1b9494c2d60d31dde4dd348ee1b9eef6d604cee79e7b4e217e2c84f59df7b1",
+          "period": "202101",
+          "symbol": "EURUSD"
+        },
+        "path": "eurusd/2021/1/.data",
+        "sha256": "4d3c0bc3d3e981604ae411b4cfdcf3c97100638fdcc77cc01b2c22a2105cb2e6",
+        "size_bytes": 54389071
+      },
+      {
+        "kind": "histdata_ascii_tick_arrow",
+        "metadata": {
+          "evidence_id": "feed-epoch-evidence-v2:sha256:2a02c2fa067f370d9d72f81f5bc0fd978ff7320838dd8027dc1fd012dd6ab332",
+          "period": "202201",
+          "symbol": "EURUSD"
+        },
+        "path": "eurusd/2022/1/.data",
+        "sha256": "0410a70f86ef17f8c18a19e36beb8f65580c6268d33c60538f3bed6d36287787",
+        "size_bytes": 39370703
+      },
+      {
+        "kind": "histdata_ascii_tick_arrow",
+        "metadata": {
+          "evidence_id": "feed-epoch-evidence-v2:sha256:42ec6b34b53f355f59a2a6de2103255d6610ca6e32c2e1fe91c7c4f55c67801d",
+          "period": "202301",
+          "symbol": "EURUSD"
+        },
+        "path": "eurusd/2023/1/.data",
+        "sha256": "d82a7b04c28f5f6a7bf755728748af1b12854cd1c92c3ac2a564bcfb4d9d54bf",
+        "size_bytes": 83374975
+      },
+      {
+        "kind": "histdata_ascii_tick_arrow",
+        "metadata": {
+          "evidence_id": "feed-epoch-evidence-v2:sha256:64be71d7518b4623902f04050b1e832e9a822f84be23b836ca12e4014bd8f369",
+          "period": "201901",
+          "symbol": "GBPUSD"
+        },
+        "path": "gbpusd/2019/1/.data",
+        "sha256": "8ab97901d4bd906d7daa64727d2b0ced7de8eaefa8b1fb7e12dc5a27b7481dfc",
+        "size_bytes": 98664191
+      },
+      {
+        "kind": "histdata_ascii_tick_arrow",
+        "metadata": {
+          "evidence_id": "feed-epoch-evidence-v2:sha256:6df6bf3c399cd4aa5a3cf360661578be6b2f9e196f2593bbc5722ebe6da882c8",
+          "period": "202001",
+          "symbol": "GBPUSD"
+        },
+        "path": "gbpusd/2020/1/.data",
+        "sha256": "31a3d0faeaa96083d4c43944fbe641895e99945ef0eb2496e2d879ef749ec9fc",
+        "size_bytes": 60173359
+      },
+      {
+        "kind": "histdata_ascii_tick_arrow",
+        "metadata": {
+          "evidence_id": "feed-epoch-evidence-v2:sha256:12aa1ac55544e2f3b2a1cc939da7b5774af1382abc9cb5e940292356db7e18a5",
+          "period": "202101",
+          "symbol": "GBPUSD"
+        },
+        "path": "gbpusd/2021/1/.data",
+        "sha256": "0f381550a9c9092bedca8c857d6b003d1d246b0cadccae1e05a912b68165f3cb",
+        "size_bytes": 63289311
+      },
+      {
+        "kind": "histdata_ascii_tick_arrow",
+        "metadata": {
+          "evidence_id": "feed-epoch-evidence-v2:sha256:032b576e85670556fc7035d5a6eb338fde398678a7d2b749cb84f4d13866661b",
+          "period": "202201",
+          "symbol": "GBPUSD"
+        },
+        "path": "gbpusd/2022/1/.data",
+        "sha256": "91aa2472c15d1351b7cae19f6c230a464852cb3d37e1e434010a2fcdcd2aedd3",
+        "size_bytes": 46716719
+      },
+      {
+        "kind": "histdata_ascii_tick_arrow",
+        "metadata": {
+          "evidence_id": "feed-epoch-evidence-v2:sha256:c6a3d69dea364e554cb2ab022434563f9b1506ec1a674025bab4d589b9ea9ad1",
+          "period": "202301",
+          "symbol": "GBPUSD"
+        },
+        "path": "gbpusd/2023/1/.data",
+        "sha256": "7deeb65a92af409d558286abab1458a426c2aa377cad860d4173a5c6c09203d4",
+        "size_bytes": 99956527
+      }
+    ],
+    "split_declarations": [
+      {
+        "end_ns": 1675209600000000000,
+        "interval": "[start_ns,end_ns)",
+        "kind": "train",
+        "schema_version": "histdatacom.reference-motif-split.v1",
+        "split_id": "reference-motif-split:sha256:3c863f1f17dd5ff90c031f9f3344fdf6a8dd97562f245c69e716712ceac4be30",
+        "start_ns": 1546300800000000000
+      },
+      {
+        "end_ns": 1690848000000000000,
+        "interval": "[start_ns,end_ns)",
+        "kind": "calibration",
+        "schema_version": "histdatacom.reference-motif-split.v1",
+        "split_id": "reference-motif-split:sha256:be6c406053bebd146d20e616405609dca70ec4d04716fd88d5c7ff54dc1794d0",
+        "start_ns": 1688169600000000000
+      },
+      {
+        "end_ns": 1706745600000000000,
+        "interval": "[start_ns,end_ns)",
+        "kind": "validation",
+        "schema_version": "histdatacom.reference-motif-split.v1",
+        "split_id": "reference-motif-split:sha256:57259505b33237f3b94b658fee79ca99bd5d4e4322b57628a401ad2929886449",
+        "start_ns": 1704067200000000000
+      },
+      {
+        "end_ns": 1761955200000000000,
+        "interval": "[start_ns,end_ns)",
+        "kind": "final_holdout",
+        "schema_version": "histdatacom.reference-motif-split.v1",
+        "split_id": "reference-motif-split:sha256:44cd33b3caeccb979912030cd33fc16a4e2d2fee5f571044f3af37711e735e3e",
+        "start_ns": 1759276800000000000
+      }
+    ],
+    "model_definition": "entire-frozen-index-including-all-fragments-ranking-backoff-metric-scales-and-transform-policies",
+    "mandatory_checks": [
+      "canonical-typed-index-roundtrip",
+      "all-retained-fragments-TRAIN-only",
+      "every-fragment-source-hash-and-source-window-ancestry-retained",
+      "TRAIN-support-disjoint-from-calibration-and-application-support",
+      "index-and-generator-state-frozen-before-calibration",
+      "no-fitted-model-uncertainty-coverage-claim"
+    ],
+    "runtime_inputs": [
+      "that-day-degraded-observed-quotes",
+      "that-day-fixed-epoch-label",
+      "fixed-london-session-label",
+      "fixed-seed"
+    ],
+    "forbidden_inputs": [
+      "truth-quotes",
+      "application-losses",
+      "external-market-context",
+      "CFTC-context",
+      "adaptive-index-updates",
+      "outcome-based-exclusions",
+      "caller-supplied-unverified-query-conditions"
+    ],
+    "query_feature_function": "histdatacom.synthetic.motifs.reference_motif_condition_from_quotes",
+    "event_tags": [
+      "context:not-admitted"
+    ],
+    "active_sessions": [
+      "london"
+    ],
+    "holiday_tags": [],
+    "overlap_tags": [],
+    "source_quality_score": 1,
+    "query_min_cell_support": null,
+    "query_max_distance": null,
+    "query_max_results": 64,
+    "query_excluded_source_window_ids": [],
+    "conditioned_model_exception": "Only this complete immutable index and fixed epoch mapping are conditioned-on model state, not extra independent historical units. Any actual runtime historical context retains ordinary full dependency closure.",
+    "retrieval_ancestry": "retain-query-result-fragments-transformations-events-and-replay-exact-values",
+    "model_or_adapter_change": "invalidates-calibration-and-weighted-identities"
+  },
+  "generator": {
+    "id": "histdatacom.empirical-motif-resampling",
+    "version": "1.2.0",
+    "config": {
+      "closed_session_states": [
+        "closed",
+        "market_closed",
+        "weekend_closed"
+      ],
+      "confidence_rounding_digits": 12,
+      "config_id": "empirical-motif-generator-config:sha256:660cac115113ef07c3e0dd478512bcaa8c486627e3dd0b679cf89fb20a8a2d66",
+      "constraint_set_id": "histdatacom.constraint-set.candidate-pre-carving.v1",
+      "estimated_bytes_per_event": 512,
+      "execution_limits_in_config_identity": false,
+      "fallback_price_precision_digits": 8,
+      "generator_id": "histdatacom.empirical-motif-resampling",
+      "generator_version": "1.2.0",
+      "max_events_per_interval": 50000,
+      "max_transformations_per_interval": 25000,
+      "schema_version": "histdatacom.empirical-motif-generator-config.v1"
+    },
+    "information_mode": "ex_post_reconstruction",
+    "delivery_claim": "known-degradation-conditional-modern-reference-counterfactual-not-certified-production-or-historical-truth",
+    "member_labels": [
+      "member-60701",
+      "member-60702",
+      "member-60703",
+      "member-60704"
+    ],
+    "member_base_seeds": [
+      60701,
+      60702,
+      60703,
+      60704
+    ],
+    "seed_derivation": "existing-ReconstructionRunV1.seed_for-with-fixed-member-base-seed-and-semantic-anchor-interval-key; retain-derived-seed",
+    "no_member_quality_by_seed": true,
+    "proposal_api": "histdatacom.synthetic.generation.generate_empirical_motif_candidates",
+    "post_generation": "retain-anchors-exactly; accept-only-finite-positive-noncrossed-quotes-and-strictly-enclosed-generated-events; reject-entire-day-on-any-member-failure",
+    "cross_currency_projection": "none; joint-triangle-synchronization-and-error-diagnostics-only-no-arbitrage-certification",
+    "native_publication": "fresh-catalog-bound-native-products-with-complete-retrieval-and-event-lineage"
+  },
+  "frozen_engine_sources": {
+    "src/histdatacom/synthetic/generation.py": "d7546bc380fc635fccf5e303300d44ca32f94074bf5b95af94c0c175d562199d",
+    "src/histdatacom/synthetic/motifs.py": "d11a0167ecb5667993e0cfe8d8de27ad55d160c0cd21ccfed6691056b240a884",
+    "src/histdatacom/synthetic/contracts.py": "f7e9430905bedb71344336be0c5388a6e49197ad1bc1c30bd29d1eb792b5e933",
+    "src/histdatacom/synthetic/streaming.py": "41beb11247732b7528ffff6a25c3296dac9e48aced0f80fa1f2d3fa027a9785b"
+  },
+  "schedule": [
+    {
+      "role": "calibration",
+      "period": "201001",
+      "dates": [
+        "2010-01-01",
+        "2010-01-04",
+        "2010-01-05",
+        "2010-01-06",
+        "2010-01-07",
+        "2010-01-08",
+        "2010-01-11",
+        "2010-01-12",
+        "2010-01-13",
+        "2010-01-14",
+        "2010-01-15",
+        "2010-01-18",
+        "2010-01-19",
+        "2010-01-20",
+        "2010-01-21",
+        "2010-01-22",
+        "2010-01-25",
+        "2010-01-26",
+        "2010-01-27",
+        "2010-01-28",
+        "2010-01-29"
+      ],
+      "shards": [
+        {
+          "shard_id": "201001-1",
+          "dates": [
+            "2010-01-01",
+            "2010-01-04",
+            "2010-01-05",
+            "2010-01-06",
+            "2010-01-07",
+            "2010-01-08",
+            "2010-01-11",
+            "2010-01-12"
+          ]
+        },
+        {
+          "shard_id": "201001-2",
+          "dates": [
+            "2010-01-13",
+            "2010-01-14",
+            "2010-01-15",
+            "2010-01-18",
+            "2010-01-19",
+            "2010-01-20",
+            "2010-01-21",
+            "2010-01-22"
+          ]
+        },
+        {
+          "shard_id": "201001-3",
+          "dates": [
+            "2010-01-25",
+            "2010-01-26",
+            "2010-01-27",
+            "2010-01-28",
+            "2010-01-29"
+          ]
+        }
+      ]
+    },
+    {
+      "role": "calibration",
+      "period": "201101",
+      "dates": [
+        "2011-01-03",
+        "2011-01-04",
+        "2011-01-05",
+        "2011-01-06",
+        "2011-01-07",
+        "2011-01-10",
+        "2011-01-11",
+        "2011-01-12",
+        "2011-01-13",
+        "2011-01-14",
+        "2011-01-17",
+        "2011-01-18",
+        "2011-01-19",
+        "2011-01-20",
+        "2011-01-21",
+        "2011-01-24",
+        "2011-01-25",
+        "2011-01-26",
+        "2011-01-27",
+        "2011-01-28",
+        "2011-01-31"
+      ],
+      "shards": [
+        {
+          "shard_id": "201101-1",
+          "dates": [
+            "2011-01-03",
+            "2011-01-04",
+            "2011-01-05",
+            "2011-01-06",
+            "2011-01-07",
+            "2011-01-10",
+            "2011-01-11",
+            "2011-01-12"
+          ]
+        },
+        {
+          "shard_id": "201101-2",
+          "dates": [
+            "2011-01-13",
+            "2011-01-14",
+            "2011-01-17",
+            "2011-01-18",
+            "2011-01-19",
+            "2011-01-20",
+            "2011-01-21",
+            "2011-01-24"
+          ]
+        },
+        {
+          "shard_id": "201101-3",
+          "dates": [
+            "2011-01-25",
+            "2011-01-26",
+            "2011-01-27",
+            "2011-01-28",
+            "2011-01-31"
+          ]
+        }
+      ]
+    },
+    {
+      "role": "application",
+      "period": "201102",
+      "dates": [
+        "2011-02-01",
+        "2011-02-02",
+        "2011-02-03",
+        "2011-02-04",
+        "2011-02-07",
+        "2011-02-08",
+        "2011-02-09",
+        "2011-02-10",
+        "2011-02-11",
+        "2011-02-14",
+        "2011-02-15",
+        "2011-02-16",
+        "2011-02-17",
+        "2011-02-18",
+        "2011-02-21",
+        "2011-02-22",
+        "2011-02-23",
+        "2011-02-24",
+        "2011-02-25",
+        "2011-02-28"
+      ],
+      "shards": [
+        {
+          "shard_id": "201102-1",
+          "dates": [
+            "2011-02-01",
+            "2011-02-02",
+            "2011-02-03",
+            "2011-02-04",
+            "2011-02-07",
+            "2011-02-08",
+            "2011-02-09",
+            "2011-02-10"
+          ]
+        },
+        {
+          "shard_id": "201102-2",
+          "dates": [
+            "2011-02-11",
+            "2011-02-14",
+            "2011-02-15",
+            "2011-02-16",
+            "2011-02-17",
+            "2011-02-18",
+            "2011-02-21",
+            "2011-02-22"
+          ]
+        },
+        {
+          "shard_id": "201102-3",
+          "dates": [
+            "2011-02-23",
+            "2011-02-24",
+            "2011-02-25",
+            "2011-02-28"
+          ]
+        }
+      ]
+    }
+  ],
+  "window": {
+    "calendar": "UTC-weekdays-no-holiday-outcome-selection",
+    "core_start": "08:00:00",
+    "core_end": "08:10:00",
+    "support_start": "07:59:00",
+    "support_end": "08:11:00",
+    "horizon_ns": 600000000000,
+    "maximum_boundary_anchor_distance_ns": 60000000000,
+    "left_anchor": "last-parent-quote-at-or-before-core-start-within-support",
+    "right_anchor": "first-parent-quote-at-or-after-core-end-within-support",
+    "ownership": "half-open-core; all-retained-anchor-support-remains-in-same-UTC-day",
+    "source_order": "timestamp-then-physical-parent-ordinal; duplicate-timestamps-retained-in-parent-order",
+    "probe_offsets_seconds": "integers-0-through-599-inclusive",
+    "probe_join": "last-quote-at-or-before-probe; at-timestamp-ties-last-source-order-event",
+    "maximum_quote_age_ns": 60000000000,
+    "maximum_age_inclusive": true,
+    "missing_probe_policy": "refuse-whole-day-for-all-policies-no-shift-no-fill",
+    "minimum_core_parent_rows_per_symbol": 64,
+    "maximum_support_parent_rows_per_symbol": 4096,
+    "no_reschedule_or_replacement": true
+  },
+  "degradation": {
+    "id": "retain-boundaries-and-every-fourth-interior-source-row.v1",
+    "interior_definition": "parent-rows-strictly-between-chosen-left-and-right-boundary-anchor-in-source-order",
+    "retained_interior_ordinals": "0,4,8,... relative-to-interior-sequence",
+    "retain_left_and_right_boundaries": true,
+    "retained_map": "every-subset-row-binds-parent-physical-ordinal-time-exact-bid-ask-and-source-hash",
+    "hidden_parent_values": "truth-only",
+    "native_parent": "new-canonical-subset-dataset-version",
+    "applicability": "this-exact-known-degradation-recipe-only-not-unknown-HistData-missingness"
+  },
+  "evidence_ownership": {
+    "historical_unit": "verified-raw-parent-UTC-day-complete-three-symbol-graph-dependency-closure",
+    "symbols": [
+      "EURGBP",
+      "EURUSD",
+      "GBPUSD"
+    ],
+    "underlying_policy": "utc-day-complete-graph-dependency-closure.v1",
+    "unit_mass": 1,
+    "descendant_mapping": "verify-subset-to-full-parent-ordinal-map-and-map-all-source-bound-training-units-to-immutable-parent-day-unit",
+    "same_support_sibling_rule": "member-run-shard-output-window-do-not-create-new-historical-unit",
+    "context_rule": "runtime-external-historical-context-disallowed-in-this-protocol; no-global-model-whitelist",
+    "shards": "frozen-calendar-order-at-most-8-days-and-32-products; shared-month-observed-identity-and-complete-global-admitted-inventory",
+    "cross_shard_rule": "verify-disjoint-parent-support-and-no-cross-day-context-or-anchors-before-treating-shards-as-separate; otherwise-refuse-rather-than-redefine-units",
+    "counts": "admitted-fully-replayed-units-only-not-scheduled-calendar-days-symbols-members-rows-or-library-fragments"
+  },
+  "uncertainty": {
+    "quantity": "fixed-model-joint-triangle-member-midpoint-error-radius",
+    "confidence_interpretation": "nominal-pre-abstention-marginal-coverage-under-conditional-on-fixed-model-day-exchangeability-only; not conditional on an admitted subset or a realized calibration sample",
+    "nominal_coverage": 0.9,
+    "minimum_calibration_units": 30,
+    "calibration_unit_score": "max_{symbol,member}(max_probe(abs(candidate_mid-reference_mid))/available_scale)",
+    "available_scale": "max(pip_size, arithmetic-mean-member-spread-over-fixed-probes, max_probe(abs(candidate_mid-own-retained-anchor-piecewise-linear-midpoint)))",
+    "pip_size": {
+      "EURGBP": 0.0001,
+      "EURUSD": 0.0001,
+      "GBPUSD": 0.0001
+    },
+    "quantile_rank": "ceil((n+1)*9/10),one-based,integer-arithmetic",
+    "quantile_outside_support": "unavailable-infinite-radius-not-clipped-rank",
+    "radius": "q*available_scale",
+    "zero_score_rule": "zero-q-is-allowed-but-does-not-imply-recovered-path-truth",
+    "nonfinite_rule": "refuse-before-allocation",
+    "application_domain": "each-symbol-member-scale-inside-calibration-per-symbol-scale-minmax-inclusive; same-graph-epoch-session-horizon-generator-config-model-degradation-adapter",
+    "domain_filter_nonclaim": "the calibration-minmax applicability filter does not inherit nominal 90-percent coverage conditional on admission; it is a conservative allocation abstention rule, not a selective-coverage theorem",
+    "unsupported_rule": "no-confidence-and-no-confidence-policy-allocation; other-policy-results-remain-explicit",
+    "support_nonclaim": "30 units gives finite rank resolution, not proven independence, precise conditional coverage, or useful radius",
+    "transport_nonclaim": "modern04-trained model applied ex-post to historical03; no fitted-model uncertainty or unseen-regime coverage"
+  },
+  "policies": [
+    {
+      "id": "observed-only.v1",
+      "mass": "W_h over retained degraded observed rows; full-parent truth is never training input"
+    },
+    {
+      "id": "equal-unit-mass.v1",
+      "mass": "W_h/M_h per admitted member; each member's rows normalized to sum to its member mass"
+    },
+    {
+      "id": "one-member-per-epoch.v1",
+      "selection": "int(SHA256(canonical_json([policy_id,historical_unit_id,training_epoch])),16) modulo number_of_canonically_sorted_admitted_members",
+      "mass": "W_h to selected member; member row normalization",
+      "epochs": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "id": "member-marginalized-loss.v1",
+      "loss": "W_h*arithmetic_mean(member_loss); actual callback API required; never loss_of_mean_prediction"
+    },
+    {
+      "id": "calibrated-capped-radius.v1",
+      "a": "1/(1+max_symbol(radius/pip_size))",
+      "b": "max(a/max_member(a),1/4)",
+      "mass": "W_h*b/sum_member(b)",
+      "maximum_within_unit_member_ratio": 4,
+      "row_normalization": "member_mass divided by exact complete retained member row count",
+      "filtering": "retain-original-weights; no-renormalization"
+    },
+    {
+      "id": "naive-concatenation-negative-control.v1",
+      "mass": "W_h per member,not divided by M_h",
+      "required_state": "failed-negative-control-for-M_h>1",
+      "eligible_as_default": false
+    }
+  ],
+  "evaluation": {
+    "application_allocation_order": "persist-all-policy-allocations-before-any-application-truth-error-or-comparison",
+    "point_loss": "mean_{symbol,probe}(abs(candidate_mid-reference_mid)/pip_size)",
+    "observed_only_predictor": "bounded-prior-degraded-observed-quote-at-identical-probes",
+    "member_marginalization": "mean-of-member-losses-not-loss-of-mean-path",
+    "minimum_application_units_for_inference": 20,
+    "minimum_complete_policy_common_units": 20,
+    "radius_coverage_reporting": "report pre-domain-filter coverage on every fully evaluable application unit and admitted-subset coverage separately, each with exact numerator, denominator, unit IDs and refusal counts; undefined radius or missing truth is unavailable, never counted as covered",
+    "paired_comparisons": "each-nonnaive-policy-minus-equal-unit-mass; deterministic-one-member-policy-reported-per-training-epoch",
+    "confidence_interval": {
+      "method": "percentile-paired-historical-unit-bootstrap",
+      "confidence_level": 0.95,
+      "replicates": 10000,
+      "seed": 60795,
+      "resample_unit": "whole-triangle-day-all-policy-results-together",
+      "quantile_method": "linear"
+    },
+    "significance_test": {
+      "method": "exact-two-sided-paired-unit-sign-test",
+      "null": "independent-unit-positive-negative-sign-probability-one-half",
+      "ties": "omit-zero-differences-and-report-effective-n",
+      "familywise_method": "Holm",
+      "fixed_family_size": 7,
+      "fixed_family_coordinates": [
+        "observed-only.v1-minus-equal-unit-mass.v1",
+        "one-member-per-epoch.v1:epoch=0-minus-equal-unit-mass.v1",
+        "one-member-per-epoch.v1:epoch=1-minus-equal-unit-mass.v1",
+        "one-member-per-epoch.v1:epoch=2-minus-equal-unit-mass.v1",
+        "one-member-per-epoch.v1:epoch=3-minus-equal-unit-mass.v1",
+        "member-marginalized-loss.v1-minus-equal-unit-mass.v1",
+        "calibrated-capped-radius.v1-minus-equal-unit-mass.v1"
+      ],
+      "family_exclusions": [
+        "equal-unit-mass.v1-minus-itself",
+        "naive-concatenation-negative-control.v1"
+      ],
+      "unavailable_coordinate_rule": "retain coordinate with null reported p-value; use p=1 only inside Holm arithmetic and retain family size 7; never remove a coordinate or substitute an observed outcome",
+      "alpha": 0.05
+    },
+    "inference_nonclaim": "unit clustering prevents sibling pseudo-replication but does not prove serial-day independence or eliminate regime drift; intervals are conditional descriptive diagnostics",
+    "required_reports": [
+      "scheduled-refused-admitted-day-counts",
+      "raw-rows",
+      "historical-unit-count",
+      "member-count",
+      "per-unit-member-and-row-mass",
+      "Kish-weight-ESS",
+      "member-feature-participation-ratio-dimension",
+      "method-and-policy-identity",
+      "radius-widths-and-joint-observed-coverage",
+      "paired-unit-losses",
+      "cluster-CI-and-significance-assumptions",
+      "source-model-adapter-and-calibration-identities"
+    ],
+    "kish": "(sum_row_weights)^2/sum_squared_row_weights; concentration-not-correlation; unavailable-for-zero-mass",
+    "correlation": {
+      "features": "member fixed-grid pip-normalized midpoint increments concatenated within each unit over three symbols",
+      "matrix": "Pearson-correlation-across-member-feature-vectors",
+      "participation_ratio": "trace(C)^2/trace(C@C); denominator=sum_ij(C_ij^2) for symmetric C; @ is matrix multiplication, not elementwise product",
+      "constant_vector": "unavailable-not-invented-zero-correlation",
+      "diagnostic_only": true
+    },
+    "utility_gate": "report-loss-and-coverage-results-without-selecting-a-winner-or-retuning; low-support-unavailable-and-measured-failures-remain-failures"
+  },
+  "refusal_policy": {
+    "refuse_day": [
+      "missing-or-changed-source",
+      "invalid-or-unmapped-source-row",
+      "missing-boundary-anchor",
+      "unsupported-probe-or-stale-quote",
+      "any-symbol-support-below-minimum-or-above-bound",
+      "any-member-generation-refusal-or-invalid-event",
+      "unverified-model-query-or-transformation",
+      "unqualified-context",
+      "source-or-unit-overlap",
+      "work-or-output-budget"
+    ],
+    "refuse_calibration": [
+      "fewer-than-30-replayed-fit-units",
+      "nonfinite-score-or-radius",
+      "model-adapter-degradation-stratum-drift"
+    ],
+    "no_silent_drop_or_retry_selection": true,
+    "no_threshold_tuning": true,
+    "no_fixture_only_empirical_qualification": true
+  },
+  "resource_limits": {
+    "maximum_source_partition_bytes": 134217728,
+    "maximum_model_source_bytes": 2147483648,
+    "maximum_model_index_bytes": 2097152,
+    "maximum_source_rows_per_month": 2000000,
+    "maximum_native_events_per_day_member": 4096,
+    "maximum_products_per_training_inventory": 32,
+    "maximum_days_per_shard": 8,
+    "maximum_training_batch_rows": 4096,
+    "maximum_artifact_bytes": 8388608,
+    "maximum_collection_items": 4096,
+    "maximum_depth": 16,
+    "maximum_total_expanded_nodes": 131072,
+    "maximum_generator_events_per_anchor_interval": 50000,
+    "maximum_probe_count_per_member_symbol": 600,
+    "maximum_calibration_units": 42,
+    "maximum_application_units": 20,
+    "maximum_bootstrap_draws": 200000,
+    "runtime_seconds_per_day": 120,
+    "maximum_campaign_runtime_seconds": 10800
+  },
+  "nonclaims": [
+    "not-recovered-historical-ticks",
+    "not-causal-or-historically-available",
+    "not-a-path-posterior",
+    "not-new-independent-history-from-members",
+    "not-proof-of-exchangeability-or-live-profitability",
+    "not-qualification-of-protected-holdouts-or-current-release",
+    "not-confidence-for-unknown-missingness",
+    "not-unabridged-source-identity-for-degraded-subsets"
+  ],
+  "references": [
+    {
+      "topic": "conformal-rank-and-marginal-exchangeability",
+      "url": "https://arxiv.org/abs/2107.07511"
+    },
+    {
+      "topic": "weighted-effective-sample-size",
+      "url": "https://www.wiley-vch.de/en/areas-interest/mathematics-statistics/survey-sampling-978-0-471-10949-5"
+    },
+    {
+      "topic": "participation-ratio-effective-dimension",
+      "url": "https://proceedings.mlr.press/v238/giaffar24a/giaffar24a.pdf"
+    },
+    {
+      "topic": "cluster-resampling",
+      "url": "https://doi.org/10.1162/rest.90.3.414"
+    }
+  ]
+}

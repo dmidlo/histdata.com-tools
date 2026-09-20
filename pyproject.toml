@@ -197,6 +197,9 @@ histdatacom-orchestration-worker = "histdatacom.orchestration.worker:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
+"histdatacom.data_quality" = [
+    "assets/*.json",
+]
 "histdatacom.forecasting" = [
     "assets/*.json",
 ]
