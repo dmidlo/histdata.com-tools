@@ -46,6 +46,22 @@ from .storage import Journal
 Clock = Callable[[], tuple[int, int]]
 
 
+@dataclass(frozen=True, slots=True)
+class BrokerLifecycleExecutionHooks:
+    """Trusted host execution hooks, never plugin configuration or wire data.
+
+    Defaults preserve the original lifecycle. A guard must raise on refusal;
+    exceptions are translated to closed lifecycle errors before publication.
+    Launch policy and its provenance are the caller's separate responsibility.
+    """
+
+    command_prefix: tuple[str, ...] = ()
+    environment: Mapping[str, str] | None = None
+    working_directory: Path | None = None
+    secret_fields: tuple[str, ...] | None = None
+    before_persist: Callable[[str], None] | None = None
+
+
 def _clock() -> tuple[int, int]:
     return time.time_ns(), time.monotonic_ns()
 
@@ -69,17 +85,28 @@ class _Counters:
 
 
 class _Run:
-    def __init__(self, journal: Journal, clock: Clock) -> None:
+    def __init__(
+        self,
+        journal: Journal,
+        clock: Clock,
+        hooks: BrokerLifecycleExecutionHooks | None = None,
+    ) -> None:
         self.journal = journal
         self.clock = clock
         self.epoch = 0
         self.counters = _Counters()
+        self.hooks = hooks
 
     def append(
         self, kind: str, payload: str, delivery: int | None = None
     ) -> None:
         record = self.record(kind, payload, delivery)
         try:
+            if self.hooks is not None and self.hooks.before_persist is not None:
+                try:
+                    self.hooks.before_persist(record.to_json())
+                except (Exception, SystemExit):
+                    raise BrokerLifecycleError(Reason.INTEGRITY) from None
             self.journal.append(record)
         except OSError:
             raise BrokerLifecycleError(Reason.PERSISTENCE) from None
@@ -169,11 +196,12 @@ def _epoch(
     read_fd, write_fd = os.pipe()
     # Internal trusted host package location, never a configurable plugin path.
     source_root = str(Path(__file__).resolve().parents[2])
-    command = (
-        "import sys; from pathlib import Path; p = "
-        + repr(source_root)
-        + "; sys.path.insert(0, p) if not any(str(Path(x).resolve()) == p for x in sys.path) else None; "
-        "from histdatacom.broker_plugin_lifecycle.worker import main; main()"
+    command = "import sys; from pathlib import Path; p = " + repr(
+        source_root
+    ) + "; sys.path.insert(0, p) if not any(str(Path(x).resolve()) == p for x in sys.path) else None; " "from histdatacom.broker_plugin_lifecycle.worker import main; " + (
+        "main()"
+        if run.hooks is None or run.hooks.secret_fields is None
+        else "main(secret_fields=" + repr(run.hooks.secret_fields) + ")"
     )
     process: subprocess.Popen[bytes] | None = None
     selector = selectors.DefaultSelector()
@@ -183,13 +211,22 @@ def _epoch(
     closed = False
     try:
         process = subprocess.Popen(
-            [worker_python, "-I", "-c", command, str(write_fd)],
+            [
+                *(run.hooks.command_prefix if run.hooks is not None else ()),
+                worker_python,
+                "-I",
+                "-c",
+                command,
+                str(write_fd),
+            ],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             pass_fds=(write_fd,),
             start_new_session=True,
             close_fds=True,
+            env=None if run.hooks is None else run.hooks.environment,
+            cwd=None if run.hooks is None else run.hooks.working_directory,
         )
         os.close(write_fd)
         write_fd = -1
@@ -343,6 +380,12 @@ def _epoch(
                             Reason.PLUGIN_FAILURE.value,
                             Reason.MALFORMED_EVENT.value,
                             Reason.EVENT_LIMIT.value,
+                            *(
+                                (Reason.INTEGRITY.value,)
+                                if run.hooks is not None
+                                and run.hooks.secret_fields is not None
+                                else ()
+                            ),
                         ):
                             raise BrokerLifecycleError(Reason.MALFORMED_IPC)
                         raise BrokerLifecycleError(Reason(frame["reason"]))
@@ -509,6 +552,7 @@ def run_broker_plugin_lifecycle(
     clock: Clock = _clock,
     worker_python: str = sys.executable,
     run_nonce: str | None = None,
+    execution_hooks: BrokerLifecycleExecutionHooks | None = None,
 ) -> BrokerLifecycleResultV1:
     """Run one explicitly authorized finite capture; never activate implicitly.
 
@@ -545,6 +589,11 @@ def run_broker_plugin_lifecycle(
         )
         if len(bootstrap) > header.policy.queue_bytes:
             raise ValueError
+        if execution_hooks is not None:
+            if type(execution_hooks) is not BrokerLifecycleExecutionHooks:
+                raise ValueError
+            if execution_hooks.before_persist is not None:
+                execution_hooks.before_persist(header.to_json())
     except Exception:
         raise BrokerLifecycleError(Reason.INVALID_REQUEST) from None
     try:
@@ -555,7 +604,7 @@ def run_broker_plugin_lifecycle(
     journal: Journal | None = None
     try:
         journal = Journal(output_directory, header)
-        run = _Run(journal, clock)
+        run = _Run(journal, clock, execution_hooks)
         run.transition(State.CONFIGURED, Reason.CONFIGURED)
         pids: list[int] = []
         deadline = time.monotonic() + header.policy.run_timeout_ms / 1000

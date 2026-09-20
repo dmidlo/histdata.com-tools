@@ -2,6 +2,16 @@
 
 ### Added
 
+- **broker plugins**: add explicit trust tiers, ephemeral secret-provider
+  delivery, known-private-material refusal, sanitized software provenance and
+  separate security receipts; qualify opt-in macOS kernel isolation with
+  denied disk writes and off/exact-loopback networking while preserving the
+  native event protocol and explicit trusted-process limitations (#619).
+- **forecasting**: freeze a versioned, installed-executable architectural
+  benchmark across five horizons and distinct actual/consensus targets, with
+  complete component forecasts, independent combination arithmetic, explicit
+  refusals and full source/model/score replay; synthetic fixtures establish
+  contract behavior, not empirical predictive skill (#557).
 - **broker plugins**: add host-supervised subprocess lifecycle, bounded IPC,
   durable delivery acknowledgements, explicit reconnect epochs and native
   partial-capture replay; retain unknown provider continuity and keep execution

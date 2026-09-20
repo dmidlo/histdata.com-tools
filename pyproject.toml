@@ -197,6 +197,9 @@ histdatacom-orchestration-worker = "histdatacom.orchestration.worker:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
+"histdatacom.broker_plugin_security" = [
+    "py.typed",
+]
 "histdatacom.data_quality" = [
     "assets/*.json",
 ]

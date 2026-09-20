@@ -4,11 +4,17 @@ from __future__ import annotations
 
 from collections import deque
 import os
+import json
 import select
 import sys
 import threading
 import time
-from typing import cast
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from histdatacom.broker_plugin_security.secrets import (
+        BrokerPrivateMaterialGuard,
+    )
 
 from histdatacom.broker_plugin_capabilities import (
     BrokerCapabilityError,
@@ -47,7 +53,7 @@ class Controls:
         return self.pending.popleft()
 
 
-def main() -> None:
+def main(*, secret_fields: tuple[str, ...] | None = None) -> None:
     descriptor = int(sys.argv[1])
     parent_pid = os.getppid()
 
@@ -61,6 +67,14 @@ def main() -> None:
     threading.Thread(target=watch_parent, daemon=True).start()
     controls = Controls()
     started = False
+    private_guard: BrokerPrivateMaterialGuard | None = None
+    security_refused = False
+
+    def emit(frame: dict[str, object], maximum: int) -> None:
+        if private_guard is not None:
+            private_guard.check(json.dumps(frame, ensure_ascii=True))
+        write_frame(descriptor, frame, maximum)
+
     try:
         startup = controls.receive(60)
         if (
@@ -73,15 +87,33 @@ def main() -> None:
         header = BrokerLifecycleHeaderV1.from_json(startup["header"])
         policy = header.policy
         configuration = cast(dict[str, object], startup["configuration"])
+        if secret_fields is not None:
+            from histdatacom.broker_plugin_security.secrets import (
+                BrokerPrivateMaterialGuard,
+            )
+
+            private_guard = BrokerPrivateMaterialGuard(
+                tuple(cast(str, configuration[name]) for name in secret_fields)
+            )
         plugin = invoke_authorized_installed_broker_plugin(
             header.inventory, header.plan, authorize=lambda _: True
         )
         identity = BrokerLifecycleIdentityV1(
             plugin.binding, plugin.metadata, plugin.configuration_schema
         )
+        if secret_fields is not None:
+            declared = {
+                field.name
+                for field in identity.configuration_schema.fields
+                if field.secret
+            }
+            # The host must explicitly classify every supplied secret field;
+            # neither ordinary configuration nor a plugin can reclassify it.
+            if set(secret_fields) != declared.intersection(configuration):
+                security_refused = True
+                raise ValueError
         identity.configuration_schema.validate_configuration(configuration)
-        write_frame(
-            descriptor,
+        emit(
             {"type": "identity", "payload": identity.to_json()},
             policy.frame_bytes,
         )
@@ -89,8 +121,7 @@ def main() -> None:
         instruments = plugin.instruments() if header.symbols else ()
         if header.symbols:
             plugin.subscribe(header.symbols)
-        write_frame(
-            descriptor,
+        emit(
             {
                 "type": "session",
                 "payload": BrokerLifecycleSessionV1(
@@ -111,7 +142,7 @@ def main() -> None:
             }
             acknowledged = False
             for attempt in range(policy.delivery_retries + 1):
-                write_frame(descriptor, frame, policy.frame_bytes)
+                emit(frame, policy.frame_bytes)
                 deadline = (
                     time.monotonic() + policy.acknowledgement_timeout_ms / 1000
                 )
@@ -141,13 +172,17 @@ def main() -> None:
             if not acknowledged:
                 raise BrokerLifecycleError(Reason.WORKER_DIED)
         if not stopped:
-            write_frame(descriptor, {"type": "eof"}, policy.frame_bytes)
+            emit({"type": "eof"}, policy.frame_bytes)
         if header.symbols:
             plugin.unsubscribe(header.symbols)
         plugin.close_session()
-        write_frame(descriptor, {"type": "closed"}, policy.frame_bytes)
+        emit({"type": "closed"}, policy.frame_bytes)
     except BaseException as error:
         reason = Reason.PLUGIN_FAILURE
+        if security_refused or (
+            private_guard is not None and private_guard.refused
+        ):
+            reason = Reason.INTEGRITY
         if started and isinstance(error, BrokerCapabilityError):
             if error.reason is BrokerCapabilityReason.RESOURCE_LIMIT:
                 reason = Reason.EVENT_LIMIT

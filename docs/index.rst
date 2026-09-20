@@ -25,6 +25,7 @@ Data and reconstruction foundations
    forecast-feature-store
    forecast-engine-registry
    forecast-math-verification
+   forecast-benchmark-suite
    economic-indicator-catalog
    release-vintage-reconstruction
    release-schedule-reconstruction
@@ -74,6 +75,7 @@ Empirical reconstruction pipeline
    broker-plugin-discovery
    broker-plugin-capabilities
    broker-plugin-lifecycle
+   broker-plugin-security
    broker-delivery-fingerprint-contracts
    broker-delivery-transfer-contracts
 

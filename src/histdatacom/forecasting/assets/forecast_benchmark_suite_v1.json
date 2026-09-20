@@ -1,0 +1,536 @@
+{
+  "version": "1.0.0",
+  "source": {
+    "actual_history": [
+      1,
+      2,
+      6
+    ],
+    "consensus_history": [
+      1,
+      3,
+      8
+    ],
+    "actual": 5,
+    "revision": 9,
+    "early_consensus": 2,
+    "late_consensus": 4
+  },
+  "cases": [
+    {
+      "case_id": "actual-1",
+      "horizon": "T-30d",
+      "target_kind": "first-release-actual",
+      "scenario": "ordinary",
+      "comparators": [
+        "equal-forecast-mean",
+        "forecast-median",
+        "historical-mean",
+        "historical-median",
+        "last-value"
+      ],
+      "expected_target": 5,
+      "expected_points": [
+        [
+          "equal-forecast-mean",
+          3.6666666666666665
+        ],
+        [
+          "forecast-median",
+          3
+        ],
+        [
+          "historical-mean",
+          3
+        ],
+        [
+          "historical-median",
+          2
+        ],
+        [
+          "last-value",
+          6
+        ]
+      ],
+      "expected_refusal": null
+    },
+    {
+      "case_id": "actual-2",
+      "horizon": "T-7d",
+      "target_kind": "first-release-actual",
+      "scenario": "ordinary",
+      "comparators": [
+        "equal-forecast-mean",
+        "forecast-median",
+        "historical-mean",
+        "historical-median",
+        "last-value"
+      ],
+      "expected_target": 5,
+      "expected_points": [
+        [
+          "equal-forecast-mean",
+          3.6666666666666665
+        ],
+        [
+          "forecast-median",
+          3
+        ],
+        [
+          "historical-mean",
+          3
+        ],
+        [
+          "historical-median",
+          2
+        ],
+        [
+          "last-value",
+          6
+        ]
+      ],
+      "expected_refusal": null
+    },
+    {
+      "case_id": "actual-3",
+      "horizon": "T-1d",
+      "target_kind": "first-release-actual",
+      "scenario": "ordinary",
+      "comparators": [
+        "equal-forecast-mean",
+        "forecast-median",
+        "historical-mean",
+        "historical-median",
+        "last-value"
+      ],
+      "expected_target": 5,
+      "expected_points": [
+        [
+          "equal-forecast-mean",
+          3.6666666666666665
+        ],
+        [
+          "forecast-median",
+          3
+        ],
+        [
+          "historical-mean",
+          3
+        ],
+        [
+          "historical-median",
+          2
+        ],
+        [
+          "last-value",
+          6
+        ]
+      ],
+      "expected_refusal": null
+    },
+    {
+      "case_id": "actual-4",
+      "horizon": "T-1h",
+      "target_kind": "first-release-actual",
+      "scenario": "ordinary",
+      "comparators": [
+        "equal-forecast-mean",
+        "forecast-median",
+        "historical-mean",
+        "historical-median",
+        "last-value"
+      ],
+      "expected_target": 5,
+      "expected_points": [
+        [
+          "equal-forecast-mean",
+          3.6666666666666665
+        ],
+        [
+          "forecast-median",
+          3
+        ],
+        [
+          "historical-mean",
+          3
+        ],
+        [
+          "historical-median",
+          2
+        ],
+        [
+          "last-value",
+          6
+        ]
+      ],
+      "expected_refusal": null
+    },
+    {
+      "case_id": "actual-5",
+      "horizon": "final-pre-release",
+      "target_kind": "first-release-actual",
+      "scenario": "ordinary",
+      "comparators": [
+        "equal-forecast-mean",
+        "forecast-median",
+        "historical-mean",
+        "historical-median",
+        "last-value"
+      ],
+      "expected_target": 5,
+      "expected_points": [
+        [
+          "equal-forecast-mean",
+          3.6666666666666665
+        ],
+        [
+          "forecast-median",
+          3
+        ],
+        [
+          "historical-mean",
+          3
+        ],
+        [
+          "historical-median",
+          2
+        ],
+        [
+          "last-value",
+          6
+        ]
+      ],
+      "expected_refusal": null
+    },
+    {
+      "case_id": "consensus-1",
+      "horizon": "T-30d",
+      "target_kind": "consensus",
+      "scenario": "ordinary",
+      "comparators": [
+        "consensus-persistence",
+        "equal-forecast-mean",
+        "forecast-median",
+        "historical-mean",
+        "historical-median"
+      ],
+      "expected_target": 2,
+      "expected_points": [
+        [
+          "consensus-persistence",
+          2
+        ],
+        [
+          "equal-forecast-mean",
+          3
+        ],
+        [
+          "forecast-median",
+          3
+        ],
+        [
+          "historical-mean",
+          4
+        ],
+        [
+          "historical-median",
+          3
+        ]
+      ],
+      "expected_refusal": null
+    },
+    {
+      "case_id": "consensus-2",
+      "horizon": "T-7d",
+      "target_kind": "consensus",
+      "scenario": "ordinary",
+      "comparators": [
+        "consensus-persistence",
+        "equal-forecast-mean",
+        "forecast-median",
+        "historical-mean",
+        "historical-median"
+      ],
+      "expected_target": 2,
+      "expected_points": [
+        [
+          "consensus-persistence",
+          2
+        ],
+        [
+          "equal-forecast-mean",
+          3
+        ],
+        [
+          "forecast-median",
+          3
+        ],
+        [
+          "historical-mean",
+          4
+        ],
+        [
+          "historical-median",
+          3
+        ]
+      ],
+      "expected_refusal": null
+    },
+    {
+      "case_id": "consensus-3",
+      "horizon": "T-1d",
+      "target_kind": "consensus",
+      "scenario": "ordinary",
+      "comparators": [
+        "consensus-persistence",
+        "equal-forecast-mean",
+        "forecast-median",
+        "historical-mean",
+        "historical-median"
+      ],
+      "expected_target": 4,
+      "expected_points": [
+        [
+          "consensus-persistence",
+          4
+        ],
+        [
+          "equal-forecast-mean",
+          3.6666666666666665
+        ],
+        [
+          "forecast-median",
+          4
+        ],
+        [
+          "historical-mean",
+          4
+        ],
+        [
+          "historical-median",
+          3
+        ]
+      ],
+      "expected_refusal": null
+    },
+    {
+      "case_id": "consensus-4",
+      "horizon": "T-1h",
+      "target_kind": "consensus",
+      "scenario": "ordinary",
+      "comparators": [
+        "consensus-persistence",
+        "equal-forecast-mean",
+        "forecast-median",
+        "historical-mean",
+        "historical-median"
+      ],
+      "expected_target": 4,
+      "expected_points": [
+        [
+          "consensus-persistence",
+          4
+        ],
+        [
+          "equal-forecast-mean",
+          3.6666666666666665
+        ],
+        [
+          "forecast-median",
+          4
+        ],
+        [
+          "historical-mean",
+          4
+        ],
+        [
+          "historical-median",
+          3
+        ]
+      ],
+      "expected_refusal": null
+    },
+    {
+      "case_id": "consensus-5",
+      "horizon": "final-pre-release",
+      "target_kind": "consensus",
+      "scenario": "ordinary",
+      "comparators": [
+        "consensus-persistence",
+        "equal-forecast-mean",
+        "forecast-median",
+        "historical-mean",
+        "historical-median"
+      ],
+      "expected_target": 4,
+      "expected_points": [
+        [
+          "consensus-persistence",
+          4
+        ],
+        [
+          "equal-forecast-mean",
+          3.6666666666666665
+        ],
+        [
+          "forecast-median",
+          4
+        ],
+        [
+          "historical-mean",
+          4
+        ],
+        [
+          "historical-median",
+          3
+        ]
+      ],
+      "expected_refusal": null
+    },
+    {
+      "case_id": "delayed-actual",
+      "horizon": "T-1h",
+      "target_kind": "first-release-actual",
+      "scenario": "delayed-actual",
+      "comparators": [
+        "historical-mean"
+      ],
+      "expected_target": 5,
+      "expected_points": [
+        [
+          "historical-mean",
+          3
+        ]
+      ],
+      "expected_refusal": null
+    },
+    {
+      "case_id": "future-consensus",
+      "horizon": "T-7d",
+      "target_kind": "consensus",
+      "scenario": "future-consensus",
+      "comparators": [
+        "consensus-persistence"
+      ],
+      "expected_target": 4,
+      "expected_points": [
+        [
+          "consensus-persistence",
+          2
+        ]
+      ],
+      "expected_refusal": null
+    },
+    {
+      "case_id": "insufficient-support",
+      "horizon": "T-7d",
+      "target_kind": "first-release-actual",
+      "scenario": "insufficient-support",
+      "comparators": [
+        "historical-mean"
+      ],
+      "expected_target": null,
+      "expected_points": [],
+      "expected_refusal": "insufficient-support"
+    },
+    {
+      "case_id": "late-schedule",
+      "horizon": "T-7d",
+      "target_kind": "first-release-actual",
+      "scenario": "late-schedule",
+      "comparators": [
+        "historical-mean"
+      ],
+      "expected_target": null,
+      "expected_points": [],
+      "expected_refusal": "schedule-unavailable"
+    },
+    {
+      "case_id": "missing-consensus",
+      "horizon": "T-7d",
+      "target_kind": "consensus",
+      "scenario": "missing-consensus",
+      "comparators": [
+        "consensus-persistence"
+      ],
+      "expected_target": null,
+      "expected_points": [],
+      "expected_refusal": "consensus-unavailable"
+    },
+    {
+      "case_id": "missing-feature",
+      "horizon": "T-7d",
+      "target_kind": "first-release-actual",
+      "scenario": "missing-feature",
+      "comparators": [
+        "historical-mean"
+      ],
+      "expected_target": null,
+      "expected_points": [],
+      "expected_refusal": "missing-feature"
+    },
+    {
+      "case_id": "observed-surprise",
+      "horizon": "T-7d",
+      "target_kind": "surprise",
+      "scenario": "observed-surprise",
+      "comparators": [
+        "historical-mean"
+      ],
+      "expected_target": 3,
+      "expected_points": [
+        [
+          "historical-mean",
+          3
+        ]
+      ],
+      "expected_refusal": null
+    },
+    {
+      "case_id": "revision-change",
+      "horizon": "T-7d",
+      "target_kind": "revision",
+      "scenario": "revision-change",
+      "comparators": [
+        "historical-mean"
+      ],
+      "expected_target": 4,
+      "expected_points": [
+        [
+          "historical-mean",
+          3
+        ]
+      ],
+      "expected_refusal": null
+    },
+    {
+      "case_id": "revision-level",
+      "horizon": "T-7d",
+      "target_kind": "revision",
+      "scenario": "revision-level",
+      "comparators": [
+        "historical-mean"
+      ],
+      "expected_target": 9,
+      "expected_points": [
+        [
+          "historical-mean",
+          3
+        ]
+      ],
+      "expected_refusal": null
+    },
+    {
+      "case_id": "semantic-mismatch",
+      "horizon": "T-7d",
+      "target_kind": "first-release-actual",
+      "scenario": "semantic-mismatch",
+      "comparators": [
+        "historical-mean"
+      ],
+      "expected_target": null,
+      "expected_points": [],
+      "expected_refusal": "semantic-mismatch"
+    }
+  ]
+}

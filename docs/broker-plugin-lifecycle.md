@@ -3,7 +3,7 @@
 Issue #618 adds a versioned, caller-authorized host lifecycle on top of the
 unchanged SDK, metadata registry and capability gates. It does not activate a
 live provider, grant credentials/rights, retrofit legacy capture adapters, or
-provide the hostile-code sandbox planned separately in #619.
+provide the credential and resource policy implemented separately in #619.
 
 ## Public API and platform boundary
 
