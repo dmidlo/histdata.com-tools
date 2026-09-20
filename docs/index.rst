@@ -46,6 +46,7 @@ Data and reconstruction foundations
    reconstruction-math-verification
    reconstruction-experiment-contracts
    reconstruction-schema-compatibility
+   schema-compatibility
    reconstruction-evidence-contracts
    cross-series-constraint-contracts
 
@@ -91,6 +92,7 @@ Persistence, projections, and validation
    causal-bar-features
    triangle-bar-features
    strategy-sensitivity-contracts
+   trader-integration-seams
    reverse-degradation-benchmark-contracts
    reverse-degradation-benchmark-corpus
    powered-reconstruction-qualification
@@ -116,6 +118,7 @@ Data quality
 
    data-quality/report-compatibility
    training-row-contracts
+   training-temporal-contracts
    training-weight-contracts
    training-weight-followup-study
    training-weight-diagnostic-tooling

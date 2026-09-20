@@ -2,6 +2,19 @@
 
 ### Added
 
+- **training**: add source-replayed feature cutoffs, explicit forward-label
+  horizons, complete evidence-unit split ownership and derived purge/embargo
+  ledgers; distinguish normalized-clock research from ex-post sources with
+  unknown historical availability and qualify leakage canaries synthetically
+  (#608).
+- **compatibility**: add a packaged metadata registry, qualified migration-graph
+  queries and source-generated compatibility tables; keep direct reader support
+  separate from migration qualification and refuse unsupported or ambiguous
+  paths (#633).
+- **trader interfaces**: freeze provider-neutral calendar, positioning, dataset,
+  bar/activity and exact/bounded-prior triangle-query seams over their canonical
+  owners; retain source replay, typed missingness and the official-calendar
+  migration boundary without adding production strategies (#666).
 - **training diagnostics**: implement a separately gated source census and
   native generator trace with bounded, atomic artifacts and a complete 234-cell
   attempt ledger; qualify with synthetic fixtures only, without empirical

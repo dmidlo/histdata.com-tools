@@ -216,8 +216,15 @@ where = ["src"]
     "assets/*.json",
     "assets/*.b64",
 ]
+"histdatacom.schema_compatibility" = [
+    "assets/*.json",
+    "py.typed",
+]
 "histdatacom.synthetic" = [
     "assets/*.json",
+]
+"histdatacom.synthetic.traders" = [
+    "py.typed",
 ]
 
 [tool.setuptools.dynamic]
