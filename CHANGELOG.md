@@ -2,6 +2,18 @@
 
 ### Added
 
+- **training joins**: add source-replayed wide feature joins with explicit
+  namespaces, entity ownership, availability/staleness rules, closed-bar
+  selection and value-free refusal provenance; preserve row grain and unknown
+  historical availability across native market/context adapters (#610).
+- **semantic proofs**: add exact native-reader/projector checks, re-executed
+  encoding transformations and composed byte handoffs; require executable
+  evidence before the offline compatibility registry can publish a lossless
+  declaration, without inventing historical production migrations (#634).
+- **experiments**: add public content-addressed scientific inputs, attempts,
+  metrics, search lineage, comparisons, promotion bindings and generated
+  reports; preserve immutable invalidation history and distinguish synthetic
+  contract evidence from unverified private campaign instances (#718).
 - **training**: add source-replayed feature cutoffs, explicit forward-label
   horizons, complete evidence-unit split ownership and derived purge/embargo
   ledgers; distinguish normalized-clock research from ex-post sources with

@@ -15,6 +15,7 @@ def main() -> int:
         build_registry,
         render_documentation,
     )
+    from histdatacom.schema_semantics import validate_lossless_evidence
 
     parser = argparse.ArgumentParser(description=__doc__)
     action = parser.add_mutually_exclusive_group(required=True)
@@ -22,6 +23,9 @@ def main() -> int:
     action.add_argument("--check", action="store_true")
     args = parser.parse_args()
     registry = build_registry(ROOT)
+    # Metadata declarations alone cannot qualify an executable lossless edge.
+    # Recompute semantic evidence before either publishing or checking assets.
+    validate_lossless_evidence(registry)
     expected = {
         ROOT
         / "src/histdatacom/schema_compatibility/assets/registry_v1.json": registry.to_json(),
@@ -32,9 +36,7 @@ def main() -> int:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(content, encoding="ascii")
         elif not path.is_file() or path.read_text("ascii") != content:
-            print(
-                "Compatibility inventory drift: " + str(path.relative_to(ROOT))
-            )
+            print("Compatibility inventory drift: " + str(path.relative_to(ROOT)))
             return 1
     print(
         f"{len(registry.schemas)} schemas; {len(registry.exemptions)} exemptions; {registry.registry_id}"

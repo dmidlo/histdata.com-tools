@@ -45,8 +45,10 @@ Data and reconstruction foundations
    reconstruction-scientific-ledger
    reconstruction-math-verification
    reconstruction-experiment-contracts
+   experiment-bundles
    reconstruction-schema-compatibility
    schema-compatibility
+   schema-semantic-proofs
    reconstruction-evidence-contracts
    cross-series-constraint-contracts
 
@@ -118,6 +120,7 @@ Data quality
 
    data-quality/report-compatibility
    training-row-contracts
+   training-join-contracts
    training-temporal-contracts
    training-weight-contracts
    training-weight-followup-study

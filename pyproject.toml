@@ -203,6 +203,10 @@ where = ["src"]
 "histdatacom.data_quality" = [
     "assets/*.json",
 ]
+"histdatacom.experiments" = [
+    "assets/*.json",
+    "py.typed",
+]
 "histdatacom.forecasting" = [
     "assets/*.json",
 ]
@@ -217,6 +221,10 @@ where = ["src"]
     "assets/*.b64",
 ]
 "histdatacom.schema_compatibility" = [
+    "assets/*.json",
+    "py.typed",
+]
+"histdatacom.schema_semantics" = [
     "assets/*.json",
     "py.typed",
 ]

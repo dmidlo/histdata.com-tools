@@ -30,7 +30,9 @@ WRITERS = frozenset(
 METADATA_WRITERS = frozenset(
     {"payload", "metadata", "to_metadata", "evidence_dict", "identity_payload"}
 )
-READERS = frozenset({"from_dict", "from_json", "from_mapping", "restore"})
+READERS = frozenset(
+    {"from_dict", "from_json", "from_mapping", "from_payload", "restore"}
+)
 PERSISTENCE_CALLS = frozenset(
     {
         "write_ipc",
@@ -187,6 +189,12 @@ CLASS_READERS = {
     "histdatacom.data_quality.calendar_profiles.HistDataCalendarProfile": (
         "calendar_profile_from_mapping",
     ),
+}
+SERIALIZER_EXEMPTIONS = {
+    "histdatacom.experiments._wire.Record": "Abstract frozen-dataclass serializer template; it has no standalone fields or payload. Concrete embedded records and versioned artifact subclasses are inventoried separately.",
+}
+FUNCTION_EXEMPTIONS = {
+    "histdatacom.experiments._wire.Artifact.artifact_id": "Derived digest property for the abstract artifact envelope, not an independent serialized family. Every concrete experiment artifact's actual envelope reader/writer is inventoried separately.",
 }
 
 
@@ -505,6 +513,17 @@ def build_registry(root: Path) -> CompatibilityRegistryV1:
             METADATA_WRITERS & entrypoints.keys()
         )
         readers = sorted(READERS & entrypoints.keys())
+        # A component payload is not an alternate reader/writer for its full
+        # versioned envelope. Embedded-only records retain their payload API.
+        if "to_dict" in writers and "to_payload" in writers:
+            writers.remove("to_payload")
+        if "from_dict" in readers and "from_payload" in readers:
+            readers.remove("from_payload")
+        if name in SERIALIZER_EXEMPTIONS:
+            exemptions.append(
+                ExemptionV1(name, SERIALIZER_EXEMPTIONS[name], module.sha256)
+            )
+            continue
         if not writers:
             if module.name in PROCESS_LOCAL_MODULES:
                 exemptions.append(
@@ -597,6 +616,11 @@ def build_registry(root: Path) -> CompatibilityRegistryV1:
                     and child.name not in WRITERS | READERS | METADATA_WRITERS
                 )
         for name, scope in scopes:
+            if name in FUNCTION_EXEMPTIONS:
+                exemptions.append(
+                    ExemptionV1(name, FUNCTION_EXEMPTIONS[name], module.sha256)
+                )
+                continue
             wires: set[str] = set()
             dynamic = False
             for child in ast.walk(scope):
@@ -799,6 +823,8 @@ def render_documentation(registry: CompatibilityRegistryV1) -> str:
         "Migration paths require qualified edges, exact source/destination invariant coverage, implementation IDs, golden-corpus and invariant evidence, and an explicit retained whole-path composition test for multi-edge paths. Paths rank by edge count, then priorities and declared destination versions; equal-ranked alternatives refuse. Cycles and missing implementations refuse at registry construction. Exact queries permit only identity/direct-read or lossless-representation paths; semantic successors and lossy/advisory edges do not preserve exact semantics.",
         "",
         "The current registry declares **no qualified historical migration edges**: existing `compatible_translation` labels, constructors and successful deserialization are not migration qualification. Every absent transition is unsupported; no artifact is rewritten. Positive migration and composition behavior is tested with separately identified synthetic graphs, not passed off as production migration evidence.",
+        "",
+        "Offline registry publication and drift checking additionally run the #634 semantic-proof gate before writing or comparing assets. Every qualified lossless edge and applicable complete composition requires native-reader/projector evidence and re-execution of an explicitly admitted implementation. Equivalent supplied payloads or an implementation name alone are insufficient. Unreviewed families and executors cannot acquire lossless qualification. See [semantic proof contracts](schema-semantic-proofs.md). Runtime metadata queries remain producer-free; custom metadata graph declarations are not a substitute for executable semantic proof.",
         "",
         "## Inventory and evidence boundaries",
         "",
