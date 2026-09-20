@@ -14,6 +14,11 @@ The first separately approved real-data attempt admitted no candidate days and
 failed during export; its retained observations and limitations are reported
 below. This page does not approve another execution or qualify the method.
 
+The separate [follow-up study design](training-weight-followup-study.md)
+specifies exploratory diagnosis and the gates for a later confirmation. It
+preserves this protocol and failed attempt; the design is not an execution
+approval or new empirical result.
+
 ## Frozen protocol and evidence ownership
 
 The authority is

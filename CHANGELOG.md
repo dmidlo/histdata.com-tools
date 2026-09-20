@@ -2,6 +2,9 @@
 
 ### Added
 
+- **training docs**: design a separate bounded feasibility study and fresh-data
+  confirmation gates for synthetic-member weighting; preserve the failed first
+  attempt and leave empirical execution explicitly unapproved (#750, #607).
 - **training**: add bounded historical-unit evidence mass across six member
   policies, separate weight-concentration and member-correlation diagnostics,
   whole-unit inference, source-bound research replay and supervised attempts;
