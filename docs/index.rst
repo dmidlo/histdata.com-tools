@@ -24,6 +24,7 @@ Data and reconstruction foundations
    forecast-contracts
    forecast-feature-store
    forecast-engine-registry
+   forecast-math-verification
    economic-indicator-catalog
    release-vintage-reconstruction
    release-schedule-reconstruction
@@ -72,6 +73,7 @@ Empirical reconstruction pipeline
    broker-plugin-sdk
    broker-plugin-discovery
    broker-plugin-capabilities
+   broker-plugin-lifecycle
    broker-delivery-fingerprint-contracts
    broker-delivery-transfer-contracts
 
@@ -111,6 +113,7 @@ Data quality
    :maxdepth: 2
 
    data-quality/report-compatibility
+   training-row-contracts
 
 Temporal runtime and operations
 -------------------------------

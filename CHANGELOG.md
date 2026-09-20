@@ -2,6 +2,17 @@
 
 ### Added
 
+- **broker plugins**: add host-supervised subprocess lifecycle, bounded IPC,
+  durable delivery acknowledgements, explicit reconnect epochs and native
+  partial-capture replay; retain unknown provider continuity and keep execution
+  permissions and live activation separate (#618).
+- **forecasting**: add independent numerical references, source-bound replayed
+  score verification and assumption-qualified paired-loss inference; separate
+  mathematical consistency from empirical predictive qualification (#580).
+- **training**: add verified row origins, immutable evidence-unit ownership,
+  source and derived-artifact lineage, explicit consumer admissibility and
+  replayable observed, reconstructed, context and machine-forecast views;
+  preserve ex-post and source-authenticity limitations (#606).
 - **broker plugins**: add versioned capability negotiation, whole-workflow
   preflight and authorized SDK invocation with exact installed-entry-point
   binding and explicit field-support receipts; capability declarations do not
