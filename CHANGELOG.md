@@ -2,6 +2,18 @@
 
 ### Added
 
+- **broker plugins**: add versioned capability negotiation, whole-workflow
+  preflight and authorized SDK invocation with exact installed-entry-point
+  binding and explicit field-support receipts; capability declarations do not
+  grant permissions or certify source authenticity (#617).
+- **forecasting**: add independently classified engine descriptors, SemVer
+  registry successors, four executable reference estimators and full
+  fit/generate/score/comparison replay; retain issue-derived taxonomy coverage
+  as unverified against the missing original research archive (#562).
+- **reconstruction**: add causal three-leg bar features, event-backed quote
+  synchronization and directional bid/ask diagnostics; replay retained
+  reconciliation inputs for ex-post projection summaries and preserve original
+  rows and provenance in additive training consumers (#651).
 - **broker plugins**: discover separately installed wheels through a frozen
   metadata-only entry-point group; inspect and select bounded, deterministic
   declarations without importing plugins or reading secrets; preserve exact

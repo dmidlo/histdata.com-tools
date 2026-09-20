@@ -23,6 +23,7 @@ Data and reconstruction foundations
    economic-calendar-contracts
    forecast-contracts
    forecast-feature-store
+   forecast-engine-registry
    economic-indicator-catalog
    release-vintage-reconstruction
    release-schedule-reconstruction
@@ -70,6 +71,7 @@ Empirical reconstruction pipeline
    broker-capture-contracts
    broker-plugin-sdk
    broker-plugin-discovery
+   broker-plugin-capabilities
    broker-delivery-fingerprint-contracts
    broker-delivery-transfer-contracts
 
@@ -83,6 +85,7 @@ Persistence, projections, and validation
    reconstruction-activity-semantics
    derived-bar-contracts
    causal-bar-features
+   triangle-bar-features
    strategy-sensitivity-contracts
    reverse-degradation-benchmark-contracts
    reverse-degradation-benchmark-corpus

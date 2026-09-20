@@ -1,0 +1,24 @@
+{
+  "version": "1.0.0",
+  "source_status": "issue-derived; original archive unavailable",
+  "families": [
+    {"id": "benchmark", "label": "Naive and benchmark", "children": ["last-value", "historical-mean", "historical-median", "seasonal-naive", "same-period-last-year", "rolling-mean", "rolling-median", "consensus-persistence", "equal-combination", "median-combination", "reference-blend"], "refs": ["#562", "#563", "#564"]},
+    {"id": "univariate-state-space", "label": "ARIMA, ETS and state-space", "children": ["AR", "ARIMA", "SARIMA", "ETS", "Holt-Winters", "local-level", "local-trend", "structural-time-series", "Kalman-filter"], "refs": ["#562", "#564"]},
+    {"id": "multivariate", "label": "VAR, BVAR, VECM and GVAR", "children": ["VAR", "BVAR", "VECM", "GVAR", "sparse-VAR"], "refs": ["#562", "#564"]},
+    {"id": "latent-factor", "label": "Dynamic-factor and latent-state", "children": ["dynamic-factor", "factor-augmented-regression"], "refs": ["#562", "#564"]},
+    {"id": "mixed-frequency", "label": "Mixed-frequency and ragged-edge nowcasting", "children": ["bridge-equations", "MIDAS", "U-MIDAS", "mixed-frequency-state-space", "dynamic-factor-nowcast", "ragged-edge-regression", "news-decomposition"], "refs": ["#562", "#564"]},
+    {"id": "regularized-linear", "label": "Regularized linear and shrinkage", "children": ["shrinkage-linear"], "refs": ["#562", "#564"]},
+    {"id": "nonlinear", "label": "Nonlinear, GAM, kernel, GP and SVR", "children": ["GAM", "splines", "threshold", "quantile", "kernel", "GP", "SVR"], "refs": ["#562", "#565"]},
+    {"id": "trees", "label": "Trees, boosting and BART", "children": ["random-forest", "extremely-randomized-trees", "gradient-boosting", "BART", "distributional-forest"], "refs": ["#562", "#565"]},
+    {"id": "neural-temporal", "label": "Neural temporal models", "children": ["recurrent", "TCN", "transformer", "N-BEATS", "N-HiTS", "DeepAR"], "refs": ["#562", "#565"]},
+    {"id": "regime", "label": "Regime switching and change points", "children": ["Markov-switching", "threshold", "smooth-transition", "change-point", "time-varying-parameter"], "refs": ["#562", "#565"]},
+    {"id": "structural", "label": "Structural and accounting bottom-up", "children": ["CPI-basket", "employment-sector", "GDP-expenditure", "GDP-industry", "retail-components", "trade-flows"], "refs": ["#562", "#564"]},
+    {"id": "semi-structural", "label": "Semi-structural econometric", "children": ["wage-price", "financial-conditions"], "refs": ["#562", "#564"]},
+    {"id": "analogue", "label": "Historical analogues", "children": ["nearest-neighbour", "dynamic-time-warping", "regime-matched", "cross-country"], "refs": ["#562", "#565"]},
+    {"id": "market-implied", "label": "Market-implied expectations", "children": ["rates", "futures", "OIS", "breakeven", "options", "commodity", "FX"], "refs": ["#562", "#565"]},
+    {"id": "textual", "label": "Textual and unstructured", "children": ["official-policy-text", "release-text"], "refs": ["#562", "#565"]},
+    {"id": "alternative", "label": "Alternative high-frequency", "children": [], "refs": ["#562", "#565"]},
+    {"id": "panel", "label": "Cross-sectional and panel", "children": ["pooled", "multi-task"], "refs": ["#562", "#565"]},
+    {"id": "density", "label": "Probabilistic and density models", "children": [], "refs": ["#562"]}
+  ]
+}

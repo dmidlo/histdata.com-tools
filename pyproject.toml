@@ -197,6 +197,9 @@ histdatacom-orchestration-worker = "histdatacom.orchestration.worker:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
+"histdatacom.forecasting" = [
+    "assets/*.json",
+]
 "histdatacom.orchestration" = [
     "assets/README.md",
     "assets/*.json",
