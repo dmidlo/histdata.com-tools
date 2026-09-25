@@ -1,8 +1,8 @@
 """Fresh parent-ledger IPC and runtime-only authorization boundary canaries."""
 
-from dataclasses import replace
 import os
 import time
+from dataclasses import replace
 
 import pytest
 
@@ -10,8 +10,12 @@ from histdatacom.broker_plugin_lifecycle import worker
 from histdatacom.broker_plugin_lifecycle.contracts import BrokerLifecycleError
 from tests.fixtures.broker_policy_core import core_context
 from tests.fixtures.broker_runtime_policy import runtime_request, runtime_scope
-from tests.unit.test_broker_plugin_lifecycle import installed as installed
-from tests.unit.test_broker_plugin_lifecycle import request_data as request_data
+from tests.unit.test_broker_plugin_lifecycle import (
+    installed as installed,  # noqa: PLC0414 - deliberate pytest fixture export
+)
+from tests.unit.test_broker_plugin_lifecycle import (
+    request_data as request_data,  # noqa: PLC0414 - pytest fixture export
+)
 
 
 def test_lifecycle_replay_canonicalizes_parent_but_not_receipt_leaf(
@@ -194,8 +198,8 @@ def test_real_worker_rereads_parent_revocation_before_another_event(
     monkeypatch,
 ):
     from histdatacom.broker_plugin_lifecycle import (
-        supervisor,
         inspect_broker_lifecycle,
+        supervisor,
     )
     from histdatacom.broker_plugin_lifecycle.contracts import (
         BrokerLifecycleCompletion,
@@ -222,8 +226,16 @@ def test_real_worker_rereads_parent_revocation_before_another_event(
 
     with runtime_scope(request) as source:
 
-        def revoke_after_first(self, kind, payload, delivery=None):
-            original_append(self, kind, payload, delivery)
+        def revoke_after_first(
+            self, kind, payload, delivery=None, *, ingress_sequence=None
+        ):
+            original_append(
+                self,
+                kind,
+                payload,
+                delivery,
+                ingress_sequence=ingress_sequence,
+            )
             if kind == "event":
                 delivered.append(delivery)
                 assert len(delivered) == 1

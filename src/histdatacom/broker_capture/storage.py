@@ -10,6 +10,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING, BinaryIO
 
 if TYPE_CHECKING:
+    from histdatacom.broker_plugin_health.runtime_legacy import (
+        LegacyCaptureHealthObserver,
+    )
     from histdatacom.broker_plugin_policy.bindings import BrokerLegacyCaptureV1
 
 from histdatacom.broker_capture.adapters import (
@@ -88,11 +91,16 @@ class AppendOnlyBrokerCaptureWriterV1:
         session: BrokerCaptureSessionV1,
         storage_policy: BrokerCaptureStoragePolicyV1,
         provider_request: BrokerLegacyCaptureV1,
+        health_observer: LegacyCaptureHealthObserver | None = None,
     ) -> None:
         self.root = Path(root)
         self.session = session
         self.storage_policy = storage_policy
         self.provider_request = provider_request
+        self.health_observer = health_observer
+        self._health_pending: list[BrokerCaptureEventV1] = []
+        if health_observer is not None:
+            health_observer.require_session(session)
         self._retain(session)
         self.session_directory = self.root / session.session_id
         if self.session_directory.exists() and any(
@@ -125,6 +133,16 @@ class AppendOnlyBrokerCaptureWriterV1:
 
     def append(self, event: BrokerCaptureEventV1) -> None:
         """Append one event, rotating before limits are crossed."""
+        try:
+            if self.health_observer is not None:
+                self.health_observer.require_bound(event)
+            self._append(event)
+        except BaseException:
+            if self.health_observer is not None:
+                self.health_observer.refuse_event(event)
+            raise
+
+    def _append(self, event: BrokerCaptureEventV1) -> None:
         if self._closed:
             raise BrokerCaptureStorageError("capture writer is closed")
         self._retain(event)
@@ -172,6 +190,11 @@ class AppendOnlyBrokerCaptureWriterV1:
         )
         self._total_events += 1
         self._last_monotonic_ns = event.receive_time_monotonic_ns
+        if self.health_observer is not None:
+            if self.storage_policy.fsync_each_event:
+                self.health_observer.persisted(event)
+            else:
+                self._health_pending.append(event)
 
     def close(
         self,
@@ -201,7 +224,7 @@ class AppendOnlyBrokerCaptureWriterV1:
             self._closed = True
         return self._manifest
 
-    def __enter__(self) -> "AppendOnlyBrokerCaptureWriterV1":
+    def __enter__(self) -> AppendOnlyBrokerCaptureWriterV1:  # noqa: PYI034
         return self
 
     def __exit__(
@@ -294,6 +317,13 @@ class AppendOnlyBrokerCaptureWriterV1:
             self._retain(first)
             file_handle.flush()
             os.fsync(file_handle.fileno())
+            # Only a successful native fsync crosses the durable boundary.
+            # A later publication failure still leaves the native manifest
+            # incomplete and cannot receive scientific-fit qualification.
+            if self.health_observer is not None:
+                for event in self._health_pending:
+                    self.health_observer.persisted(event)
+                self._health_pending.clear()
             file_handle.close()
             ordinal = len(self._partitions)
             final_path = (

@@ -156,7 +156,13 @@ def main(*, secret_fields: tuple[str, ...] | None = None) -> None:
         if (
             startup is None
             or set(startup)
-            != {"header", "configuration", "provider_request", "epoch"}
+            != {
+                "header",
+                "configuration",
+                "provider_request",
+                "epoch",
+                "permissions",
+            }
             or type(startup["header"]) is not str
             or type(startup["configuration"]) is not dict
             or type(startup["provider_request"]) is not str
@@ -166,6 +172,7 @@ def main(*, secret_fields: tuple[str, ...] | None = None) -> None:
             raise ValueError
         header = BrokerLifecycleHeaderV1.from_json(startup["header"])
         policy = header.policy
+        controls.decoder.maximum = policy.frame_bytes
         if startup["epoch"] > len(policy.retry_delays_ms):
             raise ValueError
         from histdatacom.broker_plugin_policy.bindings import (
@@ -178,6 +185,56 @@ def main(*, secret_fields: tuple[str, ...] | None = None) -> None:
         )
         if provider_request.plan.to_json() != header.plan.to_json():
             raise ValueError
+        from histdatacom.broker_plugin_permissions.contracts import (
+            BrokerPermissionManifestV1,
+            BrokerPermissionBindingV1,
+        )
+        from histdatacom.broker_plugin_permissions.decisions import (
+            BrokerPermissionAuthorityV1,
+        )
+        from histdatacom.broker_plugin_permissions.scope import (
+            broker_permission_scope,
+        )
+        from histdatacom.broker_plugin_permissions.worker import (
+            PermissionChannel,
+            WorkerPermissionSource,
+            WorkerHostResources,
+        )
+
+        permissions = startup["permissions"]
+        if (
+            type(permissions) is not dict
+            or set(permissions) != {"manifest", "binding", "grant_id"}
+            or any(type(item) is not str for item in permissions.values())
+        ):
+            raise ValueError
+        channel = PermissionChannel(
+            controls,
+            descriptor,
+            provider_request.artifact_id,
+            startup["epoch"],
+            policy.frame_bytes,
+            policy.startup_timeout_ms / 1000,
+        )
+        permission_manifest = BrokerPermissionManifestV1.from_json(
+            permissions["manifest"]
+        )
+        permission_authority = BrokerPermissionAuthorityV1(
+            permission_manifest,
+            BrokerPermissionBindingV1.from_json(permissions["binding"]),
+            permissions["grant_id"],
+            WorkerPermissionSource(channel),
+        )
+        scopes.enter_context(
+            broker_permission_scope(
+                permission_authority,
+                resources=(
+                    WorkerHostResources(channel)
+                    if permission_manifest.resource_abi == "host_resources_v1"
+                    else None
+                ),
+            )
+        )
         scopes.enter_context(
             provider_policy_scope(
                 _PolicySource(
@@ -292,9 +349,12 @@ def main(*, secret_fields: tuple[str, ...] | None = None) -> None:
         emit({"type": "closed"}, policy.frame_bytes)
     except BaseException as error:
         from histdatacom.broker_plugin_policy.scope import BrokerPolicyError
+        from histdatacom.broker_plugin_permissions.decisions import (
+            BrokerPermissionError,
+        )
 
         reason = Reason.PLUGIN_FAILURE
-        if isinstance(error, BrokerPolicyError):
+        if isinstance(error, (BrokerPolicyError, BrokerPermissionError)):
             reason = Reason.AUTHORIZATION
         if security_refused or (
             private_guard is not None and private_guard.refused

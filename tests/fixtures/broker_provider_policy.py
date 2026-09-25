@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 import hashlib
 import json
 
@@ -40,6 +40,54 @@ MONOTONIC_NS = 10 * SECOND_NS
 RAW_CANARY = "generated-opaque-provider-payload-never-permitted"
 POLICY_NOW = 1000
 POLICY_EXPIRY = 2**63 - 1
+
+
+def generated_permission_authority(request):
+    """Explicit emission-only grant for one exact synthetic native invocation."""
+    from histdatacom.broker_plugin_permissions import (
+        BrokerPermissionAuthorityV1,
+        BrokerPermissionBindingV1,
+        BrokerPermissionContextV1,
+        BrokerPermissionGrantV1,
+        BrokerPermissionManifestV1,
+    )
+    from histdatacom.broker_plugins import BROKER_PLUGIN_SDK_VERSION
+
+    candidate = request.plan.candidate
+    registration = candidate.registration
+    atoms = ("emit:health", "emit:quotes", "emit:sizes", "raw_payload:emit")
+    manifest = BrokerPermissionManifestV1(
+        candidate.artifact_id,
+        registration.distribution_name,
+        registration.distribution_version,
+        BROKER_PLUGIN_SDK_VERSION,
+        registration.provider_ids,
+        atoms,
+        resource_abi="none",
+    )
+    binding = BrokerPermissionBindingV1(
+        candidate.artifact_id,
+        manifest.artifact_id,
+        BROKER_PLUGIN_SDK_VERSION,
+        request.configuration_profile.provider_id,
+        request.configuration_profile.artifact_id,
+    )
+    grant = BrokerPermissionGrantV1(
+        binding,
+        atoms,
+        "synthetic-fixture-operator",
+        0,
+        2**63 - 1,
+        "a" * 32,
+    )
+
+    class Source:
+        def read_context(self):
+            return BrokerPermissionContextV1((grant,))
+
+    return BrokerPermissionAuthorityV1(
+        manifest, binding, grant.artifact_id, Source()
+    )
 
 
 def policy_context(
@@ -384,7 +432,7 @@ def generated_sdk_request(
     public_configuration=None,
     private_field_names=(),
     output_contract=None,
-    provider_id="generated-test-provider",
+    provider_id=None,
     profile_id="generated-test-profile",
 ):
     """Explicit test request; neither creates rights nor invokes a plugin.
@@ -416,7 +464,11 @@ def generated_sdk_request(
     return BrokerSDKInvocationV1(
         plan,
         BrokerProviderConfigurationV1(
-            provider_id,
+            (
+                plan.candidate.registration.provider_ids[0]
+                if provider_id is None
+                else provider_id
+            ),
             profile_id,
             schema.to_json(),
             json.dumps(
@@ -494,5 +546,24 @@ def generated_provider_scope(*native_subjects):
         contexts[0].execution,
     )
     source = MutablePolicySource(combined)
-    with provider_policy_scope(source):
+    from histdatacom.broker_plugin_policy.bindings import BrokerSDKInvocationV1
+    from histdatacom.broker_plugin_permissions.scope import (
+        broker_permission_scope,
+    )
+
+    invocations = {
+        item.artifact_id: item
+        for item in native_subjects
+        if type(item) is BrokerSDKInvocationV1
+    }
+    with ExitStack() as stack:
+        stack.enter_context(provider_policy_scope(source))
+        if len(invocations) == 1:
+            stack.enter_context(
+                broker_permission_scope(
+                    generated_permission_authority(
+                        next(iter(invocations.values()))
+                    )
+                )
+            )
         yield source

@@ -9,11 +9,9 @@ from pathlib import Path
 import pytest
 
 from histdatacom.broker_capture import (
-    AppendOnlyBrokerCaptureWriterV1,
     BrokerAdapterMessageV1,
     BrokerCaptureEligibilityStatus,
     BrokerCaptureEventKind,
-    BrokerCaptureEventV1,
     BrokerCapturePriceTextSemantics,
     BrokerCaptureSessionManifestV1,
     BrokerCaptureSessionV1,
@@ -876,12 +874,6 @@ def _capture(
         public_metadata={"fixture_seed": seed},
     )
     with generated_provider_scope(generated_legacy_request(session)):
-        writer = AppendOnlyBrokerCaptureWriterV1(
-            root,
-            session=session,
-            storage_policy=_storage_policy(),
-            provider_request=generated_legacy_request(session),
-        )
         messages: list[BrokerAdapterMessageV1] = [
             BrokerAdapterMessageV1(
                 kind=BrokerCaptureEventKind.PROCESS_START,
@@ -961,43 +953,83 @@ def _capture(
                 ),
             )
         )
-        if clock_correction_ns is not None:
-            messages.insert(
-                3,
-                BrokerAdapterMessageV1(
-                    kind=BrokerCaptureEventKind.CLOCK_CORRECTION,
-                    reason_code="wall_monotonic_divergence",
-                ),
-            )
-        monotonic_ns = BASE_MONOTONIC_NS
-        receive_wall_ns = wall_start_ns
-        for sequence, message in enumerate(messages):
-            gap = (
-                6 * SECOND_NS
-                if message.kind is BrokerCaptureEventKind.OUTAGE_END
-                else cadence_ns
-            )
-            monotonic_ns += gap
-            receive_wall_ns += gap
-            writer.append(
-                BrokerCaptureEventV1(
-                    session_id=session.session_id,
-                    capture_sequence=sequence,
-                    receive_time_utc_ns=receive_wall_ns,
-                    receive_time_monotonic_ns=monotonic_ns,
-                    message=message,
-                    clock_offset_change_ns=(
-                        clock_correction_ns
-                        if message.kind
-                        is BrokerCaptureEventKind.CLOCK_CORRECTION
-                        else None
-                    ),
-                )
-            )
-        return writer.close(
-            completed=completed,
-            limitations=(() if completed else ("collector_failure:fixture",)),
+        from histdatacom.broker_capture.storage import (
+            load_broker_capture_session_manifest,
         )
+        from histdatacom.broker_plugin_health import BrokerHostHealthPolicyV1
+        from histdatacom.broker_plugin_health.runtime_legacy import (
+            capture_legacy_with_host_health,
+        )
+
+        class FixtureClock:
+            # A controlled host clock sampled by actual ingress/fsync hooks.
+            # This is not a physical persistence-latency benchmark.
+            wall = session.started_at_utc_ns
+            monotonic = session.started_at_monotonic_ns
+            tick = 0
+
+            def sample(self):
+                value = self.wall + self.tick, self.monotonic + self.tick
+                self.tick += 1
+                return value
+
+        clock = FixtureClock()
+
+        class IncompleteFixtureCapture(RuntimeError):
+            pass
+
+        class FixtureAdapter:
+            adapter_id = session.adapter_id
+            adapter_version = session.adapter_version
+
+            def iter_messages(self):
+                wall = wall_start_ns
+                monotonic = BASE_MONOTONIC_NS
+                for index, message in enumerate(messages):
+                    gap = (
+                        6 * SECOND_NS
+                        if message.kind is BrokerCaptureEventKind.OUTAGE_END
+                        else cadence_ns
+                    )
+                    monotonic += gap
+                    wall += gap
+                    if index == 3 and clock_correction_ns is not None:
+                        wall += clock_correction_ns
+                    clock.wall, clock.monotonic, clock.tick = wall, monotonic, 0
+                    yield message
+                if not completed:
+                    raise IncompleteFixtureCapture(
+                        "synthetic adapter completion failure"
+                    )
+
+        # Duplicate delivery, one explicit source outage, and one reconnect are
+        # the empirical parameters this generated calibration case fits. Their
+        # exact bounded presence is allowed, not concealed. Host loss, reorder,
+        # malformed input, unidentified upstream loss requirements and false
+        # healthy claims remain fail-closed. Native fsync is per-event so the
+        # deliberate quiet interval does not masquerade as a host disk delay.
+        health_policy = BrokerHostHealthPolicyV1(
+            bucket_width_ns=60 * SECOND_NS,
+            max_duplicate_rate=0.5,
+            max_reported_source_gap_events=1,
+            max_reconnect_events=1,
+            max_clock_correction_events=1,
+        )
+        try:
+            result = capture_legacy_with_host_health(
+                root,
+                provider_request=generated_legacy_request(session),
+                adapter=FixtureAdapter(),
+                clock=clock,
+                storage_policy=_storage_policy(),
+                symbols=("EURUSD",),
+                policy=health_policy,
+            )
+        except IncompleteFixtureCapture:
+            return load_broker_capture_session_manifest(
+                root / session.session_id / "session.manifest.json"
+            )
+        return result.manifest
 
 
 def _quote(
@@ -1039,7 +1071,7 @@ def _storage_policy() -> BrokerCaptureStoragePolicyV1:
         high_watermark_bytes=24 * 1024**2,
         max_retained_partitions=100,
         manifest_reserve_bytes=64 * 1024,
-        fsync_each_event=False,
+        fsync_each_event=True,
     )
 
 

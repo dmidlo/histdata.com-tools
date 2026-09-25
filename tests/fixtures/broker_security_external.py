@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import base64
-from collections.abc import Iterator, Mapping
+import hashlib
 import json
 import os
-import socket
 import time
+from collections.abc import Iterator, Mapping
 from typing import cast
 from urllib.parse import quote
 
@@ -15,8 +15,8 @@ from histdatacom.broker_plugins import (
     BrokerConfigurationFieldV1,
     BrokerConfigurationSchemaV1,
     BrokerConfigurationType,
-    BrokerEventV1,
     BrokerEventKind,
+    BrokerEventV1,
     BrokerExtensionV1,
     BrokerInstrumentV1,
     BrokerPluginMetadataV1,
@@ -25,12 +25,17 @@ from histdatacom.broker_plugins import (
     BrokerReceiveTimeV1,
     BrokerSessionV1,
 )
+from histdatacom.broker_plugins.resources import BrokerHostResourcesV1
+
+# Independently known by this hostile fixture, not a host-resolved credential.
+PRIVATE_CANARY = 'synthetic / private " ☃ fixture-only-known-marker'
 
 
 class SecurityFixture:
-    def __init__(self) -> None:
+    def __init__(self, resources: BrokerHostResourcesV1) -> None:
+        self.resources = resources
         self.mode = "finite"
-        self.value = ""
+        self.value = PRIVATE_CANARY
 
     @property
     def metadata(self) -> BrokerPluginMetadataV1:
@@ -45,18 +50,6 @@ class SecurityFixture:
                 BrokerConfigurationFieldV1(
                     "mode", BrokerConfigurationType.STRING, "Offline scenario"
                 ),
-                BrokerConfigurationFieldV1(
-                    "credential",
-                    BrokerConfigurationType.STRING,
-                    "Ephemeral credential",
-                    secret=True,
-                ),
-                BrokerConfigurationFieldV1(
-                    "port",
-                    BrokerConfigurationType.INTEGER,
-                    "Caller-owned local fixture port",
-                    required=False,
-                ),
             )
         )
 
@@ -64,14 +57,15 @@ class SecurityFixture:
         self, configuration: Mapping[str, object]
     ) -> BrokerSessionV1:
         self.mode = cast(str, configuration["mode"])
-        self.value = cast(str, configuration["credential"])
         if self.mode == "authenticate":
-            with socket.create_connection(
-                ("127.0.0.1", cast(int, configuration["port"])), timeout=1
-            ) as transport:
-                transport.sendall((self.value + "\n").encode("utf-8"))
-                if transport.recv(16) != b"accepted":
-                    raise ValueError("authentication refused")
+            response = self.resources.request(
+                "fixture-auth",
+                "POST",
+                "/auth/login",
+                secret_profile="fixture-login",
+            )
+            if response.status != 200 or response.body != b"accepted":
+                raise ValueError("authentication refused")
         if self.mode == "exception":
             raise RuntimeError(self.value)
         if self.mode == "output":
@@ -120,6 +114,7 @@ class SecurityFixture:
             "url": quote(self.value, safe=""),
             "base64": base64.b64encode(self.value.encode()).decode(),
             "json": json.dumps(self.value),
+            "sha256": hashlib.sha256(self.value.encode()).hexdigest(),
         }
         extensions = (
             (
@@ -150,5 +145,5 @@ class SecurityFixture:
             time.sleep(60)
 
 
-def factory() -> BrokerPluginV1:
-    return SecurityFixture()
+def factory(resources: BrokerHostResourcesV1) -> BrokerPluginV1:
+    return SecurityFixture(resources)

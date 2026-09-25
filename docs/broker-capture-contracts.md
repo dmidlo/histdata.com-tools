@@ -105,6 +105,13 @@ outage, a collector failure, a reconnect discontinuity, and a clock problem. A s
 `open`, `completed`, or `failed`; a failed session retains bounded reason codes
 without copying exception messages or private adapter state.
 
+Unreleased v3 adds separate [host-owned health evidence](broker-host-health.md).
+Use `capture_legacy_with_host_health` with an explicit provider-policy scope,
+native request and SLO policy to record actual ingress and post-fsync persistence.
+Direct historical V1 writers/readers remain available, but an unaudited capture
+is no longer eligible for a new scientific fingerprint fit. Missing observations
+are not reconstructed retrospectively from its manifest or plugin status.
+
 ## Credential and publication safety
 
 The public contracts have no token, password, credential, cookie,

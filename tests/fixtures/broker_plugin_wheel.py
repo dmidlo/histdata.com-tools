@@ -9,8 +9,13 @@ import io
 from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile
 
+from histdatacom.broker_plugin_permissions import (
+    BrokerPermissionManifestV1,
+    permission_resource_path,
+)
 from histdatacom.broker_plugin_registry import (
     BROKER_PLUGIN_ENTRY_POINT_GROUP,
+    BrokerPluginCandidateV1,
     BrokerPluginRegistrationV1,
     registration_resource_path,
 )
@@ -67,6 +72,25 @@ def build_fixture_plugin_wheel(
             f"[{BROKER_PLUGIN_ENTRY_POINT_GROUP}]\n{registration.plugin_id} = {registration.entry_point}\n"
         ).encode(),
     }
+    candidate = BrokerPluginCandidateV1(
+        registration,
+        hashlib.sha256(registration.to_json().encode("ascii")).hexdigest(),
+        hashlib.sha256(entries[module + ".py"]).hexdigest(),
+    )
+    permissions = BrokerPermissionManifestV1(
+        candidate.artifact_id,
+        registration.distribution_name,
+        registration.distribution_version,
+        "1.0.0",
+        registration.provider_ids,
+        ("emit:health", "emit:quotes", "emit:sizes", "raw_payload:emit"),
+        resource_abi="none",
+    )
+    entries[
+        permission_resource_path(
+            registration.plugin_id, registration.entry_point
+        )
+    ] = permissions.to_json().encode("ascii")
     record = io.StringIO(newline="")
     writer = csv.writer(record, lineterminator="\n")
     for path, data in sorted(entries.items()):

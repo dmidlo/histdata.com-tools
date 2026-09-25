@@ -138,7 +138,7 @@ def main() -> None:
                 result = run_broker_plugin_lifecycle(
                     inventory,
                     plan,
-                    {"mode": mode, "credential": "qualification-not-retained"},
+                    {"mode": mode},
                     ("EURUSD",),
                     root / mode,
                     authorize=lambda _: True,

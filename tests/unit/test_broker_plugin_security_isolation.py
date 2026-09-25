@@ -55,12 +55,7 @@ denied('symlink',lambda:os.symlink(root/'scientific-store/existing',root/'anothe
 denied('alias',lambda:(root/'alias/existing').write_bytes(b'bad'))
 denied('unlink',lambda:(root/'scientific-store/existing').unlink())
 denied('scientific_writer',lambda:write_engine_artifact(default_forecast_registry(),root/'scientific-store'))
-child=os.fork()
-if child==0:
-    try: (root/'scientific-store/descendant').write_bytes(b'bad')
-    except PermissionError: os._exit(0)
-    os._exit(1)
-checks['descendant']=os.waitpid(child,0)[1]==0
+denied('descendant',lambda:os.fork())
 checks['runtime_read']=bool(Path(sys.argv[2]+'/histdatacom/broker_plugin_security/contracts.py').read_bytes())
 checks['metadata_read']=bool((root/'scientific-store/existing').stat().st_size)
 print(json.dumps(checks,sort_keys=True))
@@ -70,9 +65,10 @@ print(json.dumps(checks,sort_keys=True))
             *launch.command_prefix,
             sys.executable,
             "-I",
+            "-S",
             "-B",
             "-c",
-            program,
+            launch.bootstrap_source + "\n" + program,
             str(tmp_path),
             str(ROOT / "src"),
         ],
@@ -136,9 +132,10 @@ print(json.dumps(checks))
                 *launch.command_prefix,
                 sys.executable,
                 "-I",
+                "-S",
                 "-B",
                 "-c",
-                program,
+                launch.bootstrap_source + "\n" + program,
                 str(port),
                 str(other_port),
             ],

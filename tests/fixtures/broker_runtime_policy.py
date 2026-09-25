@@ -22,11 +22,19 @@ from histdatacom.broker_plugins import (
 )
 
 if __package__:
-    from .broker_provider_policy import MutablePolicySource, policy_context
+    from .broker_provider_policy import (
+        MutablePolicySource,
+        policy_context,
+        generated_permission_authority,
+    )
 else:
     # The installed-wheel qualifier copies these two generated helper files
     # alongside its script. No checkout/test-package path enters that process.
-    from broker_provider_policy import MutablePolicySource, policy_context
+    from broker_provider_policy import (
+        MutablePolicySource,
+        policy_context,
+        generated_permission_authority,
+    )
 
 
 def runtime_request(plan, configuration, *, family="lifecycle"):
@@ -50,18 +58,6 @@ def runtime_request(plan, configuration, *, family="lifecycle"):
             BrokerConfigurationFieldV1(
                 "mode", BrokerConfigurationType.STRING, "Offline scenario"
             ),
-            BrokerConfigurationFieldV1(
-                "credential",
-                BrokerConfigurationType.STRING,
-                "Ephemeral credential",
-                secret=True,
-            ),
-            BrokerConfigurationFieldV1(
-                "port",
-                BrokerConfigurationType.INTEGER,
-                "Caller-owned local fixture port",
-                required=False,
-            ),
         )
     else:
         raise ValueError("unknown generated runtime fixture family")
@@ -74,15 +70,11 @@ def runtime_request(plan, configuration, *, family="lifecycle"):
     return BrokerSDKInvocationV1(
         plan,
         BrokerProviderConfigurationV1(
-            "generated-runtime-provider",
+            plan.candidate.registration.provider_ids[0],
             "generated-private-profile",
             schema.to_json(),
             canonical_policy_json(public),
-            (
-                ("credential",)
-                if family == "security" or "credential" in configuration
-                else ()
-            ),
+            (("credential",) if "credential" in configuration else ()),
         ),
         BrokerProviderOutputContractV1(
             "sdk-v1",
@@ -94,10 +86,24 @@ def runtime_request(plan, configuration, *, family="lifecycle"):
 
 
 @contextmanager
-def runtime_scope(request):
+def runtime_scope(request, *, authority=None, resources=None):
     """Allow only the exact declared generated provider/configuration binding."""
     source = MutablePolicySource(
         policy_context(sdk_invocation_binding(request))
     )
-    with provider_policy_scope(source):
+    from histdatacom.broker_plugin_permissions.scope import (
+        broker_permission_scope,
+    )
+
+    with (
+        provider_policy_scope(source),
+        broker_permission_scope(
+            (
+                generated_permission_authority(request)
+                if authority is None
+                else authority
+            ),
+            resources=resources,
+        ),
+    ):
         yield source

@@ -36,6 +36,7 @@ from .protocols import (
     normalize_broker_instrument,
     validate_broker_event_stream,
 )
+from .resources import BrokerHostHTTPResponseV1, BrokerHostResourcesV1
 
 __all__ = [
     "BROKER_PLUGIN_SDK_VERSION",
@@ -54,6 +55,8 @@ __all__ = [
     "BrokerExtensionV1",
     "BrokerGapScope",
     "BrokerGapV1",
+    "BrokerHostHTTPResponseV1",
+    "BrokerHostResourcesV1",
     "BrokerInstrumentV1",
     "BrokerPluginError",
     "BrokerPluginMetadataV1",

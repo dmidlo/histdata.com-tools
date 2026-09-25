@@ -219,6 +219,13 @@ def invoke_authorized_installed_broker_plugin(
     credential, deadline, network or scientific-admission policy is supplied.
     """
     from histdatacom.broker_plugin_policy.scope import BrokerPolicyError
+    from histdatacom.broker_plugin_permissions.decisions import (
+        BrokerPermissionError,
+    )
+    from histdatacom.broker_plugin_permissions.scope import (
+        current_host_resources,
+        require_native_permissions,
+    )
 
     request = _provider_request(plan, provider_request)
     _provider_call(request, capture=False)
@@ -239,6 +246,7 @@ def invoke_authorized_installed_broker_plugin(
             _refuse()
         # Recheck metadata after all path reads, before any parent execution.
         verify_broker_capability_plan(plan, discover_broker_plugins())
+        authority = require_native_permissions(request, installed=True)
         for (name, path), source in zip(expected, sources):
             if name == module_name or name not in sys.modules:
                 if name in sys.modules:
@@ -251,8 +259,12 @@ def invoke_authorized_installed_broker_plugin(
         if not callable(factory):
             _refuse()
         _provider_call(request, capture=False)
-        plugin = _call(cast(Callable[[], BrokerPluginV1], factory))
-    except (BrokerCapabilityError, BrokerPolicyError):
+        if authority.manifest.resource_abi == "none":
+            plugin = _call(cast(Callable[[], BrokerPluginV1], factory))
+        else:
+            resource_factory = cast(Callable[..., BrokerPluginV1], factory)
+            plugin = _call(lambda: resource_factory(current_host_resources()))
+    except (BrokerCapabilityError, BrokerPolicyError, BrokerPermissionError):
         raise
     except (Exception, SystemExit):
         raise BrokerCapabilityError(

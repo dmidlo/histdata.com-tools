@@ -7,11 +7,18 @@ import csv
 import hashlib
 import io
 import json
+import socket
 from pathlib import Path
-from zipfile import ZipFile, ZIP_DEFLATED
+from zipfile import ZIP_DEFLATED, ZipFile
 
+from histdatacom.broker_plugin_permissions import (
+    BrokerPermissionEndpointV1,
+    BrokerPermissionManifestV1,
+    permission_resource_path,
+)
 from histdatacom.broker_plugin_registry import (
     BROKER_PLUGIN_ENTRY_POINT_GROUP,
+    BrokerPluginCandidateV1,
     BrokerPluginRegistrationV1,
     registration_resource_path,
 )
@@ -22,9 +29,10 @@ def build_security_wheel(
     *,
     direct_url: dict[str, object] | None = None,
     installer: str | None = None,
-    secret_schema: bool = True,
+    misclassify_mode_secret: bool = False,
     block_import: bool = False,
     fail_before_schema: str | None = None,
+    endpoint_origin: str | None = None,
 ) -> Path:
     registration = BrokerPluginRegistrationV1(
         "org.example.security",
@@ -70,10 +78,10 @@ def build_security_wheel(
         entries[f"{dist}/INSTALLER"] = (installer + "\n").encode()
     if direct_url is not None:
         entries[f"{dist}/direct_url.json"] = json.dumps(direct_url).encode()
-    if not secret_schema:
+    if misclassify_mode_secret:
         entries["security_fixture/plugin.py"] = entries[
             "security_fixture/plugin.py"
-        ].replace(b"secret=True", b"secret=False")
+        ].replace(b'"Offline scenario"', b'"Offline scenario", secret=True')
     if block_import:
         entries[
             "security_fixture/plugin.py"
@@ -81,7 +89,7 @@ def build_security_wheel(
     if fail_before_schema == "factory":
         entries[
             "security_fixture/plugin.py"
-        ] += b"\ndef factory():\n    raise RuntimeError('closed fixture failure')\n"
+        ] += b"\ndef factory(resources):\n    raise RuntimeError('closed fixture failure')\n"
     elif fail_before_schema in ("metadata", "schema"):
         constructor = (
             b"BrokerPluginMetadataV1"
@@ -96,6 +104,45 @@ def build_security_wheel(
             + constructor
             + b"(",
         )
+    # Generated loopback-only descriptor; qualifiers bind this exact declared
+    # port, never manufacture a wider runtime grant. A collision fails loudly.
+    if endpoint_origin is None:
+        with socket.socket() as listener:
+            listener.bind(("127.0.0.1", 0))
+            endpoint_origin = f"http://127.0.0.1:{listener.getsockname()[1]}"
+    candidate = BrokerPluginCandidateV1(
+        registration,
+        hashlib.sha256(registration.to_json().encode("ascii")).hexdigest(),
+        hashlib.sha256(entries["security_fixture/plugin.py"]).hexdigest(),
+    )
+    manifest = BrokerPermissionManifestV1(
+        candidate.artifact_id,
+        registration.distribution_name,
+        registration.distribution_version,
+        "1.0.0",
+        registration.provider_ids,
+        ("emit:health", "emit:quotes", "emit:sizes", "raw_payload:emit"),
+        ("network:provider:offline", "secrets:read:fixture-login"),
+        endpoints=(
+            BrokerPermissionEndpointV1(
+                "fixture-auth",
+                "offline",
+                endpoint_origin,
+                "/auth/",
+                ("POST",),
+                0,
+                64,
+                2000,
+                ("fixture-login",),
+            ),
+        ),
+        secret_profiles=("fixture-login",),
+    )
+    entries[
+        permission_resource_path(
+            registration.plugin_id, registration.entry_point
+        )
+    ] = manifest.to_json().encode("ascii")
     record = io.StringIO(newline="")
     writer = csv.writer(record, lineterminator="\n")
     for name, data in sorted(entries.items()):

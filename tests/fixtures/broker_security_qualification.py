@@ -7,19 +7,21 @@ No host/dependency installation; the fixture is always uninstalled afterward.
 
 from __future__ import annotations
 
-from dataclasses import replace
 import json
-from pathlib import Path
 import secrets
 import socket
 import subprocess
 import sys
 import tempfile
 import threading
+from contextlib import contextmanager
+from dataclasses import replace
+from pathlib import Path
+from urllib.parse import urlsplit
 
-import histdatacom.broker_plugin_security as security
 import histdatacom
 import histdatacom.broker_plugin_policy as policy_api
+import histdatacom.broker_plugin_security as security
 from histdatacom.broker_plugin_capabilities import (
     BrokerAdmittedEventV1,
     BrokerCapabilityWorkflowV1,
@@ -28,21 +30,88 @@ from histdatacom.broker_plugin_capabilities import (
 from histdatacom.broker_plugin_lifecycle import (
     BrokerLifecycleCompletion,
     BrokerLifecyclePolicyV1,
+)
+from histdatacom.broker_plugin_lifecycle import (
     replay_broker_lifecycle as _replay,
 )
 from histdatacom.broker_plugin_registry import discover_broker_plugins
 from histdatacom.broker_plugin_security import (
-    BrokerNetworkMode,
     BrokerSecurityError,
     BrokerSecurityMode,
     BrokerSecurityPolicyV1,
     BrokerTrustTier,
     read_security_receipt,
-    run_secure_broker_plugin as _secure,
-    run_trusted_broker_plugin as _trusted,
     verify_security_capture,
 )
-from broker_runtime_policy import runtime_request, runtime_scope
+from histdatacom.broker_plugin_security import (
+    run_secure_broker_plugin as _secure,
+)
+from histdatacom.broker_plugin_security import (
+    run_trusted_broker_plugin as _trusted,
+)
+
+if __package__:
+    from .broker_runtime_policy import runtime_request, runtime_scope
+else:
+    from broker_runtime_policy import runtime_request, runtime_scope
+
+from histdatacom.broker_plugin_permissions import (
+    BrokerHostSecretProfileV1,
+    BrokerPermissionAuthorityV1,
+    BrokerPermissionBindingV1,
+    BrokerPermissionContextV1,
+    BrokerPermissionGrantV1,
+    BrokerPermissionResourcesV1,
+    read_installed_broker_permissions,
+)
+
+PRIVATE_CANARY = 'synthetic / private " ☃ fixture-only-known-marker'
+
+
+@contextmanager
+def security_permission_scope(request, provider=None):
+    """Exact generated installed declaration, separate host-only auth binding."""
+    manifest = read_installed_broker_permissions(request.plan.candidate)
+    binding = BrokerPermissionBindingV1(
+        request.plan.candidate.artifact_id,
+        manifest.artifact_id,
+        "1.0.0",
+        request.configuration_profile.provider_id,
+        request.configuration_profile.artifact_id,
+    )
+    grant = BrokerPermissionGrantV1(
+        binding,
+        manifest.declared_atoms,
+        "generated-security-operator",
+        0,
+        2**63 - 1,
+        "d" * 32,
+    )
+
+    class Source:
+        def read_context(self):
+            return BrokerPermissionContextV1((grant,))
+
+    authority = BrokerPermissionAuthorityV1(
+        manifest, binding, grant.artifact_id, Source()
+    )
+    resources = BrokerPermissionResourcesV1(
+        authority,
+        provider_request=request,
+        secret_profiles=(
+            (
+                BrokerHostSecretProfileV1(
+                    "fixture-login", "opaque-fixture-handle"
+                ),
+            )
+            if provider is not None
+            else ()
+        ),
+        secret_provider=provider,
+    )
+    with runtime_scope(request, authority=authority, resources=resources):
+        yield authority
+
 
 _REQUESTS = {}
 
@@ -61,7 +130,9 @@ def run_secure_broker_plugin(
             acknowledgement_timeout_ms=5000,
         ),
     )
-    with runtime_scope(request):
+    provider = kwargs.pop("host_secret_provider", None)
+    kwargs.setdefault("private_identifiers", (PRIVATE_CANARY,))
+    with security_permission_scope(request, provider):
         return _secure(
             inventory,
             plan,
@@ -78,7 +149,9 @@ def run_trusted_broker_plugin(
     inventory, plan, policy, public, symbols, **kwargs
 ):
     request = runtime_request(plan, public, family="security")
-    with runtime_scope(request):
+    provider = kwargs.pop("host_secret_provider", None)
+    kwargs.setdefault("private_identifiers", (PRIVATE_CANARY,))
+    with security_permission_scope(request, provider):
         return _trusted(
             inventory,
             plan,
@@ -92,7 +165,7 @@ def run_trusted_broker_plugin(
 
 def replay_broker_lifecycle(output):
     request = _REQUESTS[output]
-    with runtime_scope(request):
+    with security_permission_scope(request):
         yield from _replay(output, provider_request=request)
 
 
@@ -102,7 +175,7 @@ class Provider:
         self.calls = 0
 
     def resolve(self, handle: str) -> str:
-        assert handle == "opaque-qualification-handle"
+        assert handle == "opaque-fixture-handle"
         self.calls += 1
         return self.value
 
@@ -156,7 +229,6 @@ def main() -> None:
             plan.candidate.artifact_id,
             BrokerTrustTier.DEVELOPMENT,
             BrokerSecurityMode.KERNEL_ISOLATED,
-            secret_fields=("credential",),
         )
         with tempfile.TemporaryDirectory(
             prefix="security-qualification-"
@@ -179,10 +251,7 @@ def main() -> None:
                     ("EURUSD",),
                     root / mode,
                     authorize=lambda _: True,
-                    secret_handles={
-                        "credential": "opaque-qualification-handle"
-                    },
-                    secret_provider=provider,
+                    host_secret_provider=provider,
                     lifecycle_policy=BrokerLifecyclePolicyV1(
                         startup_timeout_ms=15000,
                         run_timeout_ms=15000 if mode == "block_next" else 30000,
@@ -226,7 +295,7 @@ def main() -> None:
                         for record in records
                         if record.kind == "event"
                     )
-            for mode in ("plain", "url", "base64", "json", "session"):
+            for mode in ("plain", "url", "base64", "json", "sha256", "session"):
                 try:
                     run_secure_broker_plugin(
                         inventory,
@@ -236,48 +305,51 @@ def main() -> None:
                         ("EURUSD",),
                         root / mode,
                         authorize=lambda _: True,
-                        secret_handles={
-                            "credential": "opaque-qualification-handle"
-                        },
-                        secret_provider=provider,
+                        host_secret_provider=provider,
                     )
                 except BrokerSecurityError:
                     results.append({"mode": mode, "refused": True})
                 else:
                     raise AssertionError("private output accepted")
             listener = socket.socket()
-            listener.bind(("127.0.0.1", 0))
+            origin = urlsplit(
+                read_installed_broker_permissions(plan.candidate)
+                .endpoints[0]
+                .origin
+            )
+            listener.bind(("127.0.0.1", origin.port))
             listener.listen(1)
             listener.settimeout(30)
             observed: list[bool] = []
 
             def serve() -> None:
                 with listener.accept()[0] as client:
+                    client.settimeout(5)
+                    request = b""
+                    while b"\r\n\r\n" not in request:
+                        chunk = client.recv(4096)
+                        assert chunk and len(request) + len(chunk) <= 8192
+                        request += chunk
                     observed.append(
-                        client.recv(256).decode().strip() == provider.value
+                        (b"Authorization: Bearer " + provider.value.encode())
+                        in request
                     )
-                    client.sendall(b"accepted" if observed[-1] else b"denied")
+                    client.sendall(
+                        b"HTTP/1.1 200 OK\r\nContent-Length: 8\r\nConnection: close\r\n\r\naccepted"
+                    )
 
             thread = threading.Thread(target=serve)
             thread.start()
-            port = listener.getsockname()[1]
             try:
                 result = run_secure_broker_plugin(
                     inventory,
                     plan,
-                    replace(
-                        policy,
-                        network=BrokerNetworkMode.LOOPBACK,
-                        loopback_ports=(port,),
-                    ),
-                    {"mode": "authenticate", "port": port},
+                    policy,
+                    {"mode": "authenticate"},
                     ("EURUSD",),
                     root / "auth",
                     authorize=lambda _: True,
-                    secret_handles={
-                        "credential": "opaque-qualification-handle"
-                    },
-                    secret_provider=provider,
+                    host_secret_provider=provider,
                 )
                 assert (
                     result.native.manifest.completion
@@ -299,17 +371,19 @@ def main() -> None:
                 {"mode": "finite"},
                 ("EURUSD",),
                 authorize=lambda _: True,
-                secret_handles={"credential": "opaque-qualification-handle"},
-                secret_provider=provider,
+                host_secret_provider=provider,
             )
             assert (
                 tuple(
                     BrokerAdmittedEventV1.from_json(text).event.to_json()
-                    for text in trusted.events_json
+                    for text in trusted.receipt.events_json
                 )
                 == native_events
             )
-            assert provider.calls == 13
+            assert provider.calls == 1
+            assert provider.value.encode() not in b"".join(
+                path.read_bytes() for path in root.rglob("*") if path.is_file()
+            )
     finally:
         if installed:
             subprocess.run(

@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import runpy
 import select
+import shutil
 import signal
 import subprocess
 import sys
@@ -149,7 +150,7 @@ def run(request_data, tmp_path, mode="finite", **kwargs):
     return run_broker_plugin_lifecycle(
         inventory,
         plan,
-        {"mode": mode, "credential": "do-not-persist-this-value"},
+        {"mode": mode},
         ("EURUSD",),
         tmp_path / "run",
         authorize=lambda _: True,
@@ -157,6 +158,39 @@ def run(request_data, tmp_path, mode="finite", **kwargs):
         worker_python=str(python),
         **kwargs,
     )
+
+
+def test_raw_secret_configuration_is_refused_before_worker_or_output(
+    request_data, tmp_path
+):
+    from histdatacom.broker_plugin_permissions import BrokerPermissionError
+
+    python, inventory, plan = request_data
+    output = tmp_path / "raw-secret-refused"
+    with pytest.raises(
+        BrokerPermissionError, match="opaque_host_secret_profiles_required"
+    ):
+        run_broker_plugin_lifecycle(
+            inventory,
+            plan,
+            {"mode": "finite", "credential": "do-not-persist-this-value"},
+            ("EURUSD",),
+            output,
+            authorize=lambda _: True,
+            worker_python=str(python),
+        )
+    assert not output.exists()
+
+
+@pytest.mark.parametrize("nonce", ["", "A" * 32, "0" * 31, 0, False, []])
+def test_invalid_caller_nonce_is_refused_before_output(
+    request_data, tmp_path, nonce
+):
+    with pytest.raises(BrokerLifecycleError) as caught:
+        run(request_data, tmp_path, run_nonce=nonce)
+    assert caught.value.reason is Reason.INVALID_REQUEST
+    assert not (tmp_path / "run").exists()
+    assert not (tmp_path / "run-host-health").exists()
 
 
 def test_finite_installed_process_run_is_durable_and_replayable(
@@ -169,6 +203,23 @@ def test_finite_installed_process_run_is_durable_and_replayable(
     assert result.manifest.worker_reaped
     assert inspect_broker_lifecycle(result.directory).complete
     records = tuple(replay_broker_lifecycle(result.directory))
+    from histdatacom.broker_plugin_health.storage import (
+        read_lifecycle_host_health,
+    )
+    from histdatacom.broker_plugin_permissions import (
+        verify_permission_execution,
+    )
+
+    request = _PROVIDER_REQUESTS[result.directory]
+    with runtime_scope(request):
+        audited = read_lifecycle_host_health(
+            result.health_directory, result.manifest, records, request
+        )
+    assert audited == result.health
+    assert audited.complete_observations
+    assert audited.native_record_count == len(records)
+    assert all(bucket.upstream_loss_unknown for bucket in audited.buckets)
+    verify_permission_execution(result.permissions, request, result.manifest)
     assert [record.capture_sequence for record in records] == list(
         range(len(records))
     )
@@ -187,6 +238,42 @@ def test_finite_installed_process_run_is_durable_and_replayable(
     for pid in result.worker_pids:
         with pytest.raises(ChildProcessError):
             os.waitpid(pid, os.WNOHANG)
+
+
+def test_health_sidecar_independent_replay_refuses_tampered_or_missing_evidence(
+    request_data, tmp_path
+):
+    from histdatacom.broker_plugin_health.storage import (
+        read_lifecycle_host_health,
+    )
+
+    result = run(request_data, tmp_path)
+    request = _PROVIDER_REQUESTS[result.directory]
+    records = tuple(replay_broker_lifecycle(result.directory))
+    for label in ("missing", "reordered", "symlink", "foreign", "grant"):
+        copied = tmp_path / label
+        shutil.copytree(result.health_directory, copied)
+        observations = copied / "observations.jsonl"
+        if label == "missing":
+            (copied / "audit.json").unlink()
+        elif label == "reordered":
+            lines = observations.read_text().splitlines()
+            observations.write_text(
+                "\n".join([lines[1], lines[0], *lines[2:]]) + "\n"
+            )
+        elif label == "symlink":
+            observations.unlink()
+            observations.symlink_to(
+                result.health_directory / "observations.jsonl"
+            )
+        elif label == "foreign":
+            (copied / "foreign.json").write_text("{}")
+        else:
+            (copied / "permission-execution.json").write_text("{}")
+        with runtime_scope(request), pytest.raises((ValueError, OSError)):
+            read_lifecycle_host_health(
+                copied, result.manifest, records, request
+            )
 
 
 @pytest.mark.parametrize(
@@ -211,15 +298,22 @@ def test_blocked_and_invalid_workers_are_bounded_partial_reaped(
         mode,
         policy=BrokerLifecyclePolicyV1(
             startup_timeout_ms=8000,
-            run_timeout_ms=15000,
+            # Reach the deliberately blocked close after the finite stream's
+            # fresh authorization and persistence checks; next_block still
+            # exercises its separate 15-second run deadline.
+            run_timeout_ms=60000 if mode == "close_block" else 15000,
             shutdown_timeout_ms=50,
+            # These cases test provider-call/shutdown boundaries, not a lost
+            # durable ACK. Allow the independent grant/health fsync checks on
+            # the Python floor; dedicated tests retain short retry intervals.
+            acknowledgement_timeout_ms=5000,
             stdout_bytes=64,
             stderr_bytes=64,
         ),
     )
     # Includes fresh policy-source admission and durable sidecar work outside
     # the worker's own deadlines, not only the blocked provider call.
-    assert time.monotonic() - start < 40
+    assert time.monotonic() - start < (85 if mode == "close_block" else 40)
     assert result.reason is reason
     assert result.manifest.completion is Completion.PARTIAL
     assert result.manifest.worker_reaped and result.manifest.unknown_loss
@@ -815,6 +909,19 @@ def test_persistence_interruption_before_ack_never_claims_complete(
         append(self, record)
 
     monkeypatch.setattr(storage.Journal, "append", fail_once)
+    if after_append:
+        # The native bytes were fsynced, but an exception prevented the host
+        # persistence observation. Do not reconstruct a completed observation
+        # from the manifest or return a supposedly replayable health audit.
+        with pytest.raises(BrokerLifecycleError, match="persistence"):
+            run(request_data, tmp_path)
+        inspection = inspect_broker_lifecycle(tmp_path / "run")
+        assert inspection.manifest.completion is Completion.PARTIAL
+        assert inspection.manifest.appended_events == 1
+        assert inspection.manifest.worker_reaped
+        assert tuple(replay_broker_lifecycle(tmp_path / "run"))
+        assert not (tmp_path / "run-host-health" / "audit.json").exists()
+        return
     result = run(request_data, tmp_path)
     assert result.reason is Reason.PERSISTENCE
     assert result.manifest.completion is Completion.PARTIAL
@@ -832,6 +939,7 @@ def test_blocked_module_import_is_terminated_before_open(
         name: (site / name).read_bytes()
         for name in (
             "lifecycle_fixture/plugin.py",
+            "lifecycle_fixture/_histdatacom_broker_permissions/org.example.lifecycle.json",
             "histdatacom_lifecycle_fixture-1.0.0.dist-info/RECORD",
         )
     }
@@ -1029,11 +1137,22 @@ def test_unknown_loss_summary_cannot_erase_reconnect_evidence(
 def test_abrupt_parent_exit_leaves_open_partial_and_worker_self_terminates(
     installed, request_data, tmp_path, after_append
 ):
+    from histdatacom.broker_plugin_permissions.scope import (
+        current_permission_authority,
+    )
+
     python, _, _ = installed
     request = runtime_request(request_data[2], {"mode": "finite"})
     _PROVIDER_REQUESTS[tmp_path / "run"] = request
     with runtime_scope(request) as source:
         context_json = source.current.to_json()
+        authority = current_permission_authority()
+        permission_inputs = [
+            authority.manifest.to_json(),
+            authority.binding.to_json(),
+            authority.grant_id,
+            authority.read_context().to_json(),
+        ]
     script = """
 import os, sys
 from pathlib import Path
@@ -1045,6 +1164,10 @@ from histdatacom.broker_plugin_lifecycle import storage, supervisor
 from histdatacom.broker_plugin_policy.bindings import BrokerSDKInvocationV1
 from histdatacom.broker_plugin_policy.contracts import BrokerPolicyContextV1
 from histdatacom.broker_plugin_policy.scope import provider_policy_scope
+from histdatacom.broker_plugin_permissions import (
+    BrokerPermissionAuthorityV1, BrokerPermissionManifestV1,
+    BrokerPermissionBindingV1, BrokerPermissionContextV1, broker_permission_scope,
+)
 root = Path(sys.argv[2])
 original_popen = supervisor.subprocess.Popen
 def record_process(*args, **kwargs):
@@ -1067,7 +1190,15 @@ request = BrokerSDKInvocationV1.from_json(sys.argv[4])
 class CurrentSource:
     def read_policy_context(self):
         return BrokerPolicyContextV1.from_json(sys.argv[5])
-with provider_policy_scope(CurrentSource()):
+class PermissionSource:
+    def read_context(self):
+        return BrokerPermissionContextV1.from_json(sys.argv[9])
+authority = BrokerPermissionAuthorityV1(
+    BrokerPermissionManifestV1.from_json(sys.argv[6]),
+    BrokerPermissionBindingV1.from_json(sys.argv[7]),
+    sys.argv[8], PermissionSource(),
+)
+with provider_policy_scope(CurrentSource()), broker_permission_scope(authority):
     run_broker_plugin_lifecycle(inventory, plan, {"mode": "finite"}, ("EURUSD",), root / "run", authorize=lambda _: True, provider_request=request, policy=BrokerLifecyclePolicyV1(startup_timeout_ms=15000,run_timeout_ms=30000,acknowledgement_timeout_ms=5000))
 """
     parent = subprocess.run(
@@ -1081,6 +1212,7 @@ with provider_policy_scope(CurrentSource()):
             str(after_append),
             request.to_json(),
             context_json,
+            *permission_inputs,
         ],
         capture_output=True,
         timeout=60,

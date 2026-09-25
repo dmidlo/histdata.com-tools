@@ -1235,6 +1235,13 @@ def _sdk_security_subject(native: BrokerSDKSecurityV1) -> _ResolvedNative:
 
 
 def _resolve_native(native_subject: object) -> _ResolvedNative:
+    from .health_bindings import (
+        BrokerHostHealthEvidenceV1,
+        resolve_host_health_native,
+    )
+
+    if type(native_subject) is BrokerHostHealthEvidenceV1:
+        return resolve_host_health_native(native_subject)
     if type(native_subject) in (BrokerLegacyCaptureV1, BrokerLegacyRecordV1):
         return _legacy_subject(cast(Any, native_subject))
     if type(native_subject) is BrokerFingerprintFitV1:

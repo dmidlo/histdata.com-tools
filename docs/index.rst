@@ -80,7 +80,9 @@ Empirical reconstruction pipeline
    broker-plugin-capabilities
    broker-plugin-lifecycle
    broker-plugin-security
+   broker-plugin-permissions
    broker-provider-policy
+   broker-host-health
    broker-delivery-fingerprint-contracts
    broker-delivery-transfer-contracts
 

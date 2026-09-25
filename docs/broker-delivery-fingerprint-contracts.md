@@ -44,6 +44,15 @@ magnitude, and unexplained UTC regression. A verified decision binds the capture
 manifest ID, fit-config ID, event/quote counts, clock findings, UTC support, and
 logical event-content SHA-256.
 
+Unreleased v3 additionally requires independently replayed, measured
+[host-health evidence](broker-host-health.md) meeting its declared SLOs. Missing,
+degraded or insufficient evidence refuses a new fit; historical V1 inspection is
+still available. Successful fitting writes a separate immutable health
+qualification under the explicit capture root, so that root must be writable.
+The proof links the unchanged V1 fingerprint bytes to the complete native capture,
+audit and health-policy inventory. Pure numerical comparison is not health
+certification, and deserializing a proof does not reauthorize material use.
+
 Every fitted profile also retains `BrokerDeliveryCaptureEvidenceV1` per input
 session: manifest and eligibility IDs, logical content hash, a digest over the
 ordered partition IDs and artifact hashes, partition/event counts, and wall-time

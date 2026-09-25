@@ -102,6 +102,29 @@ class Journal:
     def append(self, record: BrokerLifecycleRecordV1) -> None:
         if self.poisoned:
             raise BrokerLifecycleError(Reason.PERSISTENCE)
+        from histdatacom.broker_plugin_permissions.scope import (
+            require_native_permissions,
+            require_event_permissions,
+            require_metadata_permissions,
+        )
+        from histdatacom.broker_plugin_capabilities import BrokerAdmittedEventV1
+
+        # The worker is not the permission authority. Independently recheck
+        # native event emissions at the host fsync boundary, including direct
+        # malformed/overprivileged worker IPC that bypassed the child facade.
+        require_native_permissions(self.provider_request)
+        if record.kind == "event":
+            require_event_permissions(
+                BrokerAdmittedEventV1.from_json(record.payload_json).event
+            )
+        elif record.kind == "identity":
+            from .contracts import BrokerLifecycleIdentityV1
+
+            require_metadata_permissions(
+                BrokerLifecycleIdentityV1.from_json(
+                    record.payload_json
+                ).metadata.metadata
+            )
         from histdatacom.broker_plugin_policy.bindings import (
             BrokerSDKLifecycleV1,
         )
@@ -277,6 +300,9 @@ class Journal:
             self.descriptor = None
 
     def _retain(self, record: object) -> None:
+        from histdatacom.broker_plugin_permissions.scope import (
+            require_native_permissions,
+        )
         from histdatacom.broker_plugin_policy.bindings import (
             BrokerSDKLifecycleV1,
         )
@@ -290,6 +316,7 @@ class Journal:
         # Compact manifests do not enumerate every buffered payload class.
         # The declared envelope is the conservative complete upper bound;
         # actual records are additionally checked without rewriting V1 bytes.
+        require_native_permissions(self.provider_request)
         require_provider_operation(
             self.provider_request, BrokerPolicyOperation.RETAIN_LOCAL
         )

@@ -3348,6 +3348,13 @@ health and hashes in a first streaming pass, then performs bounded deterministic
 aggregation in a second pass and rechecks the logical content hash. It does not
 persist augmented capture rows or materialize tick-sized intermediates.
 
+Unreleased v3 requires independently replayed [host-health
+evidence](docs/broker-host-health.md) and records each successful fit's exact
+capture/audit/SLO references separately from the unchanged V1 fingerprint.
+Plugin execution also requires explicit [permission
+grants](docs/broker-plugin-permissions.md), distinct from provider-data rights.
+All current qualification fixtures are synthetic; no live provider is activated.
+
 Profiles describe cadence, quote intensity, spread and spread changes,
 duplicate/stale/burst behavior, source timestamp and price precision, batching,
 outage/reconnect/clock behavior, and conditional behavior by symbol, session,

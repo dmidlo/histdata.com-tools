@@ -9,6 +9,10 @@ Unreleased v3 adds a separate mandatory
 [provider-policy context and request](broker-provider-policy.md). Current rights
 are reread for host/worker operations and retained in native-byte-bound sidecars;
 the legacy V1 lifecycle schemas and transition vocabulary remain unchanged.
+An exact [permission authority](broker-plugin-permissions.md) is also mandatory.
+Host-measured [capture-health evidence](broker-host-health.md) and a native-bound
+permission execution proof are retained beside the native capture, not inserted
+into its historical V1 partition format.
 
 ## Public API and platform boundary
 
@@ -42,6 +46,7 @@ from histdatacom.broker_plugin_lifecycle import (
     replay_broker_lifecycle,
 )
 from histdatacom.broker_plugin_policy import provider_policy_scope
+from histdatacom.broker_plugin_permissions import broker_permission_scope
 
 inventory = discover_broker_plugins()  # metadata only, no provider imports
 workflow = BrokerCapabilityWorkflowV1(tuple(sorted((
@@ -54,7 +59,9 @@ plan = negotiate_broker_capabilities(
 # This callback must represent a caller-owned authorization decision. An
 # admitted capability plan is NOT an authorization or source-quality proof.
 # These reviewed values are supplied by the operator, not generated here.
-with provider_policy_scope(reviewed_policy_source):
+with provider_policy_scope(reviewed_policy_source), broker_permission_scope(
+    reviewed_permission_authority, resources=reviewed_host_resources,
+):
     result = run_broker_plugin_lifecycle(
         inventory, plan, {"mode": "finite"}, ("EURUSD",), Path("new-run"),
         authorize=lambda selected: caller_has_authorized(selected),
@@ -75,6 +82,8 @@ pipe, not arguments, artifact fields, hashes or exception messages. This is not
 arbitrary secret detection: trusted plugin code still receives configuration,
 and the SDK's public-field hygiene cannot prove that arbitrary extension text
 contains no secrets. Do not grant access to an untrusted plugin on this basis.
+Private configuration fields are now refused before launch; authentication uses
+opaque host-side resource profiles instead of exporting secrets to the worker.
 
 Each fresh worker revalidates the selected installed distribution, descriptor,
 entry-module origin and bytes through the #617 installed-loader API immediately

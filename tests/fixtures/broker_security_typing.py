@@ -1,27 +1,24 @@
 """Strict external public API typing fixture, checked against installed wheel."""
 
 from pathlib import Path
+
 from histdatacom.broker_plugin_capabilities import BrokerCapabilityPlanV1
-from histdatacom.broker_plugin_registry import BrokerPluginInventoryV1
+from histdatacom.broker_plugin_permissions import (
+    BrokerPermissionAuthorityV1,
+    BrokerPermissionResourcesV1,
+    broker_permission_scope,
+)
 from histdatacom.broker_plugin_policy import (
     BrokerPolicySource,
     BrokerSDKInvocationV1,
     provider_policy_scope,
 )
+from histdatacom.broker_plugin_registry import BrokerPluginInventoryV1
 from histdatacom.broker_plugin_security import (
-    BrokerSecretProvider,
-    BrokerSecurityPolicyV1,
     BrokerSecureLifecycleResultV1,
+    BrokerSecurityPolicyV1,
     run_secure_broker_plugin,
 )
-
-
-class ExternalSecrets:
-    def resolve(self, handle: str) -> str:
-        return "synthetic-fixture-only"
-
-
-provider: BrokerSecretProvider = ExternalSecrets()
 
 
 def invoke(
@@ -31,8 +28,13 @@ def invoke(
     destination: Path,
     provider_request: BrokerSDKInvocationV1,
     policy_source: BrokerPolicySource,
+    permission_authority: BrokerPermissionAuthorityV1,
+    resources: BrokerPermissionResourcesV1 | None = None,
 ) -> BrokerSecureLifecycleResultV1:
-    with provider_policy_scope(policy_source):
+    with (
+        provider_policy_scope(policy_source),
+        broker_permission_scope(permission_authority, resources=resources),
+    ):
         return run_secure_broker_plugin(
             inventory,
             plan,
@@ -41,6 +43,5 @@ def invoke(
             (),
             destination,
             authorize=lambda _: True,
-            secret_provider=provider,
             provider_request=provider_request,
         )

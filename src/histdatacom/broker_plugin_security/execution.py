@@ -2,19 +2,23 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
-from contextlib import redirect_stderr, redirect_stdout
-from dataclasses import dataclass
 import io
 import logging
-from pathlib import Path
 import re
 import sys
 import tempfile
 import threading
+from collections.abc import Callable, Mapping
+from contextlib import redirect_stderr, redirect_stdout
+from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from histdatacom.broker_plugin_health import BrokerHostHealthPolicyV1
+    from histdatacom.broker_plugin_permissions import (
+        BrokerPermissionExecutionV1,
+    )
     from histdatacom.broker_plugin_policy.bindings import BrokerSDKInvocationV1
 
 from histdatacom.broker_plugin_capabilities import (
@@ -23,13 +27,13 @@ from histdatacom.broker_plugin_capabilities import (
     verify_broker_capability_plan,
 )
 from histdatacom.broker_plugin_lifecycle import (
+    BrokerLifecycleIdentityV1,
     BrokerLifecycleManifestV1,
     BrokerLifecyclePolicyV1,
-    BrokerLifecycleResultV1,
     BrokerLifecycleReason,
-    BrokerLifecycleIdentityV1,
-    BrokerLifecycleTransitionV1,
+    BrokerLifecycleResultV1,
     BrokerLifecycleState,
+    BrokerLifecycleTransitionV1,
     replay_broker_lifecycle,
     run_broker_plugin_lifecycle,
 )
@@ -42,14 +46,18 @@ from histdatacom.broker_plugin_registry import BrokerPluginInventoryV1
 
 from .contracts import (
     BrokerSecurityError,
-    BrokerSecurityMode as Mode,
     BrokerSecurityPolicyV1,
-    BrokerSecurityReason as Reason,
     BrokerSecurityReceiptV1,
     BrokerSoftwareProvenanceV1,
     BrokerTrustedSecurityReceiptV1,
     canonical_security_json,
     refuse,
+)
+from .contracts import (
+    BrokerSecurityMode as Mode,
+)
+from .contracts import (
+    BrokerSecurityReason as Reason,
 )
 from .isolation import prepare_kernel_launch, require_kernel_backend
 from .provenance import installed_software_provenance
@@ -78,7 +86,7 @@ def _preflight(
         _provider_request,
     )
 
-    request = _provider_request(plan, provider_request)
+    request: BrokerSDKInvocationV1 = _provider_request(plan, provider_request)
     _provider_call(request, capture=False)
     try:
         BrokerSecurityPolicyV1.from_json(policy.to_json())
@@ -87,6 +95,11 @@ def _preflight(
             or policy.candidate_id != plan.candidate.artifact_id
         ):
             refuse()
+        # Old raw-secret configuration and ambient loopback grants remain
+        # readable V1 evidence, but are not the new host-resource extension.
+        # Approved network/authentication must go through the permission scope.
+        if policy.secret_fields or policy.loopback_ports:
+            refuse(Reason.RESOURCE)
         verify_broker_capability_plan(plan, inventory)
         plan.require_admitted()
         required = {"configuration_schema", "open_session", "iter_events"}
@@ -114,12 +127,13 @@ def _preflight(
             require_kernel_backend()
     except BrokerSecurityError:
         raise
-    except BaseException:
+    except BaseException:  # noqa: BLE001
+        # Sanitize untrusted policy validation.
         refuse()
     try:
         if authorize(policy) is not True:
             refuse(Reason.AUTHORIZATION)
-    except BaseException:
+    except BaseException:  # noqa: BLE001 - sanitize operator callback errors.
         refuse(Reason.AUTHORIZATION)
     return request
 
@@ -190,6 +204,34 @@ class BrokerSecureLifecycleResultV1:
     receipt_path: Path
 
 
+@dataclass(frozen=True, slots=True)
+class BrokerTrustedSecurityResultV2:
+    """Native V1 receipt plus exact historical permission admission evidence."""
+
+    receipt: BrokerTrustedSecurityReceiptV1
+    permissions: BrokerPermissionExecutionV1
+
+    def __post_init__(self) -> None:
+        from histdatacom.broker_plugin_permissions import (
+            BrokerPermissionExecutionV1,
+            verify_permission_execution,
+        )
+        from histdatacom.broker_plugin_policy.bindings import (
+            BrokerSDKInvocationV1,
+        )
+
+        if (
+            type(self.receipt) is not BrokerTrustedSecurityReceiptV1
+            or type(self.permissions) is not BrokerPermissionExecutionV1
+        ):
+            raise ValueError("exact trusted security evidence required")
+        verify_permission_execution(
+            self.permissions,
+            BrokerSDKInvocationV1.from_json(self.permissions.invocation_json),
+            self.receipt,
+        )
+
+
 def _verify_configuration_classification(
     native: BrokerLifecycleResultV1,
     configuration: Mapping[str, object],
@@ -220,7 +262,12 @@ def _verify_configuration_classification(
                 configuration
             ) != set(policy.secret_fields):
                 refuse(Reason.INTEGRITY)
-            identity.configuration_schema.validate_configuration(configuration)
+            try:
+                identity.configuration_schema.validate_configuration(
+                    configuration
+                )
+            except (TypeError, ValueError):
+                refuse(Reason.INTEGRITY)
             verified.add(record.epoch)
     if not started or verified != started:
         refuse(Reason.INTEGRITY)
@@ -246,12 +293,13 @@ def run_secure_broker_plugin(
     cancellation: Callable[[], bool] = lambda: False,
     clock: Clock = _clock,
     attestation: bytes | None = None,
+    health_policy: BrokerHostHealthPolicyV1 | None = None,
 ) -> BrokerSecureLifecycleResultV1:
     """Kernel-isolated native capture, with known-private-material refusal.
 
     Unsupported enforcement refuses before resolver/output/plugin invocation.
-    Network is off or exact caller-owned loopback ports. No provider TLS or
-    proxy is provisioned, checked or implicitly trusted by this function.
+    Direct worker networking is off. Explicit permission-scoped host resources
+    mediate bounded transport without exporting resolved authentication values.
     """
     from histdatacom.broker_plugin_policy.scope import BrokerPolicyError
 
@@ -274,7 +322,7 @@ def run_secure_broker_plugin(
                 Path(__file__).resolve().parents[2],
                 Path(directory).resolve(),
                 (output_directory, *protected_paths),
-                policy.loopback_ports,
+                (),
             )
             configuration, guard, software, public_json = _private_inputs(
                 inventory,
@@ -296,6 +344,7 @@ def run_secure_broker_plugin(
                 authorize=lambda _: True,
                 provider_request=request,
                 policy=lifecycle_policy,
+                health_policy=health_policy,
                 worker_python=worker_python,
                 run_nonce=run_nonce,
                 cancellation=cancellation,
@@ -306,6 +355,7 @@ def run_secure_broker_plugin(
                     launch.working_directory,
                     policy.secret_fields,
                     guard.check,
+                    bootstrap_source=launch.bootstrap_source,
                 ),
             )
             if guard.refused:
@@ -337,7 +387,7 @@ def run_secure_broker_plugin(
             return BrokerSecureLifecycleResultV1(native, receipt, receipt_path)
     except (BrokerSecurityError, BrokerPolicyError):
         raise
-    except BaseException:
+    except BaseException:  # noqa: BLE001 - never expose private plugin errors.
         refuse(Reason.EXECUTION)
     finally:
         configuration.clear()
@@ -367,7 +417,7 @@ def run_trusted_broker_plugin(
     secret_provider: BrokerSecretProvider | None = None,
     private_identifiers: tuple[str, ...] = (),
     max_events: int = 128,
-) -> BrokerTrustedSecurityReceiptV1:
+) -> BrokerTrustedSecurityResultV2:
     """Finite synchronous native events; trusted code, no hard cancellation.
 
     Python stdout/stderr and normal logging are discarded during invocation.
@@ -375,6 +425,11 @@ def run_trusted_broker_plugin(
     Call only in a caller-owned quiescent process; strict isolation uses the
     separate secure lifecycle entry point. No arbitrary factory injection.
     """
+    from histdatacom.broker_plugin_permissions import build_permission_execution
+    from histdatacom.broker_plugin_permissions.scope import (
+        check_permission_public_output,
+        current_permission_authority,
+    )
     from histdatacom.broker_plugin_policy.bindings import BrokerSDKSecurityV1
     from histdatacom.broker_plugin_policy.contracts import BrokerPolicyOperation
     from histdatacom.broker_plugin_policy.scope import (
@@ -458,7 +513,13 @@ def run_trusted_broker_plugin(
                     BrokerSDKSecurityV1(request, receipt),
                     BrokerPolicyOperation.MATERIAL_USE,
                 )
-                return receipt
+                check_permission_public_output(receipt.to_json())
+                permissions = build_permission_execution(
+                    request, receipt, current_permission_authority()
+                )
+                guard.check(permissions.to_json())
+                check_permission_public_output(permissions.to_json())
+                return BrokerTrustedSecurityResultV2(receipt, permissions)
             finally:
                 try:
                     if plugin is not None:
@@ -467,7 +528,7 @@ def run_trusted_broker_plugin(
                     logging.disable(logging_level)
     except (BrokerSecurityError, BrokerPolicyError):
         raise
-    except BaseException:
+    except BaseException:  # noqa: BLE001 - never expose private plugin errors.
         refuse(Reason.EXECUTION)
     finally:
         configuration.clear()
@@ -501,5 +562,5 @@ def verify_security_capture(
             != manifest.header.inventory.sdk_version
         ):
             refuse(Reason.INTEGRITY)
-    except BaseException:
+    except BaseException:  # noqa: BLE001 - closed receipt integrity boundary.
         refuse(Reason.INTEGRITY)

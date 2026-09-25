@@ -203,6 +203,12 @@ where = ["src"]
 "histdatacom.broker_plugin_policy" = [
     "py.typed",
 ]
+"histdatacom.broker_plugin_permissions" = [
+    "py.typed",
+]
+"histdatacom.broker_plugin_health" = [
+    "py.typed",
+]
 "histdatacom.attribution" = [
     "assets/*.json",
     "py.typed",

@@ -8,9 +8,10 @@ provider rights, certifies market data, or activates a production broker.
 
 Unreleased v3 requires a separate current
 [provider-policy scope and exact invocation request](broker-provider-policy.md)
-for both execution modes. Security and software provenance still do not grant
-those rights. Policy receipts are additionally checked for resolved known
-private material before persistence.
+for both execution modes, plus an exact [permission authority and optional host
+resources](broker-plugin-permissions.md). Security and software provenance still
+do not grant those rights. Policy receipts are additionally checked for resolved
+known private material before persistence.
 
 ## Threat model and trust tiers
 
@@ -40,9 +41,13 @@ who can replace the host/interpreter or forge all evidence can forge a receipt.
 
 ## Actual kernel enforcement and its limits
 
-The qualified backend uses `/usr/bin/sandbox-exec` before Python startup. Apple
-marks this facility deprecated; its availability and profile behavior must be
-rechecked at invocation. Apple's supported application packaging alternative is
+The qualified backend starts trusted Python with `-I -S -B`, then calls macOS
+`sandbox_init` before importing host packages, site packages or plugins. Only
+reviewed import roots are restored; `.pth` and `sitecustomize` are not run. This
+closes the initial-exec exception of a `sandbox-exec` launcher: the sealed plugin
+process cannot fork, spawn or replace itself, even with the same interpreter.
+Seatbelt is a platform-specific facility whose behavior is rechecked at
+invocation. Apple's application packaging alternative is
 [App Sandbox](https://developer.apple.com/documentation/security/protecting-user-data-with-app-sandbox),
 not a portable promise supplied by this Python package. Linux and Windows
 strict execution are currently unsupported; portable policy/read/refusal APIs
@@ -66,13 +71,13 @@ The profile is default-deny with Apple's `system.sb` runtime support, and adds:
 - Only required inherited transport descriptors survive worker launch. Such
   already-open descriptors remain intentionally usable; the profile is not an
   assertion that all inherited descriptors become inaccessible.
-- Process descendants inherit kernel restrictions. Lifecycle process-group
+- New process creation and exec are denied. Lifecycle process-group
   cleanup/deadlines remain the independent host termination boundary. Neither
   that mechanism nor this profile is a blanket hostile-code sandbox guarantee.
 
 Runtime and protected paths are resolved, and overlapping/aliased protected
 roots are refused. The host tests actual content reads, new writes, truncation,
-rename, hard links, symlinks, unlink, aliases and descendant writes, including
+rename, hard links, symlinks, unlink, aliases and process creation, including
 the real scientific artifact writer against disposable protected stores.
 Store contents remain unchanged. No test reads real host credentials.
 
@@ -85,35 +90,32 @@ identity; no public artifact retains a user-specific installation path.
 
 ## Endpoint, proxy and TLS ownership
 
-Strict mode supports network **off**, or outbound access to an exact declared
-set of loopback ports. Other loopback ports and direct external endpoints are
-denied. There is no wildcard external-network fallback. A declared local server
-or transport proxy is a separate, caller-owned authority: the host neither
-creates it silently nor assumes that it validates provider TLS.
+Unreleased v3 strict execution denies all direct worker networking. The older
+V1 loopback network policy remains structurally readable but is refused for new
+activation. Approved requests use permission-scoped parent transport with exact
+provider/origin/path/method bounds; HTTP is limited to declared loopback fixtures,
+and HTTPS verifies certificates. Ambient proxies and arbitrary request headers
+are not inherited. There is no wildcard external-network fallback.
 
-`transport_owner` is the plugin. `tls_owner` is the plugin or an explicitly
-caller-owned proxy. `proxy_owner` is `none` or `caller`. These declarations do
-not assert that a TLS handshake or certificate check was performed:
-`provider_tls_verified_by_host` is always false. Trusted in-process mode may
-declare provider-owned transport, but does not claim kernel endpoint control.
-Plugins/proxies must configure explicit endpoints, proxies, certificate
-verification and trust roots; disabling TLS checks is not an implication of
-software compatibility. Real provider deployment and additional network
-backends are outside this offline qualification.
+Historical V1 `transport_owner`, `tls_owner`, `proxy_owner` and
+`provider_tls_verified_by_host` fields keep their original wire meanings; they
+are not new permission grants or proof of a particular TLS transaction. Current
+resource authority is recorded separately in permission evidence. Trusted
+in-process Python still has ambient authority and no kernel endpoint guarantee.
+Real provider deployment remains outside this synthetic qualification.
 
 ## Explicit secrets and private identifiers
 
-The host receives public configuration separately from opaque secret handles.
-A caller-owned `BrokerSecretProvider.resolve(handle)` returns a bounded string.
-Every delivered field must be named in policy and marked `secret=True` in the
-actual SDK configuration schema before `open_session`. Undeclared/missing
-bindings and public values under a secret field refuse. Numeric secrets should
-be declared and delivered as strings, not silently coerced into scientific
-numbers. Handles, secret values and known private account identifiers are not
-public policy/provenance and are never hashed into scientific identity.
+New activation refuses the legacy `secret_fields`/`secret_handles` plaintext
+configuration path. Instead, the operator binds a `BrokerHostSecretProfileV1`
+inside `BrokerPermissionResourcesV1`. An opaque profile name selects host-side
+authentication; only the trusted host calls the resolver. The plugin receives
+neither resolver handles nor secret values. Handles, secret values and known
+private account identifiers are not public policy/provenance and are never
+hashed into scientific identity. Historical secret-bearing V1 contracts remain
+readable, not permission to activate them again.
 
-The worker receives values through the bounded ephemeral configuration pipe.
-Known-secret guards run before worker frame serialization and before host
+Known-secret guards run on host transport responses and before host
 persistence. The parent checks the **entire** inventory/plan/header, including
 unselected candidates and diagnostics, plus metadata, session, events and the
 security sidecar. Nested JSON strings are traversed with depth/size bounds;
@@ -156,15 +158,17 @@ explicitly refuses; unknown resource operations also refuse. In strict mode,
 direct calls to host scientific writers and direct filesystem operations are
 additionally denied by the kernel. Trusted in-process mode's API restriction is
 not a promise to stop a trusted caller from bypassing it with ordinary Python.
-Permission-set grants remain #624; declared provider/data-rights admission is
+The current SDK resource ABI and permission grants are documented under
+[#624](broker-plugin-permissions.md); declared provider/data-rights admission is
 the separate #623 boundary, not inferred from this security policy.
 
 ## Running and retaining evidence
 
 Use `run_secure_broker_plugin(inventory, plan, policy, public_configuration,
-symbols, output_directory, authorize=..., provider_request=..., secret_handles=...,
-secret_provider=..., protected_paths=...)` for the strict native lifecycle.
-Run it inside an explicit `provider_policy_scope(reviewed_policy_source)`.
+symbols, output_directory, authorize=..., provider_request=...,
+protected_paths=...)` for the strict native lifecycle.
+Run it inside explicit provider-policy and broker-permission scopes, supplying
+host resources to the latter when the selected manifest requires that ABI.
 Authorization, backend availability and capability/policy checks precede secret
 resolution. Kernel qualification precedes provider import and capture output.
 Before a security sidecar may retain public configuration, full native replay
@@ -190,9 +194,11 @@ native partition and its semantics before yielding records. Recomputed hashes
 do not authenticate the executing host: these are not unforgeable kernel
 attestations, signed execution certificates or scientific admissions.
 
-`run_trusted_broker_plugin` returns a bounded `BrokerTrustedSecurityReceiptV1`
-with exact native admitted events, plan, metadata, session and installed-module
-binding. Its reader recomputes admission and stream identity checks. It makes
+`run_trusted_broker_plugin` returns `BrokerTrustedSecurityResultV2`, wrapping the
+unchanged bounded `BrokerTrustedSecurityReceiptV1` and exact permission execution
+proof. The native receipt retains admitted events, plan, metadata, session and
+installed-module binding. Its reader recomputes admission and stream identity
+checks; the permission proof separately verifies its exact native binding. It makes
 no asynchronous shutdown or capture-completeness claim. Deterministic fixture
 event bytes match strict-process results without relabeling SDK timestamps or
 squeezing events into the older legacy capture schema.
@@ -205,7 +211,7 @@ to a caller-owned offline loopback transport as well as secret leak refusal.
 Tests cover trusted/native parity, credential-independent identity, sanitized
 installation provenance, malformed payloads, excessive output, exceptions,
 blocked import/open/next/close, subprocess death, cancellation, protected-store
-attacks, exact loopback admission, unsupported platforms and receipt tampering.
+attacks, parent-mediated loopback admission, unsupported platforms and receipt tampering.
 They use synthetic assets and do not require a broker, secret manager, legal
 terms approval, external network service or real account.
 

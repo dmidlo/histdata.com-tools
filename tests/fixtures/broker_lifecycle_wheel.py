@@ -7,10 +7,15 @@ import csv
 import hashlib
 import io
 from pathlib import Path
-from zipfile import ZipFile, ZIP_DEFLATED
+from zipfile import ZIP_DEFLATED, ZipFile
 
+from histdatacom.broker_plugin_permissions import (
+    BrokerPermissionManifestV1,
+    permission_resource_path,
+)
 from histdatacom.broker_plugin_registry import (
     BROKER_PLUGIN_ENTRY_POINT_GROUP,
+    BrokerPluginCandidateV1,
     BrokerPluginRegistrationV1,
     registration_resource_path,
 )
@@ -60,6 +65,25 @@ def build_lifecycle_wheel(output: Path, *, block_import: bool = False) -> Path:
         f"{dist}/WHEEL": b"Wheel-Version: 1.0\nGenerator: lifecycle-fixture\nRoot-Is-Purelib: true\nTag: py3-none-any\n",
         f"{dist}/entry_points.txt": f"[{BROKER_PLUGIN_ENTRY_POINT_GROUP}]\n{registration.plugin_id} = {registration.entry_point}\n".encode(),
     }
+    candidate = BrokerPluginCandidateV1(
+        registration,
+        hashlib.sha256(registration.to_json().encode("ascii")).hexdigest(),
+        hashlib.sha256(source).hexdigest(),
+    )
+    permissions = BrokerPermissionManifestV1(
+        candidate.artifact_id,
+        registration.distribution_name,
+        registration.distribution_version,
+        "1.0.0",
+        registration.provider_ids,
+        ("emit:health", "emit:quotes", "emit:sizes", "raw_payload:emit"),
+        resource_abi="none",
+    )
+    entries[
+        permission_resource_path(
+            registration.plugin_id, registration.entry_point
+        )
+    ] = permissions.to_json().encode("ascii")
     record = io.StringIO(newline="")
     writer = csv.writer(record, lineterminator="\n")
     for name, content in sorted(entries.items()):

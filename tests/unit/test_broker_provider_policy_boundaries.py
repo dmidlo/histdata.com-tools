@@ -890,11 +890,15 @@ def test_raw_denied_capture_remains_fit_writable_and_identity_readable(
     tmp_path, native_legacy, fixed_policy_clock
 ):
     from histdatacom.broker_capture import (
-        AppendOnlyBrokerCaptureWriterV1,
+        SequenceBrokerCaptureAdapterV1,
         fit_broker_delivery_fingerprint,
         load_broker_delivery_fingerprint,
         write_broker_delivery_fingerprint,
     )
+    from histdatacom.broker_plugin_health.runtime_legacy import (
+        capture_legacy_with_host_health,
+    )
+    from tests.fixtures.broker_host_health import SyntheticHostHealthClock
     from histdatacom.broker_plugin_policy.native_inputs import (
         provider_native_inputs,
     )
@@ -918,15 +922,19 @@ def test_raw_denied_capture_remains_fit_writable_and_identity_readable(
         provider_policy_scope(MutablePolicySource(context)),
         provider_native_inputs(request),
     ):
-        writer = AppendOnlyBrokerCaptureWriterV1(
+        result = capture_legacy_with_host_health(
             capture_root,
-            session=inputs.session,
             storage_policy=inputs.storage_policy,
             provider_request=request,
+            adapter=SequenceBrokerCaptureAdapterV1(
+                inputs.session.adapter_id,
+                inputs.session.adapter_version,
+                inputs.messages,
+            ),
+            clock=SyntheticHostHealthClock(inputs.session),
+            symbols=("EURUSD",),
         )
-        for event in inputs.events:
-            writer.append(event)
-        manifest = writer.close()
+        manifest = result.manifest
         fingerprint = fit_broker_delivery_fingerprint(
             capture_root, (manifest,), provider_requests=(request,)
         )

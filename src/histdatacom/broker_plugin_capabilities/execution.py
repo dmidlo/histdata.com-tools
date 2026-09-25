@@ -92,6 +92,9 @@ def _provider_request(
 
 
 def _provider_call(request: BrokerSDKInvocationV1, *, capture: bool) -> None:
+    from histdatacom.broker_plugin_permissions.scope import (
+        require_native_permissions,
+    )
     from histdatacom.broker_plugin_policy.contracts import BrokerPolicyOperation
     from histdatacom.broker_plugin_policy.scope import (
         require_provider_operation,
@@ -100,6 +103,7 @@ def _provider_call(request: BrokerSDKInvocationV1, *, capture: bool) -> None:
     if not capture:
         require_provider_operation(request, BrokerPolicyOperation.INVOKE)
     require_provider_operation(request, BrokerPolicyOperation.CAPTURE)
+    require_native_permissions(request)
 
 
 def _provider_record(
@@ -108,16 +112,38 @@ def _provider_record(
     session: BrokerSessionV1 | None = None,
     metadata: BrokerPluginMetadataV1 | None = None,
 ) -> None:
+    from histdatacom.broker_plugin_permissions.scope import (
+        require_event_permissions,
+        require_metadata_permissions,
+        require_native_permissions,
+        check_permission_public_output,
+    )
     from histdatacom.broker_plugin_policy.bindings import BrokerSDKRecordV1
     from histdatacom.broker_plugin_policy.contracts import BrokerPolicyOperation
     from histdatacom.broker_plugin_policy.scope import (
         require_provider_operation,
     )
 
+    # Plugin callbacks can revoke or expire authority while producing even a
+    # schema/session/instrument, not only an event with gated optional fields.
+    require_native_permissions(request)
+    if type(record) is BrokerAdmittedEventV1:
+        require_event_permissions(record.event)
+    if type(record) is BrokerAdmittedMetadataV1:
+        require_metadata_permissions(record.metadata)
+    if metadata is not None:
+        require_metadata_permissions(metadata)
+    native = BrokerSDKRecordV1(request, record, session, metadata)
     require_provider_operation(
-        BrokerSDKRecordV1(request, record, session, metadata),
+        native,
         BrokerPolicyOperation.CAPTURE,
     )
+    for public in (record, session, metadata):
+        if public is not None:
+            # The closed native policy resolver above has already checked the
+            # concrete record/session/metadata types, not plugin duck typing.
+            serializer = getattr(public, "to_json")
+            check_permission_public_output(serializer())
 
 
 class GatedBrokerPluginV1:
@@ -486,7 +512,7 @@ def invoke_authorized_broker_factory(
     plan: BrokerCapabilityPlanV1,
     *,
     authorize: Callable[[BrokerCapabilityPlanV1], bool],
-    factory: Callable[[], BrokerPluginV1],
+    factory: Callable[..., BrokerPluginV1],
     provider_request: BrokerSDKInvocationV1,
 ) -> GatedBrokerPluginV1:
     """Explicit caller-owned factory; does NOT verify installed association."""
@@ -494,7 +520,17 @@ def invoke_authorized_broker_factory(
     _provider_call(request, capture=False)
     _authorize(inventory, plan, authorize)
     _provider_call(request, capture=False)
-    plugin = _call(factory)
+    from histdatacom.broker_plugin_permissions.scope import (
+        current_host_resources,
+        current_permission_authority,
+    )
+
+    authority = current_permission_authority()
+    plugin = _call(
+        factory
+        if authority.manifest.resource_abi == "none"
+        else lambda: factory(current_host_resources())
+    )
     return GatedBrokerPluginV1(
         plugin,
         plan,

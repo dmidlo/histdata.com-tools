@@ -163,6 +163,27 @@ def test_current_synthetic_json_arrow_parquet_shapes_roundtrip() -> None:
     assert can_read("histdatacom.synthetic.contracts.SyntheticEventV1@1.0.0")
 
 
+def test_permission_and_host_health_families_have_native_reader_inventory():
+    from histdatacom.broker_plugin_health import BrokerHostHealthPolicyV1
+    from histdatacom.broker_plugin_permissions import BrokerPermissionContextV1
+
+    policy = BrokerHostHealthPolicyV1()
+    context = BrokerPermissionContextV1(())
+    assert BrokerHostHealthPolicyV1.from_json(policy.to_json()) == policy
+    assert BrokerPermissionContextV1.from_json(context.to_json()) == context
+    assert can_read("histdatacom.broker-host-health.policy.v1")
+    assert can_read(context.schema_version())
+    registry = schema_compatibility_registry()
+    families = {item.family for item in registry.schemas}
+    assert {
+        "histdatacom.broker_plugin_health.contracts.BrokerHostHealthAuditV1",
+        "histdatacom.broker_plugin_health.qualification.BrokerHostHealthQualificationV1",
+        "histdatacom.broker_plugin_permissions.provenance.BrokerPermissionExecutionV1",
+        "histdatacom.broker_plugin_permissions.contracts.BrokerPermissionManifestV1",
+    } <= families
+    assert not registry.migrations
+
+
 def test_new_training_and_old_synthetic_physical_formats_are_registered() -> (
     None
 ):

@@ -46,7 +46,7 @@ def build_parser() -> argparse.ArgumentParser:
             )
         else:
             listing.add_argument(option, default=argparse.SUPPRESS)
-    for name in ("inspect", "select"):
+    for name in ("inspect", "select", "permissions"):
         command = commands.add_parser(
             name, help="Inspect metadata or select one compatible declaration."
         )
@@ -90,7 +90,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 )
             ]
             payload["activation_or_scientific_admission"] = False
-        elif args.command == "select":
+        elif args.command in ("select", "permissions"):
             selected = select_broker_plugin(
                 inventory,
                 plugin_id=args.plugin_id,
@@ -99,6 +99,29 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
             payload["selected_declaration"] = selected.to_dict()
             payload["activation_or_scientific_admission"] = False
+            if args.command == "permissions":
+                from histdatacom.broker_plugin_permissions import (
+                    BrokerPermissionError,
+                    read_installed_broker_permissions,
+                )
+
+                try:
+                    payload["permission_manifest"] = (
+                        read_installed_broker_permissions(selected).to_dict()
+                    )
+                    payload["operator_grants_applied"] = False
+                except BrokerPermissionError as error:
+                    print(
+                        json.dumps(
+                            {
+                                "reason": error.reason,
+                                "activation_or_scientific_admission": False,
+                            },
+                            sort_keys=True,
+                        ),
+                        file=sys.stderr,
+                    )
+                    return 2
         if args.snapshot:
             payload["snapshot"] = write_plugin_inventory(
                 inventory, args.snapshot

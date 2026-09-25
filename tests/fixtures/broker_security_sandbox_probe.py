@@ -38,7 +38,7 @@ def main() -> None:
                 "(version 1)",
                 "(deny default)",
                 '(import "system.sb")',
-                "(allow process-exec process-fork)",
+                "(deny process-exec process-fork)",
                 "(allow signal (target self))",
                 "(allow sysctl-read)",
                 "(allow file-read-metadata)",
@@ -54,7 +54,13 @@ def main() -> None:
         listener.listen(1)
         port = listener.getsockname()[1]
         source = """
-import json, os, socket, sys
+import ctypes,json,os,socket,sys
+library=ctypes.CDLL('/usr/lib/libsandbox.dylib',use_errno=True)
+library.sandbox_init.argtypes=[ctypes.c_char_p,ctypes.c_uint64,ctypes.POINTER(ctypes.c_char_p)]
+library.sandbox_init.restype=ctypes.c_int
+error=ctypes.c_char_p()
+if library.sandbox_init(sys.argv[3].encode(),0,ctypes.byref(error)):
+    raise SystemExit(78)
 root = sys.argv[1]
 checks = {}
 def denied(name, operation):
@@ -71,29 +77,23 @@ denied('rename', lambda: os.rename(root + '/protected/private.txt', root + '/ren
 denied('link', lambda: os.link(root + '/protected/private.txt', root + '/linked'))
 denied('symlink', lambda: os.symlink(root + '/protected/private.txt', root + '/alias'))
 denied('network', lambda: socket.create_connection(('127.0.0.1', int(sys.argv[2])), .2))
-child = os.fork()
-if child == 0:
-    try:
-        open(root + '/protected/child.txt', 'w')
-    except PermissionError:
-        os._exit(0)
-    os._exit(1)
-checks['descendant'] = os.waitpid(child, 0)[1] == 0
+denied('descendant', lambda: os.fork())
+denied('spawn', lambda: os.posix_spawn(sys.executable,[sys.executable,'-I','-S','-c','pass'],{'LANG':'C'}))
+denied('exec', lambda: os.execve(sys.executable,[sys.executable,'-I','-S','-c','raise SystemExit(80)'],{'LANG':'C'}))
 print(json.dumps(checks, sort_keys=True))
 """
         try:
             result = subprocess.run(
                 [
-                    "/usr/bin/sandbox-exec",
-                    "-p",
-                    profile,
                     sys.executable,
                     "-I",
+                    "-S",
                     "-B",
                     "-c",
                     source,
                     str(root),
                     str(port),
+                    profile,
                 ],
                 env=environment,
                 cwd=root,

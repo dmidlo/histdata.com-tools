@@ -165,6 +165,19 @@ def assess_broker_capture_eligibility(
     integrity_verified = False
     logical_digest: str | None = None
     health = _HealthConsumer()
+    from histdatacom.broker_plugin_health.runtime_legacy import (
+        BrokerHostHealthAdmissionError,
+        require_legacy_capture_health,
+    )
+
+    try:
+        require_legacy_capture_health(
+            root, manifest, provider_request=provider_request
+        )
+    except BrokerPolicyError:
+        raise
+    except (BrokerHostHealthAdmissionError, ValueError, OSError):
+        hard_reasons.add("host_health_unavailable_or_unqualified")
 
     if not manifest.complete:
         hard_reasons.add("capture_not_completed")
@@ -977,6 +990,11 @@ def fit_broker_delivery_fingerprint(
         limitations=limitations,
     )
     require_provider_operation(fingerprint, BrokerPolicyOperation.DERIVE)
+    from histdatacom.broker_plugin_health.qualification import (
+        write_broker_health_qualification,
+    )
+
+    write_broker_health_qualification(root, fingerprint, ordered, requests)
     return fingerprint
 
 

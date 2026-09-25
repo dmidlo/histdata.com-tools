@@ -91,6 +91,7 @@ histdatacom broker-plugins list --json
 histdatacom broker-plugins inspect --plugin-id org.example.feed --json
 histdatacom broker-plugins inspect --provider example --json
 histdatacom broker-plugins select --plugin-id org.example.feed --version '>=1.0.0,<2.0.0'
+histdatacom broker-plugins permissions --plugin-id org.example.feed --json
 histdatacom broker-plugins list --snapshot ./plugin-inventory.json
 python -m histdatacom.broker_plugin_registry list --json
 ```

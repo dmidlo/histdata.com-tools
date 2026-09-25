@@ -8,6 +8,9 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
+    from histdatacom.broker_plugin_health.runtime_legacy import (
+        LegacyCaptureHealthObserver,
+    )
     from histdatacom.broker_plugin_policy.bindings import BrokerLegacyCaptureV1
 
 from histdatacom.broker_capture.contracts import (
@@ -132,9 +135,14 @@ class LiveBrokerCaptureSourceV1:
     clock: BrokerCaptureClockV1
     clock_correction_threshold_ns: int = 5_000_000
     provider_request: BrokerLegacyCaptureV1 = field(kw_only=True)
+    health_observer: LegacyCaptureHealthObserver | None = field(
+        default=None, kw_only=True
+    )
 
     def __post_init__(self) -> None:
         _require_legacy_capture(self.session, self.provider_request)
+        if self.health_observer is not None:
+            self.health_observer.require_session(self.session)
         if self.adapter.adapter_id != self.session.adapter_id:
             raise ValueError("adapter_id does not match capture session")
         _require_legacy_capture(self.session, self.provider_request)
@@ -160,14 +168,18 @@ class LiveBrokerCaptureSourceV1:
         sequence = 0
         previous_wall: int | None = None
         previous_monotonic: int | None = None
-        for message in self._messages():
+        for message, ingress, ingress_sample in self._messages():
             if not isinstance(message, BrokerAdapterMessageV1):
                 raise TypeError("broker adapter yielded a non-contract message")
             if message.kind is BrokerCaptureEventKind.CLOCK_CORRECTION:
                 raise ValueError(
                     "broker adapters cannot emit collector clock corrections"
                 )
-            wall, monotonic = self.clock.sample()
+            wall, monotonic = (
+                self.clock.sample()
+                if ingress_sample is None
+                else ingress_sample
+            )
             _validate_clock_sample(wall, monotonic)
             if (
                 previous_monotonic is not None
@@ -203,6 +215,8 @@ class LiveBrokerCaptureSourceV1:
                         clock_offset_change_ns=offset_change,
                     )
                     self._capture_record(correction)
+                    if self.health_observer is not None:
+                        self.health_observer.bind(correction, None)
                     yield correction
                     sequence += 1
             event = BrokerCaptureEventV1(
@@ -213,6 +227,8 @@ class LiveBrokerCaptureSourceV1:
                 message=message,
             )
             self._capture_record(event)
+            if self.health_observer is not None:
+                self.health_observer.bind(event, ingress)
             yield event
             sequence += 1
             previous_wall = wall
@@ -236,7 +252,11 @@ class LiveBrokerCaptureSourceV1:
             BrokerPolicyOperation.CAPTURE,
         )
 
-    def _messages(self) -> Iterator[BrokerAdapterMessageV1]:
+    def _messages(
+        self,
+    ) -> Iterator[
+        tuple[BrokerAdapterMessageV1, int | None, tuple[int, int] | None]
+    ]:
         _require_legacy_capture(
             self.session, self.provider_request, capture=True
         )
@@ -250,8 +270,18 @@ class LiveBrokerCaptureSourceV1:
                     message = next(iterator)
                 except StopIteration:
                     return
-                self._capture_record(message)
-                yield message
+                ingress = None
+                sample = None
+                if self.health_observer is not None:
+                    sample = self.clock.sample()
+                    ingress = self.health_observer.ingress(message, sample)
+                try:
+                    self._capture_record(message)
+                except BaseException:
+                    if self.health_observer is not None and ingress is not None:
+                        self.health_observer.refuse_ingress(ingress)
+                    raise
+                yield message, ingress, sample
         finally:
             # Iterator cleanup grants no permission to pull further messages.
             close = getattr(iterator, "close", None)
