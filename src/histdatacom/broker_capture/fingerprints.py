@@ -10,6 +10,10 @@ import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from histdatacom.broker_plugin_policy.bindings import BrokerLegacyCaptureV1
 
 from histdatacom.broker_capture.contracts import (
     BrokerCaptureEventKind,
@@ -141,8 +145,19 @@ def assess_broker_capture_eligibility(
     manifest: BrokerCaptureSessionManifestV1,
     *,
     config: BrokerDeliveryFitConfigV1 | None = None,
+    provider_request: BrokerLegacyCaptureV1 | None = None,
 ) -> BrokerCaptureEligibilityV1:
     """Verify one capture and return a deterministic fit-health decision."""
+    from histdatacom.broker_plugin_policy import (
+        BrokerPolicyError,
+        BrokerPolicyOperation,
+        require_provider_operation,
+    )
+
+    provider_request = _capture_provider_request(manifest, provider_request)
+    require_provider_operation(
+        provider_request, BrokerPolicyOperation.MATERIAL_USE
+    )
     policy = config or BrokerDeliveryFitConfigV1()
     hard_reasons: set[str] = set()
     limited_reasons: set[str] = set()
@@ -180,10 +195,15 @@ def assess_broker_capture_eligibility(
         if not inspection_clean:
             hard_reasons.add("capture_inspection_not_clean")
         summary = replay_broker_capture_session(
-            root, manifest, consumers=(health,)
+            root,
+            manifest,
+            consumers=(health,),
+            provider_request=provider_request,
         )
         integrity_verified = True
         logical_digest = summary.logical_content_sha256
+    except BrokerPolicyError:
+        raise
     except (BrokerCaptureStorageError, OSError, TypeError, ValueError):
         hard_reasons.add("integrity_verification_failed")
 
@@ -237,6 +257,31 @@ def assess_broker_capture_eligibility(
     )
 
 
+def _capture_provider_request(
+    manifest: BrokerCaptureSessionManifestV1,
+    request: BrokerLegacyCaptureV1 | None,
+) -> BrokerLegacyCaptureV1:
+    from histdatacom.broker_plugin_policy.bindings import BrokerLegacyCaptureV1
+    from histdatacom.broker_plugin_policy.native_inputs import (
+        capture_request_for,
+    )
+
+    if type(manifest) is not BrokerCaptureSessionManifestV1:
+        raise ValueError(
+            "exact native capture manifest required for provider admission"
+        )
+    if request is None:
+        request = capture_request_for(manifest.session)
+    if (
+        type(request) is not BrokerLegacyCaptureV1
+        or request.session.to_json() != manifest.session.to_json()
+    ):
+        raise ValueError(
+            "capture request differs from exact native manifest session"
+        )
+    return request
+
+
 @dataclass(slots=True)
 class _SampleAccumulator:
     name: str
@@ -264,9 +309,7 @@ class _SampleAccumulator:
             value if self.maximum is None else max(self.maximum, value)
         )
         score = int.from_bytes(
-            hashlib.sha256(
-                f"{self.name}\0{evidence_key}".encode("utf-8")
-            ).digest(),
+            hashlib.sha256(f"{self.name}\0{evidence_key}".encode()).digest(),
             "big",
         )
         row = (-score, evidence_key, value)
@@ -774,8 +817,18 @@ def fit_broker_delivery_fingerprint(
     supersedes: BrokerDeliveryFingerprintV1 | None = None,
     effective_start_utc_ns: int | None = None,
     effective_end_utc_ns: int | None = None,
+    provider_requests: Sequence[BrokerLegacyCaptureV1] | None = None,
 ) -> BrokerDeliveryFingerprintV1:
     """Fit one compact immutable profile with two verified streaming passes."""
+    from histdatacom.broker_plugin_policy import (
+        BrokerPolicyOperation,
+        require_provider_operation,
+    )
+    from histdatacom.broker_plugin_policy.bindings import (
+        BrokerFingerprintFitV1,
+        BrokerLegacyCaptureV1,
+    )
+
     policy = config or BrokerDeliveryFitConfigV1()
     ordered = tuple(sorted(manifests, key=lambda item: item.session.session_id))
     if not ordered:
@@ -787,12 +840,52 @@ def fit_broker_delivery_fingerprint(
     if len({item.session.session_id for item in ordered}) != len(ordered):
         raise ValueError("capture manifests contain duplicate sessions")
     _assert_compatible_capture_identity(ordered)
+    if provider_requests is None:
+        requests = tuple(
+            _capture_provider_request(item, None) for item in ordered
+        )
+    else:
+        if len(provider_requests) != len(ordered) or any(
+            type(item) is not BrokerLegacyCaptureV1
+            for item in provider_requests
+        ):
+            raise ValueError(
+                "fingerprint requires one exact reviewed request per native capture"
+            )
+        request_by_session = {
+            item.session.session_id: item for item in provider_requests
+        }
+        if set(request_by_session) != {
+            item.session.session_id for item in ordered
+        }:
+            raise ValueError(
+                "fingerprint request inventory differs from capture sessions"
+            )
+        requests = tuple(
+            _capture_provider_request(
+                item, request_by_session[item.session.session_id]
+            )
+            for item in ordered
+        )
+    for request in requests:
+        require_provider_operation(request, BrokerPolicyOperation.MATERIAL_USE)
+    require_provider_operation(
+        BrokerFingerprintFitV1(requests, policy), BrokerPolicyOperation.DERIVE
+    )
+    if supersedes is not None:
+        require_provider_operation(
+            supersedes, BrokerPolicyOperation.MATERIAL_USE
+        )
+    request_by_session = {item.session.session_id: item for item in requests}
     context_events = _bounded_context_events(market_context_timeline, policy)
     decisions: list[BrokerCaptureEligibilityV1] = []
     evidence: list[BrokerDeliveryCaptureEvidenceV1] = []
     for manifest in ordered:
         decision = assess_broker_capture_eligibility(
-            root, manifest, config=policy
+            root,
+            manifest,
+            config=policy,
+            provider_request=request_by_session[manifest.session.session_id],
         )
         if not decision.fit_allowed:
             raise BrokerDeliveryIneligibleCaptureError(decision)
@@ -828,7 +921,10 @@ def fit_broker_delivery_fingerprint(
     for manifest in ordered:
         consumer.start_session(manifest.session.session_id)
         summary = replay_broker_capture_session(
-            root, manifest, consumers=(consumer,)
+            root,
+            manifest,
+            consumers=(consumer,),
+            provider_request=request_by_session[manifest.session.session_id],
         )
         consumer.end_session()
         expected = evidence_by_session[manifest.session.session_id]
@@ -857,7 +953,7 @@ def fit_broker_delivery_fingerprint(
         calendar_profile_complete=consumer.calendar_profile_complete,
     )
     identity = ordered[0].session
-    return BrokerDeliveryFingerprintV1(
+    fingerprint = BrokerDeliveryFingerprintV1(
         adapter_id=identity.adapter_id,
         adapter_version=identity.adapter_version,
         adapter_config_sha256=identity.adapter_config_sha256,
@@ -880,6 +976,8 @@ def fit_broker_delivery_fingerprint(
         ),
         limitations=limitations,
     )
+    require_provider_operation(fingerprint, BrokerPolicyOperation.DERIVE)
+    return fingerprint
 
 
 def compare_broker_delivery_fingerprints(
@@ -889,6 +987,14 @@ def compare_broker_delivery_fingerprints(
     config: BrokerDeliveryDriftConfigV1 | None = None,
 ) -> BrokerDeliveryFingerprintComparisonV1:
     """Compare matching conditioned metrics without an aggregate score."""
+    from histdatacom.broker_plugin_policy import (
+        BrokerPolicyOperation,
+        require_provider_operation,
+    )
+
+    for source in (reference, candidate):
+        require_provider_operation(source, BrokerPolicyOperation.MATERIAL_USE)
+        require_provider_operation(source, BrokerPolicyOperation.DERIVE)
     if reference.fingerprint_id == candidate.fingerprint_id:
         raise ValueError("drift comparison requires distinct fingerprints")
     policy = config or BrokerDeliveryDriftConfigV1()
@@ -944,39 +1050,96 @@ def write_broker_delivery_fingerprint(
     fingerprint: BrokerDeliveryFingerprintV1,
 ) -> ArtifactRef:
     """Atomically publish an immutable fingerprint or verify idempotence."""
-    target = Path(path)
+    from histdatacom.broker_plugin_policy import (
+        BrokerPolicyOperation,
+        require_provider_operation,
+    )
+    from histdatacom.broker_plugin_policy.storage import (
+        read_broker_policy_receipt,
+        verify_broker_policy_receipt,
+        write_broker_policy_receipt,
+    )
+
+    require_provider_operation(fingerprint, BrokerPolicyOperation.RETAIN_LOCAL)
+    target = Path(path).absolute()
     payload = fingerprint.to_json() + "\n"
     encoded = payload.encode("utf-8")
     digest = hashlib.sha256(encoded).hexdigest()
+    require_provider_operation(fingerprint, BrokerPolicyOperation.RETAIN_LOCAL)
     target.parent.mkdir(parents=True, exist_ok=True)
-    if target.exists():
+    # The host accepts directory aliases; canonicalize that parent only so the
+    # strict receipt store still rejects native and receipt leaf symlinks.
+    target = target.parent.resolve(strict=True) / target.name
+    if target.is_symlink():
+        raise BrokerDeliveryFingerprintArtifactError(
+            "fingerprint destination cannot be a symlink"
+        )
+    already_published = target.exists()
+    sidecar = target.with_name(target.name + ".provider-policy.json")
+    if already_published != (sidecar.exists() or sidecar.is_symlink()):
+        raise BrokerDeliveryFingerprintArtifactError(
+            "fingerprint native/policy pair is incomplete; no repair"
+        )
+
+    def verify_pair() -> None:
+        """Bound both reads and preserve the original retained admission."""
         try:
-            existing = target.read_bytes()
-        except OSError as err:
+            retained = read_broker_policy_receipt(sidecar)
+            if (
+                retained.native_file.sha256 != digest
+                or retained.native_file.byte_length != len(encoded)
+            ):
+                raise ValueError("fingerprint receipt byte identity differs")
+            verify_broker_policy_receipt(retained, fingerprint, target)
+        except (OSError, TypeError, ValueError):
             raise BrokerDeliveryFingerprintArtifactError(
-                "could not read existing fingerprint artifact"
-            ) from err
-        if existing != encoded:
-            raise BrokerDeliveryFingerprintArtifactError(
-                "immutable fingerprint artifact already exists with other content"
-            )
+                "immutable fingerprint artifact already exists with other "
+                "content or an invalid policy receipt"
+            ) from None
+
+    if already_published:
+        verify_pair()
     else:
+        write_broker_policy_receipt(
+            sidecar,
+            fingerprint,
+            native_artifact_name=target.name,
+            native_file_bytes=encoded,
+        )
+        require_provider_operation(
+            fingerprint, BrokerPolicyOperation.RETAIN_LOCAL
+        )
         partial = target.with_name(target.name + ".partial")
+        created = False
         try:
             with partial.open("xb") as handle:
+                created = True
                 handle.write(encoded)
                 handle.flush()
                 os.fsync(handle.fileno())
-            partial.replace(target)
+            require_provider_operation(
+                fingerprint, BrokerPolicyOperation.RETAIN_LOCAL
+            )
+            try:
+                os.link(partial, target, follow_symlinks=False)
+            except FileExistsError:
+                verify_pair()
             _fsync_directory(target.parent)
         except OSError as err:
             try:
-                partial.unlink(missing_ok=True)
+                if created:
+                    partial.unlink(missing_ok=True)
             except OSError:
                 pass
             raise BrokerDeliveryFingerprintArtifactError(
                 "atomic fingerprint publication failed"
             ) from err
+        finally:
+            if created:
+                partial.unlink(missing_ok=True)
+    require_provider_operation(fingerprint, BrokerPolicyOperation.RETAIN_LOCAL)
+    verify_pair()
+    require_provider_operation(fingerprint, BrokerPolicyOperation.RETAIN_LOCAL)
     return ArtifactRef(
         kind=BROKER_DELIVERY_FINGERPRINT_ARTIFACT_KIND,
         path=str(target),

@@ -12,6 +12,10 @@ import re
 import sys
 import tempfile
 import threading
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from histdatacom.broker_plugin_policy.bindings import BrokerSDKInvocationV1
 
 from histdatacom.broker_plugin_capabilities import (
     BrokerCapabilityPlanV1,
@@ -67,7 +71,15 @@ def _preflight(
     mode: Mode,
     authorize: Authorization,
     symbols: tuple[str, ...],
-) -> None:
+    provider_request: BrokerSDKInvocationV1,
+) -> BrokerSDKInvocationV1:
+    from histdatacom.broker_plugin_capabilities.execution import (
+        _provider_call,
+        _provider_request,
+    )
+
+    request = _provider_request(plan, provider_request)
+    _provider_call(request, capture=False)
     try:
         BrokerSecurityPolicyV1.from_json(policy.to_json())
         if (
@@ -109,6 +121,7 @@ def _preflight(
             refuse(Reason.AUTHORIZATION)
     except BaseException:
         refuse(Reason.AUTHORIZATION)
+    return request
 
 
 def _private_inputs(
@@ -120,16 +133,33 @@ def _private_inputs(
     provider: BrokerSecretProvider | None,
     private_identifiers: tuple[str, ...],
     attestation: bytes | None,
+    provider_request: BrokerSDKInvocationV1,
 ) -> tuple[
     dict[str, object],
     BrokerPrivateMaterialGuard,
     BrokerSoftwareProvenanceV1,
     str,
 ]:
+    from histdatacom.broker_plugin_capabilities.execution import _provider_call
+    from histdatacom.broker_plugin_policy.scope import (
+        BrokerPolicyError,
+        read_current_provider_policy_context,
+    )
+
+    _provider_call(provider_request, capture=False)
+    profile = provider_request.configuration_profile
+    if (
+        canonical_security_json(dict(public))
+        != profile.public_configuration_json
+        or set(policy.secret_fields) != set(profile.private_field_names)
+        or set(handles) != set(profile.private_field_names)
+    ):
+        raise BrokerPolicyError("reviewed_security_configuration_mismatch")
     configuration, guard = resolve_configuration(
         public, handles, policy.secret_fields, provider, private_identifiers
     )
     try:
+        profile.verify_configuration(configuration)
         public_json = canonical_security_json(dict(public))
         # Scan the FULL inventory and plan, not only selected registration.
         for text in (
@@ -137,6 +167,8 @@ def _private_inputs(
             plan.to_json(),
             policy.to_json(),
             public_json,
+            provider_request.to_json(),
+            read_current_provider_policy_context().to_json(),
         ):
             guard.check(text)
         if attestation is not None:
@@ -163,11 +195,14 @@ def _verify_configuration_classification(
     configuration: Mapping[str, object],
     public: Mapping[str, object],
     policy: BrokerSecurityPolicyV1,
+    provider_request: BrokerSDKInvocationV1,
 ) -> None:
     """Never persist caller-labeled public data without every epoch's schema."""
     started: set[int] = set()
     verified: set[int] = set()
-    for record in replay_broker_lifecycle(native.directory):
+    for record in replay_broker_lifecycle(
+        native.directory, provider_request=provider_request
+    ):
         if record.kind == "transition":
             transition = BrokerLifecycleTransitionV1.from_json(
                 record.payload_json
@@ -200,6 +235,7 @@ def run_secure_broker_plugin(
     output_directory: Path,
     *,
     authorize: Authorization,
+    provider_request: BrokerSDKInvocationV1,
     secret_handles: Mapping[str, str] | None = None,
     secret_provider: BrokerSecretProvider | None = None,
     private_identifiers: tuple[str, ...] = (),
@@ -217,8 +253,16 @@ def run_secure_broker_plugin(
     Network is off or exact caller-owned loopback ports. No provider TLS or
     proxy is provisioned, checked or implicitly trusted by this function.
     """
-    _preflight(
-        inventory, plan, policy, Mode.KERNEL_ISOLATED, authorize, symbols
+    from histdatacom.broker_plugin_policy.scope import BrokerPolicyError
+
+    request = _preflight(
+        inventory,
+        plan,
+        policy,
+        Mode.KERNEL_ISOLATED,
+        authorize,
+        symbols,
+        provider_request,
     )
     configuration: dict[str, object] = {}
     try:
@@ -241,6 +285,7 @@ def run_secure_broker_plugin(
                 secret_provider,
                 private_identifiers,
                 attestation,
+                request,
             )
             native = run_broker_plugin_lifecycle(
                 inventory,
@@ -249,6 +294,7 @@ def run_secure_broker_plugin(
                 symbols,
                 output_directory,
                 authorize=lambda _: True,
+                provider_request=request,
                 policy=lifecycle_policy,
                 worker_python=worker_python,
                 run_nonce=run_nonce,
@@ -267,7 +313,7 @@ def run_secure_broker_plugin(
             if native.reason is BrokerLifecycleReason.INTEGRITY:
                 refuse(Reason.INTEGRITY)
             _verify_configuration_classification(
-                native, configuration, public_configuration, policy
+                native, configuration, public_configuration, policy, request
             )
             guard.check(native.manifest.to_json())
             receipt = BrokerSecurityReceiptV1(
@@ -281,9 +327,15 @@ def run_secure_broker_plugin(
             receipt_path = output_directory.with_name(
                 output_directory.name + "-security.json"
             )
-            write_security_receipt(receipt, receipt_path)
+            write_security_receipt(
+                receipt,
+                receipt_path,
+                provider_request=request,
+                manifest=native.manifest,
+                before_persist=guard.check,
+            )
             return BrokerSecureLifecycleResultV1(native, receipt, receipt_path)
-    except BrokerSecurityError:
+    except (BrokerSecurityError, BrokerPolicyError):
         raise
     except BaseException:
         refuse(Reason.EXECUTION)
@@ -310,6 +362,7 @@ def run_trusted_broker_plugin(
     symbols: tuple[str, ...],
     *,
     authorize: Authorization,
+    provider_request: BrokerSDKInvocationV1,
     secret_handles: Mapping[str, str] | None = None,
     secret_provider: BrokerSecretProvider | None = None,
     private_identifiers: tuple[str, ...] = (),
@@ -322,8 +375,21 @@ def run_trusted_broker_plugin(
     Call only in a caller-owned quiescent process; strict isolation uses the
     separate secure lifecycle entry point. No arbitrary factory injection.
     """
-    _preflight(
-        inventory, plan, policy, Mode.TRUSTED_IN_PROCESS, authorize, symbols
+    from histdatacom.broker_plugin_policy.bindings import BrokerSDKSecurityV1
+    from histdatacom.broker_plugin_policy.contracts import BrokerPolicyOperation
+    from histdatacom.broker_plugin_policy.scope import (
+        BrokerPolicyError,
+        require_provider_operation,
+    )
+
+    request = _preflight(
+        inventory,
+        plan,
+        policy,
+        Mode.TRUSTED_IN_PROCESS,
+        authorize,
+        symbols,
+        provider_request,
     )
     if type(max_events) is not int or not 1 <= max_events <= 128:
         refuse(Reason.RESOURCE)
@@ -338,6 +404,7 @@ def run_trusted_broker_plugin(
             secret_provider,
             private_identifiers,
             None,
+            request,
         )
         with (
             _IN_PROCESS_LOCK,
@@ -349,7 +416,10 @@ def run_trusted_broker_plugin(
             plugin = None
             try:
                 plugin = invoke_authorized_installed_broker_plugin(
-                    inventory, plan, authorize=lambda _: True
+                    inventory,
+                    plan,
+                    authorize=lambda _: True,
+                    provider_request=request,
                 )
                 metadata = plugin.metadata
                 schema = plugin.configuration_schema
@@ -384,6 +454,10 @@ def run_trusted_broker_plugin(
                     public_json,
                 )
                 guard.check(receipt.to_json())
+                require_provider_operation(
+                    BrokerSDKSecurityV1(request, receipt),
+                    BrokerPolicyOperation.MATERIAL_USE,
+                )
                 return receipt
             finally:
                 try:
@@ -391,7 +465,7 @@ def run_trusted_broker_plugin(
                         plugin.close_session()
                 finally:
                     logging.disable(logging_level)
-    except BrokerSecurityError:
+    except (BrokerSecurityError, BrokerPolicyError):
         raise
     except BaseException:
         refuse(Reason.EXECUTION)

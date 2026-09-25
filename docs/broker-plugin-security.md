@@ -6,6 +6,12 @@ SDK, registry, capability and native lifecycle wire contracts. Installation is
 a software supply-chain decision: neither installation nor these receipts grants
 provider rights, certifies market data, or activates a production broker.
 
+Unreleased v3 requires a separate current
+[provider-policy scope and exact invocation request](broker-provider-policy.md)
+for both execution modes. Security and software provenance still do not grant
+those rights. Policy receipts are additionally checked for resolved known
+private material before persistence.
+
 ## Threat model and trust tiers
 
 `BrokerSecurityPolicyV1` binds an exact selected candidate to one of
@@ -150,14 +156,15 @@ explicitly refuses; unknown resource operations also refuse. In strict mode,
 direct calls to host scientific writers and direct filesystem operations are
 additionally denied by the kernel. Trusted in-process mode's API restriction is
 not a promise to stop a trusted caller from bypassing it with ordinary Python.
-Permission-set grants and provider legal/data-rights admission remain #624/#623,
-not inferred from this security policy.
+Permission-set grants remain #624; declared provider/data-rights admission is
+the separate #623 boundary, not inferred from this security policy.
 
 ## Running and retaining evidence
 
 Use `run_secure_broker_plugin(inventory, plan, policy, public_configuration,
-symbols, output_directory, authorize=..., secret_handles=...,
+symbols, output_directory, authorize=..., provider_request=..., secret_handles=...,
 secret_provider=..., protected_paths=...)` for the strict native lifecycle.
+Run it inside an explicit `provider_policy_scope(reviewed_policy_source)`.
 Authorization, backend availability and capability/policy checks precede secret
 resolution. Kernel qualification precedes provider import and capture output.
 Before a security sidecar may retain public configuration, full native replay

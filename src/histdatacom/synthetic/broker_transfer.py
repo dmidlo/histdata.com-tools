@@ -557,6 +557,34 @@ def select_broker_profile(
     drift_comparison: BrokerDeliveryFingerprintComparisonV1 | None = None,
 ) -> BrokerProfileSelectionV1:
     """Resolve one exact cell and its recorded backoff without invention."""
+    from histdatacom.broker_plugin_policy import (
+        BrokerDerivedArtifactV1,
+        BrokerPolicyOperation,
+        require_provider_operation,
+    )
+
+    require_provider_operation(fingerprint, BrokerPolicyOperation.MATERIAL_USE)
+    require_provider_operation(fingerprint, BrokerPolicyOperation.DERIVE)
+    result = _select_broker_profile(
+        fingerprint,
+        requested_condition=requested_condition,
+        selected_at_utc_ns=selected_at_utc_ns,
+        drift_comparison=drift_comparison,
+    )
+    require_provider_operation(
+        BrokerDerivedArtifactV1((fingerprint,), result),
+        BrokerPolicyOperation.DERIVE,
+    )
+    return result
+
+
+def _select_broker_profile(
+    fingerprint: BrokerDeliveryFingerprintV1,
+    *,
+    requested_condition: Mapping[str, str],
+    selected_at_utc_ns: int,
+    drift_comparison: BrokerDeliveryFingerprintComparisonV1 | None,
+) -> BrokerProfileSelectionV1:
     selected_at = _bounded_int(
         selected_at_utc_ns, "selected_at_utc_ns", 0, INT64_MAX
     )
@@ -671,6 +699,41 @@ def condition_broker_proposal(
     drift_comparison: BrokerDeliveryFingerprintComparisonV1 | None = None,
 ) -> BrokerConditionedProposalV1:
     """Blend broker delivery metrics into a motif query before retrieval."""
+    from histdatacom.broker_plugin_policy import (
+        BrokerDerivedArtifactV1,
+        BrokerPolicyOperation,
+        BrokerSyntheticOutputV1,
+        require_provider_operation,
+    )
+
+    require_provider_operation(fingerprint, BrokerPolicyOperation.MATERIAL_USE)
+    require_provider_operation(
+        BrokerSyntheticOutputV1(fingerprint), BrokerPolicyOperation.DERIVE
+    )
+    result = _condition_broker_proposal(
+        query,
+        fingerprint,
+        requested_condition=requested_condition,
+        selected_at_utc_ns=selected_at_utc_ns,
+        config=config,
+        drift_comparison=drift_comparison,
+    )
+    require_provider_operation(
+        BrokerDerivedArtifactV1((fingerprint,), result),
+        BrokerPolicyOperation.DERIVE,
+    )
+    return result
+
+
+def _condition_broker_proposal(
+    query: ReferenceMotifQueryV1,
+    fingerprint: BrokerDeliveryFingerprintV1,
+    *,
+    requested_condition: Mapping[str, str],
+    selected_at_utc_ns: int,
+    config: BrokerTransferConfigV1 | None,
+    drift_comparison: BrokerDeliveryFingerprintComparisonV1 | None,
+) -> BrokerConditionedProposalV1:
     policy = config or BrokerTransferConfigV1()
     selection = select_broker_profile(
         fingerprint,
@@ -1485,6 +1548,51 @@ def render_broker_delivery(
     quality_period: str = "broker-render",
 ) -> BrokerRenderedGroupV1:
     """Render one reconciled synchronized group and fail closed on validation."""
+    from histdatacom.broker_plugin_policy import (
+        BrokerDerivedArtifactV1,
+        BrokerPolicyOperation,
+        BrokerSyntheticOutputV1,
+        require_provider_operation,
+    )
+
+    require_provider_operation(fingerprint, BrokerPolicyOperation.MATERIAL_USE)
+    require_provider_operation(
+        BrokerSyntheticOutputV1(fingerprint), BrokerPolicyOperation.DERIVE
+    )
+    result = _render_broker_delivery(
+        run=run,
+        window=window,
+        group=group,
+        fingerprint=fingerprint,
+        constraints=constraints,
+        selected_at_utc_ns=selected_at_utc_ns,
+        requested_conditions=requested_conditions,
+        config=config,
+        drift_comparison=drift_comparison,
+        benchmark_comparisons=benchmark_comparisons,
+        quality_period=quality_period,
+    )
+    require_provider_operation(
+        BrokerDerivedArtifactV1((fingerprint,), result),
+        BrokerPolicyOperation.DERIVE,
+    )
+    return result
+
+
+def _render_broker_delivery(
+    *,
+    run: ReconstructionRunV1,
+    window: ReconstructionWindowV1,
+    group: CrossCurrencyReconciledGroupV1,
+    fingerprint: BrokerDeliveryFingerprintV1,
+    constraints: HistoricalCarvingConstraintSetV1,
+    selected_at_utc_ns: int,
+    requested_conditions: Mapping[str, Mapping[str, str]] | None,
+    config: BrokerTransferConfigV1 | None,
+    drift_comparison: BrokerDeliveryFingerprintComparisonV1 | None,
+    benchmark_comparisons: Sequence[BrokerBenchmarkComparisonV1],
+    quality_period: str,
+) -> BrokerRenderedGroupV1:
     policy = config or BrokerTransferConfigV1()
     _validate_render_scope(run, window, group, constraints)
     conditions = {

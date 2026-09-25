@@ -3,6 +3,11 @@
 from pathlib import Path
 from histdatacom.broker_plugin_capabilities import BrokerCapabilityPlanV1
 from histdatacom.broker_plugin_registry import BrokerPluginInventoryV1
+from histdatacom.broker_plugin_policy import (
+    BrokerPolicySource,
+    BrokerSDKInvocationV1,
+    provider_policy_scope,
+)
 from histdatacom.broker_plugin_security import (
     BrokerSecretProvider,
     BrokerSecurityPolicyV1,
@@ -24,14 +29,18 @@ def invoke(
     plan: BrokerCapabilityPlanV1,
     policy: BrokerSecurityPolicyV1,
     destination: Path,
+    provider_request: BrokerSDKInvocationV1,
+    policy_source: BrokerPolicySource,
 ) -> BrokerSecureLifecycleResultV1:
-    return run_secure_broker_plugin(
-        inventory,
-        plan,
-        policy,
-        {},
-        (),
-        destination,
-        authorize=lambda _: True,
-        secret_provider=provider,
-    )
+    with provider_policy_scope(policy_source):
+        return run_secure_broker_plugin(
+            inventory,
+            plan,
+            policy,
+            {},
+            (),
+            destination,
+            authorize=lambda _: True,
+            secret_provider=provider,
+            provider_request=provider_request,
+        )

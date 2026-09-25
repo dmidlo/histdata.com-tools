@@ -317,6 +317,14 @@ def project_modern_reference_delivery(
     if group.status is not CrossCurrencyGroupStatus.RECONCILED:
         raise ValueError("modern delivery refuses an unreconciled group")
     streams = group.streams
+    if any(
+        event.broker_profile_id is not None
+        for stream in streams
+        for event in stream.events
+    ):
+        raise ValueError(
+            "generic delivery cannot discard broker provider lineage"
+        )
     content_hash = reconstruction_streams_content_sha256(streams)
     synthetic_ids = tuple(
         event.event_id

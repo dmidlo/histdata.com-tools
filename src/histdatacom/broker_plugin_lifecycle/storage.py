@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from copy import copy
 from dataclasses import dataclass, replace
 import hashlib
 import os
 from pathlib import Path
 import stat
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from histdatacom.broker_plugin_policy.bindings import BrokerSDKInvocationV1
 
 from .contracts import (
     MAX_LIFECYCLE_BYTES,
@@ -58,14 +62,26 @@ def _sync_directory(directory: Path) -> None:
 
 class Journal:
     def __init__(
-        self, directory: Path, header: BrokerLifecycleHeaderV1
+        self,
+        directory: Path,
+        header: BrokerLifecycleHeaderV1,
+        *,
+        provider_request: BrokerSDKInvocationV1,
+        before_persist: Callable[[str], None] | None = None,
     ) -> None:
+        from histdatacom.broker_plugin_capabilities.execution import (
+            _provider_request,
+        )
+
+        self.header = header
+        self.provider_request = _provider_request(header.plan, provider_request)
+        self.before_persist = before_persist
+        self.evidence = Evidence(header)
+        self._retain(header)
         # A new caller-owned local directory is mandatory; never reuse a run.
         directory.mkdir(mode=0o700)
         _sync_directory(directory.parent)
         self.directory = directory
-        self.header = header
-        self.evidence = Evidence(header)
         self.partitions: list[BrokerLifecyclePartitionV1] = []
         self.descriptor: int | None = None
         self.hash = hashlib.sha256()
@@ -86,7 +102,30 @@ class Journal:
     def append(self, record: BrokerLifecycleRecordV1) -> None:
         if self.poisoned:
             raise BrokerLifecycleError(Reason.PERSISTENCE)
+        from histdatacom.broker_plugin_policy.bindings import (
+            BrokerSDKLifecycleV1,
+        )
+        from histdatacom.broker_plugin_policy.contracts import (
+            BrokerPolicyOperation,
+        )
+        from histdatacom.broker_plugin_policy.scope import (
+            require_provider_operation,
+        )
+
+        if record.kind in ("identity", "session", "event"):
+            require_provider_operation(
+                BrokerSDKLifecycleV1(
+                    self.provider_request,
+                    self.header,
+                    record,
+                    self.evidence.session,
+                    self.evidence.identity,
+                ),
+                BrokerPolicyOperation.CAPTURE,
+            )
+        self._retain(record)
         encoded = (record.to_json() + "\n").encode("ascii")
+        self._remaining_bytes(len(encoded))
         policy = self.header.policy
         if (
             len(encoded) > policy.partition_bytes
@@ -113,6 +152,7 @@ class Journal:
         # Verify before append. A filesystem exception never results in an ACK.
         candidate = copy(self.evidence)
         candidate.accept(record)
+        self._retain(record)
         data = memoryview(encoded)
         try:
             while data:
@@ -149,10 +189,12 @@ class Journal:
         receipt = self._receipt()
         if receipt is None:
             return
+        self._retain(receipt)
         assert self.descriptor is not None
         os.fsync(self.descriptor)
         os.close(self.descriptor)
         self.descriptor = None
+        self._retain(receipt)
         os.link(self._name(), self._name(False), follow_symlinks=False)
         self._name().unlink()
         _sync_directory(self.directory)
@@ -161,7 +203,34 @@ class Journal:
         self.bytes = self.records = self.events = 0
 
     def publish(self, manifest: BrokerLifecycleManifestV1) -> None:
+        from histdatacom.broker_plugin_policy.bindings import (
+            BrokerSDKLifecycleV1,
+        )
+        from histdatacom.broker_plugin_policy.scope import BrokerPolicyError
+        from histdatacom.broker_plugin_policy.storage import (
+            write_broker_policy_receipt,
+        )
+
+        self._retain(manifest)
         encoded = manifest.to_json().encode("ascii")
+        # Include the old sidecar and transient new native body in the same
+        # capture-byte ceiling; no off-quota admission evidence is hidden.
+        write_broker_policy_receipt(
+            self.directory.resolve() / "manifest.json.provider-policy.json",
+            BrokerSDKLifecycleV1(
+                self.provider_request,
+                self.header,
+                manifest,
+            ),
+            native_artifact_name="manifest.json",
+            native_file_bytes=encoded,
+            replace_existing=True,
+            maximum_bytes=min(
+                8 * 1024 * 1024, self._remaining_bytes(len(encoded))
+            ),
+            before_persist=self.before_persist,
+        )
+        self._remaining_bytes(len(encoded))
         temporary = self.directory / "manifest.pending"
         descriptor = os.open(
             temporary,
@@ -173,9 +242,12 @@ class Journal:
                 stream.write(encoded)
                 stream.flush()
                 os.fsync(stream.fileno())
+            self._retain(manifest)
             os.replace(temporary, self.directory / "manifest.json")
             _sync_directory(self.directory)
             self.manifest = manifest
+        except BrokerPolicyError:
+            raise
         except Exception:
             raise BrokerLifecycleError(Reason.PERSISTENCE) from None
 
@@ -203,6 +275,46 @@ class Journal:
         if self.descriptor is not None:
             os.close(self.descriptor)
             self.descriptor = None
+
+    def _retain(self, record: object) -> None:
+        from histdatacom.broker_plugin_policy.bindings import (
+            BrokerSDKLifecycleV1,
+        )
+        from histdatacom.broker_plugin_policy.contracts import (
+            BrokerPolicyOperation,
+        )
+        from histdatacom.broker_plugin_policy.scope import (
+            require_provider_operation,
+        )
+
+        # Compact manifests do not enumerate every buffered payload class.
+        # The declared envelope is the conservative complete upper bound;
+        # actual records are additionally checked without rewriting V1 bytes.
+        require_provider_operation(
+            self.provider_request, BrokerPolicyOperation.RETAIN_LOCAL
+        )
+        require_provider_operation(
+            BrokerSDKLifecycleV1(
+                self.provider_request,
+                self.header,
+                record,
+                self.evidence.session,
+                self.evidence.identity,
+            ),
+            BrokerPolicyOperation.RETAIN_LOCAL,
+        )
+
+    def _remaining_bytes(self, reserved: int = 0) -> int:
+        size = 0
+        with os.scandir(self.directory) as entries:
+            for index, entry in enumerate(entries):
+                if index >= 260 or not entry.is_file(follow_symlinks=False):
+                    raise BrokerLifecycleError(Reason.PERSISTENCE)
+                size += entry.stat(follow_symlinks=False).st_size
+        remaining = self.header.policy.max_capture_bytes - size - reserved
+        if remaining < 0:
+            raise BrokerLifecycleError(Reason.PERSISTENCE)
+        return remaining
 
 
 @dataclass(frozen=True, slots=True)
@@ -247,6 +359,8 @@ def inspect_broker_lifecycle(directory: Path) -> BrokerLifecycleInspectionV1:
             f"partition-{item.ordinal:04d}.jsonl"
             for item in manifest.partitions
         }
+        if "manifest.json.provider-policy.json" in names:
+            expected.add("manifest.json.provider-policy.json")
         if manifest.partial_partition is not None:
             expected.add(
                 f"partition-{manifest.partial_partition.ordinal:04d}.partial"
@@ -264,21 +378,54 @@ def inspect_broker_lifecycle(directory: Path) -> BrokerLifecycleInspectionV1:
 
 def replay_broker_lifecycle(
     directory: Path,
+    *,
+    provider_request: BrokerSDKInvocationV1,
 ) -> Iterator[BrokerLifecycleRecordV1]:
     """Verify the entire hash-bound retained run before yielding any record.
 
     OPEN interrupted tails are intentionally not admitted. They remain visible
     through inspect_broker_lifecycle, without fabricating a trusted prefix.
     """
+    from histdatacom.broker_plugin_policy.scope import BrokerPolicyError
+
     try:
-        yield from _replay(directory)
+        yield from _replay(directory, provider_request)
+    except BrokerPolicyError:
+        raise
     except Exception:
         raise BrokerLifecycleError(Reason.INTEGRITY) from None
 
 
-def _replay(directory: Path) -> Iterator[BrokerLifecycleRecordV1]:
+def _replay(
+    directory: Path,
+    provider_request: BrokerSDKInvocationV1,
+) -> Iterator[BrokerLifecycleRecordV1]:
+    from histdatacom.broker_plugin_capabilities.execution import (
+        _provider_request,
+    )
+    from histdatacom.broker_plugin_policy.bindings import BrokerSDKLifecycleV1
+    from histdatacom.broker_plugin_policy.contracts import BrokerPolicyOperation
+    from histdatacom.broker_plugin_policy.scope import (
+        require_provider_operation,
+    )
+    from histdatacom.broker_plugin_policy.storage import (
+        read_broker_policy_receipt,
+        verify_broker_policy_receipt,
+    )
+
     inspection = inspect_broker_lifecycle(directory)
     manifest = inspection.manifest
+    request = _provider_request(manifest.header.plan, provider_request)
+    require_provider_operation(request, BrokerPolicyOperation.MATERIAL_USE)
+    # Match the writer's canonical parent without following either file leaf.
+    native_path = directory.resolve(strict=True) / "manifest.json"
+    sidecar = native_path.with_name(native_path.name + ".provider-policy.json")
+    if sidecar.exists() or sidecar.is_symlink():
+        verify_broker_policy_receipt(
+            read_broker_policy_receipt(sidecar),
+            BrokerSDKLifecycleV1(request, manifest.header, manifest),
+            native_path,
+        )
     if manifest.completion is Completion.OPEN:
         raise BrokerLifecycleError(Reason.INTEGRITY)
     receipts = manifest.partitions + (
@@ -289,6 +436,7 @@ def _replay(directory: Path) -> Iterator[BrokerLifecycleRecordV1]:
     evidence = Evidence(manifest.header)
     total_bytes = 0
     for receipt in receipts:
+        require_provider_operation(request, BrokerPolicyOperation.MATERIAL_USE)
         suffix = "partial" if receipt is manifest.partial_partition else "jsonl"
         data = _read(
             directory / f"partition-{receipt.ordinal:04d}.{suffix}",
@@ -322,7 +470,9 @@ def _replay(directory: Path) -> Iterator[BrokerLifecycleRecordV1]:
     ):
         raise BrokerLifecycleError(Reason.INTEGRITY)
     # Re-open and re-hash on the yielding pass: no unbounded retained run.
+    yielding = Evidence(manifest.header)
     for receipt in receipts:
+        require_provider_operation(request, BrokerPolicyOperation.MATERIAL_USE)
         suffix = "partial" if receipt is manifest.partial_partition else "jsonl"
         data = _read(
             directory / f"partition-{receipt.ordinal:04d}.{suffix}",
@@ -331,4 +481,16 @@ def _replay(directory: Path) -> Iterator[BrokerLifecycleRecordV1]:
         if hashlib.sha256(data).hexdigest() != receipt.sha256:
             raise BrokerLifecycleError(Reason.INTEGRITY)
         for line in data.splitlines():
-            yield BrokerLifecycleRecordV1.from_json(line.decode("ascii"))
+            record = BrokerLifecycleRecordV1.from_json(line.decode("ascii"))
+            require_provider_operation(
+                BrokerSDKLifecycleV1(
+                    request,
+                    manifest.header,
+                    record,
+                    yielding.session,
+                    yielding.identity,
+                ),
+                BrokerPolicyOperation.MATERIAL_USE,
+            )
+            yielding.accept(record)
+            yield record

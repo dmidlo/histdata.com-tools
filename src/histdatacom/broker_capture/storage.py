@@ -7,7 +7,10 @@ import os
 from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import BinaryIO
+from typing import TYPE_CHECKING, BinaryIO
+
+if TYPE_CHECKING:
+    from histdatacom.broker_plugin_policy.bindings import BrokerLegacyCaptureV1
 
 from histdatacom.broker_capture.adapters import (
     BrokerCaptureEventConsumerV1,
@@ -84,10 +87,13 @@ class AppendOnlyBrokerCaptureWriterV1:
         *,
         session: BrokerCaptureSessionV1,
         storage_policy: BrokerCaptureStoragePolicyV1,
+        provider_request: BrokerLegacyCaptureV1,
     ) -> None:
         self.root = Path(root)
         self.session = session
         self.storage_policy = storage_policy
+        self.provider_request = provider_request
+        self._retain(session)
         self.session_directory = self.root / session.session_id
         if self.session_directory.exists() and any(
             self.session_directory.iterdir()
@@ -121,6 +127,7 @@ class AppendOnlyBrokerCaptureWriterV1:
         """Append one event, rotating before limits are crossed."""
         if self._closed:
             raise BrokerCaptureStorageError("capture writer is closed")
+        self._retain(event)
         if event.session_id != self.session.session_id:
             raise ValueError("capture event belongs to another session")
         if event.capture_sequence != self._total_events:
@@ -142,6 +149,7 @@ class AppendOnlyBrokerCaptureWriterV1:
         if starting_partition:
             self._open_partition()
         assert self._file is not None
+        self._retain(event)
         try:
             self._file.write(line)
             self._file.flush()
@@ -174,16 +182,23 @@ class AppendOnlyBrokerCaptureWriterV1:
         """Finalize valid data and publish terminal capture health."""
         if self._closed:
             return self._manifest
-        self._finalize_partition()
-        state = (
-            BrokerCaptureSessionState.COMPLETED
-            if completed
-            else BrokerCaptureSessionState.FAILED
-        )
-        self._manifest = self._publish_session_manifest(
-            state, limitations=limitations
-        )
-        self._closed = True
+        try:
+            self._finalize_partition()
+            state = (
+                BrokerCaptureSessionState.COMPLETED
+                if completed
+                else BrokerCaptureSessionState.FAILED
+            )
+            self._manifest = self._publish_session_manifest(
+                state, limitations=limitations
+            )
+        finally:
+            # Refused terminal retention leaves the previous OPEN manifest and
+            # any partial bytes intact; cleanup never implies completion.
+            if self._file is not None:
+                self._file.close()
+                self._file = None
+            self._closed = True
         return self._manifest
 
     def __enter__(self) -> "AppendOnlyBrokerCaptureWriterV1":
@@ -245,6 +260,7 @@ class AppendOnlyBrokerCaptureWriterV1:
             )
 
     def _open_partition(self) -> None:
+        self._retain(self.session)
         ordinal = len(self._partitions)
         partial_name = (
             PARTITION_DATA_TEMPLATE.format(ordinal=ordinal) + ".partial"
@@ -275,6 +291,7 @@ class AppendOnlyBrokerCaptureWriterV1:
                 "capture partition state is incomplete"
             )
         try:
+            self._retain(first)
             file_handle.flush()
             os.fsync(file_handle.fileno())
             file_handle.close()
@@ -283,6 +300,7 @@ class AppendOnlyBrokerCaptureWriterV1:
                 self.session_directory
                 / PARTITION_DATA_TEMPLATE.format(ordinal=ordinal)
             )
+            self._retain(last)
             partial_path.replace(final_path)
             _fsync_directory(self.session_directory)
             size_bytes = final_path.stat().st_size
@@ -323,6 +341,7 @@ class AppendOnlyBrokerCaptureWriterV1:
                 self.session_directory
                 / PARTITION_MANIFEST_TEMPLATE.format(ordinal=ordinal)
             )
+            self._retain(partition)
             _atomic_write_text(
                 partition_manifest_path, partition.to_json() + "\n"
             )
@@ -375,11 +394,73 @@ class AppendOnlyBrokerCaptureWriterV1:
             partial_artifact_count=0,
             limitations=tuple(limitations),
         )
+        self._retain(manifest)
+        from histdatacom.broker_plugin_policy.bindings import (
+            BrokerLegacyRecordV1,
+        )
+        from histdatacom.broker_plugin_policy.storage import (
+            write_broker_policy_receipt,
+        )
+
+        encoded = (manifest.to_json() + "\n").encode("utf-8")
+        remaining = (
+            min(
+                self.storage_policy.max_session_bytes,
+                self.storage_policy.high_watermark_bytes,
+            )
+            - _directory_size(self.session_directory)
+            - len(encoded)
+        )
+        if remaining < 0:
+            raise BrokerCaptureQuotaError(
+                "provider admission sidecar exceeds capture quota"
+            )
+        write_broker_policy_receipt(
+            self.session_directory.resolve(strict=True)
+            / (SESSION_MANIFEST_FILENAME + ".provider-policy.json"),
+            BrokerLegacyRecordV1(
+                self.session, manifest, self.provider_request.output_contract
+            ),
+            native_artifact_name=SESSION_MANIFEST_FILENAME,
+            native_file_bytes=encoded,
+            replace_existing=True,
+            maximum_bytes=min(8 * 1024 * 1024, remaining),
+        )
+        self._retain(manifest)
         _atomic_write_text(
             self.session_directory / SESSION_MANIFEST_FILENAME,
             manifest.to_json() + "\n",
         )
         return manifest
+
+    def _retain(self, record: object) -> None:
+        from histdatacom.broker_plugin_policy.bindings import (
+            BrokerLegacyCaptureV1,
+            BrokerLegacyRecordV1,
+        )
+        from histdatacom.broker_plugin_policy.contracts import (
+            BrokerPolicyOperation,
+        )
+        from histdatacom.broker_plugin_policy.scope import (
+            BrokerPolicyError,
+            require_provider_operation,
+        )
+
+        request = self.provider_request
+        if (
+            type(request) is not BrokerLegacyCaptureV1
+            or type(request.session) is not BrokerCaptureSessionV1
+            or type(self.session) is not BrokerCaptureSessionV1
+            or request.session.to_json() != self.session.to_json()
+        ):
+            raise BrokerPolicyError("legacy_capture_session_mismatch")
+        # Recheck the complete declared output envelope at each publication,
+        # including buffered contents not repeated in a compact manifest.
+        require_provider_operation(request, BrokerPolicyOperation.RETAIN_LOCAL)
+        require_provider_operation(
+            BrokerLegacyRecordV1(self.session, record, request.output_contract),
+            BrokerPolicyOperation.RETAIN_LOCAL,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -388,14 +469,19 @@ class BrokerCaptureReplaySourceV1:
 
     root: Path
     manifest: BrokerCaptureSessionManifestV1
+    provider_request: BrokerLegacyCaptureV1
 
     def __init__(
         self,
         root: str | Path,
         manifest: BrokerCaptureSessionManifestV1,
+        *,
+        provider_request: BrokerLegacyCaptureV1,
     ) -> None:
         object.__setattr__(self, "root", Path(root))
         object.__setattr__(self, "manifest", manifest)
+        object.__setattr__(self, "provider_request", provider_request)
+        self._use(manifest)
 
     @property
     def session_id(self) -> str:
@@ -407,11 +493,41 @@ class BrokerCaptureReplaySourceV1:
         return self._event_iterator()
 
     def _event_iterator(self) -> Iterator[BrokerCaptureEventV1]:
+        self._use(self.manifest)
+        from histdatacom.broker_plugin_policy.bindings import (
+            BrokerLegacyRecordV1,
+        )
+        from histdatacom.broker_plugin_policy.storage import (
+            read_broker_policy_receipt,
+            verify_broker_policy_receipt,
+        )
+
+        native_parent = (self.root / self.manifest.session.session_id).resolve(
+            strict=True
+        )
+        # Host roots may use ordinary parent aliases (for example /var on
+        # macOS). Canonicalize only the directory: neither evidence leaf may
+        # be followed through a symlink by the strict policy receipt reader.
+        native_path = native_parent / SESSION_MANIFEST_FILENAME
+        sidecar = native_path.with_name(
+            native_path.name + ".provider-policy.json"
+        )
+        if sidecar.exists() or sidecar.is_symlink():
+            verify_broker_policy_receipt(
+                read_broker_policy_receipt(sidecar),
+                BrokerLegacyRecordV1(
+                    self.manifest.session,
+                    self.manifest,
+                    self.provider_request.output_contract,
+                ),
+                native_path,
+            )
         verify_broker_capture_partition_manifests(self.root, self.manifest)
         expected_sequence = self.manifest.first_capture_sequence
         total_count = 0
         combined_counts: dict[str, int] = {}
         for partition in self.manifest.partitions:
+            self._use(partition)
             path = _contained_artifact_path(
                 self.root, partition.data_artifact.path
             )
@@ -433,7 +549,11 @@ class BrokerCaptureReplaySourceV1:
             last_event: BrokerCaptureEventV1 | None = None
             try:
                 with path.open("rt", encoding="utf-8", newline="") as handle:
-                    for line in handle:
+                    while True:
+                        self._use(partition)
+                        line = handle.readline()
+                        if not line:
+                            break
                         if not line.endswith("\n") or not line.strip():
                             raise BrokerCaptureIntegrityError(
                                 "capture partition contains a partial JSON line"
@@ -469,6 +589,7 @@ class BrokerCaptureReplaySourceV1:
                             combined_counts.get(event.kind.value, 0) + 1
                         )
                         expected_sequence += 1
+                        self._use(event)
                         yield event
             except UnicodeDecodeError as err:
                 raise BrokerCaptureIntegrityError(
@@ -502,6 +623,35 @@ class BrokerCaptureReplaySourceV1:
             raise BrokerCaptureIntegrityError(
                 "capture replay does not reconcile with session manifest"
             )
+
+    def _use(self, record: object) -> None:
+        from histdatacom.broker_plugin_policy.bindings import (
+            BrokerLegacyCaptureV1,
+            BrokerLegacyRecordV1,
+        )
+        from histdatacom.broker_plugin_policy.contracts import (
+            BrokerPolicyOperation,
+        )
+        from histdatacom.broker_plugin_policy.scope import (
+            BrokerPolicyError,
+            require_provider_operation,
+        )
+
+        request = self.provider_request
+        if (
+            type(request) is not BrokerLegacyCaptureV1
+            or type(request.session) is not BrokerCaptureSessionV1
+            or type(self.manifest) is not BrokerCaptureSessionManifestV1
+            or request.session.to_json() != self.manifest.session.to_json()
+        ):
+            raise BrokerPolicyError("legacy_capture_session_mismatch")
+        require_provider_operation(request, BrokerPolicyOperation.MATERIAL_USE)
+        require_provider_operation(
+            BrokerLegacyRecordV1(
+                request.session, record, request.output_contract
+            ),
+            BrokerPolicyOperation.MATERIAL_USE,
+        )
 
 
 def load_broker_capture_session_manifest(
@@ -607,15 +757,19 @@ def replay_broker_capture_session(
     root: str | Path,
     manifest: BrokerCaptureSessionManifestV1,
     *,
+    provider_request: BrokerLegacyCaptureV1,
     consumers: Sequence[BrokerCaptureEventConsumerV1] = (),
 ) -> BrokerCaptureReplaySummaryV1:
     """Replay verified evidence through the live-compatible consumer seam."""
     digest_consumer = _LogicalDigestConsumer()
     source: BrokerCaptureEventSourceV1 = BrokerCaptureReplaySourceV1(
-        root, manifest
+        root,
+        manifest,
+        provider_request=provider_request,
     )
     result = consume_broker_capture_source(
         source,
+        provider_request=provider_request,
         consumers=(digest_consumer, *consumers),
     )
     return BrokerCaptureReplaySummaryV1(

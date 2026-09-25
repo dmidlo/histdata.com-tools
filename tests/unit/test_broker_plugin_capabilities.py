@@ -57,6 +57,11 @@ from histdatacom.broker_plugins import (
     BrokerSourceTimeV1,
 )
 
+from tests.fixtures.broker_provider_policy import (
+    generated_provider_scope,
+    generated_sdk_request,
+)
+
 ROOT = Path(__file__).resolve().parents[2]
 WHEEL = runpy.run_path(str(ROOT / "tests/fixtures/broker_capability_wheel.py"))
 EXTERNAL = runpy.run_path(
@@ -133,6 +138,13 @@ def _event(**changes: object) -> BrokerEventV1:
     )
 
 
+@pytest.fixture
+def declared_factory_policy():
+    """This test explicitly opts into generated terms for its exact candidate."""
+    with generated_provider_scope(generated_sdk_request(_plan())):
+        yield
+
+
 def _invocation(
     plugin: object | None = None, plan: BrokerCapabilityPlanV1 | None = None
 ) -> GatedBrokerPluginV1:
@@ -141,6 +153,7 @@ def _invocation(
         plan or _plan(),
         authorize=lambda _: True,
         factory=lambda: plugin or EXTERNAL["factory"](),
+        provider_request=generated_sdk_request(plan or _plan()),
     )
 
 
@@ -229,10 +242,12 @@ def test_non_executable_operations_refuse_without_authorization_or_factory(
             plan,
             authorize=lambda _: calls.append("authorize"),
             factory=lambda: calls.append("factory"),
+            provider_request=generated_sdk_request(plan),
         )
     assert calls == []
 
 
+@pytest.mark.usefixtures("declared_factory_policy")
 def test_missing_required_and_authorization_refusal_make_zero_provider_calls() -> (
     None
 ):
@@ -244,6 +259,7 @@ def test_missing_required_and_authorization_refusal_make_zero_provider_calls() -
             plan,
             authorize=lambda _: calls.append("authorize"),
             factory=lambda: calls.append("factory"),
+            provider_request=generated_sdk_request(plan),
         )
     assert calls == []
     for denied in (False, None, 1, "yes"):
@@ -255,10 +271,12 @@ def test_missing_required_and_authorization_refusal_make_zero_provider_calls() -
                 _plan(),
                 authorize=lambda _: denied,
                 factory=lambda: calls.append("factory"),
+                provider_request=generated_sdk_request(_plan()),
             )
     assert calls == []
 
 
+@pytest.mark.usefixtures("declared_factory_policy")
 def test_public_construction_and_plan_binding_substitution_are_unavailable() -> (
     None
 ):
@@ -268,6 +286,7 @@ def test_public_construction_and_plan_binding_substitution_are_unavailable() -> 
             _plan(),
             association=BrokerInvocationAssociation.INSTALLED_ENTRYPOINT,
             module_sha256="b" * 64,
+            provider_request=generated_sdk_request(_plan()),
         )
     invocation = _invocation()
     with pytest.raises(AttributeError):
@@ -316,6 +335,7 @@ def test_frozen_wire_roundtrip_tamper_and_bounded_malformed_inputs() -> None:
             BrokerCapabilityPlanV1.from_json(text)
 
 
+@pytest.mark.usefixtures("declared_factory_policy")
 def test_full_factory_workflow_is_executable_and_preserves_null_provenance() -> (
     None
 ):
@@ -599,6 +619,7 @@ def test_receive_time_raw_hash_and_public_context_have_exact_provenance() -> (
         )
 
 
+@pytest.mark.usefixtures("declared_factory_policy")
 def test_plugin_failures_never_echo_credentials_and_runtime_identity_is_checked() -> (
     None
 ):
@@ -607,7 +628,11 @@ def test_plugin_failures_never_echo_credentials_and_runtime_identity_is_checked(
 
     with pytest.raises(BrokerCapabilityError) as error:
         invoke_authorized_broker_factory(
-            _inventory(), _plan(), authorize=lambda _: True, factory=bad
+            _inventory(),
+            _plan(),
+            authorize=lambda _: True,
+            factory=bad,
+            provider_request=generated_sdk_request(_plan()),
         )
     assert (
         str(error.value) == "plugin_failure"
@@ -625,6 +650,7 @@ def test_plugin_failures_never_echo_credentials_and_runtime_identity_is_checked(
         _invocation(Wrong())
 
 
+@pytest.mark.usefixtures("declared_factory_policy")
 def test_method_state_invalid_symbols_and_cross_thread_calls_refuse() -> None:
     invocation = _invocation()
     with pytest.raises(BrokerCapabilityError):
@@ -651,6 +677,7 @@ def test_method_state_invalid_symbols_and_cross_thread_calls_refuse() -> None:
     invocation.close_session()
 
 
+@pytest.mark.usefixtures("declared_factory_policy")
 def test_stream_creation_is_lazy_single_owner_and_budget_does_not_probe_extra() -> (
     None
 ):
@@ -676,6 +703,7 @@ def test_stream_creation_is_lazy_single_owner_and_budget_does_not_probe_extra() 
     invocation.close_session()
 
 
+@pytest.mark.usefixtures("declared_factory_policy")
 def test_stream_rejects_sequence_clock_session_and_unsubscribed_quotes() -> (
     None
 ):
@@ -741,6 +769,7 @@ def test_impossible_operation_sets_refuse_before_factory(
             plan,
             authorize=lambda _: calls.append("authorize"),
             factory=lambda: calls.append("factory"),
+            provider_request=generated_sdk_request(plan),
         )
     assert not calls
 
@@ -760,6 +789,7 @@ def test_health_only_stream_needs_session_not_subscription_and_optional_monotoni
         assert _plan(caps=(), operations=(operation,)).admitted
 
 
+@pytest.mark.usefixtures("declared_factory_policy")
 def test_undeclared_method_invalid_config_and_secret_system_exit_are_closed() -> (
     None
 ):
@@ -792,10 +822,15 @@ def test_undeclared_method_invalid_config_and_secret_system_exit_are_closed() ->
 
     with pytest.raises(BrokerCapabilityError, match="^plugin_failure$"):
         invoke_authorized_broker_factory(
-            _inventory(), _plan(), authorize=lambda _: True, factory=stop
+            _inventory(),
+            _plan(),
+            authorize=lambda _: True,
+            factory=stop,
+            provider_request=generated_sdk_request(_plan()),
         )
 
 
+@pytest.mark.usefixtures("declared_factory_policy")
 def test_unsubscribed_quotes_are_not_delivered_and_explicit_clock_correction_is_preserved() -> (
     None
 ):

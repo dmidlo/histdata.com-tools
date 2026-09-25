@@ -20,6 +20,7 @@ from histdatacom.synthetic.bars import (
     DerivedBarIntervalV1,
     DerivedBarPolicyV1,
     DerivedBarV1,
+    _require_bar_policy,
     derive_reconstruction_bars,
 )
 from histdatacom.synthetic.contracts import (
@@ -146,10 +147,14 @@ def _partition(
     expected_count = parent.duration_ns // first.interval_ns
     if len(children) != expected_count:
         raise ValueError("child gaps or excess support prevent complete parent")
+    _require_bar_policy(first, "material_use")
+    _require_bar_policy(first, "derive")
     first_payload = first.to_dict()
     for index, child in enumerate(children):
         if not isinstance(child, DerivedBarV1):
             raise TypeError("hierarchical children must be DerivedBarV1 rows")
+        _require_bar_policy(child, "material_use")
+        _require_bar_policy(child, "derive")
         # Revalidate supplied immutable contracts, including their content IDs.
         DerivedBarV1.from_dict(child.to_dict())
         if (
@@ -261,6 +266,7 @@ def aggregate_qualified_bar_projection(
         BAR_HIERARCHY_EVENT_REQUIRED_FIELDS
     ):
         raise ValueError("hierarchical projection field inventory differs")
+    _require_bar_policy(first, "derive")
     return result
 
 
@@ -350,6 +356,7 @@ def reconstruct_bar_from_qualified_children(
         total = sum(cast(int, getattr(child, name)) for child in children)
         if getattr(parent, name) != total:
             raise ValueError("verified boundary-carry transition counts differ")
+    _require_bar_policy(parent, "derive")
     return parent
 
 

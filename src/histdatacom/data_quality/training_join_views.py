@@ -31,7 +31,18 @@ def materialize_training_joins(plan: TrainingJoinPlanV1) -> TrainingJoinBatchV1:
         )
         for row in plan.spine.rows
     )
-    return TrainingJoinBatchV1(plan, rows)
+    result = TrainingJoinBatchV1(plan, rows)
+    from histdatacom.broker_plugin_policy import (
+        BrokerPolicyOperation,
+        require_provider_operation,
+    )
+    from .training_provider_policy import training_provider_subject
+
+    subject = training_provider_subject(result)
+    if subject is not None:
+        require_provider_operation(subject, BrokerPolicyOperation.MATERIAL_USE)
+        require_provider_operation(subject, BrokerPolicyOperation.DERIVE)
+    return result
 
 
 def replay_training_joins(batch: TrainingJoinBatchV1) -> TrainingJoinBatchV1:

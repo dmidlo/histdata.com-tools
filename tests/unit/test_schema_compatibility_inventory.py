@@ -90,6 +90,32 @@ def test_current_real_reader_roundtrips_preserve_original_wire_identities() -> (
     assert FeaturePeriodV1.from_dict(period.to_dict()) == period
 
 
+def test_provider_policy_wire_families_have_native_reader_inventory() -> None:
+    from histdatacom.broker_plugin_policy import BrokerPolicyContextV1
+    from tests.fixtures.broker_provider_policy import (
+        legacy_policy_inputs,
+        policy_context,
+    )
+    from histdatacom.broker_plugin_policy import legacy_capture_binding
+
+    context = policy_context(
+        legacy_capture_binding(legacy_policy_inputs().session)
+    )
+    assert BrokerPolicyContextV1.from_json(context.to_json()) == context
+    assert can_read(context.schema_version())
+    registry = schema_compatibility_registry()
+    assert not registry.migrations
+    families = {item.family for item in registry.schemas}
+    assert (
+        "histdatacom.broker_plugin_policy.storage.BrokerPolicyArtifactReceiptV1"
+        in families
+    )
+    assert (
+        "histdatacom.broker_plugin_policy.contracts.BrokerProviderPolicyV1"
+        in families
+    )
+
+
 def test_current_synthetic_json_arrow_parquet_shapes_roundtrip() -> None:
     from histdatacom.synthetic.contracts import (
         SyntheticEventStreamV1,

@@ -70,9 +70,16 @@ def fit_broker_delivery_fingerprint_with_bar_state(
     for snapshot in snapshots:
         source.verify_snapshot(snapshot, information_mode=information_mode)
     product = load_reconstruction_manifest(source.reconstruction_manifest_path)
-    if not isinstance(product, ReconstructionProductManifestV1):
+    if type(product) is not ReconstructionProductManifestV1:
         raise ValueError(
             "broker bar-state fitting requires a broker-specific source product, not generic delivery"
+        )
+    if any(
+        item.source_product_manifest_id != product.manifest_id
+        for item in snapshots
+    ):
+        raise ValueError(
+            "bar snapshot and current source product identities differ"
         )
     fingerprint = fit_broker_delivery_fingerprint(
         root, manifests, config=config
@@ -81,6 +88,12 @@ def fit_broker_delivery_fingerprint_with_bar_state(
         raise ValueError(
             "bar product was not rendered under this exact delivery fingerprint"
         )
+    from histdatacom.broker_plugin_policy.native_inputs import (
+        provider_reconstruction_inputs,
+    )
+
+    with provider_reconstruction_inputs(product):
+        _require_bar_fit_parent(fingerprint, product.manifest_id)
     evidence: dict[tuple[str, str, str, int, str], dict[str, object]] = {}
     for snapshot in snapshots:
         for cell in snapshot.cells:
@@ -114,6 +127,8 @@ def fit_broker_delivery_fingerprint_with_bar_state(
                     )
     ordered_evidence = [evidence[key] for key in sorted(evidence)]
     summaries = _state_summaries(ordered_evidence)
+    with provider_reconstruction_inputs(product):
+        _require_bar_fit_parent(fingerprint, product.manifest_id)
     return BarFeatureConsumerResultV1(
         consumer="broker_fingerprint",
         information_mode=information_mode,
@@ -216,6 +231,13 @@ def _validated_fit(
     fingerprint = BrokerDeliveryFingerprintV1.from_dict(
         body["delivery_fingerprint"]
     )
+    if canonical_bar_feature_json(
+        body["delivery_fingerprint"]
+    ) != canonical_bar_feature_json(fingerprint.to_dict()):
+        raise ValueError(
+            "embedded bar fingerprint is not exact native evidence"
+        )
+    _require_bar_fit_parent(fingerprint, product_id)
     records = body["bar_evidence"]
     if not isinstance(records, list) or not records:
         raise ValueError("bar fingerprint evidence is not a nonempty array")
@@ -287,6 +309,37 @@ def _validated_fit(
     return fingerprint, body
 
 
+def _require_bar_fit_parent(
+    fingerprint: BrokerDeliveryFingerprintV1, product_id: str
+) -> None:
+    """Bind retained bar states to actual native parents, never to an ID alone.
+
+    The registry supplies immutable metadata, not source authenticity or rights.
+    Both current operations are required even when fingerprint-only comparison
+    is permitted: these inputs also retain broker-conditioned product states.
+    """
+    from histdatacom.broker_plugin_policy import (
+        BrokerPolicyOperation,
+        require_provider_operation,
+    )
+    from histdatacom.broker_plugin_policy.native_inputs import (
+        fingerprint_for,
+        product_for,
+    )
+
+    product = product_for(product_id)
+    parent = fingerprint_for(product.broker_profile_id)
+    if (
+        product.broker_profile_id != fingerprint.fingerprint_id
+        or parent.to_json() != fingerprint.to_json()
+    ):
+        raise ValueError(
+            "bar-state product and embedded fingerprint parent differ"
+        )
+    require_provider_operation(product, BrokerPolicyOperation.MATERIAL_USE)
+    require_provider_operation(product, BrokerPolicyOperation.DERIVE)
+
+
 def compare_broker_delivery_fingerprints_with_bar_state(
     reference: BarFeatureConsumerResultV1,
     candidate: BarFeatureConsumerResultV1,
@@ -299,6 +352,8 @@ def compare_broker_delivery_fingerprints_with_bar_state(
     As with existing fingerprint comparison, this compares supplied fitted
     artifacts, not raw capture authenticity. Availability is never upgraded.
     The exact fitted result identities and policy must accompany the output.
+    Each retained ProductV1 and fingerprint must be explicitly registered as
+    native inputs. Their presence grants no permission or physical-source proof.
     """
     for item in (reference, candidate):
         if (
@@ -347,6 +402,12 @@ def compare_broker_delivery_fingerprints_with_bar_state(
                 "mean_delta": None if a is None or b is None else b - a,
             }
         )
+    _require_bar_fit_parent(
+        left_fp, cast(str, left["source_product_manifest_id"])
+    )
+    _require_bar_fit_parent(
+        right_fp, cast(str, right["source_product_manifest_id"])
+    )
     return BarFeatureConsumerResultV1(
         consumer="broker_comparison",
         information_mode=information_mode,

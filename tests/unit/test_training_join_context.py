@@ -482,118 +482,131 @@ def test_broker_refits_native_sessions_and_never_backdates_fitting(tmp_path):
 
     root = tmp_path / "capture"
     manifest = _capture(root, seed=610, wall_start_ns=BASE_WALL_NS)
-    profile = fit_broker_delivery_fingerprint(
-        root, (manifest,), config=BrokerDeliveryFitConfigV1(min_cell_support=4)
-    )
-    paths = discover_broker_capture_session_manifests(root)
-    binding = TrainingJoinSourceV1(
-        "broker",
-        JoinFamily.BROKER,
-        paths=(
-            str(root),
-            *(
-                str(root / p.session.session_id / "session.manifest.json")
-                for p in paths
-            ),
-        ),
-        evidence_json=(training_json(profile.to_dict()),),
-    )
-    cutoff = profile.support_end_utc_ns + SECOND
-    spine = controlled_spine(
-        tmp_path / "spine", (cutoff // 1_000_000 * 1_000_000,)
-    )
-    column = bound_column(
-        binding,
-        "broker_style.EURUSD.spread",
-        TrainingJoinEntityV1("EURUSD"),
-        "spread",
-        coordinate="global",
-        direction=JoinDirection.PRIOR,
-        max_age_ns=10 * SECOND,
-    )
-    plan = _plan(spine, binding, column)
-    normal = materialize_training_joins(plan)
-    assert normal.rows[0].values[0].state is JoinState.UNKNOWN_AVAILABILITY
-    refused = normal.rows[0].values[0].refusal_evidence[0]
-    assert refused.dependency_end_ns == profile.support_end_utc_ns + 1
-    post = materialize_training_joins(
-        replace(plan, information_mode=JoinInformationMode.EX_POST)
-    )
-    assert training_load(post.rows[0].values[0].value_json)[
-        "value"
-    ] == pytest.approx(0.0002)
-    assert manifest.manifest_id in post.rows[0].values[0].parent_source_ids
-    early = controlled_spine(
-        tmp_path / "early",
-        (profile.support_start_utc_ns // 1_000_000 * 1_000_000,),
-    )
-    early_value = (
-        materialize_training_joins(
-            _plan(early, binding, column, mode=JoinInformationMode.EX_POST)
-        )
-        .rows[0]
-        .values[0]
-    )
-    assert early_value.state is JoinState.UNAVAILABLE
-    assert (
-        early_value.refusal_evidence[0].dependency_end_ns
-        == profile.support_end_utc_ns + 1
+    from histdatacom.broker_plugin_policy import provider_native_inputs
+    from tests.fixtures.broker_provider_policy import (
+        generated_legacy_request,
+        generated_provider_scope,
     )
 
-    end = cutoff + SECOND
-    finite_profile = fit_broker_delivery_fingerprint(
-        root,
-        (manifest,),
-        config=profile.fit_config,
-        effective_start_utc_ns=profile.effective_start_utc_ns,
-        effective_end_utc_ns=end,
-    )
-    finite_binding = replace(
-        binding, evidence_json=(training_json(finite_profile.to_dict()),)
-    )
-    from histdatacom.data_quality.training_views import (
-        materialize_training_rows,
-    )
-
-    for direction in (JoinDirection.PRIOR, JoinDirection.INTERVAL):
-        interval_column = replace(column, direction=direction)
-        for delta, expected in (
-            (-1, JoinState.AVAILABLE),
-            (0, JoinState.STALE),
-            (1, JoinState.STALE),
-        ):
-            at_end = materialize_training_rows(
-                spine.source,
-                spine.ownership,
-                replace(spine.request, decision_time_ns=end + delta),
-            )
-            value = (
-                materialize_training_joins(
-                    _plan(
-                        at_end,
-                        finite_binding,
-                        interval_column,
-                        mode=JoinInformationMode.EX_POST,
-                    )
-                )
-                .rows[0]
-                .values[0]
-            )
-            assert value.state is expected
-            if delta >= 0:
-                assert value.refusal_evidence[0].source_ids
-
-    from pathlib import Path
-
-    partition = root / Path(manifest.partitions[0].data_artifact.path)
-    original = partition.read_bytes()
-    partition.write_bytes(original + b"tampered")
-    from histdatacom.broker_capture.fingerprints import (
-        BrokerDeliveryIneligibleCaptureError,
-    )
-
-    with pytest.raises(
-        BrokerDeliveryIneligibleCaptureError,
-        match="integrity_verification_failed",
+    provider_request = generated_legacy_request(manifest.session)
+    with (
+        generated_provider_scope(provider_request),
+        provider_native_inputs(provider_request),
     ):
-        materialize_training_joins(plan)
+        profile = fit_broker_delivery_fingerprint(
+            root,
+            (manifest,),
+            config=BrokerDeliveryFitConfigV1(min_cell_support=4),
+        )
+        paths = discover_broker_capture_session_manifests(root)
+        binding = TrainingJoinSourceV1(
+            "broker",
+            JoinFamily.BROKER,
+            paths=(
+                str(root),
+                *(
+                    str(root / p.session.session_id / "session.manifest.json")
+                    for p in paths
+                ),
+            ),
+            evidence_json=(training_json(profile.to_dict()),),
+        )
+        cutoff = profile.support_end_utc_ns + SECOND
+        spine = controlled_spine(
+            tmp_path / "spine", (cutoff // 1_000_000 * 1_000_000,)
+        )
+        column = bound_column(
+            binding,
+            "broker_style.EURUSD.spread",
+            TrainingJoinEntityV1("EURUSD"),
+            "spread",
+            coordinate="global",
+            direction=JoinDirection.PRIOR,
+            max_age_ns=10 * SECOND,
+        )
+        plan = _plan(spine, binding, column)
+        normal = materialize_training_joins(plan)
+        assert normal.rows[0].values[0].state is JoinState.UNKNOWN_AVAILABILITY
+        refused = normal.rows[0].values[0].refusal_evidence[0]
+        assert refused.dependency_end_ns == profile.support_end_utc_ns + 1
+        post = materialize_training_joins(
+            replace(plan, information_mode=JoinInformationMode.EX_POST)
+        )
+        assert training_load(post.rows[0].values[0].value_json)[
+            "value"
+        ] == pytest.approx(0.0002)
+        assert manifest.manifest_id in post.rows[0].values[0].parent_source_ids
+        early = controlled_spine(
+            tmp_path / "early",
+            (profile.support_start_utc_ns // 1_000_000 * 1_000_000,),
+        )
+        early_value = (
+            materialize_training_joins(
+                _plan(early, binding, column, mode=JoinInformationMode.EX_POST)
+            )
+            .rows[0]
+            .values[0]
+        )
+        assert early_value.state is JoinState.UNAVAILABLE
+        assert (
+            early_value.refusal_evidence[0].dependency_end_ns
+            == profile.support_end_utc_ns + 1
+        )
+
+        end = cutoff + SECOND
+        finite_profile = fit_broker_delivery_fingerprint(
+            root,
+            (manifest,),
+            config=profile.fit_config,
+            effective_start_utc_ns=profile.effective_start_utc_ns,
+            effective_end_utc_ns=end,
+        )
+        finite_binding = replace(
+            binding, evidence_json=(training_json(finite_profile.to_dict()),)
+        )
+        from histdatacom.data_quality.training_views import (
+            materialize_training_rows,
+        )
+
+        for direction in (JoinDirection.PRIOR, JoinDirection.INTERVAL):
+            interval_column = replace(column, direction=direction)
+            for delta, expected in (
+                (-1, JoinState.AVAILABLE),
+                (0, JoinState.STALE),
+                (1, JoinState.STALE),
+            ):
+                at_end = materialize_training_rows(
+                    spine.source,
+                    spine.ownership,
+                    replace(spine.request, decision_time_ns=end + delta),
+                )
+                value = (
+                    materialize_training_joins(
+                        _plan(
+                            at_end,
+                            finite_binding,
+                            interval_column,
+                            mode=JoinInformationMode.EX_POST,
+                        )
+                    )
+                    .rows[0]
+                    .values[0]
+                )
+                assert value.state is expected
+                if delta >= 0:
+                    assert value.refusal_evidence[0].source_ids
+
+        from pathlib import Path
+
+        partition = root / Path(manifest.partitions[0].data_artifact.path)
+        original = partition.read_bytes()
+        partition.write_bytes(original + b"tampered")
+        from histdatacom.broker_capture.fingerprints import (
+            BrokerDeliveryIneligibleCaptureError,
+        )
+
+        with pytest.raises(
+            BrokerDeliveryIneligibleCaptureError,
+            match="integrity_verification_failed",
+        ):
+            materialize_training_joins(plan)

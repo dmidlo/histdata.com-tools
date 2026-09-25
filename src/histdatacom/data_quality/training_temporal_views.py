@@ -207,6 +207,9 @@ def materialize_training_temporal(
     mode and split policy, never a general causal/ML eligibility certificate.
     """
     source = verify_training_temporal_source(plan)
+    from .training_provider_policy import require_training_derivation
+
+    require_training_derivation(source.legacy)
     _verify_legacy_binding(plan)
     values = []
     spans = []
@@ -268,7 +271,11 @@ def materialize_training_temporal(
                 tuple(sorted(reasons)),
             )
         )
-    return TrainingTemporalBatchV1(plan, maximum_span, boundaries, tuple(rows))
+    result = TrainingTemporalBatchV1(
+        plan, maximum_span, boundaries, tuple(rows)
+    )
+    require_training_derivation(source.legacy)
+    return result
 
 
 def replay_training_temporal(

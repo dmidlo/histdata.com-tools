@@ -56,6 +56,14 @@ from histdatacom.synthetic import (
     select_broker_profile,
 )
 
+from histdatacom.broker_plugin_policy.native_inputs import (
+    provider_native_inputs,
+)
+from tests.fixtures.broker_provider_policy import (
+    generated_legacy_request,
+    generated_provider_scope,
+)
+
 SECOND_NS = 1_000_000_000
 BASE_WALL_NS = int(
     datetime(2023, 12, 25, 12, tzinfo=timezone.utc).timestamp() * SECOND_NS
@@ -79,18 +87,38 @@ def test_fit_is_deterministic_bounded_and_recovers_conditioned_characteristics(
         max_samples_per_metric=5,
     )
 
-    forward = fit_broker_delivery_fingerprint(
-        tmp_path,
-        (first, second),
-        config=config,
-        market_context_timeline=_timeline(),
-    )
-    reversed_input = fit_broker_delivery_fingerprint(
-        tmp_path,
-        (second, first),
-        config=config,
-        market_context_timeline=_timeline(),
-    )
+    with (
+        generated_provider_scope(
+            generated_legacy_request(first.session),
+            generated_legacy_request(second.session),
+        ),
+        provider_native_inputs(
+            generated_legacy_request(first.session),
+            generated_legacy_request(second.session),
+        ),
+    ):
+        forward = fit_broker_delivery_fingerprint(
+            tmp_path,
+            (first, second),
+            config=config,
+            market_context_timeline=_timeline(),
+        )
+    with (
+        generated_provider_scope(
+            generated_legacy_request(second.session),
+            generated_legacy_request(first.session),
+        ),
+        provider_native_inputs(
+            generated_legacy_request(second.session),
+            generated_legacy_request(first.session),
+        ),
+    ):
+        reversed_input = fit_broker_delivery_fingerprint(
+            tmp_path,
+            (second, first),
+            config=config,
+            market_context_timeline=_timeline(),
+        )
 
     assert forward == reversed_input
     assert BrokerDeliveryFingerprintV1.from_json(forward.to_json()) == forward
@@ -144,9 +172,13 @@ def test_sparse_cells_back_off_and_unqualified_capture_fails_closed(
         min_cell_support=6,
         post_lifecycle_quote_count=2,
     )
-    fingerprint = fit_broker_delivery_fingerprint(
-        tmp_path, (manifest,), config=config
-    )
+    with (
+        generated_provider_scope(generated_legacy_request(manifest.session)),
+        provider_native_inputs(generated_legacy_request(manifest.session)),
+    ):
+        fingerprint = fit_broker_delivery_fingerprint(
+            tmp_path, (manifest,), config=config
+        )
     lifecycle = next(
         cell
         for cell in fingerprint.cells
@@ -170,13 +202,23 @@ def test_sparse_cells_back_off_and_unqualified_capture_fails_closed(
         wall_start_ns=BASE_WALL_NS,
         completed=False,
     )
-    eligibility = assess_broker_capture_eligibility(
-        failed_root, failed, config=config
-    )
+    with (
+        generated_provider_scope(generated_legacy_request(failed.session)),
+        provider_native_inputs(generated_legacy_request(failed.session)),
+    ):
+        eligibility = assess_broker_capture_eligibility(
+            failed_root, failed, config=config
+        )
     assert eligibility.status is BrokerCaptureEligibilityStatus.INELIGIBLE
     assert "capture_not_completed" in eligibility.reason_codes
     with pytest.raises(BrokerDeliveryIneligibleCaptureError) as error:
-        fit_broker_delivery_fingerprint(failed_root, (failed,), config=config)
+        with (
+            generated_provider_scope(generated_legacy_request(failed.session)),
+            provider_native_inputs(generated_legacy_request(failed.session)),
+        ):
+            fit_broker_delivery_fingerprint(
+                failed_root, (failed,), config=config
+            )
     assert error.value.eligibility == eligibility
 
 
@@ -187,7 +229,11 @@ def test_integrity_clock_and_resource_health_gates_are_explicit(
     corrupt = _capture(corrupt_root, seed=5, wall_start_ns=BASE_WALL_NS)
     data_path = corrupt_root / corrupt.partitions[0].data_artifact.path
     data_path.write_bytes(data_path.read_bytes() + b"{}\n")
-    eligibility = assess_broker_capture_eligibility(corrupt_root, corrupt)
+    with (
+        generated_provider_scope(generated_legacy_request(corrupt.session)),
+        provider_native_inputs(generated_legacy_request(corrupt.session)),
+    ):
+        eligibility = assess_broker_capture_eligibility(corrupt_root, corrupt)
     assert eligibility.status is BrokerCaptureEligibilityStatus.INELIGIBLE
     assert "integrity_verification_failed" in eligibility.reason_codes
 
@@ -198,31 +244,55 @@ def test_integrity_clock_and_resource_health_gates_are_explicit(
         wall_start_ns=BASE_WALL_NS,
         clock_correction_ns=25_000_000,
     )
-    limited = assess_broker_capture_eligibility(correction_root, correction)
+    with (
+        generated_provider_scope(generated_legacy_request(correction.session)),
+        provider_native_inputs(generated_legacy_request(correction.session)),
+    ):
+        limited = assess_broker_capture_eligibility(correction_root, correction)
     assert limited.status is BrokerCaptureEligibilityStatus.LIMITED
     assert limited.max_abs_clock_correction_ns == 25_000_000
-    strict = assess_broker_capture_eligibility(
-        correction_root,
-        correction,
-        config=BrokerDeliveryFitConfigV1(max_abs_clock_correction_ns=1),
-    )
+    with (
+        generated_provider_scope(generated_legacy_request(correction.session)),
+        provider_native_inputs(generated_legacy_request(correction.session)),
+    ):
+        strict = assess_broker_capture_eligibility(
+            correction_root,
+            correction,
+            config=BrokerDeliveryFitConfigV1(max_abs_clock_correction_ns=1),
+        )
     assert strict.status is BrokerCaptureEligibilityStatus.INELIGIBLE
     assert "excessive_clock_correction_magnitude" in strict.reason_codes
 
     with pytest.raises(
         BrokerDeliveryResourceLimitError, match="max_input_events"
     ):
-        fit_broker_delivery_fingerprint(
-            correction_root,
-            (correction,),
-            config=BrokerDeliveryFitConfigV1(max_input_events=8),
-        )
+        with (
+            generated_provider_scope(
+                generated_legacy_request(correction.session)
+            ),
+            provider_native_inputs(
+                generated_legacy_request(correction.session)
+            ),
+        ):
+            fit_broker_delivery_fingerprint(
+                correction_root,
+                (correction,),
+                config=BrokerDeliveryFitConfigV1(max_input_events=8),
+            )
     with pytest.raises(BrokerDeliveryResourceLimitError, match="max_cells"):
-        fit_broker_delivery_fingerprint(
-            correction_root,
-            (correction,),
-            config=BrokerDeliveryFitConfigV1(max_cells=1),
-        )
+        with (
+            generated_provider_scope(
+                generated_legacy_request(correction.session)
+            ),
+            provider_native_inputs(
+                generated_legacy_request(correction.session)
+            ),
+        ):
+            fit_broker_delivery_fingerprint(
+                correction_root,
+                (correction,),
+                config=BrokerDeliveryFitConfigV1(max_cells=1),
+            )
     context_root = tmp_path / "context-bound"
     context_manifest = _capture(
         context_root, seed=16, wall_start_ns=BASE_WALL_NS
@@ -231,12 +301,22 @@ def test_integrity_clock_and_resource_health_gates_are_explicit(
         BrokerDeliveryResourceLimitError,
         match="max_market_matches_per_quote",
     ):
-        fit_broker_delivery_fingerprint(
-            context_root,
-            (context_manifest,),
-            config=BrokerDeliveryFitConfigV1(max_market_matches_per_quote=1),
-            market_context_timeline=_timeline(),
-        )
+        with (
+            generated_provider_scope(
+                generated_legacy_request(context_manifest.session)
+            ),
+            provider_native_inputs(
+                generated_legacy_request(context_manifest.session)
+            ),
+        ):
+            fit_broker_delivery_fingerprint(
+                context_root,
+                (context_manifest,),
+                config=BrokerDeliveryFitConfigV1(
+                    max_market_matches_per_quote=1
+                ),
+                market_context_timeline=_timeline(),
+            )
 
 
 def test_drift_is_stratified_support_aware_and_has_no_winner_score(
@@ -259,22 +339,56 @@ def test_drift_is_stratified_support_aware_and_has_no_winner_score(
         precision_ns=1,
         decimal_places=5,
     )
-    reference = fit_broker_delivery_fingerprint(
-        tmp_path / "reference", (reference_manifest,)
-    )
-    stable = fit_broker_delivery_fingerprint(
-        tmp_path / "stable", (stable_manifest,)
-    )
-    drift = fit_broker_delivery_fingerprint(
-        tmp_path / "drift", (drift_manifest,)
-    )
+    with (
+        generated_provider_scope(
+            generated_legacy_request(reference_manifest.session)
+        ),
+        provider_native_inputs(
+            generated_legacy_request(reference_manifest.session)
+        ),
+    ):
+        reference = fit_broker_delivery_fingerprint(
+            tmp_path / "reference", (reference_manifest,)
+        )
+    with (
+        generated_provider_scope(
+            generated_legacy_request(stable_manifest.session)
+        ),
+        provider_native_inputs(
+            generated_legacy_request(stable_manifest.session)
+        ),
+    ):
+        stable = fit_broker_delivery_fingerprint(
+            tmp_path / "stable", (stable_manifest,)
+        )
+    with (
+        generated_provider_scope(
+            generated_legacy_request(drift_manifest.session)
+        ),
+        provider_native_inputs(
+            generated_legacy_request(drift_manifest.session)
+        ),
+    ):
+        drift = fit_broker_delivery_fingerprint(
+            tmp_path / "drift", (drift_manifest,)
+        )
 
-    stable_comparison = compare_broker_delivery_fingerprints(reference, stable)
+    with (
+        generated_provider_scope(reference, stable),
+        provider_native_inputs(reference, stable),
+    ):
+        stable_comparison = compare_broker_delivery_fingerprints(
+            reference, stable
+        )
     assert any(
         item.status is BrokerDeliveryDriftStatus.STABLE
         for item in stable_comparison.comparisons
     )
-    comparison = compare_broker_delivery_fingerprints(reference, drift)
+    with (
+        generated_provider_scope(reference, drift),
+        provider_native_inputs(reference, drift),
+    ):
+        comparison = compare_broker_delivery_fingerprints(reference, drift)
     material_names = {
         item.metric_name
         for item in comparison.comparisons
@@ -289,12 +403,16 @@ def test_drift_is_stratified_support_aware_and_has_no_winner_score(
     }.issubset(material_names)
     assert comparison.material_drift_count > 0
     assert comparison.to_dict()["global_similarity_score"] is None
-    selection = select_broker_profile(
-        drift,
-        requested_condition={},
-        selected_at_utc_ns=drift.effective_start_utc_ns,
-        drift_comparison=comparison,
-    )
+    with (
+        generated_provider_scope(drift, reference),
+        provider_native_inputs(drift, reference),
+    ):
+        selection = select_broker_profile(
+            drift,
+            requested_condition={},
+            selected_at_utc_ns=drift.effective_start_utc_ns,
+            drift_comparison=comparison,
+        )
     assert selection.status is BrokerTransferStatus.APPLIED
     assert selection.drift_comparison_id == comparison.comparison_id
     assert selection.material_drift_count == comparison.material_drift_count
@@ -303,21 +421,29 @@ def test_drift_is_stratified_support_aware_and_has_no_winner_score(
         == comparison
     )
 
-    bounded = compare_broker_delivery_fingerprints(
-        reference,
-        drift,
-        config=BrokerDeliveryDriftConfigV1(max_comparisons=3),
-    )
+    with (
+        generated_provider_scope(reference, drift),
+        provider_native_inputs(reference, drift),
+    ):
+        bounded = compare_broker_delivery_fingerprints(
+            reference,
+            drift,
+            config=BrokerDeliveryDriftConfigV1(max_comparisons=3),
+        )
     assert len(bounded.comparisons) == 3
     assert bounded.truncated
     assert bounded.comparison_candidate_count > 3
 
-    mismatched = select_broker_profile(
-        stable,
-        requested_condition={},
-        selected_at_utc_ns=stable.effective_start_utc_ns,
-        drift_comparison=comparison,
-    )
+    with (
+        generated_provider_scope(stable, reference, drift),
+        provider_native_inputs(stable, reference, drift),
+    ):
+        mismatched = select_broker_profile(
+            stable,
+            requested_condition={},
+            selected_at_utc_ns=stable.effective_start_utc_ns,
+            drift_comparison=comparison,
+        )
     assert mismatched.status is BrokerTransferStatus.REFUSED
     assert (
         "drift_comparison_does_not_include_profile" in mismatched.reason_codes
@@ -335,18 +461,34 @@ def test_successor_is_versioned_without_mutating_prior_synthetic_lineage(
         seed=11,
         wall_start_ns=BASE_WALL_NS + 24 * 60 * 60 * SECOND_NS,
     )
-    first = fit_broker_delivery_fingerprint(
-        tmp_path / "first", (first_manifest,)
-    )
+    with (
+        generated_provider_scope(
+            generated_legacy_request(first_manifest.session)
+        ),
+        provider_native_inputs(
+            generated_legacy_request(first_manifest.session)
+        ),
+    ):
+        first = fit_broker_delivery_fingerprint(
+            tmp_path / "first", (first_manifest,)
+        )
     stream = _synthetic_stream(first.fingerprint_id)
     prior_bytes = stream.to_json()
 
-    successor = fit_broker_delivery_fingerprint(
-        tmp_path / "second",
-        (second_manifest,),
-        supersedes=first,
-        effective_start_utc_ns=first.effective_start_utc_ns + SECOND_NS,
-    )
+    with (
+        generated_provider_scope(
+            generated_legacy_request(second_manifest.session), first
+        ),
+        provider_native_inputs(
+            generated_legacy_request(second_manifest.session), first
+        ),
+    ):
+        successor = fit_broker_delivery_fingerprint(
+            tmp_path / "second",
+            (second_manifest,),
+            supersedes=first,
+            effective_start_utc_ns=first.effective_start_utc_ns + SECOND_NS,
+        )
 
     assert successor.supersedes_fingerprint_id == first.fingerprint_id
     assert successor.fingerprint_id != first.fingerprint_id
@@ -356,12 +498,20 @@ def test_successor_is_versioned_without_mutating_prior_synthetic_lineage(
     )
     assert generated.broker_profile_id == first.fingerprint_id
     with pytest.raises(BrokerDeliveryFingerprintIdentityError):
-        fit_broker_delivery_fingerprint(
-            tmp_path / "second",
-            (second_manifest,),
-            supersedes=first,
-            effective_start_utc_ns=first.effective_start_utc_ns,
-        )
+        with (
+            generated_provider_scope(
+                generated_legacy_request(second_manifest.session), first
+            ),
+            provider_native_inputs(
+                generated_legacy_request(second_manifest.session), first
+            ),
+        ):
+            fit_broker_delivery_fingerprint(
+                tmp_path / "second",
+                (second_manifest,),
+                supersedes=first,
+                effective_start_utc_ns=first.effective_start_utc_ns,
+            )
 
 
 def test_fingerprint_artifacts_are_atomic_immutable_and_verified(
@@ -376,23 +526,42 @@ def test_fingerprint_artifacts_are_atomic_immutable_and_verified(
         wall_start_ns=BASE_WALL_NS + 24 * 60 * 60 * SECOND_NS,
         spread=0.0004,
     )
-    first = fit_broker_delivery_fingerprint(
-        tmp_path / "first", (first_manifest,)
-    )
-    second = fit_broker_delivery_fingerprint(
-        tmp_path / "second", (second_manifest,)
-    )
+    with (
+        generated_provider_scope(
+            generated_legacy_request(first_manifest.session)
+        ),
+        provider_native_inputs(
+            generated_legacy_request(first_manifest.session)
+        ),
+    ):
+        first = fit_broker_delivery_fingerprint(
+            tmp_path / "first", (first_manifest,)
+        )
+    with (
+        generated_provider_scope(
+            generated_legacy_request(second_manifest.session)
+        ),
+        provider_native_inputs(
+            generated_legacy_request(second_manifest.session)
+        ),
+    ):
+        second = fit_broker_delivery_fingerprint(
+            tmp_path / "second", (second_manifest,)
+        )
     target = tmp_path / "profiles" / "broker-fingerprint.json"
 
-    artifact = write_broker_delivery_fingerprint(target, first)
+    with generated_provider_scope(first), provider_native_inputs(first):
+        artifact = write_broker_delivery_fingerprint(target, first)
     assert artifact.sha256 == hashlib.sha256(target.read_bytes()).hexdigest()
     assert artifact.metadata["fingerprint_id"] == first.fingerprint_id
     assert load_broker_delivery_fingerprint(target) == first
-    assert write_broker_delivery_fingerprint(target, first) == artifact
+    with generated_provider_scope(first), provider_native_inputs(first):
+        assert write_broker_delivery_fingerprint(target, first) == artifact
     with pytest.raises(
         BrokerDeliveryFingerprintArtifactError, match="other content"
     ):
-        write_broker_delivery_fingerprint(target, second)
+        with generated_provider_scope(second), provider_native_inputs(second):
+            write_broker_delivery_fingerprint(target, second)
     target.write_text("{}\n", encoding="utf-8")
     with pytest.raises(BrokerDeliveryFingerprintArtifactError, match="invalid"):
         load_broker_delivery_fingerprint(target)
@@ -407,7 +576,17 @@ def test_capture_identity_mixing_is_refused(tmp_path: Path) -> None:
         adapter_config_sha256=hashlib.sha256(b"other-config").hexdigest(),
     )
     with pytest.raises(BrokerDeliveryFingerprintIdentityError):
-        fit_broker_delivery_fingerprint(tmp_path, (first, second))
+        with (
+            generated_provider_scope(
+                generated_legacy_request(first.session),
+                generated_legacy_request(second.session),
+            ),
+            provider_native_inputs(
+                generated_legacy_request(first.session),
+                generated_legacy_request(second.session),
+            ),
+        ):
+            fit_broker_delivery_fingerprint(tmp_path, (first, second))
 
 
 def test_proposal_conditioning_uses_cadence_burst_quiet_and_outage(
@@ -415,20 +594,28 @@ def test_proposal_conditioning_uses_cadence_burst_quiet_and_outage(
 ) -> None:
     """Delivery topology changes cadence before motif retrieval/generation."""
     manifest = _capture(tmp_path, seed=16, wall_start_ns=BASE_WALL_NS)
-    fingerprint = fit_broker_delivery_fingerprint(tmp_path, (manifest,))
+    with (
+        generated_provider_scope(generated_legacy_request(manifest.session)),
+        provider_native_inputs(generated_legacy_request(manifest.session)),
+    ):
+        fingerprint = fit_broker_delivery_fingerprint(tmp_path, (manifest,))
     query = _motif_query(
         tick_intensity=2.0,
         interarrival_ns=500_000_000.0,
         timestamp_precision_ns=1.0,
     )
 
-    proposal = condition_broker_proposal(
-        query,
-        fingerprint,
-        requested_condition={"symbol": "EURUSD"},
-        selected_at_utc_ns=fingerprint.effective_start_utc_ns,
-        config=BrokerTransferConfigV1(strength=0.5),
-    )
+    with (
+        generated_provider_scope(fingerprint),
+        provider_native_inputs(fingerprint),
+    ):
+        proposal = condition_broker_proposal(
+            query,
+            fingerprint,
+            requested_condition={"symbol": "EURUSD"},
+            selected_at_utc_ns=fingerprint.effective_start_utc_ns,
+            config=BrokerTransferConfigV1(strength=0.5),
+        )
 
     assert proposal.status is BrokerTransferStatus.APPLIED
     assert proposal.conditioned_query is not None
@@ -454,14 +641,22 @@ def test_proposal_conditioning_transfers_timestamp_and_price_precision(
         precision_ns=10_000_000,
         decimal_places=3,
     )
-    fingerprint = fit_broker_delivery_fingerprint(tmp_path, (manifest,))
-    proposal = condition_broker_proposal(
-        _motif_query(timestamp_precision_ns=1.0),
-        fingerprint,
-        requested_condition={"symbol": "EURUSD"},
-        selected_at_utc_ns=fingerprint.effective_start_utc_ns,
-        config=BrokerTransferConfigV1(strength=1.0),
-    )
+    with (
+        generated_provider_scope(generated_legacy_request(manifest.session)),
+        provider_native_inputs(generated_legacy_request(manifest.session)),
+    ):
+        fingerprint = fit_broker_delivery_fingerprint(tmp_path, (manifest,))
+    with (
+        generated_provider_scope(fingerprint),
+        provider_native_inputs(fingerprint),
+    ):
+        proposal = condition_broker_proposal(
+            _motif_query(timestamp_precision_ns=1.0),
+            fingerprint,
+            requested_condition={"symbol": "EURUSD"},
+            selected_at_utc_ns=fingerprint.effective_start_utc_ns,
+            config=BrokerTransferConfigV1(strength=1.0),
+        )
 
     assert proposal.metrics_after["timestamp_precision_ns"] == 10_000_000.0
     assert proposal.metrics_after["price_precision_digits"] == 3.0
@@ -472,16 +667,24 @@ def test_zero_strength_proposal_preserves_the_original_query(
 ) -> None:
     """The lower endpoint of the versioned blend is a true no-op."""
     manifest = _capture(tmp_path, seed=171, wall_start_ns=BASE_WALL_NS)
-    fingerprint = fit_broker_delivery_fingerprint(tmp_path, (manifest,))
+    with (
+        generated_provider_scope(generated_legacy_request(manifest.session)),
+        provider_native_inputs(generated_legacy_request(manifest.session)),
+    ):
+        fingerprint = fit_broker_delivery_fingerprint(tmp_path, (manifest,))
     query = _motif_query()
 
-    proposal = condition_broker_proposal(
-        query,
-        fingerprint,
-        requested_condition={"symbol": "EURUSD"},
-        selected_at_utc_ns=fingerprint.effective_start_utc_ns,
-        config=BrokerTransferConfigV1(strength=0.0),
-    )
+    with (
+        generated_provider_scope(fingerprint),
+        provider_native_inputs(fingerprint),
+    ):
+        proposal = condition_broker_proposal(
+            query,
+            fingerprint,
+            requested_condition={"symbol": "EURUSD"},
+            selected_at_utc_ns=fingerprint.effective_start_utc_ns,
+            config=BrokerTransferConfigV1(strength=0.0),
+        )
 
     assert proposal.status is BrokerTransferStatus.APPLIED
     assert proposal.conditioned_query == query
@@ -494,12 +697,20 @@ def test_proposal_selection_retains_stale_evidence(
 ) -> None:
     """Stale-quote behavior remains available to the rendering stage."""
     manifest = _capture(tmp_path, seed=18, wall_start_ns=BASE_WALL_NS)
-    fingerprint = fit_broker_delivery_fingerprint(tmp_path, (manifest,))
-    selection = select_broker_profile(
-        fingerprint,
-        requested_condition={"symbol": "EURUSD"},
-        selected_at_utc_ns=fingerprint.effective_start_utc_ns,
-    )
+    with (
+        generated_provider_scope(generated_legacy_request(manifest.session)),
+        provider_native_inputs(generated_legacy_request(manifest.session)),
+    ):
+        fingerprint = fit_broker_delivery_fingerprint(tmp_path, (manifest,))
+    with (
+        generated_provider_scope(fingerprint),
+        provider_native_inputs(fingerprint),
+    ):
+        selection = select_broker_profile(
+            fingerprint,
+            requested_condition={"symbol": "EURUSD"},
+            selected_at_utc_ns=fingerprint.effective_start_utc_ns,
+        )
 
     assert selection.metrics["stale_quote_rate"] > 0.0
 
@@ -507,12 +718,20 @@ def test_proposal_selection_retains_stale_evidence(
 def test_proposal_selection_retains_batching_evidence(tmp_path: Path) -> None:
     """Source-message batching remains distinct from stale-quote evidence."""
     manifest = _capture(tmp_path, seed=181, wall_start_ns=BASE_WALL_NS)
-    fingerprint = fit_broker_delivery_fingerprint(tmp_path, (manifest,))
-    selection = select_broker_profile(
-        fingerprint,
-        requested_condition={"symbol": "EURUSD"},
-        selected_at_utc_ns=fingerprint.effective_start_utc_ns,
-    )
+    with (
+        generated_provider_scope(generated_legacy_request(manifest.session)),
+        provider_native_inputs(generated_legacy_request(manifest.session)),
+    ):
+        fingerprint = fit_broker_delivery_fingerprint(tmp_path, (manifest,))
+    with (
+        generated_provider_scope(fingerprint),
+        provider_native_inputs(fingerprint),
+    ):
+        selection = select_broker_profile(
+            fingerprint,
+            requested_condition={"symbol": "EURUSD"},
+            selected_at_utc_ns=fingerprint.effective_start_utc_ns,
+        )
 
     assert selection.metrics["source_batch_quote_count"] > 1.0
     assert selection.metric_condition_ids["source_batch_quote_count"] == (
@@ -523,20 +742,32 @@ def test_proposal_selection_retains_batching_evidence(tmp_path: Path) -> None:
 def test_reconnect_cell_uses_only_recorded_backoff(tmp_path: Path) -> None:
     """Sparse reconnect evidence backs off explicitly; absent cells refuse."""
     manifest = _capture(tmp_path, seed=19, wall_start_ns=BASE_WALL_NS)
-    fingerprint = fit_broker_delivery_fingerprint(tmp_path, (manifest,))
-    reconnect = select_broker_profile(
-        fingerprint,
-        requested_condition={
-            "symbol": "EURUSD",
-            "lifecycle": "post_reconnect",
-        },
-        selected_at_utc_ns=fingerprint.effective_start_utc_ns,
-    )
-    absent = select_broker_profile(
-        fingerprint,
-        requested_condition={"symbol": "GBPUSD"},
-        selected_at_utc_ns=fingerprint.effective_start_utc_ns,
-    )
+    with (
+        generated_provider_scope(generated_legacy_request(manifest.session)),
+        provider_native_inputs(generated_legacy_request(manifest.session)),
+    ):
+        fingerprint = fit_broker_delivery_fingerprint(tmp_path, (manifest,))
+    with (
+        generated_provider_scope(fingerprint),
+        provider_native_inputs(fingerprint),
+    ):
+        reconnect = select_broker_profile(
+            fingerprint,
+            requested_condition={
+                "symbol": "EURUSD",
+                "lifecycle": "post_reconnect",
+            },
+            selected_at_utc_ns=fingerprint.effective_start_utc_ns,
+        )
+    with (
+        generated_provider_scope(fingerprint),
+        provider_native_inputs(fingerprint),
+    ):
+        absent = select_broker_profile(
+            fingerprint,
+            requested_condition={"symbol": "GBPUSD"},
+            selected_at_utc_ns=fingerprint.effective_start_utc_ns,
+        )
 
     assert reconnect.status is BrokerTransferStatus.BACKED_OFF
     assert reconnect.requested_condition_id != reconnect.effective_condition_id
@@ -551,14 +782,22 @@ def test_proposal_refuses_when_requested_condition_has_no_profile_cell(
 ) -> None:
     """Unsupported proposal cells produce no query for retrieval or generation."""
     manifest = _capture(tmp_path, seed=191, wall_start_ns=BASE_WALL_NS)
-    fingerprint = fit_broker_delivery_fingerprint(tmp_path, (manifest,))
+    with (
+        generated_provider_scope(generated_legacy_request(manifest.session)),
+        provider_native_inputs(generated_legacy_request(manifest.session)),
+    ):
+        fingerprint = fit_broker_delivery_fingerprint(tmp_path, (manifest,))
 
-    proposal = condition_broker_proposal(
-        _motif_query(),
-        fingerprint,
-        requested_condition={"symbol": "GBPUSD"},
-        selected_at_utc_ns=fingerprint.effective_start_utc_ns,
-    )
+    with (
+        generated_provider_scope(fingerprint),
+        provider_native_inputs(fingerprint),
+    ):
+        proposal = condition_broker_proposal(
+            _motif_query(),
+            fingerprint,
+            requested_condition={"symbol": "GBPUSD"},
+            selected_at_utc_ns=fingerprint.effective_start_utc_ns,
+        )
 
     assert proposal.status is BrokerTransferStatus.REFUSED
     assert proposal.conditioned_query is None
@@ -568,16 +807,24 @@ def test_proposal_refuses_when_requested_condition_has_no_profile_cell(
 def test_profile_effective_period_is_enforced(tmp_path: Path) -> None:
     """A profile cannot be selected before or after its effective period."""
     manifest = _capture(tmp_path, seed=20, wall_start_ns=BASE_WALL_NS)
-    fingerprint = fit_broker_delivery_fingerprint(
-        tmp_path,
-        (manifest,),
-        effective_end_utc_ns=BASE_WALL_NS + 100 * SECOND_NS,
-    )
-    selection = select_broker_profile(
-        fingerprint,
-        requested_condition={},
-        selected_at_utc_ns=BASE_WALL_NS + 101 * SECOND_NS,
-    )
+    with (
+        generated_provider_scope(generated_legacy_request(manifest.session)),
+        provider_native_inputs(generated_legacy_request(manifest.session)),
+    ):
+        fingerprint = fit_broker_delivery_fingerprint(
+            tmp_path,
+            (manifest,),
+            effective_end_utc_ns=BASE_WALL_NS + 100 * SECOND_NS,
+        )
+    with (
+        generated_provider_scope(fingerprint),
+        provider_native_inputs(fingerprint),
+    ):
+        selection = select_broker_profile(
+            fingerprint,
+            requested_condition={},
+            selected_at_utc_ns=BASE_WALL_NS + 101 * SECOND_NS,
+        )
 
     assert selection.status is BrokerTransferStatus.REFUSED
     assert "profile_not_effective_at_selection_time" in selection.reason_codes
@@ -628,123 +875,129 @@ def _capture(
         started_at_monotonic_ns=BASE_MONOTONIC_NS + seed,
         public_metadata={"fixture_seed": seed},
     )
-    writer = AppendOnlyBrokerCaptureWriterV1(
-        root,
-        session=session,
-        storage_policy=_storage_policy(),
-    )
-    messages: list[BrokerAdapterMessageV1] = [
-        BrokerAdapterMessageV1(
-            kind=BrokerCaptureEventKind.PROCESS_START,
-            reason_code="collector_started",
-        ),
-        BrokerAdapterMessageV1(
-            kind=BrokerCaptureEventKind.CONNECTION_OPEN,
-            connection_id="connection-1",
-        ),
-        BrokerAdapterMessageV1(
-            kind=BrokerCaptureEventKind.SUBSCRIPTION_ADD,
-            connection_id="connection-1",
-            subscription_id="subscription-eurusd",
-            symbol="EURUSD",
-        ),
-    ]
-    first_quote = _quote(
-        index=0,
-        wall_ns=wall_start_ns,
-        spread=spread,
-        precision_ns=precision_ns,
-        decimal_places=decimal_places,
-        source_batch_id="batch-1",
-    )
-    messages.extend(
-        (first_quote, BrokerAdapterMessageV1.from_json(first_quote.to_json()))
-    )
-    messages.extend(
-        _quote(
-            index=index,
-            wall_ns=wall_start_ns + index * cadence_ns,
+    with generated_provider_scope(generated_legacy_request(session)):
+        writer = AppendOnlyBrokerCaptureWriterV1(
+            root,
+            session=session,
+            storage_policy=_storage_policy(),
+            provider_request=generated_legacy_request(session),
+        )
+        messages: list[BrokerAdapterMessageV1] = [
+            BrokerAdapterMessageV1(
+                kind=BrokerCaptureEventKind.PROCESS_START,
+                reason_code="collector_started",
+            ),
+            BrokerAdapterMessageV1(
+                kind=BrokerCaptureEventKind.CONNECTION_OPEN,
+                connection_id="connection-1",
+            ),
+            BrokerAdapterMessageV1(
+                kind=BrokerCaptureEventKind.SUBSCRIPTION_ADD,
+                connection_id="connection-1",
+                subscription_id="subscription-eurusd",
+                symbol="EURUSD",
+            ),
+        ]
+        first_quote = _quote(
+            index=0,
+            wall_ns=wall_start_ns,
             spread=spread,
             precision_ns=precision_ns,
             decimal_places=decimal_places,
-            source_batch_id=f"batch-{1 + index // 4}",
+            source_batch_id="batch-1",
         )
-        for index in range(2, 12)
-    )
-    messages.extend(
-        (
-            BrokerAdapterMessageV1(
-                kind=BrokerCaptureEventKind.OUTAGE_START,
-                reason_code="fixture_outage",
-            ),
-            BrokerAdapterMessageV1(
-                kind=BrokerCaptureEventKind.OUTAGE_END,
-                gap_duration_ns=2 * SECOND_NS,
-                reason_code="fixture_outage_recovered",
-            ),
-            BrokerAdapterMessageV1(
-                kind=BrokerCaptureEventKind.RECONNECT,
-                connection_id="connection-2",
-                reason_code="fixture_reconnect",
-            ),
+        messages.extend(
+            (
+                first_quote,
+                BrokerAdapterMessageV1.from_json(first_quote.to_json()),
+            )
+        )
+        messages.extend(
             _quote(
-                index=12,
-                wall_ns=wall_start_ns + 12 * cadence_ns,
+                index=index,
+                wall_ns=wall_start_ns + index * cadence_ns,
                 spread=spread,
                 precision_ns=precision_ns,
                 decimal_places=decimal_places,
-                source_batch_id="batch-4",
-            ),
-            _quote(
-                index=13,
-                wall_ns=wall_start_ns + 13 * cadence_ns,
-                spread=spread,
-                precision_ns=precision_ns,
-                decimal_places=decimal_places,
-                source_batch_id="batch-4",
-            ),
-            BrokerAdapterMessageV1(
-                kind=BrokerCaptureEventKind.PROCESS_STOP,
-                reason_code="collector_stopped",
-            ),
+                source_batch_id=f"batch-{1 + index // 4}",
+            )
+            for index in range(2, 12)
         )
-    )
-    if clock_correction_ns is not None:
-        messages.insert(
-            3,
-            BrokerAdapterMessageV1(
-                kind=BrokerCaptureEventKind.CLOCK_CORRECTION,
-                reason_code="wall_monotonic_divergence",
-            ),
-        )
-    monotonic_ns = BASE_MONOTONIC_NS
-    receive_wall_ns = wall_start_ns
-    for sequence, message in enumerate(messages):
-        gap = (
-            6 * SECOND_NS
-            if message.kind is BrokerCaptureEventKind.OUTAGE_END
-            else cadence_ns
-        )
-        monotonic_ns += gap
-        receive_wall_ns += gap
-        writer.append(
-            BrokerCaptureEventV1(
-                session_id=session.session_id,
-                capture_sequence=sequence,
-                receive_time_utc_ns=receive_wall_ns,
-                receive_time_monotonic_ns=monotonic_ns,
-                message=message,
-                clock_offset_change_ns=(
-                    clock_correction_ns
-                    if message.kind is BrokerCaptureEventKind.CLOCK_CORRECTION
-                    else None
+        messages.extend(
+            (
+                BrokerAdapterMessageV1(
+                    kind=BrokerCaptureEventKind.OUTAGE_START,
+                    reason_code="fixture_outage",
+                ),
+                BrokerAdapterMessageV1(
+                    kind=BrokerCaptureEventKind.OUTAGE_END,
+                    gap_duration_ns=2 * SECOND_NS,
+                    reason_code="fixture_outage_recovered",
+                ),
+                BrokerAdapterMessageV1(
+                    kind=BrokerCaptureEventKind.RECONNECT,
+                    connection_id="connection-2",
+                    reason_code="fixture_reconnect",
+                ),
+                _quote(
+                    index=12,
+                    wall_ns=wall_start_ns + 12 * cadence_ns,
+                    spread=spread,
+                    precision_ns=precision_ns,
+                    decimal_places=decimal_places,
+                    source_batch_id="batch-4",
+                ),
+                _quote(
+                    index=13,
+                    wall_ns=wall_start_ns + 13 * cadence_ns,
+                    spread=spread,
+                    precision_ns=precision_ns,
+                    decimal_places=decimal_places,
+                    source_batch_id="batch-4",
+                ),
+                BrokerAdapterMessageV1(
+                    kind=BrokerCaptureEventKind.PROCESS_STOP,
+                    reason_code="collector_stopped",
                 ),
             )
         )
-    return writer.close(
-        completed=completed,
-        limitations=(() if completed else ("collector_failure:fixture",)),
-    )
+        if clock_correction_ns is not None:
+            messages.insert(
+                3,
+                BrokerAdapterMessageV1(
+                    kind=BrokerCaptureEventKind.CLOCK_CORRECTION,
+                    reason_code="wall_monotonic_divergence",
+                ),
+            )
+        monotonic_ns = BASE_MONOTONIC_NS
+        receive_wall_ns = wall_start_ns
+        for sequence, message in enumerate(messages):
+            gap = (
+                6 * SECOND_NS
+                if message.kind is BrokerCaptureEventKind.OUTAGE_END
+                else cadence_ns
+            )
+            monotonic_ns += gap
+            receive_wall_ns += gap
+            writer.append(
+                BrokerCaptureEventV1(
+                    session_id=session.session_id,
+                    capture_sequence=sequence,
+                    receive_time_utc_ns=receive_wall_ns,
+                    receive_time_monotonic_ns=monotonic_ns,
+                    message=message,
+                    clock_offset_change_ns=(
+                        clock_correction_ns
+                        if message.kind
+                        is BrokerCaptureEventKind.CLOCK_CORRECTION
+                        else None
+                    ),
+                )
+            )
+        return writer.close(
+            completed=completed,
+            limitations=(() if completed else ("collector_failure:fixture",)),
+        )
 
 
 def _quote(

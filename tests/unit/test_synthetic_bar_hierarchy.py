@@ -75,6 +75,7 @@ def _events(
             bid=bid + 0.0000000000001,
             ask=bid + 0.00012 + (minute % 3) / 100_000,
             confidence=0.543210987654 + (minute % 5) / 100,
+            broker_profile_id=None,
             event_id="",
         )
         rows.extend((left, generated, right))
@@ -223,6 +224,7 @@ def test_rounded_child_means_are_not_sufficient_statistics() -> None:
                 bid=1.1,
                 ask=1.1 + spread,
                 confidence=spread,
+                broker_profile_id=None,
                 event_id="",
             )
         )
@@ -415,7 +417,11 @@ def test_event_support_requires_exact_child_replay(damage: str) -> None:
             replace(support[-1], event_time_ns=START + 5 * MINUTE, event_id="")
         )
     elif damage == "wrong_origin":
-        support[1] = _generated(support[0], support[1])
+        support[1] = replace(
+            _generated(support[0], support[1]),
+            broker_profile_id=None,
+            event_id="",
+        )
     elif damage == "wrong_axis":
         support[1] = replace(support[1], symbol="gbpusd", event_id="")
     with pytest.raises(ValueError):

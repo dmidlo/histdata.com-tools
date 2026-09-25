@@ -595,6 +595,13 @@ def _broker(source: TrainingJoinSourceV1) -> _JoinAdapter:
     retained = BrokerDeliveryFingerprintV1.from_json(source.evidence_json[0])
     if training_json(retained.to_dict()) != source.evidence_json[0]:
         raise ValueError("noncanonical broker fingerprint")
+    from histdatacom.broker_plugin_policy import (
+        BrokerPolicyOperation,
+        require_provider_operation,
+    )
+
+    require_provider_operation(retained, BrokerPolicyOperation.MATERIAL_USE)
+    require_provider_operation(retained, BrokerPolicyOperation.DERIVE)
     if retained.supersedes_fingerprint_id is not None:
         raise ValueError(
             "broker successor requires its retained predecessor; unsupported in this adapter version"
@@ -628,6 +635,8 @@ def _broker(source: TrainingJoinSourceV1) -> _JoinAdapter:
     def select(
         column: TrainingJoinColumnV1, cutoff: int
     ) -> tuple[_JoinRecord, ...]:
+        require_provider_operation(actual, BrokerPolicyOperation.MATERIAL_USE)
+        require_provider_operation(actual, BrokerPolicyOperation.DERIVE)
         _prefix(column, "broker_style.")
         _semantics(column, JoinMeaning.STATE)
         cells = [

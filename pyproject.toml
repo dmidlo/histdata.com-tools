@@ -197,6 +197,12 @@ histdatacom-orchestration-worker = "histdatacom.orchestration.worker:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
+"histdatacom.broker_capture" = [
+    "py.typed",
+]
+"histdatacom.broker_plugin_policy" = [
+    "py.typed",
+]
 "histdatacom.attribution" = [
     "assets/*.json",
     "py.typed",
@@ -206,6 +212,7 @@ where = ["src"]
 ]
 "histdatacom.data_quality" = [
     "assets/*.json",
+    "py.typed",
 ]
 "histdatacom.experiments" = [
     "assets/*.json",
@@ -233,6 +240,7 @@ where = ["src"]
     "py.typed",
 ]
 "histdatacom.synthetic" = [
+    "py.typed",
     "assets/*.json",
 ]
 "histdatacom.synthetic.traders" = [

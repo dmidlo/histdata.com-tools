@@ -13,11 +13,13 @@ import hashlib
 import json
 import math
 import os
+import stat
+import tempfile
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any, TypeVar, cast
+from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 from histdatacom.runtime_contracts import ArtifactRef, JSONValue
 from histdatacom.synthetic.benchmark import ReverseDegradationScorecardV1
@@ -30,9 +32,13 @@ from histdatacom.synthetic.contracts import (
 )
 from histdatacom.synthetic.information import InformationMode
 from histdatacom.synthetic.persistence import (
+    ReconstructionProductManifestV1,
     iter_reconstruction_event_batches,
     verify_reconstruction_publication,
 )
+
+if TYPE_CHECKING:
+    from histdatacom.broker_plugin_policy import BrokerDerivedArtifactV1
 
 RECONSTRUCTION_ACTIVITY_POLICY_SCHEMA_VERSION = (
     "histdatacom.reconstruction-activity-policy.v1"
@@ -1579,6 +1585,11 @@ def summarize_committed_reconstruction_activity(
 ) -> ReconstructionActivityManifestV1:
     """Stream projected final Parquet columns into compact activity evidence."""
     product = verify_reconstruction_publication(manifest_path)
+    if (
+        isinstance(product, ReconstructionProductManifestV1)
+        and product.broker_profile_id is not None
+    ):
+        _require_activity_parent(product.broker_profile_id)
     size = _bounded_int(batch_size, "batch_size", 1, 1_000_000)
     stream_map: dict[str, tuple[str, ...]] = {}
     for symbol in product.symbols:
@@ -1623,29 +1634,50 @@ def write_reconstruction_activity_manifest(
     directory: str | Path,
 ) -> ArtifactRef:
     """Atomically persist and read back one compact activity manifest."""
-    if not isinstance(manifest, ReconstructionActivityManifestV1):
+    if type(manifest) is not ReconstructionActivityManifestV1:
         raise TypeError("activity persistence requires a v1 manifest")
+    from histdatacom.broker_plugin_policy.bindings import _restore_native
+
+    manifest = cast(
+        ReconstructionActivityManifestV1,
+        _restore_native(manifest, {ReconstructionActivityManifestV1}),
+    )
+    native = _activity_native(manifest)
+    _retain_activity(native)
     encoded = manifest.to_json().encode("utf-8") + b"\n"
     digest = hashlib.sha256(encoded).hexdigest()
     root = Path(directory).expanduser().resolve()
     root.mkdir(parents=True, exist_ok=True)
     path = root / f"reconstruction-activity-manifest-{digest}.json"
+    receipt_path = path.with_name(path.name + ".provider-policy.json")
+    if native is not None and (path.exists() or path.is_symlink()) != (
+        receipt_path.exists() or receipt_path.is_symlink()
+    ):
+        raise ValueError("activity native/policy pair is incomplete; no repair")
+    if path.is_symlink():
+        raise ValueError("activity persistence refuses artifact symlinks")
     if path.exists():
-        if path.read_bytes() != encoded:
+        if _read_activity_bytes(path) != encoded:
             raise ValueError("content-addressed activity manifest collision")
     else:
-        temporary = root / f".{path.name}.{os.getpid()}.tmp"
+        _retain_activity(native)
+        descriptor, name = tempfile.mkstemp(prefix=".activity-", dir=root)
+        temporary = Path(name)
         try:
-            with temporary.open("wb") as stream:
+            with os.fdopen(descriptor, "wb") as stream:
                 stream.write(encoded)
                 stream.flush()
                 os.fsync(stream.fileno())
-            os.replace(temporary, path)
+            _activity_receipt(receipt_path, native, path, encoded)
+            _retain_activity(native)
+            os.link(temporary, path, follow_symlinks=False)
         finally:
             temporary.unlink(missing_ok=True)
+    _activity_receipt(receipt_path, native, path, encoded)
     restored = read_reconstruction_activity_manifest(path)
     if restored != manifest:
         raise ValueError("persisted activity manifest differs on readback")
+    _retain_activity(native)
     return ArtifactRef(
         kind="activity-manifest",
         path=str(path),
@@ -1657,6 +1689,30 @@ def write_reconstruction_activity_manifest(
             "event_count": manifest.event_count,
         },
     )
+
+
+def _read_activity_bytes(path: Path) -> bytes:
+    """Bound an existing immutable output without following its leaf alias."""
+    before = path.lstat()
+    if not stat.S_ISREG(before.st_mode) or not (
+        0 < before.st_size <= MAX_ACTIVITY_PAYLOAD_BYTES + 1
+    ):
+        raise ValueError("activity output must be a bounded regular file")
+    flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(path, flags)
+    with os.fdopen(descriptor, "rb") as stream:
+        opened = os.fstat(stream.fileno())
+        fields = ("st_dev", "st_ino", "st_size", "st_mtime_ns", "st_ctime_ns")
+        if any(getattr(before, key) != getattr(opened, key) for key in fields):
+            raise ValueError("activity output changed before opening")
+        data = stream.read(MAX_ACTIVITY_PAYLOAD_BYTES + 2)
+        after = os.fstat(stream.fileno())
+    if len(data) != before.st_size or any(
+        getattr(before, key) != getattr(after, key) for key in fields
+    ):
+        raise ValueError("activity output changed while reading")
+    return data
 
 
 def read_reconstruction_activity_manifest(
@@ -1771,7 +1827,15 @@ def _summarize_activity_views(
         ensemble_member_id=ensemble_member_id,
         policy=policy,
     )
+    broker_parents: set[str] = set()
     for event in views:
+        if event.broker_profile_id is not None:
+            _require_activity_parent(event.broker_profile_id)
+            broker_parents.add(event.broker_profile_id)
+            if len(broker_parents) > 16:
+                raise ValueError(
+                    "activity broker parent inventory exceeds limit"
+                )
         accumulator.add(event)
     slices = accumulator.finalize()
     input_hash = _content_sha256(
@@ -1784,7 +1848,7 @@ def _summarize_activity_views(
             ]
         }
     )
-    return ReconstructionActivityManifestV1(
+    result = ReconstructionActivityManifestV1(
         run_id=run_id,
         ensemble_member_id=ensemble_member_id,
         information_mode=information_mode,
@@ -1799,6 +1863,105 @@ def _summarize_activity_views(
         calibration_report_id=calibration_report_id,
         benchmark_evidence=benchmark_evidence,
     )
+    if broker_parents:
+        from histdatacom.broker_plugin_policy import (
+            BrokerPolicyOperation,
+            require_provider_operation,
+        )
+        from histdatacom.broker_plugin_policy.activity_bindings import (
+            _activity_profile_ids,
+        )
+
+        if set(_activity_profile_ids(result)) != broker_parents:
+            raise ValueError("activity projection omitted used broker parents")
+        native = _activity_native(result)
+        require_provider_operation(native, BrokerPolicyOperation.MATERIAL_USE)
+        require_provider_operation(native, BrokerPolicyOperation.DERIVE)
+    return result
+
+
+def _require_activity_parent(fingerprint_id: str) -> None:
+    """Fresh admission before using already-materialized broker-tagged input."""
+    from histdatacom.broker_plugin_policy import (
+        BrokerPolicyOperation,
+        BrokerSyntheticOutputV1,
+        fingerprint_for,
+        require_provider_operation,
+    )
+
+    fingerprint = fingerprint_for(fingerprint_id)
+    require_provider_operation(fingerprint, BrokerPolicyOperation.MATERIAL_USE)
+    require_provider_operation(
+        BrokerSyntheticOutputV1(fingerprint), BrokerPolicyOperation.MATERIAL_USE
+    )
+    require_provider_operation(
+        BrokerSyntheticOutputV1(fingerprint), BrokerPolicyOperation.DERIVE
+    )
+
+
+def _activity_native(
+    manifest: ReconstructionActivityManifestV1,
+) -> BrokerDerivedArtifactV1 | None:
+    from histdatacom.broker_plugin_policy import (
+        BrokerDerivedArtifactV1,
+        fingerprint_for,
+    )
+    from histdatacom.broker_plugin_policy.activity_bindings import (
+        _activity_profile_ids,
+    )
+
+    identities = _activity_profile_ids(manifest)
+    if not identities:
+        return None
+    return BrokerDerivedArtifactV1(
+        tuple(fingerprint_for(identity) for identity in identities), manifest
+    )
+
+
+def _retain_activity(native: BrokerDerivedArtifactV1 | None) -> None:
+    if native is not None:
+        from histdatacom.broker_plugin_policy import (
+            BrokerPolicyOperation,
+            require_provider_operation,
+        )
+
+        require_provider_operation(native, BrokerPolicyOperation.RETAIN_LOCAL)
+
+
+def _activity_receipt(
+    path: Path,
+    native: BrokerDerivedArtifactV1 | None,
+    native_path: Path,
+    encoded: bytes,
+) -> None:
+    if native is None:
+        return
+    from histdatacom.broker_plugin_policy import (
+        read_broker_policy_receipt,
+        verify_broker_policy_receipt,
+        write_broker_policy_receipt,
+    )
+
+    if path.exists() or path.is_symlink():
+        receipt = read_broker_policy_receipt(path)
+        # A prior receipt alone is not proof that publication completed.
+        if native_path.exists():
+            verify_broker_policy_receipt(receipt, native, native_path)
+        else:
+            raise ValueError(
+                "activity sidecar exists without published artifact"
+            )
+    else:
+        if native_path.exists():
+            raise ValueError(
+                "activity native artifact lacks its original admission"
+            )
+        write_broker_policy_receipt(
+            path,
+            native,
+            native_artifact_name=native_path.name,
+            native_file_bytes=encoded,
+        )
 
 
 def _activity_event_view(

@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import time
 from collections.abc import Iterable, Iterator, Sequence
-from dataclasses import dataclass
-from typing import Protocol, runtime_checkable
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
+
+if TYPE_CHECKING:
+    from histdatacom.broker_plugin_policy.bindings import BrokerLegacyCaptureV1
 
 from histdatacom.broker_capture.contracts import (
     BrokerAdapterMessageV1,
@@ -128,10 +131,13 @@ class LiveBrokerCaptureSourceV1:
     adapter: BrokerCaptureAdapterV1
     clock: BrokerCaptureClockV1
     clock_correction_threshold_ns: int = 5_000_000
+    provider_request: BrokerLegacyCaptureV1 = field(kw_only=True)
 
     def __post_init__(self) -> None:
+        _require_legacy_capture(self.session, self.provider_request)
         if self.adapter.adapter_id != self.session.adapter_id:
             raise ValueError("adapter_id does not match capture session")
+        _require_legacy_capture(self.session, self.provider_request)
         if self.adapter.adapter_version != self.session.adapter_version:
             raise ValueError("adapter_version does not match capture session")
         if (
@@ -154,7 +160,7 @@ class LiveBrokerCaptureSourceV1:
         sequence = 0
         previous_wall: int | None = None
         previous_monotonic: int | None = None
-        for message in self.adapter.iter_messages():
+        for message in self._messages():
             if not isinstance(message, BrokerAdapterMessageV1):
                 raise TypeError("broker adapter yielded a non-contract message")
             if message.kind is BrokerCaptureEventKind.CLOCK_CORRECTION:
@@ -188,7 +194,7 @@ class LiveBrokerCaptureSourceV1:
                             "threshold_ns": self.clock_correction_threshold_ns,
                         },
                     )
-                    yield BrokerCaptureEventV1(
+                    correction = BrokerCaptureEventV1(
                         session_id=self.session.session_id,
                         capture_sequence=sequence,
                         receive_time_utc_ns=wall,
@@ -196,49 +202,175 @@ class LiveBrokerCaptureSourceV1:
                         message=correction_message,
                         clock_offset_change_ns=offset_change,
                     )
+                    self._capture_record(correction)
+                    yield correction
                     sequence += 1
-            yield BrokerCaptureEventV1(
+            event = BrokerCaptureEventV1(
                 session_id=self.session.session_id,
                 capture_sequence=sequence,
                 receive_time_utc_ns=wall,
                 receive_time_monotonic_ns=monotonic,
                 message=message,
             )
+            self._capture_record(event)
+            yield event
             sequence += 1
             previous_wall = wall
             previous_monotonic = monotonic
+
+    def _capture_record(self, record: object) -> None:
+        from histdatacom.broker_plugin_policy.bindings import (
+            BrokerLegacyRecordV1,
+        )
+        from histdatacom.broker_plugin_policy.contracts import (
+            BrokerPolicyOperation,
+        )
+        from histdatacom.broker_plugin_policy.scope import (
+            require_provider_operation,
+        )
+
+        require_provider_operation(
+            BrokerLegacyRecordV1(
+                self.session, record, self.provider_request.output_contract
+            ),
+            BrokerPolicyOperation.CAPTURE,
+        )
+
+    def _messages(self) -> Iterator[BrokerAdapterMessageV1]:
+        _require_legacy_capture(
+            self.session, self.provider_request, capture=True
+        )
+        iterator = iter(self.adapter.iter_messages())
+        try:
+            while True:
+                _require_legacy_capture(
+                    self.session, self.provider_request, capture=True
+                )
+                try:
+                    message = next(iterator)
+                except StopIteration:
+                    return
+                self._capture_record(message)
+                yield message
+        finally:
+            # Iterator cleanup grants no permission to pull further messages.
+            close = getattr(iterator, "close", None)
+            if callable(close):
+                close()
+
+
+def _require_legacy_capture(
+    session: BrokerCaptureSessionV1,
+    request: BrokerLegacyCaptureV1,
+    *,
+    capture: bool = False,
+) -> None:
+    from histdatacom.broker_plugin_policy.bindings import BrokerLegacyCaptureV1
+    from histdatacom.broker_plugin_policy.contracts import BrokerPolicyOperation
+    from histdatacom.broker_plugin_policy.scope import (
+        BrokerPolicyError,
+        require_provider_operation,
+    )
+
+    if (
+        type(request) is not BrokerLegacyCaptureV1
+        or type(request.session) is not BrokerCaptureSessionV1
+        or type(session) is not BrokerCaptureSessionV1
+        or request.session.to_json() != session.to_json()
+    ):
+        raise BrokerPolicyError("legacy_capture_session_mismatch")
+    if not capture:
+        require_provider_operation(request, BrokerPolicyOperation.INVOKE)
+    require_provider_operation(request, BrokerPolicyOperation.CAPTURE)
 
 
 def consume_broker_capture_source(
     source: BrokerCaptureEventSourceV1,
     *,
+    provider_request: BrokerLegacyCaptureV1,
     sink: BrokerCaptureEventSinkV1 | None = None,
     consumers: Sequence[BrokerCaptureEventConsumerV1] = (),
 ) -> BrokerCaptureConsumeResultV1:
     """Drive either a live or replay source through the identical interface."""
+    from histdatacom.broker_capture.storage import BrokerCaptureReplaySourceV1
+    from histdatacom.broker_plugin_policy.bindings import (
+        BrokerLegacyCaptureV1,
+        BrokerLegacyRecordV1,
+    )
+    from histdatacom.broker_plugin_policy.contracts import BrokerPolicyOperation
+    from histdatacom.broker_plugin_policy.scope import (
+        BrokerPolicyError,
+        require_provider_operation,
+    )
+
+    if (
+        type(provider_request) is not BrokerLegacyCaptureV1
+        or type(provider_request.session) is not BrokerCaptureSessionV1
+    ):
+        raise BrokerPolicyError("exact_legacy_capture_request_required")
+    operation = (
+        BrokerPolicyOperation.MATERIAL_USE
+        if type(source) is BrokerCaptureReplaySourceV1
+        else BrokerPolicyOperation.CAPTURE
+    )
+    if type(source) is not BrokerCaptureReplaySourceV1:
+        require_provider_operation(
+            provider_request, BrokerPolicyOperation.INVOKE
+        )
+    require_provider_operation(provider_request, operation)
+    if source.session_id != provider_request.session.session_id:
+        raise BrokerPolicyError("legacy_capture_session_mismatch")
     expected_sequence: int | None = None
     first_sequence: int | None = None
     last_sequence: int | None = None
     counts: dict[str, int] = {}
     event_count = 0
-    for event in source.iter_events():
-        if event.session_id != source.session_id:
-            raise ValueError("capture source yielded another session")
-        if expected_sequence is None:
-            expected_sequence = event.capture_sequence
-            first_sequence = event.capture_sequence
-        if event.capture_sequence != expected_sequence:
-            raise ValueError("capture source sequence is not contiguous")
-        if sink is not None:
-            sink.append(event)
-        for consumer in consumers:
-            consumer.on_event(event)
-        counts[event.kind.value] = counts.get(event.kind.value, 0) + 1
-        event_count += 1
-        last_sequence = event.capture_sequence
-        expected_sequence += 1
+    iterator = iter(source.iter_events())
+    try:
+        while True:
+            require_provider_operation(provider_request, operation)
+            try:
+                event = next(iterator)
+            except StopIteration:
+                break
+            if type(event) is not BrokerCaptureEventV1:
+                raise TypeError("capture source yielded a non-contract event")
+            subject = BrokerLegacyRecordV1(
+                provider_request.session,
+                event,
+                provider_request.output_contract,
+            )
+            require_provider_operation(subject, operation)
+            if event.session_id != provider_request.session.session_id:
+                raise ValueError("capture source yielded another session")
+            if expected_sequence is None:
+                expected_sequence = event.capture_sequence
+                first_sequence = event.capture_sequence
+            if event.capture_sequence != expected_sequence:
+                raise ValueError("capture source sequence is not contiguous")
+            if sink is not None:
+                require_provider_operation(
+                    provider_request, BrokerPolicyOperation.RETAIN_LOCAL
+                )
+                require_provider_operation(
+                    subject, BrokerPolicyOperation.RETAIN_LOCAL
+                )
+                sink.append(event)
+            for consumer in consumers:
+                require_provider_operation(
+                    subject, BrokerPolicyOperation.MATERIAL_USE
+                )
+                consumer.on_event(event)
+            counts[event.kind.value] = counts.get(event.kind.value, 0) + 1
+            event_count += 1
+            last_sequence = event.capture_sequence
+            expected_sequence += 1
+    finally:
+        close = getattr(iterator, "close", None)
+        if callable(close):
+            close()
     return BrokerCaptureConsumeResultV1(
-        session_id=source.session_id,
+        session_id=provider_request.session.session_id,
         event_count=event_count,
         event_kind_counts=dict(sorted(counts.items())),
         first_capture_sequence=first_sequence,

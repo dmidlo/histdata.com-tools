@@ -13,15 +13,24 @@ from .training_temporal_contracts import (
     TrainingTemporalBatchV1,
 )
 from .training_temporal_views import replay_training_temporal
+from .training_provider_policy import (
+    publish_training_policy_receipt,
+    require_training_retention,
+    training_provider_subject,
+    verify_training_policy_receipt,
+)
 
 
 def write_training_temporal_artifact(
     batch: TrainingTemporalBatchV1, directory: str | Path
 ) -> Path:
     """Re-execute before publication; interrupted writes never claim a target."""
+    subject = training_provider_subject(batch)
+    require_training_retention(subject)
     replay_training_temporal(batch)
     payload = batch.to_json().encode()
     root = Path(directory)
+    require_training_retention(subject)
     root.mkdir(parents=True, exist_ok=True)
     target = (
         root
@@ -29,13 +38,17 @@ def write_training_temporal_artifact(
     )
     temporary: Path | None = None
     try:
+        require_training_retention(subject)
         with tempfile.NamedTemporaryFile(
             mode="wb", dir=root, prefix=".temporal-", delete=False
         ) as stream:
             temporary = Path(stream.name)
+            require_training_retention(subject)
             stream.write(payload)
             stream.flush()
             os.fsync(stream.fileno())
+        publish_training_policy_receipt(subject, target, payload)
+        require_training_retention(subject)
         try:
             os.link(temporary, target, follow_symlinks=False)
         except FileExistsError:
@@ -55,6 +68,7 @@ def write_training_temporal_artifact(
     finally:
         if temporary is not None:
             temporary.unlink()
+    verify_training_policy_receipt(subject, target, required=True)
     return target
 
 
@@ -78,4 +92,5 @@ def read_training_temporal_artifact(
         raise ValueError("temporal artifact is not canonical JSON")
     if batch.plan.information_mode != information_mode:
         raise ValueError("temporal artifact information mode differs")
+    verify_training_policy_receipt(training_provider_subject(batch), path)
     return replay_training_temporal(batch)

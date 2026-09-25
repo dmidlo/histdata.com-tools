@@ -9,6 +9,8 @@ from pathlib import Path
 
 import pytest
 
+from histdatacom.broker_plugin_policy import provider_reconstruction_inputs
+
 from histdatacom.synthetic.activity import ActivitySliceScope
 from histdatacom.synthetic.bar_features import (
     BarAbsenceDeclarationV1,
@@ -30,14 +32,16 @@ from histdatacom.synthetic.bars import (
 from histdatacom.synthetic.information import InformationMode
 from histdatacom.synthetic.persistence import publish_reconstruction_group
 from tests.unit.test_synthetic_contracts import _generated, _observed
-from tests.unit.test_synthetic_persistence import _publication_inputs
+from tests.unit.test_synthetic_persistence import _publication_inputs_scope
 
 POST = InformationMode.EX_POST_RECONSTRUCTION
 ANTE = InformationMode.EX_ANTE_SIMULATION
 OBS = ActivitySliceScope.OBSERVED
 DAY = STANDARD_DERIVED_BAR_INTERVALS["1d"]
 BASE = 20_000 * DAY
-MATH_PRODUCT_ID = "reconstruction-manifest:sha256:" + "a" * 64
+# Pure arithmetic has no retained ProductV1 or provider provenance. Actual
+# broker products are exercised separately by the published_source fixture.
+MATH_PRODUCT_ID = "reconstruction-manifest-v2:sha256:" + "a" * 64
 MATH_BAR_MANIFEST_ID = "derived-bar-manifest:sha256:" + "b" * 64
 
 
@@ -76,6 +80,7 @@ def _math_snapshot(
                     event_time_ns=time,
                     bid=bid,
                     ask=bid + 0.0001,
+                    broker_profile_id=None,
                     event_id="",
                 )
                 events.append(generated)
@@ -316,26 +321,28 @@ def test_contract_rejects_forged_features_and_mutable_or_nonfinite_fields():
 
 @pytest.fixture
 def published_source(tmp_path: Path):
-    rendered, anchors, storage, retention = _publication_inputs(tmp_path)
-    product = publish_reconstruction_group(
-        tmp_path / "archive",
-        rendered,
-        immutable_source_anchors=anchors,
-        symbol_group_id="eurusd-triangle",
-        retention_plan=retention,
-        storage_policy=storage,
-    )
-    bars = publish_derived_bars(
-        tmp_path / "bars",
-        product.manifest_path,
-        policy=DerivedBarPolicyV1(
-            intervals=("1m",), scopes=tuple(ActivitySliceScope)
-        ),
-    )
-    source = BarFeatureSourceV1(
-        str(product.manifest_path), str(bars.manifest_path)
-    )
-    return source, product, tmp_path
+    with _publication_inputs_scope(tmp_path) as inputs:
+        rendered, anchors, storage, retention = inputs
+        product = publish_reconstruction_group(
+            tmp_path / "archive",
+            rendered,
+            immutable_source_anchors=anchors,
+            symbol_group_id="eurusd-triangle",
+            retention_plan=retention,
+            storage_policy=storage,
+        )
+        bars = publish_derived_bars(
+            tmp_path / "bars",
+            product.manifest_path,
+            policy=DerivedBarPolicyV1(
+                intervals=("1m",), scopes=tuple(ActivitySliceScope)
+            ),
+        )
+        source = BarFeatureSourceV1(
+            str(product.manifest_path), str(bars.manifest_path)
+        )
+        with provider_reconstruction_inputs(product.manifest):
+            yield source, product, tmp_path
 
 
 def _published_snapshot(source, *, mode=POST, scope=OBS, delay=0):

@@ -1,6 +1,7 @@
 """Small real IPC/catalog/committed-product fixtures, never market evidence."""
 
 from dataclasses import replace
+from contextlib import contextmanager
 from datetime import datetime, timezone
 
 import polars as pl
@@ -133,6 +134,7 @@ def published_product(
     wrong_anchor=False,
     storage_version=2,
     wrong_dependency=False,
+    _provider_roots=None,
 ):
     config = eurusd_triangle_reconciliation_config()
     constraints = HistoricalCarvingConstraintSetV1(
@@ -240,33 +242,46 @@ def published_product(
             BASE_WALL_NS,
             _capture,
         )
+        from histdatacom.broker_plugin_policy import provider_native_inputs
+        from tests.fixtures.broker_provider_policy import (
+            generated_legacy_request,
+            generated_provider_scope,
+        )
 
         capture = _capture(
             tmp_path / "capture", seed=606, wall_start_ns=BASE_WALL_NS
         )
-        fingerprint = fit_broker_delivery_fingerprint(
-            tmp_path / "capture", (capture,)
-        )
-        rendered = render_broker_delivery(
-            run=run,
-            window=window,
-            group=group,
-            fingerprint=fingerprint,
-            constraints=constraints,
-            selected_at_utc_ns=fingerprint.effective_start_utc_ns,
-            config=BrokerTransferConfigV1(
-                strength=0.0, apply_exact_duplicates=False
-            ),
-            quality_period="202001",
-        )
-        product = publish_reconstruction_group(
-            tmp_path / "archive",
-            rendered,
-            immutable_source_anchors=anchors,
-            symbol_group_id=window.synchronization_unit_id,
-            retention_plan=retention,
-            storage_policy=run.storage_policy,
-        )
+        request = generated_legacy_request(capture.session)
+        with generated_provider_scope(request), provider_native_inputs(request):
+            fingerprint = fit_broker_delivery_fingerprint(
+                tmp_path / "capture", (capture,)
+            )
+        with (
+            generated_provider_scope(fingerprint),
+            provider_native_inputs(fingerprint),
+        ):
+            rendered = render_broker_delivery(
+                run=run,
+                window=window,
+                group=group,
+                fingerprint=fingerprint,
+                constraints=constraints,
+                selected_at_utc_ns=fingerprint.effective_start_utc_ns,
+                config=BrokerTransferConfigV1(
+                    strength=0.0, apply_exact_duplicates=False
+                ),
+                quality_period="202001",
+            )
+            product = publish_reconstruction_group(
+                tmp_path / "archive",
+                rendered,
+                immutable_source_anchors=anchors,
+                symbol_group_id=window.synchronization_unit_id,
+                retention_plan=retention,
+                storage_policy=run.storage_policy,
+            )
+        if _provider_roots is not None:
+            _provider_roots.append(fingerprint)
         return product, rendered
     staged = stage_delivery_reconstruction_publication(
         tmp_path / "archive",
@@ -287,6 +302,23 @@ def published_product(
     )
     product = commit_delivery_reconstruction_publication(staged)
     return product, delivered
+
+
+@contextmanager
+def published_product_scope(tmp_path, version, **kwargs):
+    """Opt-in exact provider roots for a generated V1 product's consumers."""
+    from histdatacom.broker_plugin_policy import provider_native_inputs
+    from tests.fixtures.broker_provider_policy import generated_provider_scope
+
+    roots = []
+    result = published_product(
+        tmp_path, version, _provider_roots=roots, **kwargs
+    )
+    if roots:
+        with generated_provider_scope(*roots), provider_native_inputs(*roots):
+            yield result
+    else:
+        yield result
 
 
 def with_products(source, *products):

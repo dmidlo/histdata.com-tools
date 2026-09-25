@@ -13,6 +13,12 @@ caller-owned authorization callback after complete preflight. No command starts
 a plugin automatically, and this package neither changes legacy capture wire
 identities nor activates a production broker.
 
+Unreleased v3 additionally requires the separate
+[declared provider-rights gate](broker-provider-policy.md) before SDK activation
+and material operations. The caller-owned authorization callback remains
+necessary but is no longer sufficient. Native SDK/capability wire identities
+are unchanged.
+
 ## Preflight and explicit invocation
 
 ```python
@@ -22,6 +28,7 @@ from histdatacom.broker_plugin_capabilities import (
     invoke_authorized_installed_broker_plugin,
     negotiate_broker_capabilities,
 )
+from histdatacom.broker_plugin_policy import provider_policy_scope
 
 inventory = discover_broker_plugins()  # metadata only, no plugin imports
 workflow = BrokerCapabilityWorkflowV1(
@@ -38,9 +45,13 @@ plan.require_admitted()  # typed unsupported_capability / unsupported_operation
 
 # Supply a real caller-owned authorization decision. A capability receipt is
 # not sufficient authority. This example intentionally does not authorize.
-invocation = invoke_authorized_installed_broker_plugin(
-    inventory, plan, authorize=lambda approved_plan: False
-)
+# reviewed_policy_source and reviewed_provider_request are separately supplied
+# operator-reviewed inputs; this example does not create terms or grant rights.
+with provider_policy_scope(reviewed_policy_source):
+    invocation = invoke_authorized_installed_broker_plugin(
+        inventory, plan, authorize=lambda approved_plan: False,
+        provider_request=reviewed_provider_request,
+    )
 ```
 
 Required capabilities are the union of declared operation requirements and
@@ -71,7 +82,9 @@ Impossible operation sets refuse before authorization or factory/import calls.
 A health-only stream does not need a quote subscription. An optional quote
 declaration does not add prerequisites or permit unsolicited quote delivery:
 runtime quote events still require an actual discovered, subscribed instrument.
-Configuration-only and metadata-only inspection remain possible. The invocation
+Configuration-only and metadata-only SDK workflows remain possible with explicit
+provider admission; pure registry inspection and offline SDK conformance need
+no provider activation. The invocation
 enforces session/subscription ordering and rejects undeclared methods before
 calling the plugin; prerequisites authorize no automatic method calls.
 
@@ -89,6 +102,8 @@ invocation path. Its direct calls have not silently acquired these capability
 gates. All new SDK-plugin host methods are gated here; retrofit of the legacy live
 adapter would require an explicit lossless versioned integration, not relabeling
 SDK events or pretending the old adapter supplied a registration.
+The separate v3 provider-policy gate now also covers the legacy adapter, using
+its exact native configuration rather than inventing SDK registration metadata.
 
 ## Exact field and event meanings
 

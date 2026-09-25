@@ -58,6 +58,9 @@ def materialize_training_rows(
             "legacy source does not verify historical availability"
         )
     verified = verify_training_ownership(source, ownership)
+    from .training_provider_policy import require_training_derivation
+
+    require_training_derivation(verified)
     if not set(request.symbols) <= set(verified.graph_symbols):
         raise ValueError("requested symbol escapes complete evidence graph")
     if request.start_ns < verified.start_ns or request.end_ns > verified.end_ns:
@@ -302,7 +305,9 @@ def materialize_training_rows(
                 },
                 decision=decision,
             )
-    return TrainingBatchV1(source, ownership, request, tuple(rows))
+    result = TrainingBatchV1(source, ownership, request, tuple(rows))
+    require_training_derivation(verified)
+    return result
 
 
 def replay_training_batch(batch: TrainingBatchV1) -> TrainingBatchV1:

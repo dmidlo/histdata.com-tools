@@ -1037,6 +1037,19 @@ class BarFeatureSourceV1:
     def _verified_evidence(
         self, symbol: str, policy: BarFeaturePolicyV1
     ) -> tuple[str, str, tuple[DerivedBarV1, ...]]:
+        from .bars import _bar_source_inputs, _require_bar_source
+
+        product = load_reconstruction_manifest(
+            self.reconstruction_manifest_path
+        )
+        _require_bar_source(product, "material_use")
+        _require_bar_source(product, "derive")
+        with _bar_source_inputs(product):
+            return self._verified_evidence_bound(symbol, policy)
+
+    def _verified_evidence_bound(
+        self, symbol: str, policy: BarFeaturePolicyV1
+    ) -> tuple[str, str, tuple[DerivedBarV1, ...]]:
         _symbol(symbol)
         declared_product = load_reconstruction_manifest(
             self.reconstruction_manifest_path

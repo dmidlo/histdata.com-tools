@@ -53,7 +53,8 @@ from histdatacom.synthetic.triangle_projection_features import (
 )
 
 BASE = 20_000 * STANDARD_DERIVED_BAR_INTERVALS["1d"]
-PRODUCT_ID = "reconstruction-manifest:sha256:" + "a" * 64
+# Pure numerical fixtures have generic delivery ancestry, not broker ProductV1.
+PRODUCT_ID = "reconstruction-manifest-v2:sha256:" + "a" * 64
 BAR_MANIFEST_ID = "derived-bar-manifest:sha256:" + "b" * 64
 MEMBER = "triangle-feature-fixture-member"
 SOURCE = "source:triangle-feature-fixture"

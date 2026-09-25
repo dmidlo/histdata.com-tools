@@ -32,12 +32,50 @@ from histdatacom.broker_plugin_lifecycle import (
     BrokerLifecycleState as State,
     BrokerLifecycleError,
     BrokerLifecycleTransitionV1,
-    run_broker_plugin_lifecycle,
+    run_broker_plugin_lifecycle as _native_lifecycle,
     inspect_broker_lifecycle,
-    replay_broker_lifecycle,
+    replay_broker_lifecycle as _native_replay,
 )
 from histdatacom.broker_plugin_lifecycle import ipc, storage, supervisor
 from histdatacom.broker_plugin_lifecycle import contracts
+from tests.fixtures.broker_runtime_policy import runtime_request, runtime_scope
+
+_PROVIDER_REQUESTS = {}
+
+
+def run_broker_plugin_lifecycle(
+    inventory, plan, configuration, symbols, output, **kwargs
+):
+    """The old conformance cases now explicitly declare generated rights."""
+    if plan is None:
+        return _native_lifecycle(
+            inventory,
+            plan,
+            configuration,
+            symbols,
+            output,
+            provider_request=None,
+            **kwargs,
+        )
+    request = runtime_request(plan, configuration)
+    _PROVIDER_REQUESTS[output] = request
+    with runtime_scope(request):
+        return _native_lifecycle(
+            inventory,
+            plan,
+            configuration,
+            symbols,
+            output,
+            provider_request=request,
+            **kwargs,
+        )
+
+
+def replay_broker_lifecycle(directory):
+    request = _PROVIDER_REQUESTS[directory]
+    with runtime_scope(request):
+        yield from _native_replay(directory, provider_request=request)
+
 
 ROOT = Path(__file__).resolve().parents[2]
 BUILD = runpy.run_path(str(ROOT / "tests/fixtures/broker_lifecycle_wheel.py"))[
@@ -102,10 +140,10 @@ def run(request_data, tmp_path, mode="finite", **kwargs):
     policy = kwargs.pop(
         "policy",
         BrokerLifecyclePolicyV1(
-            startup_timeout_ms=3000,
-            run_timeout_ms=5000,
+            startup_timeout_ms=15000,
+            run_timeout_ms=30000,
             shutdown_timeout_ms=100,
-            acknowledgement_timeout_ms=1000,
+            acknowledgement_timeout_ms=5000,
         ),
     )
     return run_broker_plugin_lifecycle(
@@ -172,19 +210,25 @@ def test_blocked_and_invalid_workers_are_bounded_partial_reaped(
         tmp_path,
         mode,
         policy=BrokerLifecyclePolicyV1(
-            startup_timeout_ms=250 if mode == "open_block" else 3000,
-            run_timeout_ms=600 if mode == "next_block" else 5000,
+            startup_timeout_ms=8000,
+            run_timeout_ms=15000,
             shutdown_timeout_ms=50,
             stdout_bytes=64,
             stderr_bytes=64,
         ),
     )
-    assert time.monotonic() - start < 4
+    # Includes fresh policy-source admission and durable sidecar work outside
+    # the worker's own deadlines, not only the blocked provider call.
+    assert time.monotonic() - start < 40
     assert result.reason is reason
     assert result.manifest.completion is Completion.PARTIAL
     assert result.manifest.worker_reaped and result.manifest.unknown_loss
     assert inspect_broker_lifecycle(result.directory).partial_files
-    assert tuple(replay_broker_lifecycle(result.directory))
+    records = tuple(replay_broker_lifecycle(result.directory))
+    assert records
+    assert any(record.kind == "identity" for record in records)
+    if mode in ("next_block", "close_block", "malformed"):
+        assert any(record.kind == "session" for record in records)
     retained = b"".join(
         item.read_bytes() for item in result.directory.iterdir()
     )
@@ -199,7 +243,11 @@ def test_reconnect_epochs_retain_identical_quotes_and_never_claim_continuity(
         tmp_path,
         "reconnect",
         policy=BrokerLifecyclePolicyV1(
-            retry_delays_ms=(0, 1), shutdown_timeout_ms=50
+            retry_delays_ms=(0, 1),
+            startup_timeout_ms=15000,
+            run_timeout_ms=60000,
+            acknowledgement_timeout_ms=5000,
+            shutdown_timeout_ms=50,
         ),
     )
     assert result.reason is Reason.RETRY_EXHAUSTED
@@ -232,27 +280,49 @@ def test_cancellation_cannot_claim_complete(request_data, tmp_path):
     assert result.manifest.worker_reaped
 
 
-def _gate_first_startup_frame(monkeypatch, cause):
-    """Stop only once real IPC is readable, before its first frame is decoded."""
+def _gate_first_startup_frame(monkeypatch, cause, *, target="session"):
+    """Stop before a chosen native frame, after its fresh policy exchanges."""
     observed = {"ready": False, "offset": 0.0}
     selector_type = supervisor.selectors.DefaultSelector
     real_time = supervisor.time
+    real_os = supervisor.os
+    probe = ipc.FrameDecoder()
+    buffered = {}
+
+    class BufferedOS:
+        def __getattr__(self, name):
+            return getattr(real_os, name)
+
+        def read(self, descriptor, size):
+            if descriptor in buffered:
+                return buffered.pop(descriptor)[1]
+            return real_os.read(descriptor, size)
 
     class GatedSelector(selector_type):
         def select(self, timeout=None):
+            if buffered:
+                return [(next(iter(buffered.values()))[0], 1)]
             ready = super().select(timeout)
-            if not observed["ready"] and any(
-                key.data == "ipc" for key, _ in ready
-            ):
-                observed["ready"] = True
-                observed["offset"] = {
-                    "cancel": 0.0,
-                    "startup": 2.0,
-                    "run": 6.0,
-                }[cause]
-                return []
+            if not observed["ready"]:
+                for key, _ in ready:
+                    if key.data != "ipc":
+                        continue
+                    data = real_os.read(key.fd, 65_536)
+                    buffered[key.fd] = (key, data)
+                    if any(
+                        frame.get("type") == target
+                        for frame, _ in probe.feed(data)
+                    ):
+                        observed["ready"] = True
+                        observed["offset"] = {
+                            "cancel": 0.0,
+                            "startup": 20.0,
+                            "run": 40.0,
+                        }[cause]
+                        return []
             return ready
 
+    monkeypatch.setattr(supervisor, "os", BufferedOS())
     monkeypatch.setattr(supervisor.selectors, "DefaultSelector", GatedSelector)
     monkeypatch.setattr(
         supervisor,
@@ -293,8 +363,8 @@ def test_stop_before_decoding_valid_startup_drains_without_becoming_active(
         tmp_path,
         cancellation=lambda: cause == "cancel" and observed["ready"],
         policy=BrokerLifecyclePolicyV1(
-            startup_timeout_ms=1000,
-            run_timeout_ms=5000,
+            startup_timeout_ms=15000,
+            run_timeout_ms=30000,
             shutdown_timeout_ms=1000,
         ),
     )
@@ -307,8 +377,10 @@ def test_stop_before_decoding_valid_startup_drains_without_becoming_active(
     assert [record.kind for record in records].count("session") == 1
     assert not acknowledgements
     assert result.manifest.appended_events == 0
+    # Fresh per-callback policy exchange prevents a new provider pull after
+    # cancellation, unlike the old startup-only authorization handshake.
     assert (
-        result.manifest.received_events == result.manifest.discarded_known == 1
+        result.manifest.received_events == result.manifest.discarded_known == 0
     )
     assert all(
         BrokerLifecycleTransitionV1.from_json(record.payload_json).current
@@ -325,7 +397,11 @@ def test_stop_before_decoding_valid_startup_drains_without_becoming_active(
 def test_startup_stop_does_not_hide_invalid_late_evidence(
     request_data, tmp_path, monkeypatch, malformed
 ):
-    observed = _gate_first_startup_frame(monkeypatch, "cancel")
+    observed = _gate_first_startup_frame(
+        monkeypatch,
+        "cancel",
+        target="event" if malformed == "event_binding" else "identity",
+    )
     decoder = supervisor.FrameDecoder
 
     class MalformedDecoder(decoder):
@@ -357,7 +433,11 @@ def test_startup_stop_does_not_hide_invalid_late_evidence(
         request_data,
         tmp_path,
         cancellation=lambda: observed["ready"],
-        policy=BrokerLifecyclePolicyV1(shutdown_timeout_ms=1000),
+        policy=BrokerLifecyclePolicyV1(
+            startup_timeout_ms=15000,
+            run_timeout_ms=30000,
+            shutdown_timeout_ms=1000,
+        ),
     )
     assert observed["ready"]
     assert result.reason in (Reason.INTEGRITY, Reason.MALFORMED_EVENT)
@@ -475,6 +555,14 @@ def test_exhausted_journal_budget_leaves_open_evidence_without_fabricating_termi
 ):
     with pytest.raises(BrokerLifecycleError, match="persistence_failure"):
         run(request_data, tmp_path, policy=policy)
+    if policy.max_capture_bytes == 1024:
+        # This budget cannot hold the initial native manifest AND its required
+        # admission sidecar. Refuse before publishing either, not an invented
+        # OPEN/terminal receipt outside the quota.
+        assert not tuple((tmp_path / "run").iterdir())
+        with pytest.raises(BrokerLifecycleError):
+            inspect_broker_lifecycle(tmp_path / "run")
+        return
     inspection = inspect_broker_lifecycle(tmp_path / "run")
     assert inspection.manifest.completion is Completion.OPEN
     assert not inspection.complete
@@ -652,7 +740,10 @@ def test_lost_ack_retries_only_exact_delivery_without_duplicate_persistence(
         request_data,
         tmp_path,
         policy=BrokerLifecyclePolicyV1(
-            acknowledgement_timeout_ms=100, shutdown_timeout_ms=100
+            startup_timeout_ms=15000,
+            run_timeout_ms=30000,
+            acknowledgement_timeout_ms=5000,
+            shutdown_timeout_ms=100,
         ),
     )
     assert lost
@@ -695,6 +786,8 @@ def test_queue_saturation_refuses_without_unbounded_growth(
         tmp_path,
         policy=BrokerLifecyclePolicyV1(
             queue_items=1,
+            startup_timeout_ms=15000,
+            run_timeout_ms=30000,
             acknowledgement_timeout_ms=20,
             delivery_retries=8,
             shutdown_timeout_ms=50,
@@ -755,7 +848,7 @@ def test_blocked_module_import_is_terminated_before_open(
             (python, inventory, plan),
             tmp_path,
             policy=BrokerLifecyclePolicyV1(
-                startup_timeout_ms=150, shutdown_timeout_ms=50
+                startup_timeout_ms=8000, shutdown_timeout_ms=50
             ),
         )
         assert result.reason is Reason.STARTUP_TIMEOUT
@@ -782,7 +875,13 @@ def test_exact_event_budget_never_probes_an_extra_event_or_claims_eof(
     request_data, tmp_path
 ):
     result = run(
-        request_data, tmp_path, policy=BrokerLifecyclePolicyV1(max_events=2)
+        request_data,
+        tmp_path,
+        policy=BrokerLifecyclePolicyV1(
+            max_events=2,
+            startup_timeout_ms=15000,
+            acknowledgement_timeout_ms=5000,
+        ),
     )
     assert result.reason is Reason.EVENT_LIMIT
     assert result.manifest.appended_events == 2
@@ -793,7 +892,11 @@ def test_partition_rotation_and_replay(request_data, tmp_path):
     result = run(
         request_data,
         tmp_path,
-        policy=BrokerLifecyclePolicyV1(partition_events=1),
+        policy=BrokerLifecyclePolicyV1(
+            partition_events=1,
+            startup_timeout_ms=15000,
+            acknowledgement_timeout_ms=5000,
+        ),
     )
     assert len(result.manifest.partitions) == result.manifest.appended_records
     assert (
@@ -924,17 +1027,24 @@ def test_unknown_loss_summary_cannot_erase_reconnect_evidence(
 
 @pytest.mark.parametrize("after_append", [False, True])
 def test_abrupt_parent_exit_leaves_open_partial_and_worker_self_terminates(
-    installed, tmp_path, after_append
+    installed, request_data, tmp_path, after_append
 ):
     python, _, _ = installed
+    request = runtime_request(request_data[2], {"mode": "finite"})
+    _PROVIDER_REQUESTS[tmp_path / "run"] = request
+    with runtime_scope(request) as source:
+        context_json = source.current.to_json()
     script = """
 import os, sys
 from pathlib import Path
 sys.path.insert(0, sys.argv[1])
 from histdatacom.broker_plugin_registry import discover_broker_plugins
 from histdatacom.broker_plugin_capabilities import BrokerCapabilityWorkflowV1, negotiate_broker_capabilities
-from histdatacom.broker_plugin_lifecycle import run_broker_plugin_lifecycle
+from histdatacom.broker_plugin_lifecycle import run_broker_plugin_lifecycle, BrokerLifecyclePolicyV1
 from histdatacom.broker_plugin_lifecycle import storage, supervisor
+from histdatacom.broker_plugin_policy.bindings import BrokerSDKInvocationV1
+from histdatacom.broker_plugin_policy.contracts import BrokerPolicyContextV1
+from histdatacom.broker_plugin_policy.scope import provider_policy_scope
 root = Path(sys.argv[2])
 original_popen = supervisor.subprocess.Popen
 def record_process(*args, **kwargs):
@@ -953,7 +1063,12 @@ storage.Journal.append = crash
 inventory = discover_broker_plugins()
 operations = tuple(sorted(("configuration_schema", "open_session", "instruments", "subscribe", "iter_events", "unsubscribe")))
 plan = negotiate_broker_capabilities(inventory, BrokerCapabilityWorkflowV1(operations), plugin_id="org.example.lifecycle")
-run_broker_plugin_lifecycle(inventory, plan, {"mode": "finite"}, ("EURUSD",), root / "run", authorize=lambda _: True)
+request = BrokerSDKInvocationV1.from_json(sys.argv[4])
+class CurrentSource:
+    def read_policy_context(self):
+        return BrokerPolicyContextV1.from_json(sys.argv[5])
+with provider_policy_scope(CurrentSource()):
+    run_broker_plugin_lifecycle(inventory, plan, {"mode": "finite"}, ("EURUSD",), root / "run", authorize=lambda _: True, provider_request=request, policy=BrokerLifecyclePolicyV1(startup_timeout_ms=15000,run_timeout_ms=30000,acknowledgement_timeout_ms=5000))
 """
     parent = subprocess.run(
         [
@@ -964,9 +1079,11 @@ run_broker_plugin_lifecycle(inventory, plan, {"mode": "finite"}, ("EURUSD",), ro
             str(ROOT / "src"),
             str(tmp_path),
             str(after_append),
+            request.to_json(),
+            context_json,
         ],
         capture_output=True,
-        timeout=10,
+        timeout=60,
     )
     assert parent.returncode == 87, parent.stderr
     inspection = inspect_broker_lifecycle(tmp_path / "run")

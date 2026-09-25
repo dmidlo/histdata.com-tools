@@ -15,7 +15,10 @@ from pathlib import Path
 import stat
 import sys
 from types import ModuleType
-from typing import NoReturn, cast
+from typing import TYPE_CHECKING, NoReturn, cast
+
+if TYPE_CHECKING:
+    from histdatacom.broker_plugin_policy.bindings import BrokerSDKInvocationV1
 
 from histdatacom.broker_plugin_registry import (
     BROKER_PLUGIN_ENTRY_POINT_GROUP,
@@ -31,7 +34,14 @@ from .contracts import (
     BrokerCapabilityReason,
     BrokerInvocationAssociation,
 )
-from .execution import GatedBrokerPluginV1, _CONSTRUCTION_KEY, _authorize, _call
+from .execution import (
+    GatedBrokerPluginV1,
+    _CONSTRUCTION_KEY,
+    _authorize,
+    _call,
+    _provider_call,
+    _provider_request,
+)
 from .negotiation import verify_broker_capability_plan
 
 _MAX_MODULE_BYTES = 8 * 1024 * 1024
@@ -199,6 +209,7 @@ def invoke_authorized_installed_broker_plugin(
     plan: BrokerCapabilityPlanV1,
     *,
     authorize: Callable[[BrokerCapabilityPlanV1], bool],
+    provider_request: BrokerSDKInvocationV1,
 ) -> GatedBrokerPluginV1:
     """Fresh metadata/RECORD check, then authorized exact source invocation.
 
@@ -207,6 +218,10 @@ def invoke_authorized_installed_broker_plugin(
     installed invocation. Filesystem checks are non-atomic; no rights,
     credential, deadline, network or scientific-admission policy is supplied.
     """
+    from histdatacom.broker_plugin_policy.scope import BrokerPolicyError
+
+    request = _provider_request(plan, provider_request)
+    _provider_call(request, capture=False)
     _authorize(inventory, plan, authorize)
     try:
         fresh = discover_broker_plugins()
@@ -228,14 +243,16 @@ def invoke_authorized_installed_broker_plugin(
             if name == module_name or name not in sys.modules:
                 if name in sys.modules:
                     _refuse()
+                _provider_call(request, capture=False)
                 loaded = _call(lambda: _execute_source(name, path, source))
         factory: object = loaded
         for component in attribute.split("."):
             factory = getattr(factory, component)
         if not callable(factory):
             _refuse()
+        _provider_call(request, capture=False)
         plugin = _call(cast(Callable[[], BrokerPluginV1], factory))
-    except BrokerCapabilityError:
+    except (BrokerCapabilityError, BrokerPolicyError):
         raise
     except (Exception, SystemExit):
         raise BrokerCapabilityError(
@@ -245,6 +262,7 @@ def invoke_authorized_installed_broker_plugin(
         plugin,
         plan,
         association=BrokerInvocationAssociation.INSTALLED_ENTRYPOINT,
+        provider_request=request,
         module_sha256=plan.candidate.implementation_sha256,
         _key=_CONSTRUCTION_KEY,
     )

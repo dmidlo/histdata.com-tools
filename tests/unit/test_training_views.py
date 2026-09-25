@@ -35,6 +35,7 @@ from tests.fixtures.training_substrate_v1 import (
     macro_matrix,
     observed_source,
     published_product,
+    published_product_scope,
     with_products,
 )
 
@@ -160,36 +161,38 @@ def test_real_legacy_broker_and_source_referenced_products(
     source, tmp_path, storage_version
 ):
     source, version = source
-    product, _ = published_product(
+    with published_product_scope(
         tmp_path / "product", version, storage_version=storage_version
-    )
-    source = with_products(source, product)
-    batch = materialize_training_rows(
-        source, build_training_ownership(source), request(product=product)
-    )
-    assert len(batch.rows) == 9
-    expected = (
-        TrainingOrigin.BROKER_CONDITIONED_COUNTERFACTUAL
-        if storage_version == 1
-        else TrainingOrigin.SYNTHETIC_RECONSTRUCTION
-    )
-    assert {row.origin for row in batch.rows} == {
-        TrainingOrigin.OBSERVED,
-        expected,
-    }
-    assert all(
-        row.information_mode is TrainingInformationMode.EX_POST
-        for row in batch.rows
-    )
-    source = with_products(source, product)
-    ownership = build_training_ownership(source)
-    path = (
-        product.manifest_path.parent
-        / product.manifest.partitions[0].relative_path
-    )
-    path.write_bytes(b"tampered")
-    with pytest.raises(ValueError):
-        materialize_training_rows(source, ownership, request(product=product))
+    ) as (product, _):
+        source = with_products(source, product)
+        batch = materialize_training_rows(
+            source, build_training_ownership(source), request(product=product)
+        )
+        assert len(batch.rows) == 9
+        expected = (
+            TrainingOrigin.BROKER_CONDITIONED_COUNTERFACTUAL
+            if storage_version == 1
+            else TrainingOrigin.SYNTHETIC_RECONSTRUCTION
+        )
+        assert {row.origin for row in batch.rows} == {
+            TrainingOrigin.OBSERVED,
+            expected,
+        }
+        assert all(
+            row.information_mode is TrainingInformationMode.EX_POST
+            for row in batch.rows
+        )
+        source = with_products(source, product)
+        ownership = build_training_ownership(source)
+        path = (
+            product.manifest_path.parent
+            / product.manifest.partitions[0].relative_path
+        )
+        path.write_bytes(b"tampered")
+        with pytest.raises(ValueError):
+            materialize_training_rows(
+                source, ownership, request(product=product)
+            )
 
 
 def test_actual_macro_rows_retain_weaker_verification_and_missing_cells(

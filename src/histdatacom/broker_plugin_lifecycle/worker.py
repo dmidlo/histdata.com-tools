@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import deque
+from contextlib import ExitStack
 import os
 import json
 import select
@@ -21,6 +22,7 @@ from histdatacom.broker_plugin_capabilities import (
     BrokerCapabilityReason,
     invoke_authorized_installed_broker_plugin,
 )
+from histdatacom.broker_plugin_policy.contracts import BrokerPolicyContextV1
 
 from .contracts import (
     BrokerLifecycleHeaderV1,
@@ -36,6 +38,7 @@ class Controls:
     def __init__(self) -> None:
         self.decoder = FrameDecoder()
         self.pending: deque[dict[str, object]] = deque()
+        self.acknowledged_delivery = -1
 
     def receive(self, timeout: float) -> dict[str, object] | None:
         deadline = time.monotonic() + timeout
@@ -51,6 +54,76 @@ class Controls:
                     raise BrokerLifecycleError(Reason.QUEUE_SATURATED)
                 self.pending.append(value)
         return self.pending.popleft()
+
+
+class _PolicySource:
+    """One fresh parent-ledger exchange per local guard, never a permit cache.
+
+    The parent owns the changing review ledger. A returned context grants no
+    operation: the child's ordinary native resolver and current-clock policy
+    check still run. Revocation is checked before each call, not during an
+    already executing/blocking provider call.
+    """
+
+    def __init__(
+        self,
+        controls: Controls,
+        descriptor: int,
+        invocation_id: str,
+        epoch: int,
+        maximum: int,
+        timeout: float,
+    ) -> None:
+        self.controls = controls
+        self.descriptor = descriptor
+        self.invocation_id = invocation_id
+        self.epoch = epoch
+        self.maximum = maximum
+        self.timeout = timeout
+        self.sequence = 0
+
+    def read_policy_context(self) -> BrokerPolicyContextV1:
+        if self.sequence >= 2**63 - 1:
+            raise BrokerLifecycleError(Reason.FRAME_LIMIT)
+        coordinates: dict[str, object] = {
+            "invocation_id": self.invocation_id,
+            "epoch": self.epoch,
+            "sequence": self.sequence,
+        }
+        write_frame(
+            self.descriptor,
+            {"type": "policy_context_request", **coordinates},
+            self.maximum,
+        )
+        deadline = time.monotonic() + self.timeout
+        reply = self.controls.receive(self.timeout)
+        # Retransmitted deliveries can leave duplicate already-consumed ACKs
+        # in the control pipe. They are not policy responses or new permits.
+        while (
+            reply is not None
+            and set(reply) == {"type", "delivery"}
+            and reply["type"] == "ack"
+            and type(reply["delivery"]) is int
+            and 0 <= reply["delivery"] <= self.controls.acknowledged_delivery
+        ):
+            reply = self.controls.receive(max(0, deadline - time.monotonic()))
+        if reply == {"type": "stop"}:
+            raise BrokerLifecycleError(Reason.CANCELLED)
+        if (
+            reply is None
+            or set(reply) != {"type", "context", *coordinates}
+            or reply["type"] != "policy_context"
+            or type(reply["context"]) is not str
+            or type(reply["epoch"]) is not int
+            or type(reply["sequence"]) is not int
+            or any(reply[key] != value for key, value in coordinates.items())
+        ):
+            raise BrokerLifecycleError(Reason.MALFORMED_IPC)
+        context = BrokerPolicyContextV1.from_json(reply["context"])
+        if context.to_json() != reply["context"]:
+            raise BrokerLifecycleError(Reason.MALFORMED_IPC)
+        self.sequence += 1
+        return context
 
 
 def main(*, secret_fields: tuple[str, ...] | None = None) -> None:
@@ -69,6 +142,9 @@ def main(*, secret_fields: tuple[str, ...] | None = None) -> None:
     started = False
     private_guard: BrokerPrivateMaterialGuard | None = None
     security_refused = False
+    scopes = ExitStack()
+    plugin = None
+    exit_status = 0
 
     def emit(frame: dict[str, object], maximum: int) -> None:
         if private_guard is not None:
@@ -79,13 +155,46 @@ def main(*, secret_fields: tuple[str, ...] | None = None) -> None:
         startup = controls.receive(60)
         if (
             startup is None
-            or set(startup) != {"header", "configuration"}
+            or set(startup)
+            != {"header", "configuration", "provider_request", "epoch"}
             or type(startup["header"]) is not str
             or type(startup["configuration"]) is not dict
+            or type(startup["provider_request"]) is not str
+            or type(startup["epoch"]) is not int
+            or startup["epoch"] < 0
         ):
             raise ValueError
         header = BrokerLifecycleHeaderV1.from_json(startup["header"])
         policy = header.policy
+        if startup["epoch"] > len(policy.retry_delays_ms):
+            raise ValueError
+        from histdatacom.broker_plugin_policy.bindings import (
+            BrokerSDKInvocationV1,
+        )
+        from histdatacom.broker_plugin_policy.scope import provider_policy_scope
+
+        provider_request = BrokerSDKInvocationV1.from_json(
+            startup["provider_request"]
+        )
+        if provider_request.plan.to_json() != header.plan.to_json():
+            raise ValueError
+        scopes.enter_context(
+            provider_policy_scope(
+                _PolicySource(
+                    controls,
+                    descriptor,
+                    provider_request.artifact_id,
+                    startup["epoch"],
+                    policy.frame_bytes,
+                    # Data ACK retry cadence is not the policy-control RPC
+                    # budget. In particular a short deliberate ACK interval
+                    # must not interrupt a fresh ledger exchange while the
+                    # parent is durably appending an earlier record. Parent
+                    # startup/run deadlines still terminate this bounded wait.
+                    policy.startup_timeout_ms / 1000,
+                )
+            )
+        )
         configuration = cast(dict[str, object], startup["configuration"])
         if secret_fields is not None:
             from histdatacom.broker_plugin_security.secrets import (
@@ -96,7 +205,10 @@ def main(*, secret_fields: tuple[str, ...] | None = None) -> None:
                 tuple(cast(str, configuration[name]) for name in secret_fields)
             )
         plugin = invoke_authorized_installed_broker_plugin(
-            header.inventory, header.plan, authorize=lambda _: True
+            header.inventory,
+            header.plan,
+            authorize=lambda _: True,
+            provider_request=provider_request,
         )
         identity = BrokerLifecycleIdentityV1(
             plugin.binding, plugin.metadata, plugin.configuration_schema
@@ -164,6 +276,7 @@ def main(*, secret_fields: tuple[str, ...] | None = None) -> None:
                         raise ValueError
                     if control["delivery"] == delivery:
                         acknowledged = True
+                        controls.acknowledged_delivery = delivery
                         break
                 if stopped or acknowledged:
                     break
@@ -178,7 +291,11 @@ def main(*, secret_fields: tuple[str, ...] | None = None) -> None:
         plugin.close_session()
         emit({"type": "closed"}, policy.frame_bytes)
     except BaseException as error:
+        from histdatacom.broker_plugin_policy.scope import BrokerPolicyError
+
         reason = Reason.PLUGIN_FAILURE
+        if isinstance(error, BrokerPolicyError):
+            reason = Reason.AUTHORIZATION
         if security_refused or (
             private_guard is not None and private_guard.refused
         ):
@@ -193,9 +310,17 @@ def main(*, secret_fields: tuple[str, ...] | None = None) -> None:
         except BaseException:
             pass
         # No traceback/configuration/provider message crosses the boundary.
-        os._exit(70)
+        exit_status = 70
     finally:
+        if plugin is not None:
+            try:
+                plugin.close_session()
+            except BaseException:
+                pass
+        scopes.close()
         os.close(descriptor)
+    if exit_status:
+        os._exit(exit_status)
 
 
 if __name__ == "__main__":

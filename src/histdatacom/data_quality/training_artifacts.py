@@ -10,27 +10,40 @@ from pathlib import Path
 from .training_contracts import TrainingBatchV1, TrainingConsumerMode
 from .training_lineage import read_training_regular
 from .training_views import replay_training_batch
+from .training_provider_policy import (
+    publish_training_policy_receipt,
+    require_training_retention,
+    training_provider_subject,
+    verify_training_policy_receipt,
+)
 
 
 def write_training_artifact(
     batch: TrainingBatchV1, directory: str | Path
 ) -> Path:
     """Replay before persistence; publish exact bytes without overwriting."""
+    subject = training_provider_subject(batch)
+    require_training_retention(subject)
     replay_training_batch(batch)
     payload = batch.to_json().encode()
     digest = hashlib.sha256(payload).hexdigest()
     root = Path(directory)
+    require_training_retention(subject)
     root.mkdir(parents=True, exist_ok=True)
     target = root / f"training-batch-{digest}.json"
     temporary: Path | None = None
     try:
+        require_training_retention(subject)
         with tempfile.NamedTemporaryFile(
             mode="wb", dir=root, prefix=".training-", delete=False
         ) as stream:
             temporary = Path(stream.name)
+            require_training_retention(subject)
             stream.write(payload)
             stream.flush()
             os.fsync(stream.fileno())
+        publish_training_policy_receipt(subject, target, payload)
+        require_training_retention(subject)
         try:
             os.link(temporary, target, follow_symlinks=False)
         except FileExistsError:
@@ -48,6 +61,7 @@ def write_training_artifact(
     finally:
         if temporary is not None:
             temporary.unlink()
+    verify_training_policy_receipt(subject, target, required=True)
     return target
 
 
@@ -69,4 +83,5 @@ def read_training_artifact(
         raise ValueError("training artifact is not exact canonical JSON")
     if batch.request.consumer_mode != consumer_mode:
         raise ValueError("training artifact consumer mode differs")
+    verify_training_policy_receipt(training_provider_subject(batch), source)
     return replay_training_batch(batch)

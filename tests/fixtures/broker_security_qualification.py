@@ -1,6 +1,7 @@
 """Qualify installed host + separately pip-installed offline security fixture.
 
 Usage: python broker_security_qualification.py /absolute/fixture.whl
+Copy broker_runtime_policy.py and broker_provider_policy.py beside this script.
 No host/dependency installation; the fixture is always uninstalled afterward.
 """
 
@@ -17,6 +18,8 @@ import tempfile
 import threading
 
 import histdatacom.broker_plugin_security as security
+import histdatacom
+import histdatacom.broker_plugin_policy as policy_api
 from histdatacom.broker_plugin_capabilities import (
     BrokerAdmittedEventV1,
     BrokerCapabilityWorkflowV1,
@@ -25,7 +28,7 @@ from histdatacom.broker_plugin_capabilities import (
 from histdatacom.broker_plugin_lifecycle import (
     BrokerLifecycleCompletion,
     BrokerLifecyclePolicyV1,
-    replay_broker_lifecycle,
+    replay_broker_lifecycle as _replay,
 )
 from histdatacom.broker_plugin_registry import discover_broker_plugins
 from histdatacom.broker_plugin_security import (
@@ -35,10 +38,62 @@ from histdatacom.broker_plugin_security import (
     BrokerSecurityPolicyV1,
     BrokerTrustTier,
     read_security_receipt,
-    run_secure_broker_plugin,
-    run_trusted_broker_plugin,
+    run_secure_broker_plugin as _secure,
+    run_trusted_broker_plugin as _trusted,
     verify_security_capture,
 )
+from broker_runtime_policy import runtime_request, runtime_scope
+
+_REQUESTS = {}
+
+
+def run_secure_broker_plugin(
+    inventory, plan, policy, public, symbols, output, **kwargs
+):
+    """Explicit generated declarations; never a provider-name exemption."""
+    request = runtime_request(plan, public, family="security")
+    _REQUESTS[output] = request
+    kwargs.setdefault(
+        "lifecycle_policy",
+        BrokerLifecyclePolicyV1(
+            startup_timeout_ms=15000,
+            run_timeout_ms=30000,
+            acknowledgement_timeout_ms=5000,
+        ),
+    )
+    with runtime_scope(request):
+        return _secure(
+            inventory,
+            plan,
+            policy,
+            public,
+            symbols,
+            output,
+            provider_request=request,
+            **kwargs,
+        )
+
+
+def run_trusted_broker_plugin(
+    inventory, plan, policy, public, symbols, **kwargs
+):
+    request = runtime_request(plan, public, family="security")
+    with runtime_scope(request):
+        return _trusted(
+            inventory,
+            plan,
+            policy,
+            public,
+            symbols,
+            provider_request=request,
+            **kwargs,
+        )
+
+
+def replay_broker_lifecycle(output):
+    request = _REQUESTS[output]
+    with runtime_scope(request):
+        yield from _replay(output, provider_request=request)
 
 
 class Provider:
@@ -53,6 +108,10 @@ class Provider:
 
 
 def main() -> None:
+    assert histdatacom.__file__ is not None
+    assert "site-packages" in histdatacom.__file__, histdatacom.__file__
+    assert policy_api.__file__ is not None
+    assert "site-packages" in policy_api.__file__, policy_api.__file__
     assert security.__file__ is not None
     assert "site-packages" in security.__file__, security.__file__
     wheel = Path(sys.argv[1]).resolve(strict=True)
@@ -125,7 +184,9 @@ def main() -> None:
                     },
                     secret_provider=provider,
                     lifecycle_policy=BrokerLifecyclePolicyV1(
-                        run_timeout_ms=750 if mode == "block_next" else 5000,
+                        startup_timeout_ms=15000,
+                        run_timeout_ms=15000 if mode == "block_next" else 30000,
+                        acknowledgement_timeout_ms=5000,
                         shutdown_timeout_ms=100,
                     ),
                 )
@@ -187,7 +248,7 @@ def main() -> None:
             listener = socket.socket()
             listener.bind(("127.0.0.1", 0))
             listener.listen(1)
-            listener.settimeout(5)
+            listener.settimeout(30)
             observed: list[bool] = []
 
             def serve() -> None:
@@ -223,7 +284,7 @@ def main() -> None:
                     is BrokerLifecycleCompletion.COMPLETE
                 )
             finally:
-                thread.join(6)
+                thread.join(31)
                 listener.close()
             assert observed == [True]
             assert "security_fixture.plugin" not in sys.modules

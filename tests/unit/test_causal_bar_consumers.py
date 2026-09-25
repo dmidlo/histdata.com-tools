@@ -1,6 +1,7 @@
 """Real committed products drive all four opt-in consumer operations."""
 
 from dataclasses import replace
+from contextlib import contextmanager, closing
 
 import polars as pl
 import pytest
@@ -13,6 +14,8 @@ from histdatacom.broker_capture.bar_fingerprints import (
 from histdatacom.broker_capture.storage import (
     discover_broker_capture_session_manifests,
 )
+from histdatacom.broker_plugin_policy import provider_native_inputs
+from histdatacom.broker_plugin_policy.native_inputs import fingerprint_for
 from histdatacom.data_quality.bar_training_features import (
     enrich_tick_cache_with_causal_bar_features,
 )
@@ -47,6 +50,10 @@ from tests.unit.test_synthetic_bar_features import (
     published_source as _published_source_fixture,
 )
 from tests.unit.test_synthetic_motifs import _index
+from tests.fixtures.broker_provider_policy import (
+    generated_legacy_request,
+    generated_provider_scope,
+)
 from tests.unit.test_synthetic_strategy_sensitivity import (
     _audit,
     _engine,
@@ -54,9 +61,38 @@ from tests.unit.test_synthetic_strategy_sensitivity import (
 )
 
 
+def _prepared_source(root):
+    with closing(_published_source_fixture.__wrapped__(root)) as setup:
+        source, product, directory = next(setup)
+        fingerprint = fingerprint_for(product.manifest.broker_profile_id)
+    captures = discover_broker_capture_session_manifests(
+        directory / "broker-capture"
+    )
+    requests = tuple(
+        generated_legacy_request(item.session) for item in captures
+    )
+    return source, product, directory, fingerprint, requests
+
+
+@contextmanager
+def _prepared_scopes(*sources):
+    roots = tuple(
+        root
+        for item in sources
+        for root in (item[3], *item[4], item[1].manifest)
+    )
+    subjects = tuple(
+        subject for item in sources for subject in (item[3], *item[4])
+    )
+    with provider_native_inputs(*roots), generated_provider_scope(*subjects):
+        yield
+
+
 @pytest.fixture
 def published_source(tmp_path):
-    return _published_source_fixture.__wrapped__(tmp_path)
+    prepared = _prepared_source(tmp_path)
+    with _prepared_scopes(prepared):
+        yield prepared[:3]
 
 
 def test_reference_retrieval_uses_matching_metrics_and_verified_cutoff(
@@ -369,13 +405,11 @@ def test_broker_fit_invokes_capture_fit_preserves_events_and_deduplicates_state(
 
 
 def test_broker_comparison_runs_existing_delivery_and_separate_state_comparison(
-    published_source, tmp_path, monkeypatch
+    tmp_path, monkeypatch
 ):
     from tests.unit import test_synthetic_persistence as fixture_module
-    from tests.unit import test_synthetic_bar_features as bar_fixtures
 
-    source, _, root = published_source
-    left = _fit(source, root, _published_snapshot(source))
+    first = _prepared_source(tmp_path / "first")
     original = fixture_module._capture
     monkeypatch.setattr(
         fixture_module,
@@ -384,9 +418,15 @@ def test_broker_comparison_runs_existing_delivery_and_separate_state_comparison(
             root, seed=seed + 1, wall_start_ns=wall_start_ns
         ),
     )
-    other, _, other_root = bar_fixtures.published_source.__wrapped__(
-        tmp_path / "other"
-    )
+    second = _prepared_source(tmp_path / "other")
+    with _prepared_scopes(first, second):
+        _compare_prepared_sources(first, second)
+
+
+def _compare_prepared_sources(first, second):
+    source, _, root = first[:3]
+    other, _, other_root = second[:3]
+    left = _fit(source, root, _published_snapshot(source))
     right = _fit(other, other_root, _published_snapshot(other))
     result = compare_broker_delivery_fingerprints_with_bar_state(
         left, right, information_mode=POST

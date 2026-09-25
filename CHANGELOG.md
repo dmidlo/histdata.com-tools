@@ -1,5 +1,14 @@
 ## Unreleased
 
+### Breaking changes (v3)
+
+- **provider rights**: require explicit reviewed provider-policy contexts and
+  native configuration requests before broker activation, capture, material
+  reuse and retention. Separate software licenses from declared API/data rights,
+  fail closed on unknown or denied classes, and bind as-of decisions to native
+  files with separate receipts. Preserve native V1 wire identities; qualify only
+  generated inputs, not provider authorization or empirical acceptance (#623).
+
 ### Added
 
 - **overlap ownership**: add source-replayed sliding-window lineage, explicit

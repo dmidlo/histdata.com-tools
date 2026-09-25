@@ -3050,6 +3050,8 @@ def stage_reconstruction_publication(
     row_group_size: int = DEFAULT_RECONSTRUCTION_ROW_GROUP_SIZE,
 ) -> StagedReconstructionPublicationV1:
     """Write and validate one synchronized group below hidden scratch."""
+    _require_broker_policy(rendered_group, "material_use")
+    _require_broker_policy(rendered_group, "retain_local")
     _validate_publication_inputs(rendered_group, retention_plan, storage_policy)
     group_id = _required_text(symbol_group_id)
     row_group = _positive_int(row_group_size, "row_group_size")
@@ -3076,6 +3078,7 @@ def stage_reconstruction_publication(
         symbol_group_id=group_id,
     )
     scratch = axis_directory / ".scratch"
+    _require_broker_policy(rendered_group.manifest, "retain_local")
     scratch.mkdir(parents=True, exist_ok=True)
     staging_directory = Path(
         tempfile.mkdtemp(prefix="publication.tmp-", dir=scratch)
@@ -3085,6 +3088,7 @@ def stage_reconstruction_publication(
             staging_directory,
             rendered_group.streams,
             row_group_size=row_group,
+            provider_subject=rendered_group.manifest,
         )
         source = _source_manifest(events, anchors)
         constraints = _constraint_manifest(events)
@@ -3139,6 +3143,25 @@ def stage_reconstruction_publication(
         )
         manifest_bytes = manifest.to_json().encode("utf-8")
         _validate_actual_storage(partitions, manifest_bytes, storage_policy)
+        from histdatacom.broker_plugin_policy import write_broker_policy_receipt
+        from histdatacom.broker_plugin_policy._wire import MAX_BYTES
+
+        remaining_bytes = (
+            min(
+                storage_policy.max_output_bytes,
+                storage_policy.max_scratch_bytes,
+            )
+            - sum(item.size_bytes for item in partitions)
+            - len(manifest_bytes)
+        )
+        write_broker_policy_receipt(
+            staging_directory
+            / (RECONSTRUCTION_MANIFEST_FILENAME + ".provider-policy.json"),
+            manifest,
+            native_artifact_name=RECONSTRUCTION_MANIFEST_FILENAME,
+            native_file_bytes=manifest_bytes,
+            maximum_bytes=min(MAX_BYTES, max(0, remaining_bytes)),
+        )
         committed_directory = (
             axis_directory
             / "commits"
@@ -3147,6 +3170,7 @@ def stage_reconstruction_publication(
         _atomic_write_bytes(
             staging_directory / RECONSTRUCTION_MANIFEST_FILENAME,
             manifest_bytes,
+            provider_subject=manifest,
         )
         staged = StagedReconstructionPublicationV1(
             root=root_path,
@@ -3158,6 +3182,7 @@ def stage_reconstruction_publication(
             staging_directory,
             manifest,
             require_committed_layout=False,
+            require_provider_receipt=True,
         )
         return staged
     except Exception:
@@ -3172,6 +3197,8 @@ def commit_reconstruction_publication(
     if not isinstance(staged, StagedReconstructionPublicationV1):
         raise TypeError("commit requires a staged reconstruction publication")
     manifest = staged.manifest
+    _require_broker_policy(manifest, "material_use")
+    _require_broker_policy(manifest, "retain_local")
     final_directory = staged.committed_directory
     if final_directory.exists():
         existing_path = final_directory / RECONSTRUCTION_MANIFEST_FILENAME
@@ -3196,9 +3223,12 @@ def commit_reconstruction_publication(
         staged.staging_directory,
         manifest,
         require_committed_layout=False,
+        require_provider_receipt=True,
     )
+    _require_broker_policy(manifest, "retain_local")
     final_directory.parent.mkdir(parents=True, exist_ok=True)
     try:
+        _require_broker_policy(manifest, "retain_local")
         os.replace(staged.staging_directory, final_directory)
     except OSError:
         if not final_directory.exists():
@@ -3247,6 +3277,8 @@ def publish_reconstruction_group(
     row_group_size: int = DEFAULT_RECONSTRUCTION_ROW_GROUP_SIZE,
 ) -> PublishedReconstructionV1:
     """Stage, validate, and atomically commit one final reconstruction group."""
+    _require_broker_policy(rendered_group, "material_use")
+    _require_broker_policy(rendered_group, "retain_local")
     group_id = _required_text(symbol_group_id)
     row_group = _positive_int(row_group_size, "row_group_size")
     root_path = Path(root).expanduser().resolve()
@@ -3684,6 +3716,62 @@ def _published_delivery_reconstruction(
     )
 
 
+def _require_broker_policy(native: object, operation: str) -> None:
+    """Gate provider-bearing native values; generic delivery has no broker root.
+
+    A registered exact fingerprint supplies lineage, never permission. The
+    closed resolver rejects missing roots and unsupported native types.
+    """
+    if type(native) in (
+        ReconstructionProductManifestV2,
+        ReconstructionProductManifestV3,
+    ):
+        return
+    from histdatacom.broker_plugin_policy import (
+        BrokerPolicyOperation,
+        require_provider_operation,
+    )
+
+    require_provider_operation(native, BrokerPolicyOperation(operation))
+
+
+def _verify_broker_product_receipt(
+    manifest_path: Path, manifest: object, *, required: bool = False
+) -> None:
+    if type(manifest) is not ReconstructionProductManifestV1:
+        return
+    from histdatacom.broker_plugin_policy import (
+        read_broker_policy_receipt,
+        verify_broker_policy_receipt,
+    )
+
+    receipt_path = manifest_path.with_name(
+        manifest_path.name + ".provider-policy.json"
+    )
+    if required or receipt_path.exists() or receipt_path.is_symlink():
+        verify_broker_policy_receipt(
+            read_broker_policy_receipt(receipt_path), manifest, manifest_path
+        )
+
+
+def _check_product_broker_lineage(
+    manifest: object, origin: str, broker_profile_id: object
+) -> None:
+    expected = (
+        manifest.broker_profile_id
+        if type(manifest) is ReconstructionProductManifestV1
+        else None
+    )
+    if (broker_profile_id is not None and broker_profile_id != expected) or (
+        expected is not None
+        and origin == SyntheticEventOrigin.SYNTHETIC.value
+        and broker_profile_id != expected
+    ):
+        raise ReconstructionPersistenceError(
+            "physical product provider lineage differs from manifest"
+        )
+
+
 def load_reconstruction_manifest(
     path: str | Path,
 ) -> (
@@ -3795,6 +3883,8 @@ def reconstruction_parquet_paths(
     """Select only physical partitions overlapping symbol/time predicates."""
     path = Path(manifest_path).expanduser().resolve()
     manifest = load_reconstruction_manifest(path)
+    _require_broker_policy(manifest, "material_use")
+    _verify_broker_product_receipt(path, manifest)
     _validate_committed_manifest_location(path, manifest)
     selected_symbols = {_normalized_symbol(symbol) for symbol in symbols}
     if selected_symbols and not selected_symbols.issubset(manifest.symbols):
@@ -3837,6 +3927,7 @@ def iter_reconstruction_event_batches(
     if lower is not None and upper is not None and upper <= lower:
         raise ValueError("end_ns must be greater than start_ns")
     manifest = load_reconstruction_manifest(manifest_path)
+    _require_broker_policy(manifest, "material_use")
     if isinstance(manifest, ReconstructionProductManifestV3):
         selected_symbols = {_normalized_symbol(symbol) for symbol in symbols}
         if selected_symbols and not selected_symbols.issubset(manifest.symbols):
@@ -3873,14 +3964,31 @@ def iter_reconstruction_event_batches(
             else expression & upper_expression
         )
     for partition_path in paths:
+        _require_broker_policy(manifest, "material_use")
         dataset = ds.dataset(partition_path, format="parquet")
+        internal_columns = tuple(
+            dict.fromkeys((*requested, "origin", "broker_profile_id"))
+        )
         scanner = dataset.scanner(
-            columns=list(requested),
+            columns=list(internal_columns),
             filter=expression,
             batch_size=size,
             use_threads=False,
         )
-        yield from scanner.to_batches()
+        batches = iter(scanner.to_batches())
+        while True:
+            _require_broker_policy(manifest, "material_use")
+            try:
+                batch = next(batches)
+            except StopIteration:
+                break
+            for origin, profile_id in zip(
+                batch.column("origin").to_pylist(),
+                batch.column("broker_profile_id").to_pylist(),
+            ):
+                _check_product_broker_lineage(manifest, origin, profile_id)
+            _require_broker_policy(manifest, "material_use")
+            yield batch.select(list(requested))
 
 
 def scan_reconstruction_events_polars(
@@ -3891,7 +3999,13 @@ def scan_reconstruction_events_polars(
     start_ns: int | None = None,
     end_ns: int | None = None,
 ) -> Any:
-    """Return a lazy Polars scan with projection and predicates pushed down."""
+    """Return a lazy frame, materializing provider data under current policy.
+
+    Generic products retain a lazy disk scan. Broker products are read through
+    the guarded batch iterator now, so a returned frame cannot defer provider
+    file access beyond its admission scope. Its in-memory values are not a
+    revocable capability or authorization for later persistence/publication.
+    """
     requested = tuple(columns)
     if not requested:
         raise ValueError("reconstruction scan requires at least one column")
@@ -3903,6 +4017,23 @@ def scan_reconstruction_events_polars(
     if lower is not None and upper is not None and upper <= lower:
         raise ValueError("end_ns must be greater than start_ns")
     manifest = load_reconstruction_manifest(manifest_path)
+    _require_broker_policy(manifest, "material_use")
+    if type(manifest) is ReconstructionProductManifestV1:
+        pa, _ = _arrow_modules()
+        batches = list(
+            iter_reconstruction_event_batches(
+                manifest_path,
+                columns=requested,
+                symbols=symbols,
+                start_ns=lower,
+                end_ns=upper,
+            )
+        )
+        schema = synthetic_event_arrow_schema()
+        selected_schema = pa.schema([schema.field(name) for name in requested])
+        table = pa.Table.from_batches(batches, schema=selected_schema)
+        _require_broker_policy(manifest, "material_use")
+        return _polars_module().from_arrow(table).lazy()
     if isinstance(manifest, ReconstructionProductManifestV3):
         selected_symbols = {_normalized_symbol(symbol) for symbol in symbols}
         if selected_symbols and not selected_symbols.issubset(manifest.symbols):
@@ -3961,10 +4092,14 @@ def read_reconstruction_streams(
         for event in observed_events:
             by_symbol[event.symbol].append(event)
     for partition in manifest.partitions:
+        _require_broker_policy(manifest, "material_use")
         for event in _iter_partition_events(
             path.parent / partition.relative_path,
             anchor_event_ids=anchor_event_ids,
         ):
+            _check_product_broker_lineage(
+                manifest, event.origin.value, event.broker_profile_id
+            )
             by_symbol[event.symbol].append(event)
     streams = tuple(
         SyntheticEventStreamV1(
@@ -3992,6 +4127,7 @@ def read_reconstruction_streams(
         raise ReconstructionPersistenceError(
             "replayed streams differ from committed logical hash"
         )
+    _require_broker_policy(manifest, "material_use")
     return streams
 
 
@@ -4078,6 +4214,14 @@ def _validate_delivery_publication_inputs(
 ) -> None:
     if not isinstance(delivered_group, ReconstructionDeliveredGroupV1):
         raise TypeError("delivery publication requires a delivered group")
+    if any(
+        event.broker_profile_id is not None
+        for stream in delivered_group.streams
+        for event in stream.events
+    ):
+        raise ReconstructionPersistenceError(
+            "generic publication cannot discard broker provider lineage"
+        )
     if delivered_group.status is not ReconstructionDeliveryStatus.APPLIED:
         raise ReconstructionPersistenceError(
             "refused delivery groups cannot be published"
@@ -4359,6 +4503,7 @@ def _write_product_partitions(
     row_group_size: int,
     synthetic_delta: bool = False,
     anchor_event_ids: Sequence[str] = (),
+    provider_subject: object | None = None,
 ) -> tuple[ReconstructionProductPartitionV1, ...]:
     partitions: list[ReconstructionProductPartitionV1] = []
     for stream in sorted(streams, key=lambda item: item.symbol):
@@ -4377,6 +4522,8 @@ def _write_product_partitions(
             )
             relative = _partition_relative_path(stream.symbol, event_date)
             target = staging_directory / relative
+            if provider_subject is not None:
+                _require_broker_policy(provider_subject, "retain_local")
             target.parent.mkdir(parents=True, exist_ok=True)
             _write_parquet_partition(
                 partition_stream,
@@ -4384,6 +4531,7 @@ def _write_product_partitions(
                 row_group_size=row_group_size,
                 synthetic_delta=synthetic_delta,
                 anchor_event_ids=anchor_event_ids,
+                provider_subject=provider_subject,
             )
             _, pq = _arrow_modules()
             parquet = pq.ParquetFile(target)
@@ -4515,10 +4663,13 @@ def _write_parquet_partition(
     row_group_size: int,
     synthetic_delta: bool = False,
     anchor_event_ids: Sequence[str] = (),
+    provider_subject: object | None = None,
 ) -> None:
     _, pq = _arrow_modules()
     partial = target.with_name(target.name + ".partial")
     try:
+        if provider_subject is not None:
+            _require_broker_policy(provider_subject, "retain_local")
         pq.write_table(
             (
                 _synthetic_delta_stream_to_arrow(stream, anchor_event_ids)
@@ -4535,6 +4686,8 @@ def _write_parquet_partition(
             write_page_checksum=True,
         )
         _fsync_file(partial)
+        if provider_subject is not None:
+            _require_broker_policy(provider_subject, "retain_local")
         os.replace(partial, target)
         _fsync_directory(target.parent)
     finally:
@@ -5076,7 +5229,9 @@ def _verify_publication_directory(
     *,
     require_committed_layout: bool,
     source_artifact_root: Path | None = None,
+    require_provider_receipt: bool = False,
 ) -> None:
+    _require_broker_policy(manifest, "material_use")
     manifest_path = directory / RECONSTRUCTION_MANIFEST_FILENAME
     disk_manifest = load_reconstruction_manifest(manifest_path)
     if disk_manifest != manifest:
@@ -5085,6 +5240,9 @@ def _verify_publication_directory(
         )
     if require_committed_layout:
         _validate_committed_manifest_location(manifest_path, manifest)
+    _verify_broker_product_receipt(
+        manifest_path, manifest, required=require_provider_receipt
+    )
     observed_events: tuple[SyntheticEventV1, ...] = ()
     anchor_event_ids: tuple[str, ...] = ()
     if isinstance(manifest, ReconstructionProductManifestV3):
@@ -5095,6 +5253,7 @@ def _verify_publication_directory(
         )
         anchor_event_ids = tuple(event.event_id for event in observed_events)
     for partition in manifest.partitions:
+        _require_broker_policy(manifest, "material_use")
         _validate_partition_file(
             directory / partition.relative_path,
             partition,
@@ -5122,6 +5281,10 @@ def _verify_publication_directory(
         ):
             raise ReconstructionPersistenceError(
                 "synthetic-delta partitions contain observed rows"
+            )
+        for event in (*observed_events, *synthetic_events):
+            _check_product_broker_lineage(
+                manifest, event.origin.value, event.broker_profile_id
             )
         logical_events = tuple(
             sorted((*observed_events, *synthetic_events), key=_event_order_key)
@@ -5164,9 +5327,13 @@ def _verify_publication_directory(
     observed = 0
     synthetic = 0
     for partition in manifest.partitions:
+        _require_broker_policy(manifest, "material_use")
         for event in _iter_partition_events(
             directory / partition.relative_path
         ):
+            _check_product_broker_lineage(
+                manifest, event.origin.value, event.broker_profile_id
+            )
             _update_event_digest(digest, event)
             total += 1
             if event.origin is SyntheticEventOrigin.OBSERVED:
@@ -5485,7 +5652,11 @@ def _artifact_ref_for_manifest(
     )
 
 
-def _atomic_write_bytes(path: Path, payload: bytes) -> None:
+def _atomic_write_bytes(
+    path: Path, payload: bytes, *, provider_subject: object | None = None
+) -> None:
+    if provider_subject is not None:
+        _require_broker_policy(provider_subject, "retain_local")
     path.parent.mkdir(parents=True, exist_ok=True)
     handle, temporary_name = tempfile.mkstemp(
         prefix=path.name + ".tmp-", dir=path.parent
@@ -5496,6 +5667,8 @@ def _atomic_write_bytes(path: Path, payload: bytes) -> None:
             stream.write(payload)
             stream.flush()
             os.fsync(stream.fileno())
+        if provider_subject is not None:
+            _require_broker_policy(provider_subject, "retain_local")
         os.replace(temporary, path)
         _fsync_directory(path.parent)
     finally:

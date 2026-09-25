@@ -1,6 +1,7 @@
 """Qualify installed host + separately pip-installed offline plugin.
 
 Usage: python broker_lifecycle_qualification.py /absolute/fixture.whl
+Copy broker_runtime_policy.py and broker_provider_policy.py beside this script.
 Does not install/modify the host or dependencies; restores plugin inventory.
 """
 
@@ -13,6 +14,8 @@ import sys
 import tempfile
 
 import histdatacom.broker_plugin_lifecycle as lifecycle
+import histdatacom
+import histdatacom.broker_plugin_policy as policy_api
 from histdatacom.broker_plugin_capabilities import (
     BrokerCapabilityWorkflowV1,
     negotiate_broker_capabilities,
@@ -23,13 +26,44 @@ from histdatacom.broker_plugin_lifecycle import (
     BrokerLifecyclePolicyV1,
     BrokerLifecycleReason,
     inspect_broker_lifecycle,
-    replay_broker_lifecycle,
-    run_broker_plugin_lifecycle,
+    replay_broker_lifecycle as _replay,
+    run_broker_plugin_lifecycle as _run,
 )
 from histdatacom.broker_plugin_registry import discover_broker_plugins
+from broker_runtime_policy import runtime_request, runtime_scope
+
+_REQUESTS = {}
+
+
+def run_broker_plugin_lifecycle(
+    inventory, plan, configuration, symbols, output, **kwargs
+):
+    """Declare this generated fixture's exact rights at every public call."""
+    request = runtime_request(plan, configuration)
+    _REQUESTS[output] = request
+    with runtime_scope(request):
+        return _run(
+            inventory,
+            plan,
+            configuration,
+            symbols,
+            output,
+            provider_request=request,
+            **kwargs,
+        )
+
+
+def replay_broker_lifecycle(output):
+    request = _REQUESTS[output]
+    with runtime_scope(request):
+        yield from _replay(output, provider_request=request)
 
 
 def main() -> None:
+    assert histdatacom.__file__ is not None
+    assert "site-packages" in histdatacom.__file__, histdatacom.__file__
+    assert policy_api.__file__ is not None
+    assert "site-packages" in policy_api.__file__, policy_api.__file__
     assert lifecycle.__file__ is not None
     assert "site-packages" in lifecycle.__file__, lifecycle.__file__
     wheel = Path(sys.argv[1]).resolve(strict=True)
@@ -109,10 +143,9 @@ def main() -> None:
                     root / mode,
                     authorize=lambda _: True,
                     policy=BrokerLifecyclePolicyV1(
-                        startup_timeout_ms=(
-                            500 if mode == "open_block" else 3000
-                        ),
-                        run_timeout_ms=1000 if mode == "next_block" else 5000,
+                        startup_timeout_ms=8000,
+                        run_timeout_ms=15000 if mode == "next_block" else 60000,
+                        acknowledgement_timeout_ms=5000,
                         shutdown_timeout_ms=100,
                         retry_delays_ms=(0,) if mode == "reconnect" else (),
                     ),

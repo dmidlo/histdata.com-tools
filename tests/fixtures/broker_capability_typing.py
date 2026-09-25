@@ -1,6 +1,7 @@
 """Strict installed public host-side typing; no source path or private imports."""
 
 from collections.abc import Iterator
+from contextlib import contextmanager
 
 from histdatacom.broker_plugin_capabilities import (
     BrokerAdmittedEventV1,
@@ -11,6 +12,11 @@ from histdatacom.broker_plugin_capabilities import (
     negotiate_broker_capabilities,
 )
 from histdatacom.broker_plugin_registry import BrokerPluginInventoryV1
+from histdatacom.broker_plugin_policy import (
+    BrokerPolicySource,
+    BrokerSDKInvocationV1,
+    provider_policy_scope,
+)
 
 
 def preflight(inventory: BrokerPluginInventoryV1) -> BrokerCapabilityPlanV1:
@@ -21,12 +27,21 @@ def preflight(inventory: BrokerPluginInventoryV1) -> BrokerCapabilityPlanV1:
     )
 
 
+@contextmanager
 def authorized(
-    inventory: BrokerPluginInventoryV1, plan: BrokerCapabilityPlanV1
-) -> GatedBrokerPluginV1:
-    return invoke_authorized_installed_broker_plugin(
-        inventory, plan, authorize=lambda _: True
-    )
+    inventory: BrokerPluginInventoryV1,
+    plan: BrokerCapabilityPlanV1,
+    provider_request: BrokerSDKInvocationV1,
+    policy_source: BrokerPolicySource,
+) -> Iterator[GatedBrokerPluginV1]:
+    """The caller supplies declarations and uses the plugin inside this scope."""
+    with provider_policy_scope(policy_source):
+        yield invoke_authorized_installed_broker_plugin(
+            inventory,
+            plan,
+            authorize=lambda _: True,
+            provider_request=provider_request,
+        )
 
 
 def events(invocation: GatedBrokerPluginV1) -> Iterator[BrokerAdmittedEventV1]:

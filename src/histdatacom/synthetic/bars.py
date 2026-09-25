@@ -18,6 +18,7 @@ import shutil
 import sys
 import tempfile
 from collections.abc import Iterable, Iterator, Mapping, Sequence
+from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
@@ -37,7 +38,9 @@ from histdatacom.synthetic.contracts import (
 )
 from histdatacom.synthetic.persistence import (
     RECONSTRUCTION_PRODUCT_SCHEMA_VERSION,
+    ReconstructionProductManifestV1,
     iter_reconstruction_event_batches,
+    load_reconstruction_manifest,
     verify_reconstruction_publication,
 )
 
@@ -1627,6 +1630,119 @@ class _BarAccumulator:
         return bar
 
 
+def _bar_source_inputs(source: object) -> AbstractContextManager[None]:
+    """Keep an already available exact parent only for this closed operation."""
+    if type(source) is not ReconstructionProductManifestV1:
+        return nullcontext()
+    from histdatacom.broker_plugin_policy.native_inputs import (
+        provider_reconstruction_inputs,
+    )
+
+    return provider_reconstruction_inputs(source)
+
+
+def _require_bar_source(source: object, operation: str) -> None:
+    if type(source) is ReconstructionProductManifestV1:
+        from histdatacom.broker_plugin_policy import (
+            BrokerPolicyOperation,
+            require_provider_operation,
+        )
+
+        require_provider_operation(source, BrokerPolicyOperation(operation))
+
+
+def _bar_is_broker(bar: DerivedBarProductManifestV1 | DerivedBarV1) -> bool:
+    from histdatacom.broker_plugin_policy.bar_bindings import (
+        broker_bar_source_id,
+    )
+
+    return broker_bar_source_id(bar.source_product_manifest_id) or (
+        isinstance(bar, DerivedBarV1) and bool(bar.broker_profile_ids)
+    )
+
+
+def _require_bar_policy(
+    bar: DerivedBarProductManifestV1 | DerivedBarV1, operation: str
+) -> None:
+    if _bar_is_broker(bar):
+        from histdatacom.broker_plugin_policy import (
+            BrokerPolicyOperation,
+            require_provider_operation,
+        )
+
+        require_provider_operation(bar, BrokerPolicyOperation(operation))
+
+
+def _require_bar_event(event: SyntheticEventV1) -> None:
+    if event.broker_profile_id is not None:
+        from histdatacom.broker_plugin_policy import (
+            BrokerPolicyOperation,
+            require_provider_operation,
+        )
+        from histdatacom.broker_plugin_policy.bar_bindings import (
+            BrokerBarEventInputV1,
+        )
+
+        subject = BrokerBarEventInputV1(event)
+        require_provider_operation(subject, BrokerPolicyOperation.MATERIAL_USE)
+        require_provider_operation(subject, BrokerPolicyOperation.DERIVE)
+
+
+def _bar_provider_profile(manifest: DerivedBarProductManifestV1) -> str | None:
+    if not _bar_is_broker(manifest):
+        return None
+    from histdatacom.broker_plugin_policy.native_inputs import product_for
+
+    product = product_for(manifest.source_product_manifest_id)
+    return product.broker_profile_id
+
+
+def _check_bar_provider_lineage(profile: str | None, bar: DerivedBarV1) -> None:
+    expected = (
+        (profile,) if profile is not None and bar.synthetic_event_count else ()
+    )
+    if bar.broker_profile_ids != expected:
+        raise DerivedBarPersistenceError(
+            "bar physical provider lineage differs from source"
+        )
+
+
+def _verify_bar_policy_receipt(
+    path: Path, manifest: DerivedBarProductManifestV1, *, required: bool = False
+) -> None:
+    if not _bar_is_broker(manifest):
+        return
+    from histdatacom.broker_plugin_policy.storage import (
+        read_broker_policy_receipt,
+        verify_broker_policy_receipt,
+    )
+
+    receipt = path.with_name(path.name + ".provider-policy.json")
+    if required or receipt.exists() or receipt.is_symlink():
+        verify_broker_policy_receipt(
+            read_broker_policy_receipt(receipt), manifest, path
+        )
+
+
+def _write_bar_policy_receipt(
+    directory: Path, manifest: DerivedBarProductManifestV1, data: bytes
+) -> None:
+    if not _bar_is_broker(manifest):
+        return
+    from histdatacom.broker_plugin_policy import BrokerPolicyOperation
+    from histdatacom.broker_plugin_policy.storage import (
+        write_broker_policy_receipt,
+    )
+
+    write_broker_policy_receipt(
+        directory / (DERIVED_BAR_MANIFEST_FILENAME + ".provider-policy.json"),
+        manifest,
+        native_artifact_name=DERIVED_BAR_MANIFEST_FILENAME,
+        native_file_bytes=data,
+        operation=BrokerPolicyOperation.DERIVE,
+    )
+
+
 def derive_reconstruction_bars(
     events: Iterable[SyntheticEventV1],
     *,
@@ -1638,6 +1754,17 @@ def derive_reconstruction_bars(
     end_ns: int | None = None,
 ) -> tuple[DerivedBarV1, ...]:
     """Derive bounded deterministic bars from ordered narrow events."""
+    from histdatacom.broker_plugin_policy.bar_bindings import (
+        broker_bar_source_id,
+    )
+
+    product = None
+    if broker_bar_source_id(source_product_manifest_id):
+        from histdatacom.broker_plugin_policy.native_inputs import product_for
+
+        product = product_for(source_product_manifest_id)
+        _require_bar_source(product, "material_use")
+        _require_bar_source(product, "derive")
     selected = policy or DerivedBarPolicyV1()
     start, end = _query_bounds(start_ns, end_ns)
     accumulator = _BarAccumulator(
@@ -1652,12 +1779,22 @@ def derive_reconstruction_bars(
     for event in events:
         if not isinstance(event, SyntheticEventV1):
             raise TypeError("derived bars require SyntheticEventV1 rows")
+        _require_bar_event(event)
+        if product is not None and (
+            event.broker_profile_id not in (None, product.broker_profile_id)
+            or (
+                event.origin is SyntheticEventOrigin.SYNTHETIC
+                and event.broker_profile_id != product.broker_profile_id
+            )
+        ):
+            raise ValueError("bar event provider differs from source product")
         if start is not None and event.event_time_ns < start:
             continue
         if end is not None and event.event_time_ns >= end:
             continue
         bars.extend(accumulator.add(_bar_event_view(event)))
     bars.extend(accumulator.finish())
+    _require_bar_source(product, "derive")
     return tuple(sorted(bars, key=_bar_order_key))
 
 
@@ -1672,6 +1809,7 @@ def iter_committed_reconstruction_bars(
 ) -> Iterator[DerivedBarV1]:
     """Stream bars from verified projected final-event Parquet batches."""
     product = verify_reconstruction_publication(manifest_path)
+    _require_bar_source(product, "derive")
     selected = policy or DerivedBarPolicyV1()
     start, end = _query_bounds(start_ns, end_ns)
     size = _bounded_int(batch_size, "batch_size", 1, 1_000_000)
@@ -1693,10 +1831,17 @@ def iter_committed_reconstruction_bars(
         end_ns=end,
         batch_size=size,
     ):
+        _require_bar_source(product, "derive")
         for row in batch.to_pylist():
+            _require_bar_source(product, "derive")
             mapping = _mapping(row, "derived bar event row")
-            yield from accumulator.add(_bar_event_view_from_mapping(mapping))
-    yield from accumulator.finish()
+            for bar in accumulator.add(_bar_event_view_from_mapping(mapping)):
+                _require_bar_source(product, "derive")
+                yield bar
+    _require_bar_source(product, "derive")
+    for bar in accumulator.finish():
+        _require_bar_source(product, "derive")
+        yield bar
 
 
 class _PartitionWriter:
@@ -1710,6 +1855,8 @@ class _PartitionWriter:
         row_group_size: int,
         buffer_rows: int,
     ) -> None:
+        _require_bar_policy(first, "retain_local")
+        self.provider_bar = first
         self.symbol = first.symbol
         self.scope = first.scope
         self.interval_code = first.interval_code
@@ -1775,6 +1922,7 @@ class _PartitionWriter:
         """Write buffered rows as bounded row groups."""
         if not self.buffer:
             return
+        _require_bar_policy(self.buffer[0], "retain_local")
         table = _bars_to_arrow(self.buffer)
         self.writer.write_table(table, row_group_size=self.row_group_size)
         self.buffer.clear()
@@ -1782,6 +1930,7 @@ class _PartitionWriter:
     def close(self) -> DerivedBarPartitionV1:
         """Close, fsync, and freeze partition evidence."""
         self.flush()
+        _require_bar_policy(self.provider_bar, "retain_local")
         self.writer.close()
         _fsync_file(self.path)
         _fsync_directory(self.path.parent)
@@ -1909,6 +2058,8 @@ def stage_derived_bar_publication(
     """Aggregate and validate one bar product below hidden scratch."""
     source_path = Path(source_manifest_path).expanduser().resolve()
     source = verify_reconstruction_publication(source_path)
+    _require_bar_source(source, "derive")
+    _require_bar_source(source, "retain_local")
     selected = policy or DerivedBarPolicyV1()
     selected_symbols = tuple(_normalized_symbol(value) for value in symbols)
     if selected_symbols and not set(selected_symbols).issubset(source.symbols):
@@ -1924,6 +2075,7 @@ def stage_derived_bar_publication(
         root_path, source.manifest_id, selected.policy_id
     )
     scratch = axis / ".scratch"
+    _require_bar_source(source, "retain_local")
     scratch.mkdir(parents=True, exist_ok=True)
     staging = Path(tempfile.mkdtemp(prefix="publication.tmp-", dir=scratch))
     manager: _PartitionManager | None = None
@@ -1933,16 +2085,18 @@ def stage_derived_bar_publication(
             row_group_size=row_group,
             buffer_rows=buffer_rows,
         )
-        for bar in iter_committed_reconstruction_bars(
-            source_path,
-            policy=selected,
-            symbols=selected_symbols,
-            start_ns=query_start,
-            end_ns=query_end,
-            batch_size=size,
-        ):
-            manager.add(bar)
-        partitions = manager.finish()
+        with _bar_source_inputs(source):
+            for bar in iter_committed_reconstruction_bars(
+                source_path,
+                policy=selected,
+                symbols=selected_symbols,
+                start_ns=query_start,
+                end_ns=query_end,
+                batch_size=size,
+            ):
+                _require_bar_source(source, "retain_local")
+                manager.add(bar)
+            partitions = manager.finish()
         counts: dict[str, int] = {}
         for partition in partitions:
             counts[partition.symbol] = (
@@ -1972,9 +2126,12 @@ def stage_derived_bar_publication(
             row_group_size=row_group,
         )
         manifest_bytes = manifest.to_json().encode("utf-8")
+        _require_bar_source(source, "retain_local")
         _atomic_write_bytes(
             staging / DERIVED_BAR_MANIFEST_FILENAME, manifest_bytes
         )
+        with _bar_source_inputs(source):
+            _write_bar_policy_receipt(staging, manifest, manifest_bytes)
         committed = axis / "commits" / _path_component(manifest.publication_id)
         staged = StagedDerivedBarPublicationV1(
             root=root_path,
@@ -1982,7 +2139,8 @@ def stage_derived_bar_publication(
             committed_directory=committed,
             manifest=manifest,
         )
-        _verify_derived_bar_directory(staging, manifest, committed=False)
+        with _bar_source_inputs(source):
+            _verify_derived_bar_directory(staging, manifest, committed=False)
         return staged
     except Exception:
         if manager is not None:
@@ -1999,6 +2157,16 @@ def commit_derived_bar_publication(
         raise TypeError("derived bar commit requires staged publication")
     final = staged.committed_directory
     manifest = staged.manifest
+    _require_bar_policy(manifest, "retain_local")
+    _verify_bar_policy_receipt(
+        (
+            final / DERIVED_BAR_MANIFEST_FILENAME
+            if final.exists()
+            else staged.manifest_path
+        ),
+        manifest,
+        required=True,
+    )
     if final.exists():
         existing_path = final / DERIVED_BAR_MANIFEST_FILENAME
         existing = verify_derived_bar_publication(existing_path)
@@ -2017,8 +2185,10 @@ def commit_derived_bar_publication(
     _verify_derived_bar_directory(
         staged.staging_directory, manifest, committed=False
     )
+    _require_bar_policy(manifest, "retain_local")
     final.parent.mkdir(parents=True, exist_ok=True)
     try:
+        _require_bar_policy(manifest, "retain_local")
         os.replace(staged.staging_directory, final)
     except OSError as err:
         if not final.exists():
@@ -2072,7 +2242,9 @@ def publish_derived_bars(
         write_buffer_rows=write_buffer_rows,
     )
     try:
-        return commit_derived_bar_publication(staged)
+        source = load_reconstruction_manifest(source_manifest_path)
+        with _bar_source_inputs(source):
+            return commit_derived_bar_publication(staged)
     except Exception:
         if staged.staging_directory.exists():
             _remove_bar_scratch(staged.staging_directory, staged.root)
@@ -2173,6 +2345,7 @@ def iter_derived_bar_batches(
             continue
         if end is not None and partition.min_bar_start_ns >= end:
             continue
+        _require_bar_policy(manifest, "material_use")
         dataset = ds.dataset(
             path.parent / partition.relative_path, format="parquet"
         )
@@ -2182,7 +2355,14 @@ def iter_derived_bar_batches(
             batch_size=size,
             use_threads=False,
         )
-        yield from scanner.to_batches()
+        iterator = iter(scanner.to_batches())
+        while True:
+            _require_bar_policy(manifest, "material_use")
+            try:
+                batch = next(iterator)
+            except StopIteration:
+                break
+            yield batch
 
 
 def scan_derived_bars_polars(
@@ -2195,7 +2375,11 @@ def scan_derived_bars_polars(
     start_ns: int | None = None,
     end_ns: int | None = None,
 ) -> Any:
-    """Return a predicate-pushed lazy Polars bar scan."""
+    """Return generic pushed scans, or broker rows materialized under admission.
+
+    A broker frame never defers provider disk IO until after the policy scope.
+    Its already materialized values carry no continuing execution permission.
+    """
     path = Path(manifest_path).expanduser().resolve()
     manifest = verify_derived_bar_publication(path)
     requested = tuple(columns)
@@ -2221,6 +2405,25 @@ def scan_derived_bars_polars(
         and (end is None or item.min_bar_start_ns < end)
     ]
     pl = _polars_module()
+    if _bar_is_broker(manifest):
+        pa, _ = _arrow_modules()
+        batches = list(
+            iter_derived_bar_batches(
+                path,
+                columns=requested,
+                symbols=selected_symbols,
+                scopes=selected_scopes,
+                intervals=selected_intervals,
+                start_ns=start,
+                end_ns=end,
+            )
+        )
+        schema = pa.schema(
+            [derived_bar_arrow_schema().field(name) for name in requested]
+        )
+        return pl.from_arrow(
+            pa.Table.from_batches(batches, schema=schema)
+        ).lazy()
     if not paths:
         return (
             pl.from_arrow(derived_bar_arrow_schema().empty_table())
@@ -2357,6 +2560,10 @@ def _verify_derived_bar_directory(
     *,
     committed: bool,
 ) -> None:
+    _require_bar_policy(manifest, "material_use")
+    _verify_bar_policy_receipt(
+        directory / DERIVED_BAR_MANIFEST_FILENAME, manifest
+    )
     if not directory.is_dir() or directory.is_symlink():
         raise DerivedBarPersistenceError(
             "derived bar directory is missing or unsafe"
@@ -2366,6 +2573,9 @@ def _verify_derived_bar_directory(
             directory / DERIVED_BAR_MANIFEST_FILENAME, manifest
         )
     expected_files = {DERIVED_BAR_MANIFEST_FILENAME}
+    sidecar = DERIVED_BAR_MANIFEST_FILENAME + ".provider-policy.json"
+    if _bar_is_broker(manifest) and (directory / sidecar).exists():
+        expected_files.add(sidecar)
     expected_files.update(item.relative_path for item in manifest.partitions)
     expected_directories = {
         parent.as_posix()
@@ -2393,6 +2603,7 @@ def _verify_derived_bar_directory(
     ):
         raise DerivedBarPersistenceError("derived bar artifact set differs")
     for partition in manifest.partitions:
+        _require_bar_policy(manifest, "material_use")
         _validate_bar_partition_file(
             directory / partition.relative_path,
             partition,
@@ -2404,6 +2615,7 @@ def _verify_derived_bar_directory(
         != manifest.logical_content_sha256
     ):
         raise DerivedBarPersistenceError("derived bar replay hash differs")
+    _require_bar_policy(manifest, "material_use")
 
 
 def _validate_bar_partition_file(
@@ -2439,6 +2651,7 @@ def _validate_bar_partition_file(
         (DERIVED_BAR_LOGICAL_HASH_ALGORITHM + "\n").encode("ascii")
     )
     count = 0
+    provider_profile = _bar_provider_profile(manifest)
     minimum: int | None = None
     maximum: int | None = None
     last_order: tuple[int, str] | None = None
@@ -2448,8 +2661,10 @@ def _validate_bar_partition_file(
             raise DerivedBarPersistenceError(
                 "derived bar row group exceeds bound"
             )
+        _require_bar_policy(manifest, "material_use")
         for row in parquet.read_row_group(ordinal).to_pylist():
             bar = DerivedBarV1.from_dict(_mapping(row, "derived bar row"))
+            _check_bar_provider_lineage(provider_profile, bar)
             if (
                 bar.symbol != expected.symbol
                 or bar.scope is not expected.scope

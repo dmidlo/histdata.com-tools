@@ -380,10 +380,17 @@ def materialize_training_overlap(
     ):
         raise TypeError("overlap materialization requires typed plan/selection")
     source = verify_overlap_source(plan)
+    from .training_provider_policy import (
+        require_training_derivation,
+        training_reconstruction_inputs,
+    )
+
+    require_training_derivation(source.verified)
     carries = _carry(plan, source)
     windows, targets_json, maximum = _windows(plan, source, carries)
     allocations = _allocations(plan, source, windows)
-    native = native_overlap_features(plan, source)
+    with training_reconstruction_inputs(source.verified):
+        native = native_overlap_features(plan, source)
     by_id = {c.coordinate_id: c for c in source.coordinates}
     allocation_by_key = {
         (a.evidence_unit_id, a.window_id, a.member_id, a.scenario_id): a
@@ -436,7 +443,7 @@ def materialize_training_overlap(
                     max(window.end_ns, window.dependency_end_ns),
                 )
             )
-    return TrainingOverlapBatchV1(
+    result = TrainingOverlapBatchV1(
         plan,
         selection,
         source.coordinates,
@@ -449,6 +456,8 @@ def materialize_training_overlap(
         maximum,
         tuple(rows),
     )
+    require_training_derivation(source.verified)
+    return result
 
 
 def replay_training_overlap(

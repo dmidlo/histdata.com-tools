@@ -640,6 +640,15 @@ def _activity(
 def prepare_market_join(
     source: TrainingJoinSourceV1, verified: _VerifiedSource
 ) -> _JoinAdapter:
+    from .training_provider_policy import training_reconstruction_inputs
+
+    with training_reconstruction_inputs(verified):
+        return _prepare_market_join(source, verified)
+
+
+def _prepare_market_join(
+    source: TrainingJoinSourceV1, verified: _VerifiedSource
+) -> _JoinAdapter:
     if source.family is JoinFamily.TICK:
         return _tick(source, verified)
     if source.family in (JoinFamily.BAR, JoinFamily.INDICATOR):

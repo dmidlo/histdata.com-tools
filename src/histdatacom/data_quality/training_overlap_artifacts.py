@@ -10,6 +10,12 @@ from pathlib import Path
 
 from .training_overlap_contracts import TrainingOverlapBatchV1
 from .training_overlap_views import replay_training_overlap
+from .training_provider_policy import (
+    publish_training_policy_receipt,
+    require_training_retention,
+    training_provider_subject,
+    verify_training_policy_receipt,
+)
 
 
 def _parents(path: Path) -> tuple[tuple[str, int, int], ...]:
@@ -90,24 +96,31 @@ def _fsync_directory(root: Path) -> None:
 def write_training_overlap_artifact(
     batch: TrainingOverlapBatchV1, directory: str | Path
 ) -> Path:
+    subject = training_provider_subject(batch)
+    require_training_retention(subject)
     replay_training_overlap(batch)
     data = batch.to_json().encode()
     root = Path(directory)
     _parents(root / "unpublished-overlap")
+    require_training_retention(subject)
     root.mkdir(parents=True, exist_ok=True)
     target = (
         root / f"training-overlap-batch-{hashlib.sha256(data).hexdigest()}.json"
     )
     temporary = None
     try:
+        require_training_retention(subject)
         with tempfile.NamedTemporaryFile(
             mode="wb", dir=root, prefix=".overlap-", delete=False
         ) as stream:
             temporary = Path(stream.name)
+            require_training_retention(subject)
             if stream.write(data) != len(data):
                 raise OSError("short overlap artifact write")
             stream.flush()
             os.fsync(stream.fileno())
+        publish_training_policy_receipt(subject, target, data)
+        require_training_retention(subject)
         try:
             os.link(temporary, target, follow_symlinks=False)
         except FileExistsError:
@@ -119,6 +132,7 @@ def write_training_overlap_artifact(
     finally:
         if temporary is not None:
             temporary.unlink()
+    verify_training_policy_receipt(subject, target, required=True)
     return target
 
 
@@ -137,4 +151,5 @@ def read_training_overlap_artifact(
     result = TrainingOverlapBatchV1.from_json(data.decode())
     if result.to_json().encode() != data:
         raise ValueError("overlap artifact is not canonical")
+    verify_training_policy_receipt(training_provider_subject(result), source)
     return replay_training_overlap(result)

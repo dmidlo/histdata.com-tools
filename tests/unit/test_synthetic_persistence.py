@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import shutil
+from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
 
@@ -15,7 +16,7 @@ import pyarrow.parquet as pq
 import pytest
 from pyarrow import ipc
 
-from histdatacom.broker_capture import fit_broker_delivery_fingerprint
+from histdatacom.broker_plugin_policy import provider_native_inputs
 from histdatacom.reconstruction import ReconstructionClient
 from histdatacom.runtime_contracts import ArtifactRef
 from histdatacom.synthetic import (
@@ -53,7 +54,11 @@ from histdatacom.synthetic.cross_currency import (
     reconcile_cross_currency_window,
 )
 from tests.unit.test_broker_delivery_fingerprints import BASE_WALL_NS, _capture
-from tests.unit.test_synthetic_broker_transfer import _group_with_constraints
+from tests.fixtures.broker_provider_policy import generated_provider_scope
+from tests.unit.test_synthetic_broker_transfer import (
+    _fit_generated_capture,
+    _group_with_constraints,
+)
 from tests.unit.test_synthetic_cross_currency import _condition
 
 
@@ -61,103 +66,107 @@ def test_publish_exact_narrow_schema_reconciles_anchors_and_replays(
     tmp_path: Path,
 ) -> None:
     """The committed product contains exact #431 rows and compact evidence."""
-    rendered, anchors, policy, retention = _publication_inputs(tmp_path)
+    with _publication_inputs_scope(tmp_path) as inputs:
+        rendered, anchors, policy, retention = inputs
 
-    published = publish_reconstruction_group(
-        tmp_path / "archive",
-        rendered,
-        immutable_source_anchors=anchors,
-        symbol_group_id="eurusd-triangle",
-        retention_plan=retention,
-        storage_policy=policy,
-        row_group_size=2,
-    )
+        published = publish_reconstruction_group(
+            tmp_path / "archive",
+            rendered,
+            immutable_source_anchors=anchors,
+            symbol_group_id="eurusd-triangle",
+            retention_plan=retention,
+            storage_policy=policy,
+            row_group_size=2,
+        )
 
-    assert not published.idempotent_retry
-    manifest = verify_reconstruction_publication(published.manifest_path)
-    assert manifest == published.manifest
-    assert ReconstructionProductManifestV1.from_json(manifest.to_json()) == (
-        manifest
-    )
-    assert manifest.event_count == sum(
-        len(stream.events) for stream in rendered.streams
-    )
-    assert manifest.observed_event_count == len(anchors)
-    assert manifest.synthetic_event_count == (
-        manifest.event_count - len(anchors)
-    )
-    assert manifest.quality.broker_transfer_manifest_id == (
-        rendered.manifest.manifest_id
-    )
-    assert manifest.source.observed_content_sha256
-    assert manifest.constraints.constraint_set_ids
-    assert manifest.replay.logical_content_sha256
-    assert manifest.ensemble.materialized_member_id == (
-        rendered.manifest.ensemble_member_id
-    )
-    assert manifest.ensemble.retention_plan_id == retention.plan_id
-    assert manifest.ensemble.to_dict()["automatic_winner"] is False
-    assert manifest.retention.plan_id == retention.plan_id
-    payload = manifest.to_dict()
-    assert payload["event_rows_inline"] is False
-    assert payload["analytical_frame_columns_inline"] is False
-    assert "events" not in json.dumps(payload)
+        assert not published.idempotent_retry
+        manifest = verify_reconstruction_publication(published.manifest_path)
+        assert manifest == published.manifest
+        assert ReconstructionProductManifestV1.from_json(
+            manifest.to_json()
+        ) == (manifest)
+        assert manifest.event_count == sum(
+            len(stream.events) for stream in rendered.streams
+        )
+        assert manifest.observed_event_count == len(anchors)
+        assert manifest.synthetic_event_count == (
+            manifest.event_count - len(anchors)
+        )
+        assert manifest.quality.broker_transfer_manifest_id == (
+            rendered.manifest.manifest_id
+        )
+        assert manifest.source.observed_content_sha256
+        assert manifest.constraints.constraint_set_ids
+        assert manifest.replay.logical_content_sha256
+        assert manifest.ensemble.materialized_member_id == (
+            rendered.manifest.ensemble_member_id
+        )
+        assert manifest.ensemble.retention_plan_id == retention.plan_id
+        assert manifest.ensemble.to_dict()["automatic_winner"] is False
+        assert manifest.retention.plan_id == retention.plan_id
+        payload = manifest.to_dict()
+        assert payload["event_rows_inline"] is False
+        assert payload["analytical_frame_columns_inline"] is False
+        assert "events" not in json.dumps(payload)
 
-    for partition in manifest.partitions:
-        table = pq.ParquetFile(
-            published.manifest_path.parent / partition.relative_path
-        ).read()
-        assert table.schema.names == list(SYNTHETIC_EVENT_ARROW_COLUMNS)
-        assert table.num_columns == 26
-        assert table.num_columns < 521
-        assert table.num_rows == partition.row_count
-        assert partition.row_group_count >= 1
-    assert any(item.row_group_count > 1 for item in manifest.partitions)
-    assert read_reconstruction_streams(published.manifest_path) == (
-        rendered.streams
-    )
+        for partition in manifest.partitions:
+            table = pq.ParquetFile(
+                published.manifest_path.parent / partition.relative_path
+            ).read()
+            assert table.schema.names == list(SYNTHETIC_EVENT_ARROW_COLUMNS)
+            assert table.num_columns == 26
+            assert table.num_columns < 521
+            assert table.num_rows == partition.row_count
+            assert partition.row_group_count >= 1
+        assert any(item.row_group_count > 1 for item in manifest.partitions)
+        assert read_reconstruction_streams(published.manifest_path) == (
+            rendered.streams
+        )
 
 
 def test_staging_is_invisible_and_commit_is_atomic_and_idempotent(
     tmp_path: Path,
 ) -> None:
     """Only directory promotion makes a synchronized unit discoverable."""
-    rendered, anchors, policy, retention = _publication_inputs(tmp_path)
-    root = tmp_path / "archive"
+    with _publication_inputs_scope(tmp_path) as inputs:
+        rendered, anchors, policy, retention = inputs
+        root = tmp_path / "archive"
 
-    staged = stage_reconstruction_publication(
-        root,
-        rendered,
-        immutable_source_anchors=anchors,
-        symbol_group_id="eurusd-triangle",
-        retention_plan=retention,
-        storage_policy=policy,
-    )
+        staged = stage_reconstruction_publication(
+            root,
+            rendered,
+            immutable_source_anchors=anchors,
+            symbol_group_id="eurusd-triangle",
+            retention_plan=retention,
+            storage_policy=policy,
+        )
 
-    assert staged.staging_directory.exists()
-    assert staged.manifest_ref.path == str(staged.manifest_path)
-    assert discover_reconstruction_manifests(root) == ()
+        assert staged.staging_directory.exists()
+        assert staged.manifest_ref.path == str(staged.manifest_path)
+        assert discover_reconstruction_manifests(root) == ()
 
-    committed = commit_reconstruction_publication(staged)
-    assert not committed.idempotent_retry
-    assert not staged.staging_directory.exists()
-    assert discover_reconstruction_manifests(root) == (committed.manifest_path,)
+        committed = commit_reconstruction_publication(staged)
+        assert not committed.idempotent_retry
+        assert not staged.staging_directory.exists()
+        assert discover_reconstruction_manifests(root) == (
+            committed.manifest_path,
+        )
 
-    retry = commit_reconstruction_publication(staged)
-    assert retry.idempotent_retry
-    assert retry.manifest == committed.manifest
-    assert retry.manifest_ref.sha256 == committed.manifest_ref.sha256
+        retry = commit_reconstruction_publication(staged)
+        assert retry.idempotent_retry
+        assert retry.manifest == committed.manifest
+        assert retry.manifest_ref.sha256 == committed.manifest_ref.sha256
 
-    publish_retry = publish_reconstruction_group(
-        root,
-        rendered,
-        immutable_source_anchors=anchors,
-        symbol_group_id="eurusd-triangle",
-        retention_plan=retention,
-        storage_policy=policy,
-    )
-    assert publish_retry.idempotent_retry
-    assert publish_retry.manifest == committed.manifest
+        publish_retry = publish_reconstruction_group(
+            root,
+            rendered,
+            immutable_source_anchors=anchors,
+            symbol_group_id="eurusd-triangle",
+            retention_plan=retention,
+            storage_policy=policy,
+        )
+        assert publish_retry.idempotent_retry
+        assert publish_retry.manifest == committed.manifest
 
 
 def test_generic_delivery_commit_recovers_after_atomic_rename(
@@ -267,6 +276,28 @@ def test_generic_delivery_commit_recovers_after_atomic_rename(
     assert recovered.manifest == committed.manifest
     assert read_reconstruction_streams(committed.manifest_path) == (
         delivered.streams
+    )
+
+    # Non-provider V2 retains deferred Parquet projection/predicate pushdown.
+    eurusd = next(s for s in delivered.streams if s.symbol == "eurusd")
+    start = eurusd.events[1].event_time_ns
+    end = eurusd.events[-1].event_time_ns + 1
+    lazy = scan_reconstruction_events_polars(
+        committed.manifest_path,
+        columns=("symbol", "event_time_ns", "bid"),
+        symbols=("eurusd",),
+        start_ns=start,
+        end_ns=end,
+    )
+    plan = lazy.explain(optimized=True)
+    frame = lazy.collect()
+    assert "Parquet SCAN" in plan
+    assert "PROJECT 3/26 COLUMNS" in plan
+    assert "SELECTION" in plan
+    assert frame.columns == ["symbol", "event_time_ns", "bid"]
+    assert frame["symbol"].unique().to_list() == ["eurusd"]
+    assert frame.height == sum(
+        start <= event.event_time_ns < end for event in eurusd.events
     )
 
 
@@ -489,25 +520,10 @@ def test_idempotent_publish_retry_revalidates_committed_partitions(
     tmp_path: Path,
 ) -> None:
     """A matching manifest cannot hide corrupt committed Parquet on retry."""
-    rendered, anchors, policy, retention = _publication_inputs(tmp_path)
-    root = tmp_path / "archive"
-    published = publish_reconstruction_group(
-        root,
-        rendered,
-        immutable_source_anchors=anchors,
-        symbol_group_id="eurusd-triangle",
-        retention_plan=retention,
-        storage_policy=policy,
-    )
-    partition = published.manifest.partitions[0]
-    partition_path = published.manifest_path.parent / partition.relative_path
-    partition_path.write_bytes(partition_path.read_bytes()[:32])
-
-    with pytest.raises(
-        ReconstructionPersistenceError,
-        match="byte size differs",
-    ):
-        publish_reconstruction_group(
+    with _publication_inputs_scope(tmp_path) as inputs:
+        rendered, anchors, policy, retention = inputs
+        root = tmp_path / "archive"
+        published = publish_reconstruction_group(
             root,
             rendered,
             immutable_source_anchors=anchors,
@@ -515,103 +531,126 @@ def test_idempotent_publish_retry_revalidates_committed_partitions(
             retention_plan=retention,
             storage_policy=policy,
         )
+        partition = published.manifest.partitions[0]
+        partition_path = (
+            published.manifest_path.parent / partition.relative_path
+        )
+        partition_path.write_bytes(partition_path.read_bytes()[:32])
+
+        with pytest.raises(
+            ReconstructionPersistenceError,
+            match="byte size differs",
+        ):
+            publish_reconstruction_group(
+                root,
+                rendered,
+                immutable_source_anchors=anchors,
+                symbol_group_id="eurusd-triangle",
+                retention_plan=retention,
+                storage_policy=policy,
+            )
 
 
 def test_manifest_refs_complete_the_checkpoint_two_phase_commit(
     tmp_path: Path,
 ) -> None:
     """Staged and promoted byte identities plug into the #432 state machine."""
-    rendered, anchors, policy, retention = _publication_inputs(tmp_path)
-    staged = stage_reconstruction_publication(
-        tmp_path / "archive",
-        rendered,
-        immutable_source_anchors=anchors,
-        symbol_group_id="eurusd-triangle",
-        retention_plan=retention,
-        storage_policy=policy,
-    )
-    checkpoint = ReconstructionCheckpointV1(
-        run_id=rendered.manifest.run_id,
-        window_id=rendered.manifest.window_id,
-        synchronization_unit_id=rendered.manifest.synchronization_unit_id,
-        revision=1,
-        phase=ReconstructionCommitPhase.RUNNING,
-    )
-    staged_checkpoint = checkpoint.transition(
-        ReconstructionCommitPhase.STAGED,
-        expected_checkpoint_id=checkpoint.checkpoint_id,
-        staged_manifest_ref=staged.manifest_ref,
-    )
-    validated_checkpoint = staged_checkpoint.transition(
-        ReconstructionCommitPhase.VALIDATED,
-        expected_checkpoint_id=staged_checkpoint.checkpoint_id,
-    )
+    with _publication_inputs_scope(tmp_path) as inputs:
+        rendered, anchors, policy, retention = inputs
+        staged = stage_reconstruction_publication(
+            tmp_path / "archive",
+            rendered,
+            immutable_source_anchors=anchors,
+            symbol_group_id="eurusd-triangle",
+            retention_plan=retention,
+            storage_policy=policy,
+        )
+        checkpoint = ReconstructionCheckpointV1(
+            run_id=rendered.manifest.run_id,
+            window_id=rendered.manifest.window_id,
+            synchronization_unit_id=rendered.manifest.synchronization_unit_id,
+            revision=1,
+            phase=ReconstructionCommitPhase.RUNNING,
+        )
+        staged_checkpoint = checkpoint.transition(
+            ReconstructionCommitPhase.STAGED,
+            expected_checkpoint_id=checkpoint.checkpoint_id,
+            staged_manifest_ref=staged.manifest_ref,
+        )
+        validated_checkpoint = staged_checkpoint.transition(
+            ReconstructionCommitPhase.VALIDATED,
+            expected_checkpoint_id=staged_checkpoint.checkpoint_id,
+        )
 
-    published = commit_reconstruction_publication(staged)
-    committed_checkpoint = validated_checkpoint.transition(
-        ReconstructionCommitPhase.COMMITTED,
-        expected_checkpoint_id=validated_checkpoint.checkpoint_id,
-        committed_manifest_ref=published.manifest_ref,
-    )
+        published = commit_reconstruction_publication(staged)
+        committed_checkpoint = validated_checkpoint.transition(
+            ReconstructionCommitPhase.COMMITTED,
+            expected_checkpoint_id=validated_checkpoint.checkpoint_id,
+            committed_manifest_ref=published.manifest_ref,
+        )
 
-    assert committed_checkpoint.advertised_manifest_ref == (
-        published.manifest_ref
-    )
-    assert committed_checkpoint.staged_manifest_ref is None
-    assert staged_checkpoint.advertised_manifest_ref is None
+        assert committed_checkpoint.advertised_manifest_ref == (
+            published.manifest_ref
+        )
+        assert committed_checkpoint.staged_manifest_ref is None
+        assert staged_checkpoint.advertised_manifest_ref is None
 
 
 def test_truncated_staging_fails_closed_before_publication(
     tmp_path: Path,
 ) -> None:
     """A damaged Parquet footer can never cross the commit boundary."""
-    rendered, anchors, policy, retention = _publication_inputs(tmp_path)
-    root = tmp_path / "archive"
-    staged = stage_reconstruction_publication(
-        root,
-        rendered,
-        immutable_source_anchors=anchors,
-        symbol_group_id="eurusd-triangle",
-        retention_plan=retention,
-        storage_policy=policy,
-    )
-    partition = staged.manifest.partitions[0]
-    partition_path = staged.staging_directory / partition.relative_path
-    partition_path.write_bytes(partition_path.read_bytes()[:32])
+    with _publication_inputs_scope(tmp_path) as inputs:
+        rendered, anchors, policy, retention = inputs
+        root = tmp_path / "archive"
+        staged = stage_reconstruction_publication(
+            root,
+            rendered,
+            immutable_source_anchors=anchors,
+            symbol_group_id="eurusd-triangle",
+            retention_plan=retention,
+            storage_policy=policy,
+        )
+        partition = staged.manifest.partitions[0]
+        partition_path = staged.staging_directory / partition.relative_path
+        partition_path.write_bytes(partition_path.read_bytes()[:32])
 
-    with pytest.raises(
-        ReconstructionPersistenceError,
-        match="byte size differs",
-    ):
-        commit_reconstruction_publication(staged)
+        with pytest.raises(
+            ReconstructionPersistenceError,
+            match="byte size differs",
+        ):
+            commit_reconstruction_publication(staged)
 
-    assert discover_reconstruction_manifests(root) == ()
-    assert cleanup_reconstruction_scratch(root) == (staged.staging_directory,)
-    assert not staged.staging_directory.exists()
+        assert discover_reconstruction_manifests(root) == ()
+        assert cleanup_reconstruction_scratch(root) == (
+            staged.staging_directory,
+        )
+        assert not staged.staging_directory.exists()
 
 
 def test_anchor_value_drift_refuses_even_when_observed_id_is_unchanged(
     tmp_path: Path,
 ) -> None:
     """Publication compares immutable values as well as stable source IDs."""
-    rendered, anchors, policy, retention = _publication_inputs(tmp_path)
-    first = anchors[0]
-    changed = replace(first, bid=first.bid + 0.0001)
+    with _publication_inputs_scope(tmp_path) as inputs:
+        rendered, anchors, policy, retention = inputs
+        first = anchors[0]
+        changed = replace(first, bid=first.bid + 0.0001)
 
-    with pytest.raises(
-        ReconstructionPersistenceError,
-        match="values or IDs differ",
-    ):
-        publish_reconstruction_group(
-            tmp_path / "archive",
-            rendered,
-            immutable_source_anchors=(changed, *anchors[1:]),
-            symbol_group_id="eurusd-triangle",
-            retention_plan=retention,
-            storage_policy=policy,
-        )
+        with pytest.raises(
+            ReconstructionPersistenceError,
+            match="values or IDs differ",
+        ):
+            publish_reconstruction_group(
+                tmp_path / "archive",
+                rendered,
+                immutable_source_anchors=(changed, *anchors[1:]),
+                symbol_group_id="eurusd-triangle",
+                retention_plan=retention,
+                storage_policy=policy,
+            )
 
-    assert discover_reconstruction_manifests(tmp_path / "archive") == ()
+        assert discover_reconstruction_manifests(tmp_path / "archive") == ()
 
 
 def test_retention_preflight_estimates_primary_and_all_retained_members() -> (
@@ -719,230 +758,247 @@ def test_cleanup_removes_only_transaction_scratch(
     tmp_path: Path,
 ) -> None:
     """Cleanup cannot touch committed products or immutable source evidence."""
-    rendered, anchors, policy, retention = _publication_inputs(tmp_path)
-    root = tmp_path / "archive"
-    committed = publish_reconstruction_group(
-        root,
-        rendered,
-        immutable_source_anchors=anchors,
-        symbol_group_id="eurusd-triangle",
-        retention_plan=retention,
-        storage_policy=policy,
-    )
-    staged = stage_reconstruction_publication(
-        root,
-        rendered,
-        immutable_source_anchors=anchors,
-        symbol_group_id="eurusd-triangle",
-        retention_plan=retention,
-        storage_policy=policy,
-    )
-    source = root / "immutable-source.data"
-    source.write_text("evidence", encoding="utf-8")
-    unrelated = staged.staging_directory.parent / "operator-note.txt"
-    unrelated.write_text("keep", encoding="utf-8")
+    with _publication_inputs_scope(tmp_path) as inputs:
+        rendered, anchors, policy, retention = inputs
+        root = tmp_path / "archive"
+        committed = publish_reconstruction_group(
+            root,
+            rendered,
+            immutable_source_anchors=anchors,
+            symbol_group_id="eurusd-triangle",
+            retention_plan=retention,
+            storage_policy=policy,
+        )
+        staged = stage_reconstruction_publication(
+            root,
+            rendered,
+            immutable_source_anchors=anchors,
+            symbol_group_id="eurusd-triangle",
+            retention_plan=retention,
+            storage_policy=policy,
+        )
+        source = root / "immutable-source.data"
+        source.write_text("evidence", encoding="utf-8")
+        unrelated = staged.staging_directory.parent / "operator-note.txt"
+        unrelated.write_text("keep", encoding="utf-8")
 
-    removed = cleanup_reconstruction_scratch(root)
+        removed = cleanup_reconstruction_scratch(root)
 
-    assert removed == (staged.staging_directory,)
-    assert committed.manifest_path.exists()
-    assert source.read_text(encoding="utf-8") == "evidence"
-    assert unrelated.read_text(encoding="utf-8") == "keep"
-    assert discover_reconstruction_manifests(root) == (committed.manifest_path,)
+        assert removed == (staged.staging_directory,)
+        assert committed.manifest_path.exists()
+        assert source.read_text(encoding="utf-8") == "evidence"
+        assert unrelated.read_text(encoding="utf-8") == "keep"
+        assert discover_reconstruction_manifests(root) == (
+            committed.manifest_path,
+        )
 
 
 def test_arrow_and_polars_scans_prune_files_columns_and_rows(
     tmp_path: Path,
 ) -> None:
     """Manifest pruning and lazy readers avoid unrelated product columns."""
-    rendered, anchors, policy, retention = _publication_inputs(tmp_path)
-    published = publish_reconstruction_group(
-        tmp_path / "archive",
-        rendered,
-        immutable_source_anchors=anchors,
-        symbol_group_id="eurusd-triangle",
-        retention_plan=retention,
-        storage_policy=policy,
-    )
-    eurusd = next(
-        stream for stream in rendered.streams if stream.symbol == "eurusd"
-    )
-    start = eurusd.events[0].event_time_ns
-    end = eurusd.events[-1].event_time_ns + 1
-    paths = reconstruction_parquet_paths(
-        published.manifest_path,
-        symbols=("eurusd",),
-        start_ns=start,
-        end_ns=end,
-    )
+    with _publication_inputs_scope(tmp_path) as inputs:
+        rendered, anchors, policy, retention = inputs
+        published = publish_reconstruction_group(
+            tmp_path / "archive",
+            rendered,
+            immutable_source_anchors=anchors,
+            symbol_group_id="eurusd-triangle",
+            retention_plan=retention,
+            storage_policy=policy,
+        )
+        eurusd = next(
+            stream for stream in rendered.streams if stream.symbol == "eurusd"
+        )
+        start = eurusd.events[0].event_time_ns
+        end = eurusd.events[-1].event_time_ns + 1
+        paths = reconstruction_parquet_paths(
+            published.manifest_path,
+            symbols=("eurusd",),
+            start_ns=start,
+            end_ns=end,
+        )
 
-    assert paths
-    assert all("symbol=eurusd" in str(path) for path in paths)
-    assert all("symbol=gbpusd" not in str(path) for path in paths)
-    batches = tuple(
-        iter_reconstruction_event_batches(
+        assert paths
+        assert all("symbol=eurusd" in str(path) for path in paths)
+        assert all("symbol=gbpusd" not in str(path) for path in paths)
+        batches = tuple(
+            iter_reconstruction_event_batches(
+                published.manifest_path,
+                columns=("symbol", "event_time_ns", "bid"),
+                symbols=("eurusd",),
+                start_ns=start,
+                end_ns=end,
+                batch_size=1,
+            )
+        )
+        assert batches
+        assert all(
+            batch.schema.names == ["symbol", "event_time_ns", "bid"]
+            for batch in batches
+        )
+        lazy = scan_reconstruction_events_polars(
             published.manifest_path,
             columns=("symbol", "event_time_ns", "bid"),
             symbols=("eurusd",),
             start_ns=start,
             end_ns=end,
-            batch_size=1,
         )
-    )
-    assert batches
-    assert all(
-        batch.schema.names == ["symbol", "event_time_ns", "bid"]
-        for batch in batches
-    )
-    lazy = scan_reconstruction_events_polars(
-        published.manifest_path,
-        columns=("symbol", "event_time_ns", "bid"),
-        symbols=("eurusd",),
-        start_ns=start,
-        end_ns=end,
-    )
-    plan = lazy.explain(optimized=True)
-    frame = lazy.collect()
-    assert frame.columns == ["symbol", "event_time_ns", "bid"]
-    assert frame["symbol"].unique().to_list() == ["eurusd"]
-    assert frame.height == len(eurusd.events)
-    assert "PROJECT 3/26 COLUMNS" in plan
-    assert "SELECTION" in plan
+        plan = lazy.explain(optimized=True)
+        frame = lazy.collect()
+        assert frame.columns == ["symbol", "event_time_ns", "bid"]
+        assert frame["symbol"].unique().to_list() == ["eurusd"]
+        assert frame.height == len(eurusd.events)
+        # V3 runtime policy tightening: no deferred provider disk access may
+        # escape this scope. Projection/filtering were applied by guarded IO;
+        # the returned lazy frame now holds only those admitted values.
+        assert plan.startswith("DF ")
+        assert "Parquet SCAN" not in plan
 
 
 def test_duckdb_smoke_proves_parquet_projection_and_filter_pushdown(
     tmp_path: Path,
 ) -> None:
     """DuckDB reads the committed paths with projected columns and filters."""
-    rendered, anchors, policy, retention = _publication_inputs(tmp_path)
-    published = publish_reconstruction_group(
-        tmp_path / "archive",
-        rendered,
-        immutable_source_anchors=anchors,
-        symbol_group_id="eurusd-triangle",
-        retention_plan=retention,
-        storage_policy=policy,
-    )
-    eurusd = next(
-        stream for stream in rendered.streams if stream.symbol == "eurusd"
-    )
-    start = eurusd.events[1].event_time_ns
-    end = eurusd.events[-1].event_time_ns + 1
-    paths = reconstruction_parquet_paths(
-        published.manifest_path,
-        symbols=("eurusd",),
-        start_ns=start,
-        end_ns=end,
-    )
-    literals = ",".join(
-        "'" + str(path).replace("'", "''") + "'" for path in paths
-    )
-    query = (
-        "SELECT symbol, event_time_ns, bid "
-        f"FROM read_parquet([{literals}]) "
-        f"WHERE event_time_ns >= {start} AND event_time_ns < {end}"
-    )
+    with _publication_inputs_scope(tmp_path) as inputs:
+        rendered, anchors, policy, retention = inputs
+        published = publish_reconstruction_group(
+            tmp_path / "archive",
+            rendered,
+            immutable_source_anchors=anchors,
+            symbol_group_id="eurusd-triangle",
+            retention_plan=retention,
+            storage_policy=policy,
+        )
+        eurusd = next(
+            stream for stream in rendered.streams if stream.symbol == "eurusd"
+        )
+        start = eurusd.events[1].event_time_ns
+        end = eurusd.events[-1].event_time_ns + 1
+        paths = reconstruction_parquet_paths(
+            published.manifest_path,
+            symbols=("eurusd",),
+            start_ns=start,
+            end_ns=end,
+        )
+        literals = ",".join(
+            "'" + str(path).replace("'", "''") + "'" for path in paths
+        )
+        query = (
+            "SELECT symbol, event_time_ns, bid "
+            f"FROM read_parquet([{literals}]) "
+            f"WHERE event_time_ns >= {start} AND event_time_ns < {end}"
+        )
 
-    connection = duckdb.connect()
-    try:
-        plan_rows = connection.execute("EXPLAIN " + query).fetchall()
-        rows = connection.execute(query).fetchall()
-    finally:
-        connection.close()
-    plan = "\n".join(str(value) for row in plan_rows for value in row)
+        connection = duckdb.connect()
+        try:
+            plan_rows = connection.execute("EXPLAIN " + query).fetchall()
+            rows = connection.execute(query).fetchall()
+        finally:
+            connection.close()
+        plan = "\n".join(str(value) for row in plan_rows for value in row)
 
-    expected_rows = sum(event.event_time_ns >= start for event in eurusd.events)
-    assert len(rows) == expected_rows
-    assert {row[0] for row in rows} == {"eurusd"}
-    assert "Projections:" in plan
-    assert "symbol" in plan and "event_time_ns" in plan and "bid" in plan
-    assert "Filters:" in plan
+        expected_rows = sum(
+            event.event_time_ns >= start for event in eurusd.events
+        )
+        assert len(rows) == expected_rows
+        assert {row[0] for row in rows} == {"eurusd"}
+        assert "Projections:" in plan
+        assert "symbol" in plan and "event_time_ns" in plan and "bid" in plan
+        assert "Filters:" in plan
 
 
 def test_same_writer_runtime_produces_stable_partition_byte_hashes(
     tmp_path: Path,
 ) -> None:
     """Physical hashes are stable across roots under the pinned writer."""
-    rendered, anchors, policy, retention = _publication_inputs(tmp_path)
-    first = publish_reconstruction_group(
-        tmp_path / "archive-a",
-        rendered,
-        immutable_source_anchors=anchors,
-        symbol_group_id="eurusd-triangle",
-        retention_plan=retention,
-        storage_policy=policy,
-        row_group_size=2,
-    )
-    second = publish_reconstruction_group(
-        tmp_path / "archive-b",
-        rendered,
-        immutable_source_anchors=anchors,
-        symbol_group_id="eurusd-triangle",
-        retention_plan=retention,
-        storage_policy=policy,
-        row_group_size=2,
-    )
+    with _publication_inputs_scope(tmp_path) as inputs:
+        rendered, anchors, policy, retention = inputs
+        first = publish_reconstruction_group(
+            tmp_path / "archive-a",
+            rendered,
+            immutable_source_anchors=anchors,
+            symbol_group_id="eurusd-triangle",
+            retention_plan=retention,
+            storage_policy=policy,
+            row_group_size=2,
+        )
+        second = publish_reconstruction_group(
+            tmp_path / "archive-b",
+            rendered,
+            immutable_source_anchors=anchors,
+            symbol_group_id="eurusd-triangle",
+            retention_plan=retention,
+            storage_policy=policy,
+            row_group_size=2,
+        )
 
-    assert first.manifest.publication_id == second.manifest.publication_id
-    assert first.manifest.manifest_id == second.manifest.manifest_id
-    assert first.manifest.replay.partition_byte_sha256 == (
-        second.manifest.replay.partition_byte_sha256
-    )
-    assert [item.byte_sha256 for item in first.manifest.partitions] == [
-        item.byte_sha256 for item in second.manifest.partitions
-    ]
+        assert first.manifest.publication_id == second.manifest.publication_id
+        assert first.manifest.manifest_id == second.manifest.manifest_id
+        assert first.manifest.replay.partition_byte_sha256 == (
+            second.manifest.replay.partition_byte_sha256
+        )
+        assert [item.byte_sha256 for item in first.manifest.partitions] == [
+            item.byte_sha256 for item in second.manifest.partitions
+        ]
 
 
 def test_manifest_tampering_fails_closed(
     tmp_path: Path,
 ) -> None:
     """Derived counts and deterministic manifest identity reject mutation."""
-    rendered, anchors, policy, retention = _publication_inputs(tmp_path)
-    published = publish_reconstruction_group(
-        tmp_path / "archive",
-        rendered,
-        immutable_source_anchors=anchors,
-        symbol_group_id="eurusd-triangle",
-        retention_plan=retention,
-        storage_policy=policy,
-    )
-    payload = json.loads(published.manifest_path.read_text(encoding="utf-8"))
-    payload["event_count"] += 1
-    published.manifest_path.write_text(json.dumps(payload), encoding="utf-8")
+    with _publication_inputs_scope(tmp_path) as inputs:
+        rendered, anchors, policy, retention = inputs
+        published = publish_reconstruction_group(
+            tmp_path / "archive",
+            rendered,
+            immutable_source_anchors=anchors,
+            symbol_group_id="eurusd-triangle",
+            retention_plan=retention,
+            storage_policy=policy,
+        )
+        payload = json.loads(
+            published.manifest_path.read_text(encoding="utf-8")
+        )
+        payload["event_count"] += 1
+        published.manifest_path.write_text(
+            json.dumps(payload), encoding="utf-8"
+        )
 
-    with pytest.raises(ValueError, match="event_count"):
-        verify_reconstruction_publication(published.manifest_path)
+        with pytest.raises(ValueError, match="event_count"):
+            verify_reconstruction_publication(published.manifest_path)
 
 
 def test_discovery_filters_member_run_broker_and_group_axes(
     tmp_path: Path,
 ) -> None:
     """Committed lookup uses manifest axes without scanning unrelated rows."""
-    rendered, anchors, policy, retention = _publication_inputs(tmp_path)
-    root = tmp_path / "archive"
-    published = publish_reconstruction_group(
-        root,
-        rendered,
-        immutable_source_anchors=anchors,
-        symbol_group_id="eurusd-triangle",
-        retention_plan=retention,
-        storage_policy=policy,
-    )
-
-    assert discover_reconstruction_manifests(
-        root,
-        run_id=rendered.manifest.run_id,
-        broker_profile_id=rendered.manifest.fingerprint_id,
-        ensemble_member_id=rendered.manifest.ensemble_member_id,
-        symbol_group_id="eurusd-triangle",
-    ) == (published.manifest_path,)
-    assert (
-        discover_reconstruction_manifests(
-            root, ensemble_member_id="other-member"
+    with _publication_inputs_scope(tmp_path) as inputs:
+        rendered, anchors, policy, retention = inputs
+        root = tmp_path / "archive"
+        published = publish_reconstruction_group(
+            root,
+            rendered,
+            immutable_source_anchors=anchors,
+            symbol_group_id="eurusd-triangle",
+            retention_plan=retention,
+            storage_policy=policy,
         )
-        == ()
-    )
-    assert RECONSTRUCTION_PRODUCT_DIRECTORY in str(published.manifest_path)
+
+        assert discover_reconstruction_manifests(
+            root,
+            run_id=rendered.manifest.run_id,
+            broker_profile_id=rendered.manifest.fingerprint_id,
+            ensemble_member_id=rendered.manifest.ensemble_member_id,
+            symbol_group_id="eurusd-triangle",
+        ) == (published.manifest_path,)
+        assert (
+            discover_reconstruction_manifests(
+                root, ensemble_member_id="other-member"
+            )
+            == ()
+        )
+        assert RECONSTRUCTION_PRODUCT_DIRECTORY in str(published.manifest_path)
 
 
 def _write_anchor_source_artifacts(
@@ -1004,28 +1060,48 @@ def _write_anchor_source_artifacts(
 
 
 def _publication_inputs(tmp_path: Path):
+    """Preserve the legacy four-item setup result without leaking a scope."""
+    return _publication_inputs_with_parent(tmp_path)[:4]
+
+
+@contextmanager
+def _publication_inputs_scope(tmp_path: Path):
+    """Yield native broker setup within explicitly declared parent admission."""
+    rendered, anchors, policy, retention, fingerprint = (
+        _publication_inputs_with_parent(tmp_path)
+    )
+    with (
+        generated_provider_scope(fingerprint),
+        provider_native_inputs(fingerprint),
+    ):
+        yield rendered, anchors, policy, retention
+
+
+def _publication_inputs_with_parent(tmp_path: Path):
     run, window, group, constraints = _group_with_constraints()
     capture = _capture(
         tmp_path / "broker-capture",
         seed=446,
         wall_start_ns=BASE_WALL_NS,
     )
-    fingerprint = fit_broker_delivery_fingerprint(
-        tmp_path / "broker-capture", (capture,)
-    )
-    rendered = render_broker_delivery(
-        run=run,
-        window=window,
-        group=group,
-        fingerprint=fingerprint,
-        constraints=constraints,
-        selected_at_utc_ns=fingerprint.effective_start_utc_ns,
-        config=BrokerTransferConfigV1(
-            strength=0.25,
-            max_events_per_group=100,
-        ),
-        quality_period="202001",
-    )
+    fingerprint = _fit_generated_capture(tmp_path / "broker-capture", capture)
+    with (
+        generated_provider_scope(fingerprint),
+        provider_native_inputs(fingerprint),
+    ):
+        rendered = render_broker_delivery(
+            run=run,
+            window=window,
+            group=group,
+            fingerprint=fingerprint,
+            constraints=constraints,
+            selected_at_utc_ns=fingerprint.effective_start_utc_ns,
+            config=BrokerTransferConfigV1(
+                strength=0.25,
+                max_events_per_group=100,
+            ),
+            quality_period="202001",
+        )
     anchors = tuple(
         event
         for stream in group.streams
@@ -1043,7 +1119,7 @@ def _publication_inputs(tmp_path: Path):
         estimated_partition_count=len(rendered.streams),
         storage_policy=policy,
     )
-    return rendered, anchors, policy, retention
+    return rendered, anchors, policy, retention, fingerprint
 
 
 def test_polars_dependency_is_the_supported_runtime() -> None:

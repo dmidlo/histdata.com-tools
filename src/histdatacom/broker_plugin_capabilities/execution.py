@@ -8,7 +8,11 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterator, Mapping
 import threading
-from typing import TypeVar
+from typing import TYPE_CHECKING, TypeVar
+
+if TYPE_CHECKING:
+    from histdatacom.broker_plugin_policy.bindings import BrokerSDKInvocationV1
+    from histdatacom.broker_plugins import BrokerPluginMetadataV1
 
 from histdatacom.broker_plugin_registry import BrokerPluginInventoryV1
 from histdatacom.broker_plugins import (
@@ -70,6 +74,52 @@ def _authorize(
         ) from None
 
 
+def _provider_request(
+    plan: BrokerCapabilityPlanV1, request: BrokerSDKInvocationV1
+) -> BrokerSDKInvocationV1:
+    from histdatacom.broker_plugin_policy.bindings import BrokerSDKInvocationV1
+    from histdatacom.broker_plugin_policy.scope import BrokerPolicyError
+
+    if (
+        type(request) is not BrokerSDKInvocationV1
+        or type(plan) is not BrokerCapabilityPlanV1
+    ):
+        raise BrokerPolicyError("exact_provider_invocation_required")
+    restored = BrokerSDKInvocationV1.from_json(request.to_json())
+    if restored.plan.to_json() != plan.to_json():
+        raise BrokerPolicyError("provider_invocation_plan_mismatch")
+    return restored
+
+
+def _provider_call(request: BrokerSDKInvocationV1, *, capture: bool) -> None:
+    from histdatacom.broker_plugin_policy.contracts import BrokerPolicyOperation
+    from histdatacom.broker_plugin_policy.scope import (
+        require_provider_operation,
+    )
+
+    if not capture:
+        require_provider_operation(request, BrokerPolicyOperation.INVOKE)
+    require_provider_operation(request, BrokerPolicyOperation.CAPTURE)
+
+
+def _provider_record(
+    request: BrokerSDKInvocationV1,
+    record: object,
+    session: BrokerSessionV1 | None = None,
+    metadata: BrokerPluginMetadataV1 | None = None,
+) -> None:
+    from histdatacom.broker_plugin_policy.bindings import BrokerSDKRecordV1
+    from histdatacom.broker_plugin_policy.contracts import BrokerPolicyOperation
+    from histdatacom.broker_plugin_policy.scope import (
+        require_provider_operation,
+    )
+
+    require_provider_operation(
+        BrokerSDKRecordV1(request, record, session, metadata),
+        BrokerPolicyOperation.CAPTURE,
+    )
+
+
 class GatedBrokerPluginV1:
     """One authorized, single-threaded invocation, not a permission authority.
 
@@ -81,6 +131,7 @@ class GatedBrokerPluginV1:
     __slots__ = (
         "_plugin",
         "_plan",
+        "_provider_request",
         "_thread",
         "_metadata",
         "_binding",
@@ -100,6 +151,7 @@ class GatedBrokerPluginV1:
         plan: BrokerCapabilityPlanV1,
         *,
         association: BrokerInvocationAssociation,
+        provider_request: BrokerSDKInvocationV1,
         module_sha256: str | None = None,
         _key: object = None,
     ) -> None:
@@ -109,10 +161,13 @@ class GatedBrokerPluginV1:
             )
         self._plugin = plugin
         self._plan = plan
+        self._provider_request = _provider_request(plan, provider_request)
         self._thread = threading.get_ident()
+        _provider_call(self._provider_request, capture=False)
         self._metadata = validate_broker_metadata(
             plan, _call(lambda: plugin.metadata)
         )
+        _provider_record(self._provider_request, self._metadata)
         self._binding = BrokerInvocationBindingV1(
             plan.artifact_id,
             plan.candidate.artifact_id,
@@ -135,12 +190,22 @@ class GatedBrokerPluginV1:
 
     @property
     def binding(self) -> BrokerInvocationBindingV1:
+        _provider_record(
+            self._provider_request,
+            self._binding,
+            metadata=self._metadata.metadata,
+        )
         return self._binding
 
     def _guard(self, operation: str) -> None:
         if threading.get_ident() != self._thread:
             raise BrokerCapabilityError(BrokerCapabilityReason.INVALID_STATE)
         _operation(self.plan, operation)
+        # Releasing an already owned session remains possible after expiry.
+        # No new subscription, provider pull, or retained output is authorized
+        # by this cleanup exception.
+        if operation not in ("unsubscribe", "close_session"):
+            _provider_call(self._provider_request, capture=False)
 
     def _active(self, operation: str) -> BrokerSessionV1:
         self._guard(operation)
@@ -154,15 +219,19 @@ class GatedBrokerPluginV1:
         return self._metadata
 
     def _schema(self) -> BrokerConfigurationSchemaV1:
+        _provider_call(self._provider_request, capture=False)
         value = _call(lambda: self._plugin.configuration_schema)
         try:
             if type(value) is not BrokerConfigurationSchemaV1:
                 raise ValueError
-            return BrokerConfigurationSchemaV1.from_json(value.to_json())
+            restored = BrokerConfigurationSchemaV1.from_json(value.to_json())
+            self._provider_request.configuration_profile.verify_schema(restored)
         except Exception:
             raise BrokerCapabilityError(
                 BrokerCapabilityReason.CAPABILITY_VIOLATION
             ) from None
+        _provider_record(self._provider_request, restored)
+        return restored
 
     @property
     def configuration_schema(self) -> BrokerConfigurationSchemaV1:
@@ -172,6 +241,8 @@ class GatedBrokerPluginV1:
     def open_session(
         self, configuration: Mapping[str, object]
     ) -> BrokerSessionV1:
+        from histdatacom.broker_plugin_policy.scope import BrokerPolicyError
+
         self._guard("open_session")
         if self._session is not None or self._closed:
             raise BrokerCapabilityError(BrokerCapabilityReason.INVALID_STATE)
@@ -183,12 +254,16 @@ class GatedBrokerPluginV1:
                 raise ValueError
             ephemeral = dict(configuration)
             self._schema().validate_configuration(ephemeral)
-        except BrokerCapabilityError:
+            self._provider_request.configuration_profile.verify_configuration(
+                ephemeral
+            )
+        except (BrokerCapabilityError, BrokerPolicyError):
             raise
         except Exception:
             raise BrokerCapabilityError(
                 BrokerCapabilityReason.CAPABILITY_VIOLATION
             ) from None
+        _provider_call(self._provider_request, capture=False)
         session = _call(lambda: self._plugin.open_session(ephemeral))
         try:
             if type(session) is not BrokerSessionV1:
@@ -205,7 +280,22 @@ class GatedBrokerPluginV1:
             raise BrokerCapabilityError(
                 BrokerCapabilityReason.RUNTIME_IDENTITY
             ) from None
+        # Keep the session available for cleanup even if its returned metadata
+        # is refused by the fresh post-call classification/rights check.
         self._session = restored
+        try:
+            _provider_record(
+                self._provider_request,
+                restored,
+                restored,
+                self._metadata.metadata,
+            )
+        except BaseException:
+            try:
+                self.close_session()
+            except BaseException:
+                pass
+            raise
         return restored
 
     def instruments(self) -> tuple[BrokerAdmittedInstrumentV1, ...]:
@@ -216,6 +306,10 @@ class GatedBrokerPluginV1:
         admitted = tuple(
             validate_broker_instrument(self.plan, item) for item in values
         )
+        for item in admitted:
+            _provider_record(
+                self._provider_request, item, session, self._metadata.metadata
+            )
         raw = tuple(item.instrument for item in admitted)
         try:
             if raw:
@@ -300,6 +394,7 @@ class GatedBrokerPluginV1:
         self._streaming = True
         events: Iterator[BrokerEventV1] | None = None
         try:
+            _provider_call(self._provider_request, capture=True)
             events = _call(lambda: iter(self._plugin.iter_events(session)))
             validated = validate_broker_event_stream(
                 events, session, starting_sequence=self._next_sequence
@@ -309,6 +404,7 @@ class GatedBrokerPluginV1:
                     raise BrokerCapabilityError(
                         BrokerCapabilityReason.INVALID_STATE
                     )
+                _provider_call(self._provider_request, capture=True)
                 try:
                     event = next(validated)
                 except StopIteration:
@@ -318,6 +414,12 @@ class GatedBrokerPluginV1:
                         BrokerCapabilityReason.CAPABILITY_VIOLATION
                     ) from None
                 admitted = validate_broker_capability_event(self.plan, event)
+                _provider_record(
+                    self._provider_request,
+                    admitted,
+                    session,
+                    self._metadata.metadata,
+                )
                 if event.instrument is not None and (
                     self._instruments is None
                     or event.instrument
@@ -385,13 +487,18 @@ def invoke_authorized_broker_factory(
     *,
     authorize: Callable[[BrokerCapabilityPlanV1], bool],
     factory: Callable[[], BrokerPluginV1],
+    provider_request: BrokerSDKInvocationV1,
 ) -> GatedBrokerPluginV1:
     """Explicit caller-owned factory; does NOT verify installed association."""
+    request = _provider_request(plan, provider_request)
+    _provider_call(request, capture=False)
     _authorize(inventory, plan, authorize)
+    _provider_call(request, capture=False)
     plugin = _call(factory)
     return GatedBrokerPluginV1(
         plugin,
         plan,
         association=BrokerInvocationAssociation.CALLER_FACTORY,
+        provider_request=request,
         _key=_CONSTRUCTION_KEY,
     )

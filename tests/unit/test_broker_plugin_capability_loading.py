@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import ExitStack
 from dataclasses import replace
 import hashlib
 from importlib import metadata
@@ -24,6 +25,11 @@ from histdatacom.broker_plugin_capabilities import (
     negotiate_broker_capabilities,
 )
 from histdatacom.broker_plugin_registry import discover_broker_plugins
+
+from tests.fixtures.broker_provider_policy import (
+    generated_provider_scope,
+    generated_sdk_request,
+)
 
 ROOT = Path(__file__).resolve().parents[2]
 WHEEL = runpy.run_path(str(ROOT / "tests/fixtures/broker_capability_wheel.py"))
@@ -56,7 +62,16 @@ def _clear_fixture_modules():
             del sys.modules[name]
 
 
-def _installed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+@pytest.fixture
+def declared_installed_policy():
+    """Explicit per-test lifetime for exact discovered generated declarations."""
+    with ExitStack() as stack:
+        yield stack
+
+
+def _installed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, declarations: ExitStack
+):
     wheel = WHEEL["build_capability_wheel"](tmp_path / "wheels")
     site = (tmp_path / "site").resolve()
     with ZipFile(wheel) as archive:
@@ -72,16 +87,28 @@ def _installed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         BrokerCapabilityWorkflowV1(OPERATIONS),
         plugin_id="org.example.capabilities",
     )
+    declarations.enter_context(
+        generated_provider_scope(generated_sdk_request(plan))
+    )
     return site, inventory, plan
 
 
 def test_real_entrypoint_invocation_checks_identity_and_all_sdk_operations(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    declared_installed_policy: ExitStack,
 ) -> None:
-    site, inventory, plan = _installed(tmp_path, monkeypatch)
+    site, inventory, plan = _installed(
+        tmp_path,
+        monkeypatch,
+        declared_installed_policy,
+    )
     assert "capability_fixture" not in sys.modules
     invocation = invoke_authorized_installed_broker_plugin(
-        inventory, plan, authorize=lambda _: True
+        inventory,
+        plan,
+        authorize=lambda _: True,
+        provider_request=generated_sdk_request(plan),
     )
     assert (
         invocation.binding.association
@@ -121,15 +148,25 @@ def test_real_entrypoint_invocation_checks_identity_and_all_sdk_operations(
         BrokerCapabilityError, match="runtime_identity_mismatch"
     ):
         invoke_authorized_installed_broker_plugin(
-            inventory, plan, authorize=lambda _: True
+            inventory,
+            plan,
+            authorize=lambda _: True,
+            provider_request=generated_sdk_request(plan),
         )
 
 
 @pytest.mark.parametrize("refusal", ["unauthorized", "missing", "dependency"])
 def test_preflight_refusals_make_zero_imports(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, refusal: str
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    refusal: str,
+    declared_installed_policy: ExitStack,
 ) -> None:
-    _, inventory, plan = _installed(tmp_path, monkeypatch)
+    _, inventory, plan = _installed(
+        tmp_path,
+        monkeypatch,
+        declared_installed_policy,
+    )
     if refusal == "missing":
         plan = negotiate_broker_capabilities(
             inventory,
@@ -144,7 +181,10 @@ def test_preflight_refusals_make_zero_imports(
         )
     with pytest.raises(BrokerCapabilityError):
         invoke_authorized_installed_broker_plugin(
-            inventory, plan, authorize=lambda _: refusal != "unauthorized"
+            inventory,
+            plan,
+            authorize=lambda _: refusal != "unauthorized",
+            provider_request=generated_sdk_request(plan),
         )
     assert not any(
         name.startswith("capability_fixture") for name in sys.modules
@@ -153,9 +193,16 @@ def test_preflight_refusals_make_zero_imports(
 
 @pytest.mark.parametrize("change", ["module", "descriptor", "removed"])
 def test_fresh_bytes_and_descriptor_revalidation_refuse_stale_plan(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change: str
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    change: str,
+    declared_installed_policy: ExitStack,
 ) -> None:
-    site, inventory, plan = _installed(tmp_path, monkeypatch)
+    site, inventory, plan = _installed(
+        tmp_path,
+        monkeypatch,
+        declared_installed_policy,
+    )
     target = site / "capability_fixture/plugin.py"
     if change == "descriptor":
         target = (
@@ -172,15 +219,24 @@ def test_fresh_bytes_and_descriptor_revalidation_refuse_stale_plan(
         assert target.stat().st_size == before.st_size
     with pytest.raises(BrokerCapabilityError):
         invoke_authorized_installed_broker_plugin(
-            inventory, plan, authorize=lambda _: True
+            inventory,
+            plan,
+            authorize=lambda _: True,
+            provider_request=generated_sdk_request(plan),
         )
     assert "capability_fixture" not in sys.modules
 
 
 def test_shadow_parent_package_is_refused_before_canary_executes(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    declared_installed_policy: ExitStack,
 ) -> None:
-    _, inventory, plan = _installed(tmp_path, monkeypatch)
+    _, inventory, plan = _installed(
+        tmp_path,
+        monkeypatch,
+        declared_installed_policy,
+    )
     shadow = tmp_path / "shadow"
     (shadow / "capability_fixture").mkdir(parents=True)
     (shadow / "capability_fixture/__init__.py").write_text(
@@ -191,7 +247,10 @@ def test_shadow_parent_package_is_refused_before_canary_executes(
         BrokerCapabilityError, match="runtime_identity_mismatch"
     ):
         invoke_authorized_installed_broker_plugin(
-            inventory, plan, authorize=lambda _: True
+            inventory,
+            plan,
+            authorize=lambda _: True,
+            provider_request=generated_sdk_request(plan),
         )
     assert "capability_fixture" not in sys.modules
 
@@ -200,9 +259,16 @@ def test_shadow_parent_package_is_refused_before_canary_executes(
     "name", ["capability_fixture", "capability_fixture.plugin"]
 )
 def test_already_loaded_foreign_origin_is_refused_before_parent_import(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    name: str,
+    declared_installed_policy: ExitStack,
 ) -> None:
-    _, inventory, plan = _installed(tmp_path, monkeypatch)
+    _, inventory, plan = _installed(
+        tmp_path,
+        monkeypatch,
+        declared_installed_policy,
+    )
     module = ModuleType(name)
     module.__file__ = "/unrelated/foreign.py"
     monkeypatch.setitem(sys.modules, name, module)
@@ -210,15 +276,24 @@ def test_already_loaded_foreign_origin_is_refused_before_parent_import(
         BrokerCapabilityError, match="runtime_identity_mismatch"
     ):
         invoke_authorized_installed_broker_plugin(
-            inventory, plan, authorize=lambda _: True
+            inventory,
+            plan,
+            authorize=lambda _: True,
+            provider_request=generated_sdk_request(plan),
         )
     assert sys.modules[name] is module
 
 
 def test_verified_source_not_stale_same_size_mtime_bytecode_executes(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    declared_installed_policy: ExitStack,
 ) -> None:
-    site, inventory, plan = _installed(tmp_path, monkeypatch)
+    site, inventory, plan = _installed(
+        tmp_path,
+        monkeypatch,
+        declared_installed_policy,
+    )
     target = site / "capability_fixture/plugin.py"
     data = target.read_bytes()
     info = target.stat()
@@ -233,35 +308,56 @@ def test_verified_source_not_stale_same_size_mtime_bytecode_executes(
     target.write_bytes(data)
     os.utime(target, ns=(info.st_atime_ns, info.st_mtime_ns))
     invocation = invoke_authorized_installed_broker_plugin(
-        inventory, plan, authorize=lambda _: True
+        inventory,
+        plan,
+        authorize=lambda _: True,
+        provider_request=generated_sdk_request(plan),
     )
     assert invocation.metadata.metadata.plugin_id == "org.example.capabilities"
     assert "PYC_CANARY" not in json.dumps(invocation.binding.to_dict())
 
 
 def test_nonregular_module_refuses_without_blocking(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    declared_installed_policy: ExitStack,
 ) -> None:
-    site, inventory, plan = _installed(tmp_path, monkeypatch)
+    site, inventory, plan = _installed(
+        tmp_path,
+        monkeypatch,
+        declared_installed_policy,
+    )
     target = site / "capability_fixture/plugin.py"
     target.unlink()
     os.mkfifo(target)
     with pytest.raises(BrokerCapabilityError):
         invoke_authorized_installed_broker_plugin(
-            inventory, plan, authorize=lambda _: True
+            inventory,
+            plan,
+            authorize=lambda _: True,
+            provider_request=generated_sdk_request(plan),
         )
     assert "capability_fixture" not in sys.modules
 
 
 def test_equivalent_site_path_alias_is_not_a_shadow_package(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    declared_installed_policy: ExitStack,
 ) -> None:
-    site, inventory, plan = _installed(tmp_path, monkeypatch)
+    site, inventory, plan = _installed(
+        tmp_path,
+        monkeypatch,
+        declared_installed_policy,
+    )
     alias = tmp_path / "site-alias"
     alias.symlink_to(site, target_is_directory=True)
     monkeypatch.syspath_prepend(str(alias))
     invocation = invoke_authorized_installed_broker_plugin(
-        inventory, plan, authorize=lambda _: True
+        inventory,
+        plan,
+        authorize=lambda _: True,
+        provider_request=generated_sdk_request(plan),
     )
     assert (
         invocation.binding.association
@@ -270,17 +366,26 @@ def test_equivalent_site_path_alias_is_not_a_shadow_package(
 
 
 def test_correct_preloaded_parent_alias_is_permitted(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    declared_installed_policy: ExitStack,
 ) -> None:
     import importlib
 
-    site, inventory, plan = _installed(tmp_path, monkeypatch)
+    site, inventory, plan = _installed(
+        tmp_path,
+        monkeypatch,
+        declared_installed_policy,
+    )
     alias = tmp_path / "site-alias"
     alias.symlink_to(site, target_is_directory=True)
     monkeypatch.syspath_prepend(str(alias))
     parent = importlib.import_module("capability_fixture")
     assert str(alias) in parent.__file__
     invocation = invoke_authorized_installed_broker_plugin(
-        inventory, plan, authorize=lambda _: True
+        inventory,
+        plan,
+        authorize=lambda _: True,
+        provider_request=generated_sdk_request(plan),
     )
     assert invocation.metadata.metadata.plugin_id == "org.example.capabilities"

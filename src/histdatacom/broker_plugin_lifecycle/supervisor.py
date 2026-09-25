@@ -14,7 +14,10 @@ import signal
 import subprocess
 import sys
 import time
-from typing import cast
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from histdatacom.broker_plugin_policy.bindings import BrokerSDKInvocationV1
 import uuid
 
 from histdatacom.broker_plugin_capabilities import (
@@ -190,9 +193,20 @@ def _epoch(
 ) -> tuple[Reason, bool, int, bool, bool]:
     header, policy = run.journal.header, run.journal.header.policy
     bootstrap = encode_frame(
-        {"header": header.to_json(), "configuration": configuration},
+        {
+            "header": header.to_json(),
+            "configuration": configuration,
+            "provider_request": run.journal.provider_request.to_json(),
+            "epoch": run.epoch,
+        },
         policy.frame_bytes,
     )
+    from histdatacom.broker_plugin_capabilities.execution import _provider_call
+    from histdatacom.broker_plugin_policy.scope import (
+        BrokerPolicyError,
+        read_current_provider_policy_context,
+    )
+
     read_fd, write_fd = os.pipe()
     # Internal trusted host package location, never a configurable plugin path.
     source_root = str(Path(__file__).resolve().parents[2])
@@ -210,6 +224,7 @@ def _epoch(
     clean = False
     closed = False
     try:
+        _provider_call(run.journal.provider_request, capture=False)
         process = subprocess.Popen(
             [
                 *(run.hooks.command_prefix if run.hooks is not None else ()),
@@ -258,6 +273,7 @@ def _epoch(
         stopping: float | None = None
         exited_deadline: float | None = None
         startup_deadline = time.monotonic() + policy.startup_timeout_ms / 1000
+        policy_sequence = 0
 
         def send(value: dict[str, object]) -> None:
             encoded = encode_frame(value, policy.frame_bytes)
@@ -330,7 +346,48 @@ def _epoch(
                     continue
                 for frame, size in decoder.feed(data):
                     kind = frame.get("type")
-                    if kind in ("identity", "session"):
+                    if kind == "policy_context_request":
+                        if (
+                            closed
+                            or eof
+                            or set(frame)
+                            != {"type", "invocation_id", "epoch", "sequence"}
+                            or frame["invocation_id"]
+                            != run.journal.provider_request.artifact_id
+                            or type(frame["epoch"]) is not int
+                            or frame["epoch"] != run.epoch
+                            or type(frame["sequence"]) is not int
+                            or frame["sequence"] != policy_sequence
+                        ):
+                            raise BrokerLifecycleError(Reason.MALFORMED_IPC)
+                        policy_sequence += 1
+                        if stopping is not None:
+                            send({"type": "stop"})
+                            continue
+                        # Returning the fresh ledger is not an operation grant.
+                        # The child independently resolves and decides against
+                        # its current clock immediately before its next call.
+                        context = read_current_provider_policy_context()
+                        if (
+                            run.hooks is not None
+                            and run.hooks.before_persist is not None
+                        ):
+                            try:
+                                run.hooks.before_persist(context.to_json())
+                            except (Exception, SystemExit):
+                                raise BrokerLifecycleError(
+                                    Reason.INTEGRITY
+                                ) from None
+                        send(
+                            {
+                                "type": "policy_context",
+                                "invocation_id": frame["invocation_id"],
+                                "epoch": frame["epoch"],
+                                "sequence": frame["sequence"],
+                                "context": context.to_json(),
+                            }
+                        )
+                    elif kind in ("identity", "session"):
                         if (
                             closed
                             or eof
@@ -380,6 +437,7 @@ def _epoch(
                             Reason.PLUGIN_FAILURE.value,
                             Reason.MALFORMED_EVENT.value,
                             Reason.EVENT_LIMIT.value,
+                            Reason.AUTHORIZATION.value,
                             *(
                                 (Reason.INTEGRITY.value,)
                                 if run.hooks is not None
@@ -388,6 +446,14 @@ def _epoch(
                             ),
                         ):
                             raise BrokerLifecycleError(Reason.MALFORMED_IPC)
+                        if (
+                            frame["reason"] == Reason.AUTHORIZATION.value
+                            and stopping is not None
+                        ):
+                            # A pending ledger read consumes the parent's stop
+                            # control; core source refusal must not relabel an
+                            # already requested cancellation/deadline.
+                            raise BrokerLifecycleError(reason)
                         raise BrokerLifecycleError(Reason(frame["reason"]))
                     else:
                         raise BrokerLifecycleError(Reason.MALFORMED_IPC)
@@ -515,6 +581,8 @@ def _epoch(
         )
         if reason is Reason.EOF and not clean:
             reason = Reason.WORKER_DIED
+    except BrokerPolicyError:
+        reason = Reason.AUTHORIZATION
     except BrokerLifecycleError as error:
         reason = error.reason
     except (Exception, SystemExit):
@@ -547,6 +615,7 @@ def run_broker_plugin_lifecycle(
     output_directory: Path,
     *,
     authorize: Callable[[BrokerCapabilityPlanV1], bool],
+    provider_request: BrokerSDKInvocationV1,
     policy: BrokerLifecyclePolicyV1 | None = None,
     cancellation: Callable[[], bool] = lambda: False,
     clock: Clock = _clock,
@@ -559,6 +628,19 @@ def run_broker_plugin_lifecycle(
     Local filesystem and Python runtime are trusted. No OS sandbox, grants,
     credential policy or source-continuity certification is provided here.
     """
+    if os.name != "posix":
+        raise BrokerLifecycleError(Reason.INVALID_REQUEST)
+    from histdatacom.broker_plugin_capabilities.execution import (
+        _provider_call,
+        _provider_request,
+    )
+    from histdatacom.broker_plugin_policy.scope import (
+        BrokerPolicyError,
+        read_current_provider_policy_context,
+    )
+
+    request = _provider_request(plan, provider_request)
+    _provider_call(request, capture=False)
     try:
         if (
             os.name != "posix"
@@ -567,6 +649,7 @@ def run_broker_plugin_lifecycle(
         ):
             raise ValueError
         ephemeral = dict(configuration)
+        request.configuration_profile.verify_configuration(ephemeral)
         # Configuration is primitive, ephemeral and never hashed or persisted.
         if any(
             type(key) is not str or type(value) not in (str, int, float, bool)
@@ -584,16 +667,39 @@ def run_broker_plugin_lifecycle(
             platform.python_version(),
         )
         bootstrap = encode_frame(
-            {"header": header.to_json(), "configuration": ephemeral},
+            {
+                "header": header.to_json(),
+                "configuration": ephemeral,
+                "provider_request": request.to_json(),
+                "epoch": 0,
+            },
             header.policy.frame_bytes,
         )
         if len(bootstrap) > header.policy.queue_bytes:
             raise ValueError
+        # Refuse a ledger too large for this native transport before creating
+        # any output or child. A later expansion is checked on each reply.
+        encode_frame(
+            {
+                "type": "policy_context",
+                "invocation_id": request.artifact_id,
+                "epoch": len(header.policy.retry_delays_ms),
+                "sequence": 2**63 - 1,
+                "context": read_current_provider_policy_context().to_json(),
+            },
+            header.policy.frame_bytes,
+        )
         if execution_hooks is not None:
             if type(execution_hooks) is not BrokerLifecycleExecutionHooks:
                 raise ValueError
             if execution_hooks.before_persist is not None:
                 execution_hooks.before_persist(header.to_json())
+                execution_hooks.before_persist(request.to_json())
+                execution_hooks.before_persist(
+                    read_current_provider_policy_context().to_json()
+                )
+    except BrokerPolicyError:
+        raise
     except Exception:
         raise BrokerLifecycleError(Reason.INVALID_REQUEST) from None
     try:
@@ -603,7 +709,16 @@ def run_broker_plugin_lifecycle(
         raise BrokerLifecycleError(Reason.AUTHORIZATION) from None
     journal: Journal | None = None
     try:
-        journal = Journal(output_directory, header)
+        journal = Journal(
+            output_directory,
+            header,
+            provider_request=request,
+            before_persist=(
+                None
+                if execution_hooks is None
+                else execution_hooks.before_persist
+            ),
+        )
         run = _Run(journal, clock, execution_hooks)
         run.transition(State.CONFIGURED, Reason.CONFIGURED)
         pids: list[int] = []
@@ -629,6 +744,11 @@ def run_broker_plugin_lifecycle(
             if pid:
                 pids.append(pid)
             all_reaped = all_reaped and reaped
+            if reason is Reason.AUTHORIZATION:
+                # V1 has no durable ACTIVE -> STOPPING policy-refusal edge.
+                # Do not mutate that frozen state machine or create terminal
+                # bytes after expiry: leave the inspectable OPEN native run.
+                raise BrokerPolicyError("worker_provider_policy_refused")
             if not clean:
                 run.counters.unknown_loss = True
             if reason is not Reason.RECONNECT:
@@ -697,7 +817,7 @@ def run_broker_plugin_lifecycle(
         return BrokerLifecycleResultV1(
             output_directory, manifest, reason, tuple(pids)
         )
-    except BrokerLifecycleError:
+    except (BrokerLifecycleError, BrokerPolicyError):
         raise
     except (Exception, SystemExit):
         raise BrokerLifecycleError(Reason.PERSISTENCE) from None

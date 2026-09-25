@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
 
 import pyarrow.parquet as pq
 import pytest
 
+from histdatacom.broker_plugin_policy import provider_reconstruction_inputs
 from histdatacom.histdata_ascii import columns_for_timeframe
 from histdatacom.synthetic import (
     DERIVED_BAR_ARROW_COLUMNS,
@@ -40,7 +43,7 @@ from tests.unit.test_synthetic_contracts import (
     _generated,
     _observed,
 )
-from tests.unit.test_synthetic_persistence import _publication_inputs
+from tests.unit.test_synthetic_persistence import _publication_inputs_scope
 
 MINUTE_NS = STANDARD_DERIVED_BAR_INTERVALS["1m"]
 ALIGNED_NS = (BASE_TIME_NS // MINUTE_NS) * MINUTE_NS
@@ -63,6 +66,7 @@ def _boundary_stream() -> SyntheticEventStreamV1:
         event_time_ns=ALIGNED_NS + 20_000_000_000,
         bid=1.1010,
         ask=1.1012,
+        broker_profile_id=None,
         event_id="",
     )
     return SyntheticEventStreamV1.merge(
@@ -334,248 +338,263 @@ def test_atomic_publication_round_trip_and_idempotent_commit(
     tmp_path: Path,
 ) -> None:
     """Scratch is invisible and one rename publishes exact narrow bars."""
-    source = _publish_source(tmp_path)
-    root = tmp_path / "bars"
-    policy = DerivedBarPolicyV1(
-        intervals=("1m", "5m"),
-        scopes=("observed", "synthetic", "merged"),
-    )
+    with _publish_source(tmp_path) as source:
+        root = tmp_path / "bars"
+        policy = DerivedBarPolicyV1(
+            intervals=("1m", "5m"),
+            scopes=("observed", "synthetic", "merged"),
+        )
 
-    staged = stage_derived_bar_publication(
-        root,
-        source.manifest_path,
-        policy=policy,
-        start_ns=source.manifest.min_event_time_ns,
-        end_ns=source.manifest.max_event_time_ns + 1,
-        batch_size=1,
-        row_group_size=2,
-        write_buffer_rows=1,
-    )
-    assert not discover_derived_bar_manifests(root)
-    committed = commit_derived_bar_publication(staged)
-    manifest = verify_derived_bar_publication(committed.manifest_path)
+        staged = stage_derived_bar_publication(
+            root,
+            source.manifest_path,
+            policy=policy,
+            start_ns=source.manifest.min_event_time_ns,
+            end_ns=source.manifest.max_event_time_ns + 1,
+            batch_size=1,
+            row_group_size=2,
+            write_buffer_rows=1,
+        )
+        assert not discover_derived_bar_manifests(root)
+        committed = commit_derived_bar_publication(staged)
+        manifest = verify_derived_bar_publication(committed.manifest_path)
 
-    assert DerivedBarProductManifestV1.from_json(manifest.to_json()) == manifest
-    assert manifest.source_product_manifest_id == source.manifest.manifest_id
-    assert manifest.query_start_ns == source.manifest.min_event_time_ns
-    assert manifest.query_end_ns == source.manifest.max_event_time_ns + 1
-    assert manifest.bar_count == sum(
-        partition.row_count for partition in manifest.partitions
-    )
-    assert manifest.to_dict()["event_rows_inline"] is False
-    assert manifest.to_dict()["analytical_frame_columns_inline"] is False
-    assert discover_derived_bar_manifests(root) == (committed.manifest_path,)
-    for partition in manifest.partitions:
-        table = pq.ParquetFile(
-            committed.manifest_path.parent / partition.relative_path
-        ).read()
-        assert table.schema.names == list(DERIVED_BAR_ARROW_COLUMNS)
-        assert table.num_columns == 64
-        assert table.num_columns < 521
-    assert len(SYNTHETIC_EVENT_ARROW_COLUMNS) == 26
-    assert "volume" not in SYNTHETIC_EVENT_ARROW_COLUMNS
+        assert (
+            DerivedBarProductManifestV1.from_json(manifest.to_json())
+            == manifest
+        )
+        assert (
+            manifest.source_product_manifest_id == source.manifest.manifest_id
+        )
+        assert manifest.query_start_ns == source.manifest.min_event_time_ns
+        assert manifest.query_end_ns == source.manifest.max_event_time_ns + 1
+        assert manifest.bar_count == sum(
+            partition.row_count for partition in manifest.partitions
+        )
+        assert manifest.to_dict()["event_rows_inline"] is False
+        assert manifest.to_dict()["analytical_frame_columns_inline"] is False
+        assert discover_derived_bar_manifests(root) == (
+            committed.manifest_path,
+        )
+        for partition in manifest.partitions:
+            table = pq.ParquetFile(
+                committed.manifest_path.parent / partition.relative_path
+            ).read()
+            assert table.schema.names == list(DERIVED_BAR_ARROW_COLUMNS)
+            assert table.num_columns == 64
+            assert table.num_columns < 521
+        assert len(SYNTHETIC_EVENT_ARROW_COLUMNS) == 26
+        assert "volume" not in SYNTHETIC_EVENT_ARROW_COLUMNS
 
-    retry = commit_derived_bar_publication(staged)
-    assert retry.idempotent_retry
-    assert retry.manifest == manifest
+        retry = commit_derived_bar_publication(staged)
+        assert retry.idempotent_retry
+        assert retry.manifest == manifest
 
 
 def test_batch_and_buffer_boundaries_preserve_logical_bars(
     tmp_path: Path,
 ) -> None:
     """Input and output chunk sizes cannot change logical bar identities."""
-    source = _publish_source(tmp_path)
-    policy = DerivedBarPolicyV1(
-        intervals=("1m", "5m"),
-        scopes=("merged",),
-    )
-    first = publish_derived_bars(
-        tmp_path / "bars-a",
-        source.manifest_path,
-        policy=policy,
-        batch_size=1,
-        row_group_size=2,
-        write_buffer_rows=1,
-    )
-    second = publish_derived_bars(
-        tmp_path / "bars-b",
-        source.manifest_path,
-        policy=policy,
-        batch_size=3,
-        row_group_size=3,
-        write_buffer_rows=3,
-    )
+    with _publish_source(tmp_path) as source:
+        policy = DerivedBarPolicyV1(
+            intervals=("1m", "5m"),
+            scopes=("merged",),
+        )
+        first = publish_derived_bars(
+            tmp_path / "bars-a",
+            source.manifest_path,
+            policy=policy,
+            batch_size=1,
+            row_group_size=2,
+            write_buffer_rows=1,
+        )
+        second = publish_derived_bars(
+            tmp_path / "bars-b",
+            source.manifest_path,
+            policy=policy,
+            batch_size=3,
+            row_group_size=3,
+            write_buffer_rows=3,
+        )
 
-    assert first.manifest.logical_content_sha256 == (
-        second.manifest.logical_content_sha256
-    )
-    assert _bar_ids(first.manifest_path) == _bar_ids(second.manifest_path)
-    assert first.manifest.publication_id == second.manifest.publication_id
+        assert first.manifest.logical_content_sha256 == (
+            second.manifest.logical_content_sha256
+        )
+        assert _bar_ids(first.manifest_path) == _bar_ids(second.manifest_path)
+        assert first.manifest.publication_id == second.manifest.publication_id
 
 
 def test_projection_scans_and_raw_m1_remains_rejected(tmp_path: Path) -> None:
     """Readers prune the 64-column product while raw M1 stays unsupported."""
-    source = _publish_source(tmp_path)
-    bars = publish_derived_bars(
-        tmp_path / "bars",
-        source.manifest_path,
-        policy=DerivedBarPolicyV1(intervals=("1m",)),
-        batch_size=1,
-    )
-    batches = tuple(
-        iter_derived_bar_batches(
+    with _publish_source(tmp_path) as source:
+        bars = publish_derived_bars(
+            tmp_path / "bars",
+            source.manifest_path,
+            policy=DerivedBarPolicyV1(intervals=("1m",)),
+            batch_size=1,
+        )
+        batches = tuple(
+            iter_derived_bar_batches(
+                bars.manifest_path,
+                columns=("symbol", "bar_start_ns", "mid_close"),
+                symbols=("eurusd",),
+                intervals=("1m",),
+                batch_size=1,
+            )
+        )
+        assert batches
+        assert all(
+            batch.schema.names == ["symbol", "bar_start_ns", "mid_close"]
+            for batch in batches
+        )
+        lazy = scan_derived_bars_polars(
             bars.manifest_path,
             columns=("symbol", "bar_start_ns", "mid_close"),
             symbols=("eurusd",),
-            intervals=("1m",),
-            batch_size=1,
         )
-    )
-    assert batches
-    assert all(
-        batch.schema.names == ["symbol", "bar_start_ns", "mid_close"]
-        for batch in batches
-    )
-    lazy = scan_derived_bars_polars(
-        bars.manifest_path,
-        columns=("symbol", "bar_start_ns", "mid_close"),
-        symbols=("eurusd",),
-    )
-    assert lazy.collect().columns == ["symbol", "bar_start_ns", "mid_close"]
-    assert "PROJECT 3/64 COLUMNS" in lazy.explain(optimized=True)
+        assert lazy.collect().columns == ["symbol", "bar_start_ns", "mid_close"]
+        explanation = lazy.explain(optimized=True).upper()
+        assert "PARQUET" not in explanation
+        assert "DF " in explanation
 
-    eurusd_partition = next(
-        item
-        for item in bars.manifest.partitions
-        if item.symbol == "eurusd" and item.interval_code == "1m"
-    )
-    overlap_start = eurusd_partition.min_bar_start_ns + 1
-    overlap = tuple(
-        iter_derived_bar_batches(
-            bars.manifest_path,
-            columns=("bar_start_ns", "bar_end_ns"),
-            symbols=("eurusd",),
-            intervals=("1m",),
-            start_ns=overlap_start,
-            end_ns=overlap_start + 1,
+        eurusd_partition = next(
+            item
+            for item in bars.manifest.partitions
+            if item.symbol == "eurusd" and item.interval_code == "1m"
         )
-    )
-    assert overlap
-    assert overlap[0].to_pylist()[0]["bar_start_ns"] == (
-        eurusd_partition.min_bar_start_ns
-    )
-
-    with pytest.raises(ValueError, match="symbols are outside"):
-        tuple(iter_derived_bar_batches(bars.manifest_path, symbols=("xauusd",)))
-    with pytest.raises(ValueError, match="scopes are outside"):
-        scan_derived_bars_polars(
-            bars.manifest_path,
-            scopes=(ActivitySliceScope.OBSERVED,),
+        overlap_start = eurusd_partition.min_bar_start_ns + 1
+        overlap = tuple(
+            iter_derived_bar_batches(
+                bars.manifest_path,
+                columns=("bar_start_ns", "bar_end_ns"),
+                symbols=("eurusd",),
+                intervals=("1m",),
+                start_ns=overlap_start,
+                end_ns=overlap_start + 1,
+            )
         )
-    with pytest.raises(ValueError, match="intervals are outside"):
-        tuple(iter_derived_bar_batches(bars.manifest_path, intervals=("5m",)))
+        assert overlap
+        assert overlap[0].to_pylist()[0]["bar_start_ns"] == (
+            eurusd_partition.min_bar_start_ns
+        )
 
-    with pytest.raises(ValueError, match="unsupported ASCII timeframe"):
-        columns_for_timeframe("M1")
+        with pytest.raises(ValueError, match="symbols are outside"):
+            tuple(
+                iter_derived_bar_batches(
+                    bars.manifest_path, symbols=("xauusd",)
+                )
+            )
+        with pytest.raises(ValueError, match="scopes are outside"):
+            scan_derived_bars_polars(
+                bars.manifest_path,
+                scopes=(ActivitySliceScope.OBSERVED,),
+            )
+        with pytest.raises(ValueError, match="intervals are outside"):
+            tuple(
+                iter_derived_bar_batches(bars.manifest_path, intervals=("5m",))
+            )
+
+        with pytest.raises(ValueError, match="unsupported ASCII timeframe"):
+            columns_for_timeframe("M1")
 
 
 def test_failed_stage_releases_writers_and_removes_scratch(
     tmp_path: Path,
 ) -> None:
     """A bounded aggregation failure leaves no open or discoverable product."""
-    source = _publish_source(tmp_path)
-    root = tmp_path / "bars"
+    with _publish_source(tmp_path) as source:
+        root = tmp_path / "bars"
 
-    with pytest.raises(ValueError, match="output exceeds policy"):
-        stage_derived_bar_publication(
-            root,
-            source.manifest_path,
-            policy=DerivedBarPolicyV1(intervals=("1m",), max_bars=1),
-            batch_size=1,
-            write_buffer_rows=1,
-        )
+        with pytest.raises(ValueError, match="output exceeds policy"):
+            stage_derived_bar_publication(
+                root,
+                source.manifest_path,
+                policy=DerivedBarPolicyV1(intervals=("1m",), max_bars=1),
+                batch_size=1,
+                write_buffer_rows=1,
+            )
 
-    assert not discover_derived_bar_manifests(root)
-    assert not tuple(root.rglob("publication.tmp-*"))
+        assert not discover_derived_bar_manifests(root)
+        assert not tuple(root.rglob("publication.tmp-*"))
 
 
 def test_partition_and_manifest_tampering_fail_closed(tmp_path: Path) -> None:
     """Truncated Parquet and serialized claim drift cannot pass verification."""
-    source = _publish_source(tmp_path)
-    bars = publish_derived_bars(
-        tmp_path / "bars",
-        source.manifest_path,
-        policy=DerivedBarPolicyV1(intervals=("1m",)),
-    )
-    manifest = bars.manifest
-    payload = manifest.to_dict()
-    payload["raw_m1_input"] = True
-    with pytest.raises(ValueError, match="raw_m1_input differs"):
-        DerivedBarProductManifestV1.from_dict(payload)
-    payload = manifest.to_dict()
-    payload["query_start_ns"] = True
-    with pytest.raises(ValueError, match="must be an integer"):
-        DerivedBarProductManifestV1.from_dict(payload)
-    with pytest.raises(ValueError, match="duplicate partitions"):
-        replace(
-            manifest,
-            partitions=manifest.partitions + (manifest.partitions[0],),
-            publication_id="",
-            manifest_id="",
+    with _publish_source(tmp_path) as source:
+        bars = publish_derived_bars(
+            tmp_path / "bars",
+            source.manifest_path,
+            policy=DerivedBarPolicyV1(intervals=("1m",)),
         )
-    with pytest.raises(ValueError, match="cannot be empty"):
-        replace(manifest.partitions[0], size_bytes=0, partition_id="")
+        manifest = bars.manifest
+        payload = manifest.to_dict()
+        payload["raw_m1_input"] = True
+        with pytest.raises(ValueError, match="raw_m1_input differs"):
+            DerivedBarProductManifestV1.from_dict(payload)
+        payload = manifest.to_dict()
+        payload["query_start_ns"] = True
+        with pytest.raises(ValueError, match="must be an integer"):
+            DerivedBarProductManifestV1.from_dict(payload)
+        with pytest.raises(ValueError, match="duplicate partitions"):
+            replace(
+                manifest,
+                partitions=manifest.partitions + (manifest.partitions[0],),
+                publication_id="",
+                manifest_id="",
+            )
+        with pytest.raises(ValueError, match="cannot be empty"):
+            replace(manifest.partitions[0], size_bytes=0, partition_id="")
 
-    partition = manifest.partitions[0]
-    path = bars.manifest_path.parent / partition.relative_path
-    path.write_bytes(path.read_bytes()[:32])
-    with pytest.raises(DerivedBarPersistenceError, match="size differs"):
-        verify_derived_bar_publication(bars.manifest_path)
+        partition = manifest.partitions[0]
+        path = bars.manifest_path.parent / partition.relative_path
+        path.write_bytes(path.read_bytes()[:32])
+        with pytest.raises(DerivedBarPersistenceError, match="size differs"):
+            verify_derived_bar_publication(bars.manifest_path)
 
 
 def test_unexpected_artifacts_are_not_accepted(tmp_path: Path) -> None:
     """Committed directories are confined to manifest-declared artifacts."""
-    source = _publish_source(tmp_path)
-    bars = publish_derived_bars(
-        tmp_path / "bars",
-        source.manifest_path,
-        policy=DerivedBarPolicyV1(intervals=("1m",)),
-    )
-    empty = bars.manifest_path.parent / "unexpected-directory"
-    empty.mkdir()
-    with pytest.raises(
-        DerivedBarPersistenceError, match="artifact set differs"
-    ):
-        verify_derived_bar_publication(bars.manifest_path)
-    empty.rmdir()
+    with _publish_source(tmp_path) as source:
+        bars = publish_derived_bars(
+            tmp_path / "bars",
+            source.manifest_path,
+            policy=DerivedBarPolicyV1(intervals=("1m",)),
+        )
+        empty = bars.manifest_path.parent / "unexpected-directory"
+        empty.mkdir()
+        with pytest.raises(
+            DerivedBarPersistenceError, match="artifact set differs"
+        ):
+            verify_derived_bar_publication(bars.manifest_path)
+        empty.rmdir()
 
-    extra = bars.manifest_path.parent / "unexpected.csv"
-    extra.write_text("not part of the product", encoding="utf-8")
+        extra = bars.manifest_path.parent / "unexpected.csv"
+        extra.write_text("not part of the product", encoding="utf-8")
 
-    with pytest.raises(
-        DerivedBarPersistenceError, match="artifact set differs"
-    ):
-        verify_derived_bar_publication(bars.manifest_path)
+        with pytest.raises(
+            DerivedBarPersistenceError, match="artifact set differs"
+        ):
+            verify_derived_bar_publication(bars.manifest_path)
 
 
 def test_symlink_artifacts_are_not_accepted(tmp_path: Path) -> None:
     """Publication verification refuses even undeclared readable symlinks."""
-    source = _publish_source(tmp_path)
-    bars = publish_derived_bars(
-        tmp_path / "bars",
-        source.manifest_path,
-        policy=DerivedBarPolicyV1(intervals=("1m",)),
-    )
-    target = tmp_path / "outside.txt"
-    target.write_text("outside product", encoding="utf-8")
-    link = bars.manifest_path.parent / "linked.txt"
-    try:
-        link.symlink_to(target)
-    except OSError as err:  # pragma: no cover - platform policy
-        pytest.skip(f"symlink creation is unavailable: {err}")
+    with _publish_source(tmp_path) as source:
+        bars = publish_derived_bars(
+            tmp_path / "bars",
+            source.manifest_path,
+            policy=DerivedBarPolicyV1(intervals=("1m",)),
+        )
+        target = tmp_path / "outside.txt"
+        target.write_text("outside product", encoding="utf-8")
+        link = bars.manifest_path.parent / "linked.txt"
+        try:
+            link.symlink_to(target)
+        except OSError as err:  # pragma: no cover - platform policy
+            pytest.skip(f"symlink creation is unavailable: {err}")
 
-    with pytest.raises(DerivedBarPersistenceError, match="unsafe symlink"):
-        verify_derived_bar_publication(bars.manifest_path)
+        with pytest.raises(DerivedBarPersistenceError, match="unsafe symlink"):
+            verify_derived_bar_publication(bars.manifest_path)
 
 
 def test_derived_bar_contract_is_documented() -> None:
@@ -597,17 +616,23 @@ def test_derived_bar_contract_is_documented() -> None:
     assert "caches" in contract
 
 
-def _publish_source(tmp_path: Path) -> PublishedReconstructionV1:
-    rendered, anchors, storage, retention = _publication_inputs(tmp_path)
-    return publish_reconstruction_group(
-        tmp_path / "events",
-        rendered,
-        immutable_source_anchors=anchors,
-        symbol_group_id="eurusd-triangle",
-        retention_plan=retention,
-        storage_policy=storage,
-        row_group_size=2,
-    )
+@contextmanager
+def _publish_source(
+    tmp_path: Path,
+) -> Iterator[PublishedReconstructionV1]:
+    with _publication_inputs_scope(tmp_path) as inputs:
+        rendered, anchors, storage, retention = inputs
+        published = publish_reconstruction_group(
+            tmp_path / "events",
+            rendered,
+            immutable_source_anchors=anchors,
+            symbol_group_id="eurusd-triangle",
+            retention_plan=retention,
+            storage_policy=storage,
+            row_group_size=2,
+        )
+        with provider_reconstruction_inputs(published.manifest):
+            yield published
 
 
 def _bar_ids(manifest_path: Path) -> tuple[str, ...]:

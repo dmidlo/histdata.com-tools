@@ -5,6 +5,11 @@ unchanged SDK, metadata registry and capability gates. It does not activate a
 live provider, grant credentials/rights, retrofit legacy capture adapters, or
 provide the credential and resource policy implemented separately in #619.
 
+Unreleased v3 adds a separate mandatory
+[provider-policy context and request](broker-provider-policy.md). Current rights
+are reread for host/worker operations and retained in native-byte-bound sidecars;
+the legacy V1 lifecycle schemas and transition vocabulary remain unchanged.
+
 ## Public API and platform boundary
 
 `histdatacom.broker_plugin_lifecycle` exports immutable `*V1` policy, header,
@@ -36,6 +41,7 @@ from histdatacom.broker_plugin_lifecycle import (
     BrokerLifecyclePolicyV1, run_broker_plugin_lifecycle,
     replay_broker_lifecycle,
 )
+from histdatacom.broker_plugin_policy import provider_policy_scope
 
 inventory = discover_broker_plugins()  # metadata only, no provider imports
 workflow = BrokerCapabilityWorkflowV1(tuple(sorted((
@@ -47,13 +53,18 @@ plan = negotiate_broker_capabilities(
 )
 # This callback must represent a caller-owned authorization decision. An
 # admitted capability plan is NOT an authorization or source-quality proof.
-result = run_broker_plugin_lifecycle(
-    inventory, plan, {"mode": "finite"}, ("EURUSD",), Path("new-run"),
-    authorize=lambda selected: caller_has_authorized(selected),
-    policy=BrokerLifecyclePolicyV1(),
-)
-for record in replay_broker_lifecycle(result.directory):
-    consume_native_record(record)
+# These reviewed values are supplied by the operator, not generated here.
+with provider_policy_scope(reviewed_policy_source):
+    result = run_broker_plugin_lifecycle(
+        inventory, plan, {"mode": "finite"}, ("EURUSD",), Path("new-run"),
+        authorize=lambda selected: caller_has_authorized(selected),
+        policy=BrokerLifecyclePolicyV1(),
+        provider_request=reviewed_provider_request,
+    )
+    for record in replay_broker_lifecycle(
+        result.directory, provider_request=reviewed_provider_request,
+    ):
+        consume_native_record(record)
 ```
 
 The complete workflow and explicit boolean authorization are checked before
@@ -114,6 +125,12 @@ line reads. A worker has **one outstanding event** and waits for the host's
 durable acknowledgement before asking the SDK iterator for another. This
 explicit backpressure bounds in-flight production at the host boundary; it
 does not assert that an upstream network/source cannot drop data.
+
+The v3 worker also requests fresh policy contexts through sequence-bound control
+messages. Their response wait is independently bounded by the startup timeout,
+not the event-ACK retry interval. Parent cancellation and global deadlines
+remain authoritative. Provider-policy refusal stops and reaps the worker; it
+does not invent an unsupported legacy V1 transition or complete-capture claim.
 
 The parent also enforces pending-frame item and byte limits, a bounded recent
 delivery-history window, per-frame bytes, event count, health-transition count,

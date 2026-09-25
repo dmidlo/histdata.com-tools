@@ -28,8 +28,25 @@ from histdatacom.synthetic import (
 from histdatacom.synthetic.contracts import SYNTHETIC_EVENT_ARROW_COLUMNS
 from histdatacom.synthetic.persistence import publish_reconstruction_group
 from tests.unit.test_synthetic_benchmark import _run_scorecard
-from tests.unit.test_synthetic_contracts import _stream
-from tests.unit.test_synthetic_persistence import _publication_inputs
+from tests.unit.test_synthetic_contracts import _stream as _contract_stream
+from tests.unit.test_synthetic_persistence import _publication_inputs_scope
+
+
+def _stream(*, generated_count=1):
+    """Generic numeric fixtures declare no unretained broker parent.
+
+    Actual broker provenance and its complete policy gates are exercised by
+    test_broker_activity_policy using constructed native fingerprint roots.
+    """
+    stream = _contract_stream(generated_count=generated_count)
+    return replace(
+        stream,
+        events=tuple(
+            replace(event, broker_profile_id=None, event_id="")
+            for event in stream.events
+        ),
+        stream_id="",
+    )
 
 
 def test_activity_contract_round_trip_separates_origins_and_units() -> None:
@@ -71,7 +88,7 @@ def test_activity_contract_round_trip_separates_origins_and_units() -> None:
     assert synthetic.reference_ids == ("reference:modern-2026",)
     assert synthetic.motif_ids == ("motif:quiet-london-001",)
     assert synthetic.feed_epoch_ids == ("feed-epoch:modern",)
-    assert synthetic.broker_profile_ids == ("broker-profile:demo-v1",)
+    assert synthetic.broker_profile_ids == ()
     assert synthetic.constraint_set_ids == ("constraint:sha256:historical-v1",)
     assert synthetic.stream_ids == (stream.stream_id,)
     assert synthetic.event_content_sha256
@@ -274,37 +291,40 @@ def test_committed_parquet_activity_matches_in_memory_streaming(
     tmp_path: Path,
 ) -> None:
     """Projected one-row batches reproduce the in-memory final event slices."""
-    rendered, anchors, storage_policy, retention = _publication_inputs(tmp_path)
-    published = publish_reconstruction_group(
-        tmp_path / "archive",
-        rendered,
-        immutable_source_anchors=anchors,
-        symbol_group_id="eurusd-triangle",
-        retention_plan=retention,
-        storage_policy=storage_policy,
-        row_group_size=2,
-    )
-    information_id = "information-manifest:sha256:committed"
+    with _publication_inputs_scope(tmp_path) as inputs:
+        rendered, anchors, storage_policy, retention = inputs
+        published = publish_reconstruction_group(
+            tmp_path / "archive",
+            rendered,
+            immutable_source_anchors=anchors,
+            symbol_group_id="eurusd-triangle",
+            retention_plan=retention,
+            storage_policy=storage_policy,
+            row_group_size=2,
+        )
+        information_id = "information-manifest:sha256:committed"
 
-    committed = summarize_committed_reconstruction_activity(
-        published.manifest_path,
-        information_mode=InformationMode.EX_POST_RECONSTRUCTION,
-        information_manifest_id=information_id,
-        batch_size=1,
-    )
-    in_memory = summarize_reconstruction_activity_streams(
-        rendered.streams,
-        information_mode=InformationMode.EX_POST_RECONSTRUCTION,
-        information_manifest_id=information_id,
-        window_id=published.manifest.window_id,
-        synchronization_unit_id=(published.manifest.synchronization_unit_id),
-        product_manifest_id=published.manifest.manifest_id,
-    )
+        committed = summarize_committed_reconstruction_activity(
+            published.manifest_path,
+            information_mode=InformationMode.EX_POST_RECONSTRUCTION,
+            information_manifest_id=information_id,
+            batch_size=1,
+        )
+        in_memory = summarize_reconstruction_activity_streams(
+            rendered.streams,
+            information_mode=InformationMode.EX_POST_RECONSTRUCTION,
+            information_manifest_id=information_id,
+            window_id=published.manifest.window_id,
+            synchronization_unit_id=(
+                published.manifest.synchronization_unit_id
+            ),
+            product_manifest_id=published.manifest.manifest_id,
+        )
 
-    assert committed == in_memory
-    assert committed.product_manifest_id == published.manifest.manifest_id
-    assert committed.event_count == published.manifest.event_count
-    assert all(item.stream_ids for item in committed.slices)
+        assert committed == in_memory
+        assert committed.product_manifest_id == published.manifest.manifest_id
+        assert committed.event_count == published.manifest.event_count
+        assert all(item.stream_ids for item in committed.slices)
 
 
 def test_existing_reverse_degradation_scorecard_supplies_activity_evidence() -> (
