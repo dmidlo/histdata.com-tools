@@ -3741,9 +3741,19 @@ def _verify_broker_product_receipt(
     if type(manifest) is not ReconstructionProductManifestV1:
         return
     from histdatacom.broker_plugin_policy import (
+        fingerprint_for,
         read_broker_policy_receipt,
         verify_broker_policy_receipt,
     )
+    from histdatacom.broker_capture.fingerprint_v2 import (
+        BrokerDeliveryFingerprintV2,
+    )
+
+    if (
+        type(fingerprint_for(manifest.broker_profile_id))
+        is BrokerDeliveryFingerprintV2
+    ):
+        required = True
 
     receipt_path = manifest_path.with_name(
         manifest_path.name + ".provider-policy.json"

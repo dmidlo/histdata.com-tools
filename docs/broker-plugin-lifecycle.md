@@ -12,7 +12,9 @@ the legacy V1 lifecycle schemas and transition vocabulary remain unchanged.
 An exact [permission authority](broker-plugin-permissions.md) is also mandatory.
 Host-measured [capture-health evidence](broker-host-health.md) and a native-bound
 permission execution proof are retained beside the native capture, not inserted
-into its historical V1 partition format.
+into its historical V1 partition format. A mandatory host-owned
+[provenance journal](broker-plugin-provenance.md) binds actual ingress, native
+records, health observations and terminal authority evidence beside them.
 
 ## Public API and platform boundary
 
@@ -205,8 +207,9 @@ manifest may hide the unknown tail. Inspection remains available; replay refuses
 `source_continuity_verified` and `configuration_material_retained` are always
 false. Even successful local finite completion is **not** a provider-feed
 completeness, source authenticity, market-data permission or production-readiness
-certificate. Configuration is intentionally not reproducibility evidence;
-broader provider provenance remains separate work (#626).
+certificate. Reviewed public configuration and actual retained authority are
+bound by the separate provenance header; opaque credentials are not retained or
+hashed into reproducibility evidence. SDK scientific fitting remains unavailable.
 
 `inspect_broker_lifecycle(...).complete` is only the manifest's claimed local
 completion plus directory shape. It does **not** hash or authenticate partition

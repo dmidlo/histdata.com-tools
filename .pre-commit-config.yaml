@@ -16,11 +16,23 @@ repos:
     - py310
     id: black
     files: ^(src|tests|samples)/.*\.py$
+  - id: black
+    name: black (standalone broker plugins, 88 columns)
+    args: [--line-length, '88', --target-version, py310]
+    files: ^broker-plugins/(reference|starter)/.*\.py$
   repo: https://github.com/psf/black
   rev: 26.5.1
 - hooks:
   - id: ruff-check
     files: ^(src|tests|samples)/.*\.py$
+  - id: ruff-check
+    name: ruff-check (reference broker project)
+    args: [--config, broker-plugins/reference/pyproject.toml]
+    files: ^broker-plugins/reference/.*\.py$
+  - id: ruff-check
+    name: ruff-check (starter broker project)
+    args: [--config, broker-plugins/starter/pyproject.toml]
+    files: ^broker-plugins/starter/.*\.py$
   repo: https://github.com/astral-sh/ruff-pre-commit
   rev: v0.15.18
 - hooks:
@@ -62,6 +74,7 @@ repos:
   rev: v0.11.0.1
 - hooks:
   - id: actionlint
+    files: ^(\.github|broker-plugins/(reference|starter)/\.github)/workflows/.*\.ya?ml$
   repo: https://github.com/rhysd/actionlint
   rev: v1.7.12
 - hooks:

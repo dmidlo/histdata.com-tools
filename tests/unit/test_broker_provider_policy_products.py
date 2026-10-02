@@ -5,24 +5,34 @@ from dataclasses import replace
 
 import pytest
 
+from histdatacom.broker_capture import broker_fingerprint_sources
+from histdatacom.broker_plugin_policy import (
+    BrokerPolicyDataClass as DataClass,
+)
 from histdatacom.broker_plugin_policy import (
     BrokerPolicyError,
-    BrokerPolicyOperation as Operation,
-    BrokerPolicyDataClass as DataClass,
-    BrokerPolicyStatus as Status,
     provider_native_inputs,
     provider_policy_scope,
     read_broker_policy_receipt,
+    read_broker_scientific_lineage,
     resolve_provider_subject,
     scope,
     verify_broker_policy_receipt,
 )
+from histdatacom.broker_plugin_policy import (
+    BrokerPolicyOperation as Operation,
+)
+from histdatacom.broker_plugin_policy import (
+    BrokerPolicyStatus as Status,
+)
 from histdatacom.synthetic import (
     BrokerTransferConfigV1,
     SyntheticEventOrigin,
+    broker_transfer,
     commit_reconstruction_publication,
     estimate_reconstruction_retention,
     iter_reconstruction_event_batches,
+    persistence,
     project_modern_reference_delivery,
     read_reconstruction_streams,
     render_broker_delivery,
@@ -30,9 +40,9 @@ from histdatacom.synthetic import (
     stage_reconstruction_publication,
     verify_reconstruction_publication,
 )
-from histdatacom.synthetic import persistence
-from histdatacom.synthetic import broker_transfer
-from tests.fixtures.broker_derived_policy import generated_fingerprint
+from tests.fixtures.broker_derived_policy import (
+    generated_qualified_fingerprint,
+)
 from tests.fixtures.broker_provider_policy import (
     MutablePolicySource,
     generated_provider_scope,
@@ -42,8 +52,14 @@ from tests.unit.test_synthetic_broker_transfer import _group_with_constraints
 
 
 @pytest.fixture(scope="module")
-def product_inputs():
-    fingerprint = generated_fingerprint()
+def product_inputs(tmp_path_factory):
+    capture_root = tmp_path_factory.mktemp("qualified-product-source")
+    fingerprint = generated_qualified_fingerprint(capture_root)
+    with broker_fingerprint_sources(capture_root):
+        yield _render_product_inputs(fingerprint)
+
+
+def _render_product_inputs(fingerprint):
     run, window, group, constraints = _group_with_constraints()
     with generated_provider_scope(fingerprint):
         rendered = render_broker_delivery(
@@ -158,7 +174,7 @@ def test_product_specific_class_is_required(
 
 
 def test_native_product_bytes_and_sidecar_pair_and_guarded_queries(
-    tmp_path, product_inputs
+    tmp_path, product_inputs, monkeypatch
 ):
     fingerprint, rendered, *_ = product_inputs
     source = _source(
@@ -182,6 +198,15 @@ def test_native_product_bytes_and_sidecar_pair_and_guarded_queries(
             manifest,
             published.manifest_path,
         )
+        lineage = read_broker_scientific_lineage(published.manifest_path)
+        assert (
+            lineage.native_id
+            == resolve_provider_subject(manifest).native_ref.native_id
+        )
+        assert lineage.fingerprints == (fingerprint,)
+        assert (
+            lineage.fingerprints[0].capture_roots == fingerprint.capture_roots
+        )
         assert (
             read_reconstruction_streams(published.manifest_path)
             == rendered.streams
@@ -204,6 +229,32 @@ def test_native_product_bytes_and_sidecar_pair_and_guarded_queries(
         provider_native_inputs(fingerprint),
         generated_provider_scope(fingerprint),
     ):
+        lineage_path = published.manifest_path.with_name(
+            "manifest.json.broker-provenance.json"
+        )
+        original_lineage = lineage_path.read_bytes()
+        original_receipt = sidecar.read_bytes()
+
+        def forbidden_partition_read(*args, **kwargs):
+            pytest.fail("missing companion reached product partition reads")
+
+        for missing in ((sidecar,), (lineage_path,), (sidecar, lineage_path)):
+            for path in missing:
+                path.unlink()
+            with monkeypatch.context() as isolated:
+                isolated.setattr(
+                    persistence,
+                    "_validate_partition_file",
+                    forbidden_partition_read,
+                )
+                with pytest.raises((ValueError, OSError)):
+                    verify_reconstruction_publication(published.manifest_path)
+            sidecar.write_bytes(original_receipt)
+            lineage_path.write_bytes(original_lineage)
+        lineage_path.write_bytes(b"{}")
+        with pytest.raises(ValueError):
+            verify_reconstruction_publication(published.manifest_path)
+        lineage_path.write_bytes(original_lineage)
         sidecar.write_bytes(b"{}")
         with pytest.raises(ValueError):
             verify_reconstruction_publication(published.manifest_path)
@@ -270,7 +321,9 @@ def test_modern_projection_cannot_drop_declared_broker_lineage(product_inputs):
     events = tuple(
         (
             replace(
-                event, broker_profile_id=fingerprint.fingerprint_id, event_id=""
+                event,
+                broker_profile_id=fingerprint.fingerprint_id,
+                event_id="",
             )
             if event.origin is SyntheticEventOrigin.SYNTHETIC
             else event
@@ -296,8 +349,10 @@ def test_modern_projection_cannot_drop_declared_broker_lineage(product_inputs):
         (Operation.DERIVE, DataClass.BROKER_SYNTHETIC),
     ],
 )
-def test_render_refuses_before_computation(monkeypatch, operation, data_class):
-    fingerprint = generated_fingerprint()
+def test_render_refuses_before_computation(
+    monkeypatch, operation, data_class, product_inputs
+):
+    fingerprint = product_inputs[0]
     run, window, group, constraints = _group_with_constraints()
     calls = []
 
@@ -321,8 +376,10 @@ def test_render_refuses_before_computation(monkeypatch, operation, data_class):
     assert calls == []
 
 
-def test_render_rechecks_current_policy_before_return(monkeypatch):
-    fingerprint = generated_fingerprint()
+def test_render_rechecks_current_policy_before_return(
+    monkeypatch, product_inputs
+):
+    fingerprint = product_inputs[0]
     run, window, group, constraints = _group_with_constraints()
     original = broker_transfer._render_broker_delivery
     clock = [1000]
@@ -396,7 +453,9 @@ def test_projected_batches_reject_foreign_physical_broker_lineage(
         assert "foreign-broker-profile" in values
         index = table.schema.get_field_index("broker_profile_id")
         altered = table.set_column(
-            index, table.schema.field(index), pa.array(values, type=pa.string())
+            index,
+            table.schema.field(index),
+            pa.array(values, type=pa.string()),
         )
         pq.write_table(altered, path)
         # The requested projection excludes the lineage fields. The host must

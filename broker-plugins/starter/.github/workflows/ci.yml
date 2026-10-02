@@ -1,0 +1,50 @@
+name: Standalone broker starter
+on:
+  workflow_dispatch:
+    inputs:
+      host_wheel_url:
+        description: Reviewed development host wheel HTTPS URL (operator supplied)
+        required: true
+      host_wheel_sha256:
+        description: Independently verified host wheel SHA256
+        required: true
+permissions:
+  contents: read
+jobs:
+  wheel-tests:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ['3.10', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Obtain explicitly reviewed development artifact
+        env:
+          HOST_WHEEL_URL: ${{ inputs.host_wheel_url }}
+          HOST_WHEEL_SHA256: ${{ inputs.host_wheel_sha256 }}
+        run: |
+          python -c 'import os,re; from urllib.parse import urlsplit; u=urlsplit(os.environ["HOST_WHEEL_URL"]); assert u.scheme == "https" and u.hostname and not u.username and not u.password; assert re.fullmatch("[0-9a-f]{64}",os.environ["HOST_WHEEL_SHA256"])'
+          curl --fail --proto '=https' --tlsv1.2 "$HOST_WHEEL_URL" --output histdatacom-2.5.0-py3-none-any.whl
+          printf '%s  %s\n' "$HOST_WHEEL_SHA256" histdatacom-2.5.0-py3-none-any.whl | sha256sum --check
+      - name: Build and test actual installed plugin
+        run: |
+          python -m pip install --upgrade 'pip==25.1.1'
+          python -m pip install ./histdatacom-2.5.0-py3-none-any.whl build setuptools wheel
+          python tools/check_host.py
+          python tools/generate_metadata.py --check
+          python -m build
+          python -m pip install 'dist/histdatacom_broker_starter-0.1.0-py3-none-any.whl[test]'
+          python -m pip check
+          python -I -m pytest -q tests
+          histdatacom broker-plugins inspect --plugin-id org.example.starter --json
+      - name: Complete trusted advertised-capability inventory
+        run: |
+          histdatacom-broker-conformance plan --driver conformance/driver.json --profile trusted_contract_v1 --capability quotes.v1 --capability timestamps.broker-event.v1 --capability timestamps.receive.v1 --capability heartbeat.v1 --capability gaps.v1 --output plan.json
+          histdatacom-broker-conformance run --plan plan.json --output generated-run --authorize-generated-execution
+          histdatacom-broker-conformance verify generated-run
+      # Also qualify all advertised capabilities on supported macOS before
+      # release. Linux cannot label unavailable native isolation as PASS.
+      # No publishing job and no production credentials.

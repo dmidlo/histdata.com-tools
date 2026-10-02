@@ -1,19 +1,21 @@
 """Closed schemas, exact identities, detached values and resource bounds."""
 
 import json
+import math
 from dataclasses import FrozenInstanceError, replace
 
 import pytest
 
 from histdatacom.broker_plugin_health import (
+    BrokerHostHealthDistributionV1,
+    BrokerHostHealthPolicyV1,
+    health_rate,
+)
+from histdatacom.broker_plugin_health import (
     BrokerHostHealthObservationKind as Kind,
 )
 from histdatacom.broker_plugin_health import (
     BrokerHostHealthObservationV1 as Observation,
-)
-from histdatacom.broker_plugin_health import (
-    BrokerHostHealthPolicyV1,
-    health_rate,
 )
 from histdatacom.broker_plugin_health import (
     BrokerHostHealthReason as Reason,
@@ -142,3 +144,22 @@ def test_rate_artifact_recomputes_interval_not_just_digest():
 def test_source_condition_ceilings_are_exact_bounded_counts(field, value):
     with pytest.raises(ValueError):
         BrokerHostHealthPolicyV1(**{field: value})
+
+
+@pytest.mark.parametrize("sample", [0, 100, 2**53 + 1, 2**63 - 1, -(2**63 - 1)])
+@pytest.mark.parametrize("direction", [-math.inf, math.inf])
+def test_distribution_refuses_adjacent_float_outside_representable_bounds(
+    sample,
+    direction,
+):
+    valid = BrokerHostHealthDistributionV1(
+        1, sample, sample, sample, sample, float(sample)
+    )
+    with pytest.raises(ValueError, match="mean outside observation range"):
+        replace(valid, mean_ns=math.nextafter(float(sample), direction))
+
+
+@pytest.mark.parametrize("mean", [math.nan, math.inf, -math.inf, -1.0, 101.0])
+def test_distribution_refuses_nonfinite_or_genuinely_out_of_range_mean(mean):
+    with pytest.raises(ValueError):
+        BrokerHostHealthDistributionV1(2, 0, 100, 0, 100, mean)

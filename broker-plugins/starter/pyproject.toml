@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "histdatacom-broker-starter"
+version = "0.1.0"
+description = "Public-SDK-only generated broker plugin starter; not a provider integration"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["histdatacom"]
+classifiers = ["Programming Language :: Python :: 3", "Typing :: Typed"]
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
+
+[project.entry-points."histdatacom.broker_plugins.v1"]
+"org.example.starter" = "histdatacom_broker_starter.plugin:factory"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+histdatacom_broker_starter = ["py.typed", "_histdatacom_broker_plugins/*.json", "_histdatacom_broker_permissions/*.json"]
+
+[tool.black]
+line-length = 88
+target-version = ["py310"]
+
+[tool.ruff]
+target-version = "py310"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--import-mode=importlib"

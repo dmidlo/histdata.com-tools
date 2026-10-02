@@ -26,16 +26,21 @@ from histdatacom.synthetic.broker_transfer import (
     select_broker_profile,
 )
 from tests.fixtures.broker_derived_policy import generated_fingerprint
+from tests.fixtures.broker_derived_policy import (
+    generated_qualified_fingerprint,
+)
+from histdatacom.broker_capture import broker_fingerprint_sources
 from tests.fixtures.broker_provider_policy import generated_provider_scope
 from tests.unit.test_broker_delivery_fingerprints import _motif_query
 from tests.unit.test_synthetic_broker_transfer import _group_with_constraints
 
 
 @pytest.fixture(scope="module")
-def roots():
-    fingerprint = generated_fingerprint()
+def roots(tmp_path_factory):
+    root = tmp_path_factory.mktemp("qualified-derived")
+    fingerprint = generated_qualified_fingerprint(root)
     run, window, group, constraints = _group_with_constraints()
-    with generated_provider_scope(fingerprint):
+    with generated_provider_scope(fingerprint, capture_roots=(root,)):
         selection = select_broker_profile(
             fingerprint, requested_condition={}, selected_at_utc_ns=0
         )
@@ -56,7 +61,8 @@ def roots():
             quality_period="202001",
         )
     assert rendered.status is BrokerTransferStatus.APPLIED
-    return fingerprint, selection, proposal, rendered
+    with broker_fingerprint_sources(root):
+        yield fingerprint, selection, proposal, rendered
 
 
 def test_expected_shape_is_not_storable_and_carries_parent_classes():
@@ -108,7 +114,13 @@ def test_native_wrappers_and_registered_bare_roots_match_exact_bytes(
 )
 def test_exact_parent_inventory_is_required(roots, variant):
     fingerprint, selection, *_ = roots
-    other = replace(fingerprint, server_id="other-server", fingerprint_id="")
+    other = replace(
+        fingerprint,
+        statistics=replace(
+            fingerprint.statistics, effective_end_utc_ns=100, fingerprint_id=""
+        ),
+        fingerprint_id="",
+    )
     parents = {
         "missing": (),
         "extra": (fingerprint, other),
@@ -134,7 +146,13 @@ def test_resealed_selection_cannot_change_parent_values(roots, variant):
     }[variant]
     if variant == "clock":
         fingerprint = replace(
-            fingerprint, effective_end_utc_ns=100, fingerprint_id=""
+            fingerprint,
+            statistics=replace(
+                fingerprint.statistics,
+                effective_end_utc_ns=100,
+                fingerprint_id="",
+            ),
+            fingerprint_id="",
         )
         selection = replace(
             selection,

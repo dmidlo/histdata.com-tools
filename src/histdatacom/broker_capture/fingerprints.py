@@ -50,6 +50,13 @@ from histdatacom.market_context.contracts import (
 )
 from histdatacom.runtime_contracts import ArtifactRef, JSONValue
 
+from .fingerprint_v2 import (
+    BrokerDeliveryFingerprint,
+    BrokerDeliveryFingerprintV2,
+    BrokerFingerprintCaptureRootV1,
+    parse_broker_delivery_fingerprint,
+)
+
 _TAG_RE = re.compile(r"[^A-Za-z0-9._:-]+")
 _NANOSECONDS_PER_SECOND = 1_000_000_000
 _RATE_EVENT_KINDS = (
@@ -827,11 +834,11 @@ def fit_broker_delivery_fingerprint(
     config: BrokerDeliveryFitConfigV1 | None = None,
     calendar_profile: HistDataCalendarProfile | None = None,
     market_context_timeline: MarketContextTimelineV1 | None = None,
-    supersedes: BrokerDeliveryFingerprintV1 | None = None,
+    supersedes: BrokerDeliveryFingerprint | None = None,
     effective_start_utc_ns: int | None = None,
     effective_end_utc_ns: int | None = None,
     provider_requests: Sequence[BrokerLegacyCaptureV1] | None = None,
-) -> BrokerDeliveryFingerprintV1:
+) -> BrokerDeliveryFingerprintV2:
     """Fit one compact immutable profile with two verified streaming passes."""
     from histdatacom.broker_plugin_policy import (
         BrokerPolicyOperation,
@@ -841,8 +848,20 @@ def fit_broker_delivery_fingerprint(
         BrokerFingerprintFitV1,
         BrokerLegacyCaptureV1,
     )
+    from histdatacom.broker_plugin_provenance.native import (
+        require_legacy_capture_provenance,
+    )
+
+    from .fingerprint_sources import _fit_source_scope
 
     policy = config or BrokerDeliveryFitConfigV1()
+    if any(
+        type(item) is not BrokerCaptureSessionManifestV1 for item in manifests
+    ):
+        raise ValueError(
+            "fingerprint fitting requires exact legacy capture manifests; "
+            "SDK-native scientific fitting is unavailable"
+        )
     ordered = tuple(sorted(manifests, key=lambda item: item.session.session_id))
     if not ordered:
         raise ValueError("at least one capture manifest is required")
@@ -886,13 +905,15 @@ def fit_broker_delivery_fingerprint(
         BrokerFingerprintFitV1(requests, policy), BrokerPolicyOperation.DERIVE
     )
     if supersedes is not None:
-        require_provider_operation(
-            supersedes, BrokerPolicyOperation.MATERIAL_USE
-        )
+        with _fit_source_scope(root):
+            require_provider_operation(
+                supersedes, BrokerPolicyOperation.MATERIAL_USE
+            )
     request_by_session = {item.session.session_id: item for item in requests}
     context_events = _bounded_context_events(market_context_timeline, policy)
     decisions: list[BrokerCaptureEligibilityV1] = []
     evidence: list[BrokerDeliveryCaptureEvidenceV1] = []
+    capture_roots: list[BrokerFingerprintCaptureRootV1] = []
     for manifest in ordered:
         decision = assess_broker_capture_eligibility(
             root,
@@ -902,6 +923,24 @@ def fit_broker_delivery_fingerprint(
         )
         if not decision.fit_allowed:
             raise BrokerDeliveryIneligibleCaptureError(decision)
+        request = request_by_session[manifest.session.session_id]
+        verified = require_legacy_capture_provenance(
+            root,
+            manifest,
+            provider_request=request,
+        )
+        if not verified.structurally_complete or verified.seal is None:
+            raise BrokerDeliveryFingerprintArtifactError(
+                "new fitting requires complete native capture provenance"
+            )
+        capture_roots.append(
+            BrokerFingerprintCaptureRootV1(
+                manifest,
+                request.output_contract,
+                verified.header,
+                verified.seal,
+            )
+        )
         assert decision.logical_content_sha256 is not None
         assert decision.first_receive_time_utc_ns is not None
         assert decision.last_receive_time_utc_ns is not None
@@ -966,7 +1005,7 @@ def fit_broker_delivery_fingerprint(
         calendar_profile_complete=consumer.calendar_profile_complete,
     )
     identity = ordered[0].session
-    fingerprint = BrokerDeliveryFingerprintV1(
+    statistics = BrokerDeliveryFingerprintV1(
         adapter_id=identity.adapter_id,
         adapter_version=identity.adapter_version,
         adapter_config_sha256=identity.adapter_config_sha256,
@@ -989,18 +1028,20 @@ def fit_broker_delivery_fingerprint(
         ),
         limitations=limitations,
     )
-    require_provider_operation(fingerprint, BrokerPolicyOperation.DERIVE)
+    fingerprint = BrokerDeliveryFingerprintV2(statistics, tuple(capture_roots))
     from histdatacom.broker_plugin_health.qualification import (
         write_broker_health_qualification,
     )
 
-    write_broker_health_qualification(root, fingerprint, ordered, requests)
+    with _fit_source_scope(root):
+        require_provider_operation(fingerprint, BrokerPolicyOperation.DERIVE)
+        write_broker_health_qualification(root, fingerprint, ordered, requests)
     return fingerprint
 
 
 def compare_broker_delivery_fingerprints(
-    reference: BrokerDeliveryFingerprintV1,
-    candidate: BrokerDeliveryFingerprintV1,
+    reference: BrokerDeliveryFingerprint,
+    candidate: BrokerDeliveryFingerprint,
     *,
     config: BrokerDeliveryDriftConfigV1 | None = None,
 ) -> BrokerDeliveryFingerprintComparisonV1:
@@ -1065,7 +1106,7 @@ def compare_broker_delivery_fingerprints(
 
 def write_broker_delivery_fingerprint(
     path: str | Path,
-    fingerprint: BrokerDeliveryFingerprintV1,
+    fingerprint: BrokerDeliveryFingerprint,
 ) -> ArtifactRef:
     """Atomically publish an immutable fingerprint or verify idempotence."""
     from histdatacom.broker_plugin_policy import (
@@ -1172,10 +1213,10 @@ def write_broker_delivery_fingerprint(
 
 def load_broker_delivery_fingerprint(
     path: str | Path,
-) -> BrokerDeliveryFingerprintV1:
+) -> BrokerDeliveryFingerprint:
     """Load and identity-verify one immutable fingerprint artifact."""
     try:
-        return BrokerDeliveryFingerprintV1.from_json(
+        return parse_broker_delivery_fingerprint(
             Path(path).read_text(encoding="utf-8")
         )
     except (OSError, TypeError, ValueError) as err:
@@ -1390,7 +1431,7 @@ def _assert_compatible_capture_identity(
 
 def _assert_compatible_predecessor(
     manifest: BrokerCaptureSessionManifestV1,
-    predecessor: BrokerDeliveryFingerprintV1,
+    predecessor: BrokerDeliveryFingerprint,
     effective_start_utc_ns: int,
 ) -> None:
     session = manifest.session

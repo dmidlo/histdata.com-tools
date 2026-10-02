@@ -20,7 +20,9 @@ from histdatacom.broker_plugin_policy.contracts import (
     BrokerPolicyStatus as Status,
     BrokerPolicySubjectV1,
 )
-from histdatacom.broker_plugin_policy.decisions import decide_provider_operation
+from histdatacom.broker_plugin_policy.decisions import (
+    decide_provider_operation,
+)
 from histdatacom.broker_plugin_policy.scope import (
     BrokerPolicyError,
     provider_policy_scope,
@@ -449,7 +451,9 @@ def test_sdk_execution_routes_refuse_without_current_rights_before_effects(
         invoke_authorized_installed_broker_plugin,
     )
     from histdatacom.broker_plugin_lifecycle import run_broker_plugin_lifecycle
-    from histdatacom.broker_plugin_policy.bindings import sdk_invocation_binding
+    from histdatacom.broker_plugin_policy.bindings import (
+        sdk_invocation_binding,
+    )
     from histdatacom.broker_plugin_registry import BrokerPluginInventoryV1
     from histdatacom.broker_plugin_security import (
         BrokerSecurityMode,
@@ -821,7 +825,8 @@ def test_native_guard_rechecks_expiry_after_native_resolution(
     with provider_policy_scope(MutablePolicySource(context)):
         with pytest.raises(BrokerPolicyError) as error:
             require_provider_operation(
-                BrokerLegacyCaptureV1(inputs.session, output), Operation.CAPTURE
+                BrokerLegacyCaptureV1(inputs.session, output),
+                Operation.CAPTURE,
             )
     assert error.value.decision.request.decision_at_ns == expiry
     assert not error.value.decision.allowed
@@ -894,6 +899,7 @@ def test_raw_denied_capture_remains_fit_writable_and_identity_readable(
         fit_broker_delivery_fingerprint,
         load_broker_delivery_fingerprint,
         write_broker_delivery_fingerprint,
+        broker_fingerprint_sources,
     )
     from histdatacom.broker_plugin_health.runtime_legacy import (
         capture_legacy_with_host_health,
@@ -943,7 +949,8 @@ def test_raw_denied_capture_remains_fit_writable_and_identity_readable(
         )
         assert fingerprint.to_json() == from_registry.to_json()
         target = tmp_path / "derived" / "fingerprint.json"
-        artifact = write_broker_delivery_fingerprint(target, fingerprint)
+        with broker_fingerprint_sources(capture_root):
+            artifact = write_broker_delivery_fingerprint(target, fingerprint)
     native_bytes = (fingerprint.to_json() + "\n").encode("utf-8")
     assert target.read_bytes() == native_bytes
     assert artifact.sha256 == hashlib.sha256(native_bytes).hexdigest()
@@ -1313,7 +1320,9 @@ def test_missing_or_unacknowledged_terms_never_become_allowed():
 
 
 @pytest.mark.parametrize("deadline", (None, 1001, 1500))
-def test_finite_retention_is_not_accepted_as_a_timestamp_only_promise(deadline):
+def test_finite_retention_is_not_accepted_as_a_timestamp_only_promise(
+    deadline,
+):
     binding = _binding()
     context = policy_context(binding, maximum_retention_ns=5000)
     request = _request(

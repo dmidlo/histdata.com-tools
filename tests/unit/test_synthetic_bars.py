@@ -5,12 +5,16 @@ from __future__ import annotations
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import replace
+from itertools import count
 from pathlib import Path
 
 import pyarrow.parquet as pq
 import pytest
 
-from histdatacom.broker_plugin_policy import provider_reconstruction_inputs
+from histdatacom.broker_plugin_policy import (
+    provider_reconstruction_inputs,
+    scope,
+)
 from histdatacom.histdata_ascii import columns_for_timeframe
 from histdatacom.synthetic import (
     DERIVED_BAR_ARROW_COLUMNS,
@@ -38,6 +42,7 @@ from histdatacom.synthetic.persistence import (
     PublishedReconstructionV1,
     publish_reconstruction_group,
 )
+from tests.fixtures.broker_provider_policy import POLICY_NOW
 from tests.unit.test_synthetic_contracts import (
     BASE_TIME_NS,
     _generated,
@@ -393,8 +398,11 @@ def test_atomic_publication_round_trip_and_idempotent_commit(
 
 def test_batch_and_buffer_boundaries_preserve_logical_bars(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Input and output chunk sizes cannot change logical bar identities."""
+    ticks = count(POLICY_NOW)
+    monkeypatch.setattr(scope, "_now_ns", ticks.__next__)
     with _publish_source(tmp_path) as source:
         policy = DerivedBarPolicyV1(
             intervals=("1m", "5m"),

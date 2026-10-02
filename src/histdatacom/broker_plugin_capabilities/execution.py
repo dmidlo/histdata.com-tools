@@ -6,8 +6,8 @@ those require the separate lifecycle/isolation/permission policies.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator, Mapping
 import threading
+from collections.abc import Callable, Iterator, Mapping
 from typing import TYPE_CHECKING, TypeVar
 
 if TYPE_CHECKING:
@@ -21,7 +21,6 @@ from histdatacom.broker_plugins import (
     BrokerPluginV1,
     BrokerSessionV1,
     normalize_broker_instrument,
-    validate_broker_event_stream,
 )
 
 from .contracts import (
@@ -35,6 +34,7 @@ from .contracts import (
     BrokerInvocationAssociation,
     BrokerInvocationBindingV1,
 )
+from .event_diagnostics import next_host_validated_event
 from .negotiation import verify_broker_capability_plan
 from .validation import (
     _operation,
@@ -113,10 +113,10 @@ def _provider_record(
     metadata: BrokerPluginMetadataV1 | None = None,
 ) -> None:
     from histdatacom.broker_plugin_permissions.scope import (
+        check_permission_public_output,
         require_event_permissions,
         require_metadata_permissions,
         require_native_permissions,
-        check_permission_public_output,
     )
     from histdatacom.broker_plugin_policy.bindings import BrokerSDKRecordV1
     from histdatacom.broker_plugin_policy.contracts import BrokerPolicyOperation
@@ -422,9 +422,6 @@ class GatedBrokerPluginV1:
         try:
             _provider_call(self._provider_request, capture=True)
             events = _call(lambda: iter(self._plugin.iter_events(session)))
-            validated = validate_broker_event_stream(
-                events, session, starting_sequence=self._next_sequence
-            )
             for _ in range(maximum):
                 if self._active("iter_events") != session:
                     raise BrokerCapabilityError(
@@ -432,13 +429,15 @@ class GatedBrokerPluginV1:
                     )
                 _provider_call(self._provider_request, capture=True)
                 try:
-                    event = next(validated)
+                    event = next_host_validated_event(
+                        events,
+                        session,
+                        sequence=self._next_sequence,
+                        previous_monotonic=self._last_monotonic,
+                        previous_utc=self._last_utc,
+                    )
                 except StopIteration:
                     return
-                except (Exception, SystemExit):
-                    raise BrokerCapabilityError(
-                        BrokerCapabilityReason.CAPABILITY_VIOLATION
-                    ) from None
                 admitted = validate_broker_capability_event(self.plan, event)
                 _provider_record(
                     self._provider_request,

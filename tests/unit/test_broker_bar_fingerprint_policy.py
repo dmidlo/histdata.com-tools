@@ -1,7 +1,6 @@
 """Retained constructed profiles and actual generated bar parents, no fit claim."""
 
 from dataclasses import replace
-from unittest.mock import patch
 
 import pytest
 
@@ -10,36 +9,46 @@ from histdatacom.broker_capture.fingerprints import (
     compare_broker_delivery_fingerprints,
 )
 from histdatacom.broker_plugin_policy import (
-    BrokerPolicyError,
-    BrokerPolicyOperation as Operation,
     BrokerPolicyDataClass as DataClass,
-    BrokerPolicyStatus as Status,
+)
+from histdatacom.broker_plugin_policy import (
+    BrokerPolicyError,
     provider_native_inputs,
     provider_policy_scope,
     scope,
 )
+from histdatacom.broker_plugin_policy import (
+    BrokerPolicyOperation as Operation,
+)
+from histdatacom.broker_plugin_policy import (
+    BrokerPolicyStatus as Status,
+)
 from histdatacom.synthetic import bars
 from histdatacom.synthetic.activity import ActivitySliceScope
 from histdatacom.synthetic.bar_features import (
-    BarAvailabilityDeclarationV1,
     BarAvailabilityBasis,
+    BarAvailabilityDeclarationV1,
+    BarFeatureConsumerResultV1,
     BarFeaturePolicyV1,
     BarFeatureSourceV1,
-    BarFeatureConsumerResultV1,
     canonical_bar_feature_json,
 )
 from histdatacom.synthetic.information import InformationMode
 from tests.fixtures.broker_provider_policy import generated_provider_scope
+from tests.unit.test_broker_bar_policy import _publish_source
 from tests.unit.test_broker_bar_policy import (
-    published_source as _published_source,
+    published_source as published_source,  # noqa: PLC0414 - fixture export
 )
-from tests.unit.test_broker_provider_policy_products import _source
+from tests.unit.test_broker_provider_policy_products import (
+    _render_product_inputs,
+    _source,
+)
 
 MODE = InformationMode.EX_POST_RECONSTRUCTION
 
 
-def _build_retained_fit(tmp_path_factory):
-    fingerprint, product = _published_source.__wrapped__(tmp_path_factory)
+def _build_retained_fit(tmp_path_factory, source_pair):
+    fingerprint, product = source_pair
     with (
         provider_native_inputs(fingerprint, product.manifest),
         generated_provider_scope(fingerprint),
@@ -115,22 +124,25 @@ def _build_retained_fit(tmp_path_factory):
 
 
 @pytest.fixture(scope="module")
-def retained_fit(tmp_path_factory):
-    return _build_retained_fit(tmp_path_factory)
+def retained_fit(tmp_path_factory, published_source):
+    return _build_retained_fit(tmp_path_factory, published_source)
 
 
 @pytest.fixture(scope="module")
 def other_retained_fit(tmp_path_factory, retained_fit):
     other = replace(
-        retained_fit[0], effective_end_utc_ns=2**63 - 1, fingerprint_id=""
+        retained_fit[0],
+        statistics=replace(
+            retained_fit[0].statistics,
+            effective_end_utc_ns=2**63 - 1,
+            fingerprint_id="",
+        ),
+        fingerprint_id="",
     )
     # Change only a generated fixture input. The actual native renderer,
     # publication, bar derivation and source replay all execute again.
-    with patch(
-        "tests.unit.test_broker_provider_policy_products.generated_fingerprint",
-        return_value=other,
-    ):
-        return _build_retained_fit(tmp_path_factory)
+    source = _publish_source(tmp_path_factory, _render_product_inputs(other))
+    return _build_retained_fit(tmp_path_factory, source)
 
 
 def _compare(artifact, other=None):
@@ -151,7 +163,7 @@ def test_actual_parent_comparison_preserves_native_math_and_nonclaims(
         changes=tuple(
             (op, cls, Status.DENIED)
             for op in Operation
-            for cls in (DataClass.RAW_PAYLOAD, DataClass.NORMALIZED_QUOTES)
+            for cls in (DataClass.RAW_PAYLOAD,)
         ),
     )
     with (
@@ -180,6 +192,27 @@ def test_actual_parent_comparison_preserves_native_math_and_nonclaims(
     assert not result.historical_availability_verified
 
 
+def test_source_quote_revocation_refuses_retained_summary_reuse(retained_fit):
+    """Retained statistics are not a bypass of mandatory native-root replay."""
+    fingerprint, product, artifact = retained_fit[:3]
+    source = _source(
+        fingerprint,
+        changes=(
+            (
+                Operation.MATERIAL_USE,
+                DataClass.NORMALIZED_QUOTES,
+                Status.DENIED,
+            ),
+        ),
+    )
+    with (
+        provider_native_inputs(fingerprint, product.manifest),
+        provider_policy_scope(source),
+        pytest.raises(BrokerPolicyError),
+    ):
+        _compare(artifact)
+
+
 @pytest.mark.parametrize(
     "operation", [Operation.MATERIAL_USE, Operation.DERIVE]
 )
@@ -200,7 +233,13 @@ def test_broker_product_right_is_required_before_summary_work(
         provider_policy_scope(source),
     ):
         other = replace(
-            fingerprint, effective_end_utc_ns=2**63 - 1, fingerprint_id=""
+            fingerprint,
+            statistics=replace(
+                fingerprint.statistics,
+                effective_end_utc_ns=2**63 - 1,
+                fingerprint_id="",
+            ),
+            fingerprint_id="",
         )
         assert compare_broker_delivery_fingerprints(fingerprint, other)
         with pytest.raises(BrokerPolicyError):
@@ -227,7 +266,13 @@ def test_resealed_retained_parent_mismatch_refuses(retained_fit, change):
     body = artifact.result()
     if change == "foreign_fingerprint":
         other = replace(
-            fingerprint, effective_end_utc_ns=2**63 - 1, fingerprint_id=""
+            fingerprint,
+            statistics=replace(
+                fingerprint.statistics,
+                effective_end_utc_ns=2**63 - 1,
+                fingerprint_id="",
+            ),
+            fingerprint_id="",
         )
         body["delivery_fingerprint"] = other.to_dict()
     elif change == "unknown_fingerprint_field":

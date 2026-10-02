@@ -7,6 +7,11 @@ changes immutable observations or supplies historical price-path content.
 
 from __future__ import annotations
 
+from histdatacom.broker_capture.fingerprint_v2 import (
+    BROKER_DELIVERY_FINGERPRINT_V2_SCHEMA_VERSION,
+    BrokerDeliveryFingerprint,
+)
+
 import hashlib
 import json
 import math
@@ -20,7 +25,6 @@ from histdatacom.broker_capture.fingerprint_contracts import (
     BROKER_DELIVERY_FINGERPRINT_SCHEMA_VERSION,
     BrokerDeliveryCellV1,
     BrokerDeliveryFingerprintComparisonV1,
-    BrokerDeliveryFingerprintV1,
     BrokerDeliverySupportStatus,
 )
 from histdatacom.data_quality.contracts import QualityStatus
@@ -268,9 +272,10 @@ class BrokerProfileSelectionV1:
     def __post_init__(self) -> None:
         if self.schema_version != BROKER_PROFILE_SELECTION_SCHEMA_VERSION:
             raise ValueError("unsupported broker profile selection")
-        if self.fingerprint_schema_version != (
-            BROKER_DELIVERY_FINGERPRINT_SCHEMA_VERSION
-        ):
+        if self.fingerprint_schema_version not in {
+            BROKER_DELIVERY_FINGERPRINT_SCHEMA_VERSION,
+            BROKER_DELIVERY_FINGERPRINT_V2_SCHEMA_VERSION,
+        }:
             raise ValueError("selection fingerprint schema is unsupported")
         object.__setattr__(
             self, "fingerprint_id", _required_text(self.fingerprint_id)
@@ -550,7 +555,7 @@ class BrokerConditionedProposalV1:
 
 
 def select_broker_profile(
-    fingerprint: BrokerDeliveryFingerprintV1,
+    fingerprint: BrokerDeliveryFingerprint,
     *,
     requested_condition: Mapping[str, str],
     selected_at_utc_ns: int,
@@ -579,7 +584,7 @@ def select_broker_profile(
 
 
 def _select_broker_profile(
-    fingerprint: BrokerDeliveryFingerprintV1,
+    fingerprint: BrokerDeliveryFingerprint,
     *,
     requested_condition: Mapping[str, str],
     selected_at_utc_ns: int,
@@ -691,7 +696,7 @@ def _select_broker_profile(
 
 def condition_broker_proposal(
     query: ReferenceMotifQueryV1,
-    fingerprint: BrokerDeliveryFingerprintV1,
+    fingerprint: BrokerDeliveryFingerprint,
     *,
     requested_condition: Mapping[str, str],
     selected_at_utc_ns: int,
@@ -727,7 +732,7 @@ def condition_broker_proposal(
 
 def _condition_broker_proposal(
     query: ReferenceMotifQueryV1,
-    fingerprint: BrokerDeliveryFingerprintV1,
+    fingerprint: BrokerDeliveryFingerprint,
     *,
     requested_condition: Mapping[str, str],
     selected_at_utc_ns: int,
@@ -849,7 +854,7 @@ def _condition_id(dimensions: Mapping[str, str]) -> str:
 
 
 def _refused_selection(
-    fingerprint: BrokerDeliveryFingerprintV1,
+    fingerprint: BrokerDeliveryFingerprint,
     requested: Mapping[str, str],
     requested_id: str,
     selected_at: int,
@@ -902,7 +907,7 @@ def _resolved_metrics(
 
 
 def _drift_evidence(
-    fingerprint: BrokerDeliveryFingerprintV1,
+    fingerprint: BrokerDeliveryFingerprint,
     comparison: BrokerDeliveryFingerprintComparisonV1 | None,
 ) -> tuple[str | None, int | None, str | None]:
     if comparison is None:
@@ -1538,7 +1543,7 @@ def render_broker_delivery(
     run: ReconstructionRunV1,
     window: ReconstructionWindowV1,
     group: CrossCurrencyReconciledGroupV1,
-    fingerprint: BrokerDeliveryFingerprintV1,
+    fingerprint: BrokerDeliveryFingerprint,
     constraints: HistoricalCarvingConstraintSetV1,
     selected_at_utc_ns: int,
     requested_conditions: Mapping[str, Mapping[str, str]] | None = None,
@@ -1584,7 +1589,7 @@ def _render_broker_delivery(
     run: ReconstructionRunV1,
     window: ReconstructionWindowV1,
     group: CrossCurrencyReconciledGroupV1,
-    fingerprint: BrokerDeliveryFingerprintV1,
+    fingerprint: BrokerDeliveryFingerprint,
     constraints: HistoricalCarvingConstraintSetV1,
     selected_at_utc_ns: int,
     requested_conditions: Mapping[str, Mapping[str, str]] | None,
@@ -2281,7 +2286,7 @@ def _refused_render(
     run: ReconstructionRunV1,
     window: ReconstructionWindowV1,
     group: CrossCurrencyReconciledGroupV1,
-    fingerprint: BrokerDeliveryFingerprintV1,
+    fingerprint: BrokerDeliveryFingerprint,
     config: BrokerTransferConfigV1,
     selections: Sequence[BrokerProfileSelectionV1],
     input_hash: str,

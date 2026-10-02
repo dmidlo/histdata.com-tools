@@ -10,11 +10,11 @@ import re
 from typing import TYPE_CHECKING, cast
 
 from .bindings import (
-    _ResolvedNative,
     _composite_ref,
     _preflight_native,
     _ref,
     _resolve_native,
+    _ResolvedNative,
     _restore_native,
 )
 from .contracts import BrokerPolicyDataClass, BrokerPolicySubjectV1
@@ -71,6 +71,9 @@ def _resolve_activity_native(
     from histdatacom.broker_capture.fingerprint_contracts import (
         BrokerDeliveryFingerprintV1,
     )
+    from histdatacom.broker_capture.fingerprint_v2 import (
+        BrokerDeliveryFingerprintV2,
+    )
     from histdatacom.synthetic.activity import ReconstructionActivityManifestV1
 
     from .derived import BrokerDerivedArtifactV1
@@ -91,7 +94,9 @@ def _resolve_activity_native(
         _restore_native(native.artifact, {ReconstructionActivityManifestV1}),
     )
     fingerprints = tuple(
-        _restore_native(item, {BrokerDeliveryFingerprintV1})
+        _restore_native(
+            item, {BrokerDeliveryFingerprintV1, BrokerDeliveryFingerprintV2}
+        )
         for item in native.fingerprints
     )
     identities = tuple(sorted(item.fingerprint_id for item in fingerprints))

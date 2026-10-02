@@ -189,6 +189,7 @@ Homepage = "https://github.com/dmidlo/histdata.com-tools"
 [project.scripts]
 histdatacom = "histdatacom.histdata_com:main"
 histdatacom-orchestration-worker = "histdatacom.orchestration.worker:main"
+histdatacom-broker-conformance = "histdatacom.broker_plugin_conformance.cli:main"
 
 [tool.setuptools.package-dir]
 "" = "src"
@@ -207,6 +208,12 @@ where = ["src"]
     "py.typed",
 ]
 "histdatacom.broker_plugin_health" = [
+    "py.typed",
+]
+"histdatacom.broker_plugin_provenance" = [
+    "py.typed",
+]
+"histdatacom.broker_plugin_conformance" = [
     "py.typed",
 ]
 "histdatacom.attribution" = [

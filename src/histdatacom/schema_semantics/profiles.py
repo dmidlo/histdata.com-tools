@@ -20,7 +20,9 @@ _SOURCES = {
     "broker_plugins/contracts.py": "e17a51c0b406fe96cf73066abd5e9ae25804f9bb944ec5358d6fb17f7fdba18c",
     "broker_plugin_lifecycle/contracts.py": "ece9eb834a271bf3387fc85677fcb9f30b377a40a319ecfd7c1cd1de4b00b2bb",
     "broker_plugin_registry/contracts.py": "c15f3f0dfca961fb086018b65dd4c675c2c66026067b606e3b9d3d25468cfee3",
-    "broker_plugin_capabilities/contracts.py": "d80c6f3773eb92788a5cdefd54c8379b03d14b9e7ed2deaecef960b21ffafed9",
+    # #620 adds closed exception metadata only; the complete artifact
+    # reader/writer/validator domain and historical error wire are unchanged.
+    "broker_plugin_capabilities/contracts.py": "46adf9c4831f4a2dbb950081dfb56ba02c35e03c223ae8d3b6c3fc1215cbdd3a",
     "market_context/economic_calendar.py": "e71254fdb69032fe032e1559ae89b19409d72d8e72c464bab7d2b42bc9db9761",
     "market_context/contracts.py": "6319014257ab8852f19626c0d6f71f45c9630371f2c8e65d94e9d60c76093bed",
     "forecasting/scoring.py": "97ef6d6fdeb1b2aa5a8033abac4970ec599ac871e334a89ac238ff7632070456",

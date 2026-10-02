@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import hashlib
 import json
-from json.encoder import encode_basestring_ascii
 import math
 import re
 from dataclasses import fields
 from enum import Enum
 from functools import lru_cache
+from json.encoder import encode_basestring_ascii
 from types import UnionType
 from typing import (
     Any,
@@ -100,9 +100,10 @@ def plain(value: object) -> object:
     return visit(value, 0)
 
 
-def canonical_json(value: object) -> str:
+def _encode_plain(value: object) -> str:
+    """Encode only an already bounded detached tree, never public raw input."""
     text = json.dumps(
-        plain(value),
+        value,
         ensure_ascii=True,
         allow_nan=False,
         sort_keys=True,
@@ -111,6 +112,10 @@ def canonical_json(value: object) -> str:
     if len(text) > MAX_BYTES:
         raise ValueError("broker-provider-policy byte bound")
     return text
+
+
+def canonical_json(value: object) -> str:
+    return _encode_plain(plain(value))
 
 
 def load_json(text: str) -> object:
@@ -232,9 +237,9 @@ class Record:
         return cast(dict[str, object], plain(self))
 
     @classmethod
-    def from_payload(
+    def from_payload(  # noqa: PYI019
         cls: type[_T], payload: dict[str, object]
-    ) -> _T:  # noqa: PYI019
+    ) -> _T:
         plain(payload)
         if type(payload) is not dict or set(payload) != {
             f.name for f in fields(cast(Any, cls))
@@ -260,32 +265,37 @@ class Artifact(Record):
 
     @property
     def artifact_id(self) -> str:
-        return identity(
-            self.KIND,
-            {
-                "schema_version": self.schema_version(),
-                "payload": self.to_payload(),
-            },
-        )
+        return cast(str, self.to_dict()["artifact_id"])
 
     def to_dict(self) -> dict[str, object]:
-        payload = self.to_payload()
         schema = self.schema_version()
-        return {
-            "schema_version": schema,
-            "artifact_id": identity(
-                self.KIND, {"schema_version": schema, "payload": payload}
+        prefix = f"broker-provider-policy-{self.KIND}:sha256:"
+        # Preflight the complete envelope once with an exactly equal-length,
+        # equal-type SHA-256 placeholder. Traversal is performed on live fields
+        # each time; no context, decision, authority, source, or result is cached.
+        envelope = cast(
+            dict[str, object],
+            plain(
+                {
+                    "schema_version": schema,
+                    "artifact_id": prefix + "0" * 64,
+                    "payload": self,
+                }
             ),
-            "payload": payload,
-        }
+        )
+        source = _encode_plain(
+            {"schema_version": schema, "payload": envelope["payload"]}
+        )
+        envelope["artifact_id"] = prefix + sha256(source)
+        return envelope
 
     def to_json(self) -> str:
-        return canonical_json(self.to_dict())
+        return _encode_plain(self.to_dict())
 
     @classmethod
-    def from_dict(
+    def from_dict(  # noqa: PYI019
         cls: type[_T], value: dict[str, object]
-    ) -> _T:  # noqa: PYI019
+    ) -> _T:
         plain(value)
         if type(value) is not dict or set(value) != {
             "schema_version",

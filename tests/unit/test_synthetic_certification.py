@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import pytest
 
@@ -29,12 +30,41 @@ from histdatacom.synthetic import (
 from histdatacom.synthetic.certification import EURUSD_TRIANGLE_SYMBOLS
 
 BROKER_ID = "broker-delivery-fingerprint:sha256:qualified-fixture"
+_QUALIFIED: Any = None
+_CAPTURE_ROOT: Any = None
 METHODOLOGY = (
     "The fixture binds immutable source identities, final holdout scorecards, "
     "post-render cross-currency validation, restart/replay evidence, resource "
     "measurements, negative tests, and downstream strategy sensitivity to one "
     "predeclared policy. Event rows remain outside the dossier."
 )
+
+
+@pytest.fixture(scope="module", autouse=True)
+def actual_broker_root(tmp_path_factory):
+    """Only generated capture bytes qualify the positive certification gates."""
+    from tests.fixtures.broker_derived_policy import (
+        generated_qualified_fingerprint,
+    )
+
+    global BROKER_ID, _QUALIFIED, _CAPTURE_ROOT
+    root = tmp_path_factory.mktemp("certification-broker-source")
+    _QUALIFIED = generated_qualified_fingerprint(root)
+    _CAPTURE_ROOT = root
+    BROKER_ID = _QUALIFIED.fingerprint_id
+    return _QUALIFIED
+
+
+@contextmanager
+def _qualified_scope():
+    from histdatacom.broker_plugin_policy import provider_native_inputs
+    from tests.fixtures.broker_provider_policy import generated_provider_scope
+
+    with (
+        provider_native_inputs(_QUALIFIED),
+        generated_provider_scope(_QUALIFIED, capture_roots=(_CAPTURE_ROOT,)),
+    ):
+        yield
 
 
 def _policy() -> ReconstructionCertificationPolicyV1:
@@ -64,12 +94,20 @@ def _artifact(
         policy_id=selected_policy.policy_id,
         kind=kind,
         subject_id=subject_id,
-        subject_schema_version=f"histdatacom.{kind}.v1",
-        payload={
-            "kind": kind,
-            "subject_id": subject_id,
-            "fixture": True,
-        },
+        subject_schema_version=(
+            _QUALIFIED.schema_version
+            if kind == "broker-delivery-fingerprint"
+            else f"histdatacom.{kind}.v1"
+        ),
+        payload=(
+            _QUALIFIED.to_dict()
+            if kind == "broker-delivery-fingerprint"
+            else {
+                "kind": kind,
+                "subject_id": subject_id,
+                "fixture": True,
+            }
+        ),
         relative_path=f"certification/{kind}.json",
         verified=verified,
         metadata={"event_rows_inline": False},
@@ -140,16 +178,17 @@ def _dossier(
                 observation_id="",
             )
         )
-    return evaluate_reconstruction_certification(
-        policy,
-        artifacts=selected_artifacts,
-        observations=observations,
-        methodology=METHODOLOGY,
-        accepted_limitations=(
-            "The deterministic fixture demonstrates contract semantics, not historical truth.",
-        ),
-        blocking_limitations=blocking_limitations,
-    )
+    with _qualified_scope():
+        return evaluate_reconstruction_certification(
+            policy,
+            artifacts=selected_artifacts,
+            observations=observations,
+            methodology=METHODOLOGY,
+            accepted_limitations=(
+                "The deterministic fixture demonstrates contract semantics, not historical truth.",
+            ),
+            blocking_limitations=blocking_limitations,
+        )
 
 
 def test_default_policy_predeclares_every_issue_gate_and_round_trips() -> None:
@@ -191,6 +230,21 @@ def test_complete_content_bound_evidence_certifies_without_product_claims() -> (
         ReconstructionCertificationDossierV1.from_json(dossier.to_json())
         == dossier
     )
+
+
+def test_declared_verified_flag_and_resealed_hash_are_not_actual_broker_evidence():
+    policy = _policy()
+    artifacts = tuple(
+        (
+            replace(item, content_sha256="0" * 64, evidence_id="")
+            if item.kind == "broker-delivery-fingerprint"
+            else item
+        )
+        for item in _artifacts(policy)
+    )
+    assert all(item.verified for item in artifacts)
+    with pytest.raises(ValueError, match="actual qualified broker fingerprint"):
+        _dossier(artifacts=artifacts)
 
 
 def test_only_promotion_coverage_missing_is_ready_for_promotion() -> None:
@@ -383,16 +437,29 @@ def test_dossier_publication_is_atomic_replayable_and_human_readable(
     json_path = tmp_path / "evidence" / "certification.json"
     markdown_path = tmp_path / "evidence" / "certification.md"
 
-    json_ref, markdown_ref = write_reconstruction_certification_dossier(
-        dossier,
-        json_path=json_path,
-        markdown_path=markdown_path,
-    )
+    with _qualified_scope():
+        json_ref, markdown_ref = write_reconstruction_certification_dossier(
+            dossier,
+            json_path=json_path,
+            markdown_path=markdown_path,
+        )
 
     assert load_reconstruction_certification_dossier(json_path) == dossier
     assert json_ref.sha256
     assert markdown_ref.sha256
     assert json_ref.size_bytes == json_path.stat().st_size
+    from histdatacom.broker_plugin_policy import (
+        read_broker_scientific_lineage,
+        read_broker_policy_receipt,
+    )
+
+    lineage = read_broker_scientific_lineage(json_path)
+    receipt = read_broker_policy_receipt(
+        json_path.with_name(json_path.name + ".provider-policy.json")
+    )
+    assert lineage.native_id == receipt.native_file.native_id
+    assert lineage.fingerprints == (_QUALIFIED,)
+    assert lineage.fingerprints[0].capture_roots == _QUALIFIED.capture_roots
     markdown = markdown_path.read_text(encoding="utf-8")
     assert "## Gate results" in markdown
     assert "## Methodology" in markdown

@@ -8,6 +8,27 @@ or their own provider dependencies. The SDK itself imports only the standard
 library and its own modules; it performs no network, filesystem, registration,
 or provider discovery side effects.
 
+## Standalone reference and starter projects
+
+The repository ships two independently buildable source projects:
+
+- [`broker-plugins/reference`](https://github.com/dmidlo/histdata.com-tools/tree/dev/broker-plugins/reference)
+  is the generated, credential-free first-party reference implementation.
+- [`broker-plugins/starter`](https://github.com/dmidlo/histdata.com-tools/tree/dev/broker-plugins/starter)
+  is the external-developer template; copy that entire directory into its own
+  repository without copying host internals.
+
+Each directory includes its own package metadata, public SDK implementation,
+tests, CI example and developer/operator guides. Start with the local
+`DEVELOPER_GUIDE.md` ([reference guide](https://github.com/dmidlo/histdata.com-tools/blob/dev/broker-plugins/reference/DEVELOPER_GUIDE.md),
+[starter guide](https://github.com/dmidlo/histdata.com-tools/blob/dev/broker-plugins/starter/DEVELOPER_GUIDE.md))
+and run commands from that project's root. The guides distinguish installing
+the reviewed unreleased host, metadata discovery, conformance, normal capture
+and replay, and scientific/provider admission. Declared capabilities and pure
+test results are not physical conformance certification; consult the
+reference project's dated `INTEGRATED_QUALIFICATION.md` preparation record for
+the exact completed scope and remaining gates.
+
 ## Ownership and compatibility
 
 The plugin supplies broker-neutral measurements. The host owns validation,

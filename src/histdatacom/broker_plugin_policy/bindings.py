@@ -1235,11 +1235,17 @@ def _sdk_security_subject(native: BrokerSDKSecurityV1) -> _ResolvedNative:
 
 
 def _resolve_native(native_subject: object) -> _ResolvedNative:
+    from .provenance_bindings import (
+        BrokerProvenanceEvidenceV1,
+        resolve_provenance_native,
+    )
     from .health_bindings import (
         BrokerHostHealthEvidenceV1,
         resolve_host_health_native,
     )
 
+    if type(native_subject) is BrokerProvenanceEvidenceV1:
+        return resolve_provenance_native(native_subject)
     if type(native_subject) is BrokerHostHealthEvidenceV1:
         return resolve_host_health_native(native_subject)
     if type(native_subject) in (BrokerLegacyCaptureV1, BrokerLegacyRecordV1):
@@ -1255,10 +1261,17 @@ def _resolve_native(native_subject: object) -> _ResolvedNative:
     from histdatacom.broker_capture.fingerprint_contracts import (
         BrokerDeliveryFingerprintV1,
     )
+    from histdatacom.broker_capture.fingerprint_v2 import (
+        BrokerDeliveryFingerprintV2,
+    )
 
-    if type(native_subject) is BrokerDeliveryFingerprintV1:
+    if type(native_subject) in {
+        BrokerDeliveryFingerprintV1,
+        BrokerDeliveryFingerprintV2,
+    }:
         fingerprint = _restore_native(
-            native_subject, {BrokerDeliveryFingerprintV1}
+            native_subject,
+            {BrokerDeliveryFingerprintV1, BrokerDeliveryFingerprintV2},
         )
         classes = {
             DataClass.FINGERPRINTS,
@@ -1269,6 +1282,19 @@ def _resolve_native(native_subject: object) -> _ResolvedNative:
             classes.add(DataClass.PRIVATE_ACCOUNT)
         if _fingerprint_has_opaque_text(fingerprint):
             classes.add(DataClass.RAW_PAYLOAD)
+        if type(fingerprint) is BrokerDeliveryFingerprintV2:
+            for root in fingerprint.capture_roots:
+                classes |= _session_classes(root.manifest.session)
+                if root.manifest.limitations or any(
+                    dict(partition.data_artifact.metadata)
+                    != {
+                        "encoding": "utf-8",
+                        "format": "canonical-json-lines",
+                        "ordering": "capture_sequence",
+                    }
+                    for partition in root.manifest.partitions
+                ):
+                    classes.add(DataClass.RAW_PAYLOAD)
         return _ResolvedNative(
             BrokerPolicySubjectV1(
                 _native_ref(fingerprint, "fingerprint_id"),

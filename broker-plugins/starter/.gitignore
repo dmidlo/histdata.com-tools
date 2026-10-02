@@ -1,0 +1,11 @@
+.venv/
+build/
+dist*/
+*.egg-info/
+__pycache__/
+.mypy_cache/
+.ruff_cache/
+*.log
+plan.json
+qualification-plan.json
+generated-run/

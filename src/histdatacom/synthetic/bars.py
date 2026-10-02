@@ -1712,11 +1712,21 @@ def _verify_bar_policy_receipt(
 ) -> None:
     if not _bar_is_broker(manifest):
         return
+    from histdatacom.broker_capture.fingerprint_v2 import (
+        BrokerDeliveryFingerprintV2,
+    )
+    from histdatacom.broker_plugin_policy.native_inputs import fingerprint_for
     from histdatacom.broker_plugin_policy.storage import (
         read_broker_policy_receipt,
         verify_broker_policy_receipt,
     )
 
+    profile = _bar_provider_profile(manifest)
+    if (
+        profile is not None
+        and type(fingerprint_for(profile)) is BrokerDeliveryFingerprintV2
+    ):
+        required = True
     receipt = path.with_name(path.name + ".provider-policy.json")
     if required or receipt.exists() or receipt.is_symlink():
         verify_broker_policy_receipt(
@@ -2576,6 +2586,9 @@ def _verify_derived_bar_directory(
     sidecar = DERIVED_BAR_MANIFEST_FILENAME + ".provider-policy.json"
     if _bar_is_broker(manifest) and (directory / sidecar).exists():
         expected_files.add(sidecar)
+        expected_files.add(
+            DERIVED_BAR_MANIFEST_FILENAME + ".broker-provenance.json"
+        )
     expected_files.update(item.relative_path for item in manifest.partitions)
     expected_directories = {
         parent.as_posix()

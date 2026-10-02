@@ -77,3 +77,62 @@ def generated_fingerprint() -> BrokerDeliveryFingerprintV1:
         effective_end_utc_ns=None,
         cells=(cell,),
     )
+
+
+def generated_qualified_fingerprint(root):
+    """Execute a tiny synthetic host capture and real V2 fit, never a fake seal."""
+    from dataclasses import replace
+
+    from histdatacom.broker_capture import (
+        SequenceBrokerCaptureAdapterV1,
+        fit_broker_delivery_fingerprint,
+    )
+    from histdatacom.broker_plugin_health.runtime_legacy import (
+        capture_legacy_with_host_health,
+    )
+    from histdatacom.broker_plugin_policy import (
+        BrokerLegacyCaptureV1,
+        BrokerProviderOutputContractV1,
+    )
+    from tests.fixtures.broker_host_health import SyntheticHostHealthClock
+    from tests.fixtures.broker_provider_policy import (
+        generated_provider_scope,
+        legacy_policy_inputs,
+    )
+
+    inputs = legacy_policy_inputs()
+    messages = inputs.messages[:7] + inputs.messages[-1:]
+    request = BrokerLegacyCaptureV1(
+        inputs.session,
+        BrokerProviderOutputContractV1(
+            "legacy-capture-v1",
+            tuple(sorted({item.kind.value for item in messages})),
+            allow_raw_hashes=False,
+            allow_opaque_metadata=False,
+            allow_private_account_metadata=False,
+        ),
+    )
+    with generated_provider_scope(request):
+        result = capture_legacy_with_host_health(
+            root,
+            provider_request=request,
+            adapter=SequenceBrokerCaptureAdapterV1(
+                inputs.session.adapter_id,
+                inputs.session.adapter_version,
+                messages,
+            ),
+            clock=SyntheticHostHealthClock(inputs.session),
+            storage_policy=replace(
+                inputs.storage_policy,
+                max_partition_events=32,
+                fsync_each_event=True,
+                policy_id="",
+            ),
+            symbols=("EURUSD",),
+        )
+        return fit_broker_delivery_fingerprint(
+            root,
+            (result.manifest,),
+            provider_requests=(request,),
+            effective_start_utc_ns=0,
+        )

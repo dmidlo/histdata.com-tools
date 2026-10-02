@@ -7,23 +7,27 @@ claimed to be simultaneous capture observations or independent across widths.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 import math
-from pathlib import Path
 import re
 import statistics
+from collections.abc import Sequence
+from pathlib import Path
 from typing import Any, cast
 
 from histdatacom.broker_capture.contracts import BrokerCaptureSessionManifestV1
 from histdatacom.broker_capture.fingerprint_contracts import (
     BrokerDeliveryDriftConfigV1,
-    BrokerDeliveryFingerprintV1,
     BrokerDeliveryFitConfigV1,
+)
+from histdatacom.broker_capture.fingerprint_v2 import (
+    BrokerDeliveryFingerprint,
+    parse_broker_delivery_fingerprint,
 )
 from histdatacom.broker_capture.fingerprints import (
     compare_broker_delivery_fingerprints,
     fit_broker_delivery_fingerprint,
 )
+from histdatacom.synthetic.activity import ActivitySliceScope
 from histdatacom.synthetic.bar_features import (
     MAX_BAR_FEATURE_COLLECTION_ITEMS,
     BarFeatureConsumerResultV1,
@@ -34,7 +38,6 @@ from histdatacom.synthetic.bar_features import (
     CausalBarSnapshotV1,
     canonical_bar_feature_json,
 )
-from histdatacom.synthetic.activity import ActivitySliceScope
 from histdatacom.synthetic.bars import STANDARD_DERIVED_BAR_INTERVALS
 from histdatacom.synthetic.information import InformationMode
 from histdatacom.synthetic.persistence import (
@@ -193,7 +196,7 @@ def _state_summaries(
 
 def _validated_fit(
     artifact: BarFeatureConsumerResultV1,
-) -> tuple[BrokerDeliveryFingerprintV1, dict[str, object]]:
+) -> tuple[BrokerDeliveryFingerprint, dict[str, object]]:
     body = artifact.result()
     if set(body) != {
         "state_schema_version",
@@ -228,7 +231,7 @@ def _validated_fit(
         or artifact.information_mode is not policy.information_mode
     ):
         raise ValueError("bar fingerprint policy binding differs")
-    fingerprint = BrokerDeliveryFingerprintV1.from_dict(
+    fingerprint = parse_broker_delivery_fingerprint(
         body["delivery_fingerprint"]
     )
     if canonical_bar_feature_json(
@@ -310,7 +313,7 @@ def _validated_fit(
 
 
 def _require_bar_fit_parent(
-    fingerprint: BrokerDeliveryFingerprintV1, product_id: str
+    fingerprint: BrokerDeliveryFingerprint, product_id: str
 ) -> None:
     """Bind retained bar states to actual native parents, never to an ID alone.
 
@@ -427,6 +430,6 @@ def compare_broker_delivery_fingerprints_with_bar_state(
 
 
 __all__ = [
-    "fit_broker_delivery_fingerprint_with_bar_state",
     "compare_broker_delivery_fingerprints_with_bar_state",
+    "fit_broker_delivery_fingerprint_with_bar_state",
 ]

@@ -15,15 +15,16 @@ from histdatacom.broker_capture import (
     BrokerCapturePriceTextSemantics,
     BrokerCaptureSessionManifestV1,
     BrokerCaptureSessionV1,
-    BrokerCaptureStoragePolicyV1,
     BrokerCaptureSourceTimestampSemantics,
+    BrokerCaptureStoragePolicyV1,
+    BrokerDeliveryCellV1,
     BrokerDeliveryDriftConfigV1,
     BrokerDeliveryDriftStatus,
-    BrokerDeliveryCellV1,
     BrokerDeliveryFingerprintArtifactError,
     BrokerDeliveryFingerprintComparisonV1,
     BrokerDeliveryFingerprintIdentityError,
     BrokerDeliveryFingerprintV1,
+    BrokerDeliveryFingerprintV2,
     BrokerDeliveryFitConfigV1,
     BrokerDeliveryIneligibleCaptureError,
     BrokerDeliveryResourceLimitError,
@@ -33,6 +34,9 @@ from histdatacom.broker_capture import (
     fit_broker_delivery_fingerprint,
     load_broker_delivery_fingerprint,
     write_broker_delivery_fingerprint,
+)
+from histdatacom.broker_plugin_policy.native_inputs import (
+    provider_native_inputs,
 )
 from histdatacom.market_context import (
     MarketContextEventV1,
@@ -52,10 +56,6 @@ from histdatacom.synthetic import (
     SyntheticEventV1,
     condition_broker_proposal,
     select_broker_profile,
-)
-
-from histdatacom.broker_plugin_policy.native_inputs import (
-    provider_native_inputs,
 )
 from tests.fixtures.broker_provider_policy import (
     generated_legacy_request,
@@ -119,7 +119,7 @@ def test_fit_is_deterministic_bounded_and_recovers_conditioned_characteristics(
         )
 
     assert forward == reversed_input
-    assert BrokerDeliveryFingerprintV1.from_json(forward.to_json()) == forward
+    assert BrokerDeliveryFingerprintV2.from_json(forward.to_json()) == forward
     assert len(forward.capture_evidence) == 2
     assert all(item.logical_content_sha256 for item in forward.capture_evidence)
     assert all(
@@ -209,14 +209,12 @@ def test_sparse_cells_back_off_and_unqualified_capture_fails_closed(
         )
     assert eligibility.status is BrokerCaptureEligibilityStatus.INELIGIBLE
     assert "capture_not_completed" in eligibility.reason_codes
-    with pytest.raises(BrokerDeliveryIneligibleCaptureError) as error:
-        with (
-            generated_provider_scope(generated_legacy_request(failed.session)),
-            provider_native_inputs(generated_legacy_request(failed.session)),
-        ):
-            fit_broker_delivery_fingerprint(
-                failed_root, (failed,), config=config
-            )
+    with (
+        pytest.raises(BrokerDeliveryIneligibleCaptureError) as error,
+        generated_provider_scope(generated_legacy_request(failed.session)),
+        provider_native_inputs(generated_legacy_request(failed.session)),
+    ):
+        fit_broker_delivery_fingerprint(failed_root, (failed,), config=config)
     assert error.value.eligibility == eligibility
 
 
@@ -261,60 +259,50 @@ def test_integrity_clock_and_resource_health_gates_are_explicit(
     assert strict.status is BrokerCaptureEligibilityStatus.INELIGIBLE
     assert "excessive_clock_correction_magnitude" in strict.reason_codes
 
-    with pytest.raises(
-        BrokerDeliveryResourceLimitError, match="max_input_events"
+    with (
+        pytest.raises(
+            BrokerDeliveryResourceLimitError, match="max_input_events"
+        ),
+        generated_provider_scope(generated_legacy_request(correction.session)),
+        provider_native_inputs(generated_legacy_request(correction.session)),
     ):
-        with (
-            generated_provider_scope(
-                generated_legacy_request(correction.session)
-            ),
-            provider_native_inputs(
-                generated_legacy_request(correction.session)
-            ),
-        ):
-            fit_broker_delivery_fingerprint(
-                correction_root,
-                (correction,),
-                config=BrokerDeliveryFitConfigV1(max_input_events=8),
-            )
-    with pytest.raises(BrokerDeliveryResourceLimitError, match="max_cells"):
-        with (
-            generated_provider_scope(
-                generated_legacy_request(correction.session)
-            ),
-            provider_native_inputs(
-                generated_legacy_request(correction.session)
-            ),
-        ):
-            fit_broker_delivery_fingerprint(
-                correction_root,
-                (correction,),
-                config=BrokerDeliveryFitConfigV1(max_cells=1),
-            )
+        fit_broker_delivery_fingerprint(
+            correction_root,
+            (correction,),
+            config=BrokerDeliveryFitConfigV1(max_input_events=8),
+        )
+    with (
+        pytest.raises(BrokerDeliveryResourceLimitError, match="max_cells"),
+        generated_provider_scope(generated_legacy_request(correction.session)),
+        provider_native_inputs(generated_legacy_request(correction.session)),
+    ):
+        fit_broker_delivery_fingerprint(
+            correction_root,
+            (correction,),
+            config=BrokerDeliveryFitConfigV1(max_cells=1),
+        )
     context_root = tmp_path / "context-bound"
     context_manifest = _capture(
         context_root, seed=16, wall_start_ns=BASE_WALL_NS
     )
-    with pytest.raises(
-        BrokerDeliveryResourceLimitError,
-        match="max_market_matches_per_quote",
+    with (
+        pytest.raises(
+            BrokerDeliveryResourceLimitError,
+            match="max_market_matches_per_quote",
+        ),
+        generated_provider_scope(
+            generated_legacy_request(context_manifest.session)
+        ),
+        provider_native_inputs(
+            generated_legacy_request(context_manifest.session)
+        ),
     ):
-        with (
-            generated_provider_scope(
-                generated_legacy_request(context_manifest.session)
-            ),
-            provider_native_inputs(
-                generated_legacy_request(context_manifest.session)
-            ),
-        ):
-            fit_broker_delivery_fingerprint(
-                context_root,
-                (context_manifest,),
-                config=BrokerDeliveryFitConfigV1(
-                    max_market_matches_per_quote=1
-                ),
-                market_context_timeline=_timeline(),
-            )
+        fit_broker_delivery_fingerprint(
+            context_root,
+            (context_manifest,),
+            config=BrokerDeliveryFitConfigV1(max_market_matches_per_quote=1),
+            market_context_timeline=_timeline(),
+        )
 
 
 def test_drift_is_stratified_support_aware_and_has_no_winner_score(
@@ -372,7 +360,11 @@ def test_drift_is_stratified_support_aware_and_has_no_winner_score(
         )
 
     with (
-        generated_provider_scope(reference, stable),
+        generated_provider_scope(
+            reference,
+            stable,
+            capture_roots=(tmp_path / "reference", tmp_path / "stable"),
+        ),
         provider_native_inputs(reference, stable),
     ):
         stable_comparison = compare_broker_delivery_fingerprints(
@@ -383,7 +375,11 @@ def test_drift_is_stratified_support_aware_and_has_no_winner_score(
         for item in stable_comparison.comparisons
     )
     with (
-        generated_provider_scope(reference, drift),
+        generated_provider_scope(
+            reference,
+            drift,
+            capture_roots=(tmp_path / "reference", tmp_path / "drift"),
+        ),
         provider_native_inputs(reference, drift),
     ):
         comparison = compare_broker_delivery_fingerprints(reference, drift)
@@ -402,7 +398,11 @@ def test_drift_is_stratified_support_aware_and_has_no_winner_score(
     assert comparison.material_drift_count > 0
     assert comparison.to_dict()["global_similarity_score"] is None
     with (
-        generated_provider_scope(drift, reference),
+        generated_provider_scope(
+            drift,
+            reference,
+            capture_roots=(tmp_path / "drift", tmp_path / "reference"),
+        ),
         provider_native_inputs(drift, reference),
     ):
         selection = select_broker_profile(
@@ -420,7 +420,11 @@ def test_drift_is_stratified_support_aware_and_has_no_winner_score(
     )
 
     with (
-        generated_provider_scope(reference, drift),
+        generated_provider_scope(
+            reference,
+            drift,
+            capture_roots=(tmp_path / "reference", tmp_path / "drift"),
+        ),
         provider_native_inputs(reference, drift),
     ):
         bounded = compare_broker_delivery_fingerprints(
@@ -433,7 +437,16 @@ def test_drift_is_stratified_support_aware_and_has_no_winner_score(
     assert bounded.comparison_candidate_count > 3
 
     with (
-        generated_provider_scope(stable, reference, drift),
+        generated_provider_scope(
+            stable,
+            reference,
+            drift,
+            capture_roots=(
+                tmp_path / "stable",
+                tmp_path / "reference",
+                tmp_path / "drift",
+            ),
+        ),
         provider_native_inputs(stable, reference, drift),
     ):
         mismatched = select_broker_profile(
@@ -475,7 +488,9 @@ def test_successor_is_versioned_without_mutating_prior_synthetic_lineage(
 
     with (
         generated_provider_scope(
-            generated_legacy_request(second_manifest.session), first
+            generated_legacy_request(second_manifest.session),
+            first,
+            capture_roots=(tmp_path / "first", tmp_path / "second"),
         ),
         provider_native_inputs(
             generated_legacy_request(second_manifest.session), first
@@ -495,21 +510,24 @@ def test_successor_is_versioned_without_mutating_prior_synthetic_lineage(
         event for event in stream.events if event.broker_profile_id
     )
     assert generated.broker_profile_id == first.fingerprint_id
-    with pytest.raises(BrokerDeliveryFingerprintIdentityError):
-        with (
-            generated_provider_scope(
-                generated_legacy_request(second_manifest.session), first
-            ),
-            provider_native_inputs(
-                generated_legacy_request(second_manifest.session), first
-            ),
-        ):
-            fit_broker_delivery_fingerprint(
-                tmp_path / "second",
-                (second_manifest,),
-                supersedes=first,
-                effective_start_utc_ns=first.effective_start_utc_ns,
-            )
+    with (
+        pytest.raises(BrokerDeliveryFingerprintIdentityError),
+        generated_provider_scope(
+            generated_legacy_request(second_manifest.session),
+            first,
+            capture_roots=(tmp_path / "first", tmp_path / "second"),
+        ),
+        provider_native_inputs(
+            generated_legacy_request(second_manifest.session),
+            first,
+        ),
+    ):
+        fit_broker_delivery_fingerprint(
+            tmp_path / "second",
+            (second_manifest,),
+            supersedes=first,
+            effective_start_utc_ns=first.effective_start_utc_ns,
+        )
 
 
 def test_fingerprint_artifacts_are_atomic_immutable_and_verified(
@@ -548,18 +566,27 @@ def test_fingerprint_artifacts_are_atomic_immutable_and_verified(
         )
     target = tmp_path / "profiles" / "broker-fingerprint.json"
 
-    with generated_provider_scope(first), provider_native_inputs(first):
+    with (
+        generated_provider_scope(first, capture_roots=(tmp_path / "first",)),
+        provider_native_inputs(first),
+    ):
         artifact = write_broker_delivery_fingerprint(target, first)
     assert artifact.sha256 == hashlib.sha256(target.read_bytes()).hexdigest()
     assert artifact.metadata["fingerprint_id"] == first.fingerprint_id
     assert load_broker_delivery_fingerprint(target) == first
-    with generated_provider_scope(first), provider_native_inputs(first):
-        assert write_broker_delivery_fingerprint(target, first) == artifact
-    with pytest.raises(
-        BrokerDeliveryFingerprintArtifactError, match="other content"
+    with (
+        generated_provider_scope(first, capture_roots=(tmp_path / "first",)),
+        provider_native_inputs(first),
     ):
-        with generated_provider_scope(second), provider_native_inputs(second):
-            write_broker_delivery_fingerprint(target, second)
+        assert write_broker_delivery_fingerprint(target, first) == artifact
+    with (
+        pytest.raises(
+            BrokerDeliveryFingerprintArtifactError, match="other content"
+        ),
+        generated_provider_scope(second, capture_roots=(tmp_path / "second",)),
+        provider_native_inputs(second),
+    ):
+        write_broker_delivery_fingerprint(target, second)
     target.write_text("{}\n", encoding="utf-8")
     with pytest.raises(BrokerDeliveryFingerprintArtifactError, match="invalid"):
         load_broker_delivery_fingerprint(target)
@@ -573,18 +600,18 @@ def test_capture_identity_mixing_is_refused(tmp_path: Path) -> None:
         wall_start_ns=BASE_WALL_NS + SECOND_NS,
         adapter_config_sha256=hashlib.sha256(b"other-config").hexdigest(),
     )
-    with pytest.raises(BrokerDeliveryFingerprintIdentityError):
-        with (
-            generated_provider_scope(
-                generated_legacy_request(first.session),
-                generated_legacy_request(second.session),
-            ),
-            provider_native_inputs(
-                generated_legacy_request(first.session),
-                generated_legacy_request(second.session),
-            ),
-        ):
-            fit_broker_delivery_fingerprint(tmp_path, (first, second))
+    with (
+        pytest.raises(BrokerDeliveryFingerprintIdentityError),
+        generated_provider_scope(
+            generated_legacy_request(first.session),
+            generated_legacy_request(second.session),
+        ),
+        provider_native_inputs(
+            generated_legacy_request(first.session),
+            generated_legacy_request(second.session),
+        ),
+    ):
+        fit_broker_delivery_fingerprint(tmp_path, (first, second))
 
 
 def test_proposal_conditioning_uses_cadence_burst_quiet_and_outage(
@@ -604,7 +631,7 @@ def test_proposal_conditioning_uses_cadence_burst_quiet_and_outage(
     )
 
     with (
-        generated_provider_scope(fingerprint),
+        generated_provider_scope(fingerprint, capture_roots=(tmp_path,)),
         provider_native_inputs(fingerprint),
     ):
         proposal = condition_broker_proposal(
@@ -645,7 +672,7 @@ def test_proposal_conditioning_transfers_timestamp_and_price_precision(
     ):
         fingerprint = fit_broker_delivery_fingerprint(tmp_path, (manifest,))
     with (
-        generated_provider_scope(fingerprint),
+        generated_provider_scope(fingerprint, capture_roots=(tmp_path,)),
         provider_native_inputs(fingerprint),
     ):
         proposal = condition_broker_proposal(
@@ -673,7 +700,7 @@ def test_zero_strength_proposal_preserves_the_original_query(
     query = _motif_query()
 
     with (
-        generated_provider_scope(fingerprint),
+        generated_provider_scope(fingerprint, capture_roots=(tmp_path,)),
         provider_native_inputs(fingerprint),
     ):
         proposal = condition_broker_proposal(
@@ -701,7 +728,7 @@ def test_proposal_selection_retains_stale_evidence(
     ):
         fingerprint = fit_broker_delivery_fingerprint(tmp_path, (manifest,))
     with (
-        generated_provider_scope(fingerprint),
+        generated_provider_scope(fingerprint, capture_roots=(tmp_path,)),
         provider_native_inputs(fingerprint),
     ):
         selection = select_broker_profile(
@@ -722,7 +749,7 @@ def test_proposal_selection_retains_batching_evidence(tmp_path: Path) -> None:
     ):
         fingerprint = fit_broker_delivery_fingerprint(tmp_path, (manifest,))
     with (
-        generated_provider_scope(fingerprint),
+        generated_provider_scope(fingerprint, capture_roots=(tmp_path,)),
         provider_native_inputs(fingerprint),
     ):
         selection = select_broker_profile(
@@ -746,7 +773,7 @@ def test_reconnect_cell_uses_only_recorded_backoff(tmp_path: Path) -> None:
     ):
         fingerprint = fit_broker_delivery_fingerprint(tmp_path, (manifest,))
     with (
-        generated_provider_scope(fingerprint),
+        generated_provider_scope(fingerprint, capture_roots=(tmp_path,)),
         provider_native_inputs(fingerprint),
     ):
         reconnect = select_broker_profile(
@@ -758,7 +785,7 @@ def test_reconnect_cell_uses_only_recorded_backoff(tmp_path: Path) -> None:
             selected_at_utc_ns=fingerprint.effective_start_utc_ns,
         )
     with (
-        generated_provider_scope(fingerprint),
+        generated_provider_scope(fingerprint, capture_roots=(tmp_path,)),
         provider_native_inputs(fingerprint),
     ):
         absent = select_broker_profile(
@@ -787,7 +814,7 @@ def test_proposal_refuses_when_requested_condition_has_no_profile_cell(
         fingerprint = fit_broker_delivery_fingerprint(tmp_path, (manifest,))
 
     with (
-        generated_provider_scope(fingerprint),
+        generated_provider_scope(fingerprint, capture_roots=(tmp_path,)),
         provider_native_inputs(fingerprint),
     ):
         proposal = condition_broker_proposal(
@@ -815,7 +842,7 @@ def test_profile_effective_period_is_enforced(tmp_path: Path) -> None:
             effective_end_utc_ns=BASE_WALL_NS + 100 * SECOND_NS,
         )
     with (
-        generated_provider_scope(fingerprint),
+        generated_provider_scope(fingerprint, capture_roots=(tmp_path,)),
         provider_native_inputs(fingerprint),
     ):
         selection = select_broker_profile(

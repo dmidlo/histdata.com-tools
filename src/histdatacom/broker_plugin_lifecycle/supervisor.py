@@ -17,7 +17,7 @@ import signal
 import subprocess
 import sys
 import time
-from typing import TYPE_CHECKING, cast
+from typing import Any, TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
     from histdatacom.broker_plugin_policy.bindings import BrokerSDKInvocationV1
@@ -29,11 +29,18 @@ if TYPE_CHECKING:
     from histdatacom.broker_plugin_permissions import (
         BrokerPermissionExecutionV1,
     )
+    from histdatacom.broker_plugin_provenance.contracts import (
+        BrokerProvenanceSealV1,
+    )
+    from histdatacom.broker_plugin_provenance.runtime import (
+        NativeProvenanceRecorder,
+    )
 import uuid
 
 from histdatacom.broker_plugin_capabilities import (
     BrokerAdmittedEventV1,
     BrokerCapabilityPlanV1,
+    verify_broker_admitted_event,
 )
 from histdatacom.broker_plugin_registry import BrokerPluginInventoryV1
 from histdatacom.broker_plugins import (
@@ -90,6 +97,8 @@ class BrokerLifecycleResultV1:
     health: BrokerHostHealthAuditV1
     health_directory: Path
     permissions: BrokerPermissionExecutionV1
+    provenance: BrokerProvenanceSealV1
+    provenance_directory: Path
 
 
 @dataclass
@@ -110,6 +119,7 @@ class _Run:
         hooks: BrokerLifecycleExecutionHooks | None = None,
         *,
         health: HostHealthRecorder,
+        provenance: NativeProvenanceRecorder,
     ) -> None:
         self.journal = journal
         self.clock = clock
@@ -117,6 +127,7 @@ class _Run:
         self.counters = _Counters()
         self.hooks = hooks
         self.health = health
+        self.provenance = provenance
 
     def append(
         self,
@@ -134,6 +145,7 @@ class _Run:
                 except (Exception, SystemExit):
                     raise BrokerLifecycleError(Reason.INTEGRITY) from None
             self.journal.append(record)
+            self.provenance.native(record)
             self.health.persisted(
                 record.artifact_id,
                 (
@@ -528,6 +540,11 @@ def _epoch(
                             incoming = BrokerAdmittedEventV1.from_json(
                                 frame["payload"]
                             )
+                            # Invalid bindings are malformed transport input,
+                            # not plugin failures or identifiable provenance.
+                            verify_broker_admitted_event(
+                                incoming, run.journal.header.plan
+                            )
                         except Exception:
                             ingress = run.health.ingress(
                                 None, run.epoch, malformed=True
@@ -538,8 +555,18 @@ def _epoch(
                             raise BrokerLifecycleError(
                                 Reason.MALFORMED_EVENT
                             ) from None
+                        # A content-derived event ID is itself retained
+                        # evidence. Refuse forbidden input before journaling
+                        # that identity, not only before writing its payload.
+                        run.provenance.authorize_ingress(incoming)
                         ingress = run.health.ingress(
                             incoming.artifact_id, run.epoch
+                        )
+                        run.provenance.ingress(
+                            incoming,
+                            run.epoch,
+                            ingress,
+                            frame["delivery"],
                         )
                         if (
                             len(pending) >= policy.queue_items
@@ -968,6 +995,7 @@ def run_broker_plugin_lifecycle(
     from .storage import replay_broker_lifecycle
 
     writer: HostHealthEvidenceWriter | None = None
+    provenance: NativeProvenanceRecorder | None = None
     try:
         permission_context, permission_decision = authority.snapshot_admission()
         require_provider_operation(request, BrokerPolicyOperation.MATERIAL_USE)
@@ -1027,8 +1055,35 @@ def run_broker_plugin_lifecycle(
             authorize_artifact=authorize_health,
             guard_text=check_public,
         )
-        recorder = HostHealthRecorder(health_header, clock, writer.append)
-        run = _Run(journal, clock, execution_hooks, health=recorder)
+        from histdatacom.broker_plugin_provenance.runtime import (
+            NativeProvenanceRecorder,
+        )
+
+        provenance = NativeProvenanceRecorder(
+            output_directory.with_name(output_directory.name + "-provenance"),
+            request,
+            header,
+            health_header,
+            provider_decision,
+            guard_text=check_public,
+            permission_manifest=authority.manifest,
+            permission_context=permission_context,
+            permission_decision=permission_decision,
+        )
+
+        def persist_observation(observation: Any) -> None:
+            assert writer is not None and provenance is not None
+            writer.append(observation)
+            provenance.observation(observation)
+
+        recorder = HostHealthRecorder(health_header, clock, persist_observation)
+        run = _Run(
+            journal,
+            clock,
+            execution_hooks,
+            health=recorder,
+            provenance=provenance,
+        )
         run.transition(State.CONFIGURED, Reason.CONFIGURED)
         pids: list[int] = []
         deadline = time.monotonic() + header.policy.run_timeout_ms / 1000
@@ -1140,6 +1195,13 @@ def run_broker_plugin_lifecycle(
         )
         permissions = build_permission_execution(request, manifest, authority)
         writer.finish(health, permission_execution=permissions)
+        provenance.set_stop(recorder.observations[-1])
+        provenance_seal = provenance.finish(
+            manifest,
+            health,
+            epoch=run.epoch,
+            permission_execution=permissions,
+        )
         return BrokerLifecycleResultV1(
             output_directory,
             manifest,
@@ -1148,6 +1210,8 @@ def run_broker_plugin_lifecycle(
             health,
             writer.directory,
             permissions,
+            provenance_seal,
+            provenance.directory,
         )
     except (BrokerLifecycleError, BrokerPolicyError):
         raise
@@ -1159,3 +1223,5 @@ def run_broker_plugin_lifecycle(
             journal.close()
         if writer is not None:
             writer.close()
+        if provenance is not None:
+            provenance.close()

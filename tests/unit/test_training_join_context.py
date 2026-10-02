@@ -203,7 +203,9 @@ def test_native_executable_forecast_replays_actual_model_and_inputs(tmp_path):
     assert replay_training_joins(result) == result
 
 
-def test_registered_engine_forecast_executes_full_nonbaseline_receipt(tmp_path):
+def test_registered_engine_forecast_executes_full_nonbaseline_receipt(
+    tmp_path,
+):
     from histdatacom.forecasting.engine_runner import (
         ForecastEngineRunnerV1,
         HISTORICAL_MEDIAN,
@@ -400,7 +402,8 @@ def test_current_cftc_is_expost_only_not_historical_original(
 
 
 @pytest.mark.parametrize(
-    "delta,expected", [(-1, "2014-06-09"), (0, "2014-06-10"), (1, "2014-06-10")]
+    "delta,expected",
+    [(-1, "2014-06-09"), (0, "2014-06-10"), (1, "2014-06-10")],
 )
 def test_cftc_mapping_utc_day_does_not_round_nanoseconds(
     tmp_path, cftc_source, monkeypatch, delta, expected
@@ -467,7 +470,9 @@ def test_cftc_raw_source_tamper_refuses_even_without_selected_rows(
         materialize_training_joins(_plan(empty, binding))
 
 
-def test_broker_refits_native_sessions_and_never_backdates_fitting(tmp_path):
+def test_broker_refits_native_sessions_and_never_backdates_fitting(
+    tmp_path, monkeypatch
+):
     from histdatacom.broker_capture import (
         BrokerDeliveryFitConfigV1,
         fit_broker_delivery_fingerprint,
@@ -490,7 +495,7 @@ def test_broker_refits_native_sessions_and_never_backdates_fitting(tmp_path):
 
     provider_request = generated_legacy_request(manifest.session)
     with (
-        generated_provider_scope(provider_request),
+        generated_provider_scope(provider_request, capture_roots=(root,)),
         provider_native_inputs(provider_request),
     ):
         profile = fit_broker_delivery_fingerprint(
@@ -601,12 +606,23 @@ def test_broker_refits_native_sessions_and_never_backdates_fitting(tmp_path):
         partition = root / Path(manifest.partitions[0].data_artifact.path)
         original = partition.read_bytes()
         partition.write_bytes(original + b"tampered")
-        from histdatacom.broker_capture.fingerprints import (
-            BrokerDeliveryIneligibleCaptureError,
-        )
 
-        with pytest.raises(
-            BrokerDeliveryIneligibleCaptureError,
-            match="integrity_verification_failed",
-        ):
-            materialize_training_joins(plan)
+        def unexpected_refit(*args, **kwargs):
+            raise AssertionError(
+                "tampered source must be rejected before refit"
+            )
+
+        # Mandatory V2 current-source replay rejects the interrupted partition
+        # before the fitter's own eligibility check can run.
+        with monkeypatch.context() as patch:
+            patch.setattr(
+                "histdatacom.data_quality.training_join_context."
+                "fit_broker_delivery_fingerprint",
+                unexpected_refit,
+            )
+            with pytest.raises(
+                ValueError,
+                match="^legacy health native partition has interrupted tail$",
+            ) as error:
+                materialize_training_joins(plan)
+            assert type(error.value) is ValueError

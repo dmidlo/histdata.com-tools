@@ -1,17 +1,19 @@
 """Generated source-backed training artifacts keep exact provider rights."""
 
-from dataclasses import replace
 import hashlib
 import os
+from dataclasses import replace
+from itertools import count
 from pathlib import Path
 
 import pytest
 
+from histdatacom.broker_capture import broker_fingerprint_sources
 from histdatacom.broker_plugin_policy import (
     BrokerPolicyDataClass as DataClass,
+)
+from histdatacom.broker_plugin_policy import (
     BrokerPolicyError,
-    BrokerPolicyOperation as Operation,
-    BrokerPolicyStatus as Status,
     provider_native_inputs,
     provider_policy_scope,
     read_broker_policy_receipt,
@@ -19,11 +21,17 @@ from histdatacom.broker_plugin_policy import (
     scope,
     verify_broker_policy_receipt,
 )
+from histdatacom.broker_plugin_policy import (
+    BrokerPolicyOperation as Operation,
+)
+from histdatacom.broker_plugin_policy import (
+    BrokerPolicyStatus as Status,
+)
 from histdatacom.data_quality import training_artifacts as plain
 from histdatacom.data_quality import training_join_artifacts as joins
 from histdatacom.data_quality import training_overlap_artifacts as overlap
-from histdatacom.data_quality import training_temporal_artifacts as temporal
 from histdatacom.data_quality import training_provider_policy as policy
+from histdatacom.data_quality import training_temporal_artifacts as temporal
 from histdatacom.data_quality.training_contracts import (
     DAY_NS,
     TrainingConsumerMode,
@@ -54,6 +62,7 @@ from histdatacom.data_quality.training_temporal_views import (
 )
 from histdatacom.data_quality.training_views import materialize_training_rows
 from tests.fixtures.broker_provider_policy import (
+    POLICY_NOW,
     MutablePolicySource,
     generated_provider_scope,
     policy_context,
@@ -103,7 +112,20 @@ def _read(index, path, batch):
 
 
 @pytest.fixture(scope="module")
-def inputs(tmp_path_factory):
+def training_policy_clock():
+    """Advance synthetic policy time for this module's explicit inputs only.
+
+    Function-scoped expiry tests override this callable and restore it before
+    the module fixture restores the original live policy clock at teardown.
+    """
+    ticks = count(POLICY_NOW)
+    with pytest.MonkeyPatch.context() as controlled:
+        controlled.setattr(scope, "_now_ns", ticks.__next__)
+        yield
+
+
+@pytest.fixture(scope="module")
+def inputs(tmp_path_factory, training_policy_clock):
     root = tmp_path_factory.mktemp("generated-provider-training")
     source, version = observed_source(root / "source")
     roots = []
@@ -113,7 +135,9 @@ def inputs(tmp_path_factory):
     (fingerprint,) = roots
     source = with_products(source, product)
     with (
-        generated_provider_scope(fingerprint),
+        generated_provider_scope(
+            fingerprint, capture_roots=(root / "product" / "capture",)
+        ),
         provider_native_inputs(fingerprint),
     ):
         ownership = build_training_ownership(source)
@@ -144,7 +168,8 @@ def inputs(tmp_path_factory):
                 native_intervals=(),
             )
         )
-    return fingerprint, product, (batch, joined, timed, overlapped)
+    with broker_fingerprint_sources(root / "product" / "capture"):
+        yield fingerprint, product, (batch, joined, timed, overlapped)
 
 
 def _source(fingerprint, *, changes=(), expires_at_ns=2**63 - 1):
@@ -177,7 +202,7 @@ def test_all_training_writers_refuse_retention_before_output(
 
 @pytest.mark.parametrize("index", range(4))
 def test_exact_training_bytes_paired_receipts_and_tamper_refusal(
-    tmp_path, inputs, index
+    tmp_path, inputs, index, monkeypatch
 ):
     fingerprint, _, batches = inputs
     batch = batches[index]
@@ -195,6 +220,33 @@ def test_exact_training_bytes_paired_receipts_and_tamper_refusal(
         assert _read(index, path, batch) == batch
         assert WRITERS[index](batch, path.parent) == path
         assert read_broker_policy_receipt(sidecar) == receipt
+        lineage = path.with_name(path.name + ".broker-provenance.json")
+        originals = {
+            sidecar: sidecar.read_bytes(),
+            lineage: lineage.read_bytes(),
+        }
+        replay_modules = (plain, joins, temporal, overlap)
+        replay_names = (
+            "replay_training_batch",
+            "replay_training_joins",
+            "replay_training_temporal",
+            "replay_training_overlap",
+        )
+
+        def forbidden_replay(*args, **kwargs):
+            pytest.fail("missing companion reached training source replay")
+
+        for missing in ((sidecar,), (lineage,), (sidecar, lineage)):
+            for companion in missing:
+                companion.unlink()
+            with monkeypatch.context() as isolated:
+                isolated.setattr(
+                    replay_modules[index], replay_names[index], forbidden_replay
+                )
+                with pytest.raises((ValueError, OSError)):
+                    _read(index, path, batch)
+            for companion, original in originals.items():
+                companion.write_bytes(original)
         sidecar.write_bytes(b"{}")
         with pytest.raises(ValueError):
             _read(index, path, batch)
@@ -284,8 +336,11 @@ def test_expiry_after_sidecar_refuses_native_promotion(
     ):
         WRITERS[index](batches[index], tmp_path / "interrupted")
     retained = tuple((tmp_path / "interrupted").iterdir())
-    assert len(retained) == 1
-    assert retained[0].name.endswith(".provider-policy.json")
+    assert len(retained) == 2
+    assert any(item.name.endswith(".provider-policy.json") for item in retained)
+    assert any(
+        item.name.endswith(".broker-provenance.json") for item in retained
+    )
     # A separately written sidecar is incomplete evidence, never completion.
     with (
         generated_provider_scope(fingerprint),
@@ -358,9 +413,13 @@ def test_existing_native_without_receipt_is_not_silently_upgraded(
         generated_provider_scope(fingerprint),
         provider_native_inputs(fingerprint),
     ):
-        # Historical material replay is allowed under current rights, without
-        # inventing evidence that the original publication was admitted.
-        assert _read(index, native, batch) == batch
+        # Pure native metadata remains parseable. V2-rooted material replay
+        # requires both original persisted lineage and retention admission.
+        assert type(batch).from_json(native.read_text()) == batch
+        with pytest.raises(
+            ValueError, match="requires its provider-policy receipt"
+        ):
+            _read(index, native, batch)
         with pytest.raises(
             ValueError, match="lacks its provider-policy receipt"
         ):

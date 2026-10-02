@@ -8,6 +8,7 @@ import math
 from collections.abc import Mapping
 from dataclasses import fields
 from enum import Enum
+from functools import lru_cache
 from types import UnionType
 from typing import (
     Any,
@@ -128,12 +129,18 @@ def decode(annotation: object, value: object) -> Any:
     _fail()
 
 
+@lru_cache(maxsize=64)
+def _hints(cls: Any) -> dict[str, Any]:
+    """Cache schema annotations only, never instance bytes or authorization."""
+    return get_type_hints(cls)
+
+
 class Artifact:
     __slots__ = ()
     KIND: ClassVar[str]
 
     def __post_init__(self) -> None:
-        annotations = get_type_hints(type(self))
+        annotations = _hints(cast(Any, type(self)))
         for field in fields(cast(Any, self)):
             object.__setattr__(
                 self,
@@ -165,7 +172,19 @@ class Artifact:
         return "broker-host-health-" + self.KIND + ":sha256:" + digest
 
     def to_dict(self) -> dict[str, object]:
-        return {**self._payload(), "artifact_id": self.artifact_id}
+        # Detach/validate the actual payload once, then derive the same identity
+        # from that tree. Do not recursively rebuild all child artifacts twice.
+        payload = self._payload()
+        digest = hashlib.sha256(
+            canonical_health_json(payload).encode("ascii")
+        ).hexdigest()
+        return {
+            **payload,
+            "artifact_id": "broker-host-health-"
+            + self.KIND
+            + ":sha256:"
+            + digest,
+        }
 
     def to_json(self) -> str:
         return canonical_health_json(self.to_dict())

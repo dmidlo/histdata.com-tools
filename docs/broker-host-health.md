@@ -68,12 +68,14 @@ A successful new native fingerprint fit writes an immutable
 `BrokerHostHealthQualificationV1` under the explicit capture root's
 `host-health-qualifications` directory. It binds the fingerprint bytes and the
 complete sorted inventory of capture manifest, audit and SLO-policy IDs. A
-different audit for the same V1 fingerprint is a conflict, not an overwrite.
+different audit for the same fingerprint is a conflict, not an overwrite.
 `read_current_broker_health_qualification` replays the supplied actual source
 captures and current provider rights; JSON deserialization alone is not
 admission. This new fitting side effect requires a writable capture root. Pure
 numerical fingerprint comparison is not a health certification or provenance
-chain verifier; broader end-to-end chain work remains separate in #626.
+chain verifier. New fitting additionally binds the complete verified
+[capture provenance roots](broker-plugin-provenance.md) in fingerprint V2;
+historical V1 statistics remain intact inside that versioned composition.
 
 Tests use synthetic captures, deliberately broken/lying plugins and independent
 mathematical calculations. No provider capture or empirical campaign is run.

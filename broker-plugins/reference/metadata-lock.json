@@ -1,0 +1,24 @@
+{
+  "files": {
+    ".github/workflows/ci.yml": "0f3673da87d02a47890cb23aac4db71c7ff082b9415ee1be68d4095777b9f8bc",
+    "CONFORMANCE_ABI.md": "c56f6bd7734d604216024a6cd40c21f1ec4fa6b6b5b947f14b03ec62b1531dcf",
+    "DEVELOPER_GUIDE.md": "aed294f796cd9bc2a0ccd5a184c87bc0cfbe47d57680ec67e7855f13c33b0ecc",
+    "INTEGRATED_QUALIFICATION.md": "879e3ec698d26b580c07aa004c9e6f315d626030a357c55aae9feef5b8d2479f",
+    "MANIFEST.in": "b8f1cfc3efe95d0bcce036036a5914ef2d19aaeffb996ded60aa82befe0eb42d",
+    "OPERATOR.md": "5fcbd16e8fe8c562c00dd30f69e3f3e1bdfd9def2595054959907886c55fb708",
+    "README.md": "2e73baaa78955217569ca1ee719b300af94ce4dfa5a189ef61e1986765e59549",
+    "conformance/driver.json": "0802df4d2c68c07a9e010b3d08319a811023e04b82b53ff8315350aee8f3cf42",
+    "pyproject.toml": "c9c12ee8b988d90579b3a62baaaceb85bfef110f874b6e3c52670930f929f63b",
+    "setup.py": "6a04ec4571aa7869362838f4b5bc70963c4680116183559782d1d17a7e583893",
+    "src/histdatacom_reference_broker/__init__.py": "bae1c406e0762f6874e1392fa039e99ff89c3a19efad00441dc1f748c427978d",
+    "src/histdatacom_reference_broker/_histdatacom_broker_permissions/org.histdatacom.reference-broker.json": "eec141528062529ddba5cecd79261e1d2151f1e47de6d7c191702f9938772f5c",
+    "src/histdatacom_reference_broker/_histdatacom_broker_plugins/org.histdatacom.reference-broker.json": "d1c45f6e4e84635f8175d8bc22b515e3d37505fdb22e78517a3adfa0b1e67692",
+    "src/histdatacom_reference_broker/plugin.py": "f927d1dac194a49b32a48f371f831030eef4a85b50a55e0710fecc25fb9cf896",
+    "tests/test_capture_example.py": "95bec6ba95d438cb88be87dab318f09abb0007ea7e717890fb6ef05a3b101e9c",
+    "tests/test_reference.py": "09b4e61a8414717e1f11f35bba5a8ef36e15409ffecf515f836e4a6e2d88679d",
+    "tools/capture_example.py": "dfa81e94ccfaf070f3172606072a51c75634be289d41700891ce02e40148082c",
+    "tools/check_host.py": "3ae5d799760984112e6a7690bf0fff1d0369bcf7a408f0752f9488a03add14e4",
+    "tools/generate_metadata.py": "ad808e1d4dd4430a98cead40af1f4feb86d7c4293bae9262496501ff029c2512"
+  },
+  "format": 1
+}

@@ -29,7 +29,9 @@ jobs:
         shell: bash
 
       - name: Check workflow files
-        run: ./actionlint -color
+        run: |
+          ./actionlint -color
+          ./actionlint -color broker-plugins/reference/.github/workflows/ci.yml broker-plugins/starter/.github/workflows/ci.yml
         shell: bash
 
   docs:
@@ -301,6 +303,200 @@ jobs:
           name: histdatacom-dist
           path: dist/*
           if-no-files-found: error
+
+  standalone-brokers:
+    name: Installed ${{ matrix.project }} broker on Python ${{ matrix.python-version }}
+    needs: build
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        project: [reference, starter]
+        python-version: ['3.10', '3.13']
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@v7.0.0
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Prepare separate project and noneditable environment
+        env:
+          PROJECT: ${{ matrix.project }}
+        run: |
+          mkdir "$RUNNER_TEMP/broker-qualification"
+          cp -R "broker-plugins/$PROJECT" "$RUNNER_TEMP/broker-project"
+          echo "QUALIFICATION_DIR=$RUNNER_TEMP/broker-qualification" >> "$GITHUB_ENV"
+          echo "SOURCE_DIR=$RUNNER_TEMP/broker-project" >> "$GITHUB_ENV"
+          python -m venv "$RUNNER_TEMP/broker-venv"
+          echo "$RUNNER_TEMP/broker-venv/bin" >> "$GITHUB_PATH"
+        shell: bash
+
+      - name: Download this run's actual host build
+        uses: actions/download-artifact@v8.0.1
+        with:
+          name: histdatacom-dist
+          path: ${{ env.QUALIFICATION_DIR }}/host-dist
+
+      - name: Install the exact host wheel and project build tools
+        working-directory: ${{ env.QUALIFICATION_DIR }}
+        run: |
+          host_wheels=(host-dist/histdatacom-*.whl)
+          test "${#host_wheels[@]}" -eq 1
+          sha256sum "${host_wheels[0]}" > host-wheel.sha256
+          python -m pip install --upgrade 'pip==25.1.1'
+          python -m pip install "${host_wheels[0]}" build 'black==26.5.1' 'ruff==0.15.18'
+        shell: bash
+
+      - name: Check source metadata and pinned project style without rewriting
+        working-directory: ${{ env.SOURCE_DIR }}
+        run: |
+          python tools/check_host.py | tee "$QUALIFICATION_DIR/host-api.json"
+          python tools/generate_metadata.py --check
+          python -m black --check --line-length 88 --target-version py310 .
+          python -m ruff check --config pyproject.toml .
+        shell: bash
+
+      - name: Build ordinary sdist then wheel and install the actual plugin
+        working-directory: ${{ env.SOURCE_DIR }}
+        run: |
+          python -m build --outdir "$QUALIFICATION_DIR/plugin-dist"
+          plugin_wheels=("$QUALIFICATION_DIR"/plugin-dist/*.whl)
+          test "${#plugin_wheels[@]}" -eq 1
+          sha256sum "$QUALIFICATION_DIR"/plugin-dist/* > "$QUALIFICATION_DIR/plugin-artifacts.sha256"
+          python -m pip install "${plugin_wheels[0]}[test]"
+          python -m pip check | tee "$QUALIFICATION_DIR/dependencies.txt"
+          python -m pip freeze > "$QUALIFICATION_DIR/installed.txt"
+        shell: bash
+
+      - name: Retain exact installed archive identities and unpack the tested sdist
+        working-directory: ${{ env.QUALIFICATION_DIR }}
+        env:
+          PROJECT: ${{ matrix.project }}
+        run: |
+          python -I -B - <<'PY'
+          import hashlib
+          import importlib.metadata
+          import json
+          import os
+          from pathlib import Path, PurePosixPath
+          import sysconfig
+          import tarfile
+          from zipfile import ZipFile
+
+          root = Path.cwd()
+          plugin = ('histdatacom-reference-broker' if os.environ['PROJECT'] == 'reference'
+                    else 'histdatacom-broker-starter')
+          identities = {}
+          for name, directory in (('histdatacom', 'host-dist'), (plugin, 'plugin-dist')):
+              wheels = tuple((root / directory).glob('*.whl'))
+              assert len(wheels) == 1
+              sha256 = hashlib.sha256(wheels[0].read_bytes()).hexdigest()
+              distribution = importlib.metadata.distribution(name)
+              direct = json.loads(distribution.read_text('direct_url.json'))
+              assert direct.get('archive_info', {}).get('hashes', {}).get('sha256') == sha256
+              assert not direct.get('dir_info', {}).get('editable', False)
+              compared = 0
+              with ZipFile(wheels[0]) as archive:
+                  for member in archive.namelist():
+                      if member.endswith('/'):
+                          continue
+                      parts = PurePosixPath(member).parts
+                      assert not member.startswith('/') and '..' not in parts
+                      # pip rewrites RECORD and adds launchers/direct_url.json;
+                      # compare wheel payload, not the post-install RECORD bytes.
+                      if len(parts) == 2 and parts[0].endswith('.dist-info') and parts[1] == 'RECORD':
+                          continue
+                      if parts[0].endswith('.data'):
+                          # These projects have no rewritten wheel scripts. Fail
+                          # closed on any future unsupported installation scheme.
+                          assert len(parts) > 2 and parts[1] in ('purelib', 'platlib')
+                          installed = Path(sysconfig.get_path(parts[1])).joinpath(*parts[2:])
+                      else:
+                          installed = Path(distribution.locate_file(member))
+                      assert installed.read_bytes() == archive.read(member), member
+                      compared += 1
+              assert compared > 0
+              identities[name] = {'version': distribution.version, 'wheel_sha256': sha256,
+                                  'installed_wheel_members_equal': compared}
+          (root / 'installed-identities.json').write_text(json.dumps(identities, sort_keys=True))
+          sdists = tuple((root / 'plugin-dist').glob('*.tar.gz'))
+          assert len(sdists) == 1
+          extracted = root / 'sdist-source'
+          extracted.mkdir()
+          with tarfile.open(sdists[0]) as archive:
+              archive.extractall(extracted, filter='data')
+          projects = tuple(extracted.iterdir())
+          assert len(projects) == 1 and projects[0].is_dir()
+          source = Path(os.environ['SOURCE_DIR'])
+          def test_inventory(project):
+              return {str(path.relative_to(project)): hashlib.sha256(path.read_bytes()).hexdigest()
+                      for path in (project / 'tests').rglob('*') if path.is_file()}
+          assert test_inventory(source) == test_inventory(projects[0])
+          for relative in ('pyproject.toml', 'tools/check_host.py', 'tools/generate_metadata.py',
+                           'conformance/driver.json', 'DEVELOPER_GUIDE.md', 'OPERATOR.md',
+                           '.github/workflows/ci.yml'):
+              assert (source / relative).read_bytes() == (projects[0] / relative).read_bytes()
+          with open(os.environ['GITHUB_ENV'], 'a') as stream:
+              stream.write('TEST_PROJECT=' + str(projects[0]) + '\n')
+          PY
+        shell: bash
+
+      - name: Run every project test against the installed wheel
+        working-directory: ${{ env.QUALIFICATION_DIR }}
+        run: |
+          python -I -B -m pytest -q -p no:cacheprovider -c "$TEST_PROJECT/pyproject.toml" "$TEST_PROJECT/tests" --basetemp="$QUALIFICATION_DIR/pytest-temp" --junitxml="$QUALIFICATION_DIR/project-tests.xml"
+        shell: bash
+
+      - name: Discover the installed candidate and plan all trusted capabilities
+        working-directory: ${{ env.QUALIFICATION_DIR }}
+        env:
+          PROJECT: ${{ matrix.project }}
+        run: |
+          plugin_id=org.example.starter
+          capabilities=(quotes.v1 timestamps.broker-event.v1 timestamps.receive.v1 heartbeat.v1 gaps.v1)
+          if [[ "$PROJECT" == reference ]]; then
+            plugin_id=org.histdatacom.reference-broker
+            capabilities+=(sizes.quoted.v1 raw-hashes.v1)
+          fi
+          python -I -B -m histdatacom.broker_plugin_registry inspect --plugin-id "$plugin_id" --json > discovery.json
+          args=()
+          for capability in "${capabilities[@]}"; do args+=(--capability "$capability"); done
+          python -I -B -m histdatacom.broker_plugin_conformance plan --driver "$TEST_PROJECT/conformance/driver.json" --profile trusted_contract_v1 "${args[@]}" --output plan.json
+          python -I -B - <<'PY'
+          import os
+          from pathlib import Path
+          from histdatacom.broker_plugin_conformance import BrokerConformancePlanV1
+
+          plan = BrokerConformancePlanV1.from_json(Path('plan.json').read_text())
+          assert plan.catalog_id == 'broker-conformance-catalog:sha256:7c4965dad269a282167e08b1b04a7caaa6feaf4fc78da4d87b6229aef008b705'
+          assert plan.subject.value == 'installed_candidate'
+          assert len(plan.case_ids) == (28 if os.environ['PROJECT'] == 'reference' else 24)
+          PY
+        shell: bash
+
+      # This generated-only trusted profile cannot certify native isolation or
+      # native-only health. Full supported-kernel/operator gates stay separate.
+      - name: Execute and independently verify the complete trusted plan
+        working-directory: ${{ env.QUALIFICATION_DIR }}
+        run: |
+          python -I -B -m histdatacom.broker_plugin_conformance run --plan plan.json --output generated-run --authorize-generated-execution > run-report.json
+          python -I -B -m histdatacom.broker_plugin_conformance verify generated-run > verify-report.json
+          cmp run-report.json verify-report.json
+        shell: bash
+
+      - name: Retain qualification artifacts even when a gate fails
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: broker-${{ matrix.project }}-py${{ matrix.python-version }}
+          path: ${{ env.QUALIFICATION_DIR }}/
+          if-no-files-found: warn
 
   wheel-smoke:
     name: Smoke wheel on ${{ matrix.os }}

@@ -504,7 +504,7 @@ def generated_legacy_request(session):
 
 
 @contextmanager
-def generated_provider_scope(*native_subjects):
+def generated_provider_scope(*native_subjects, capture_roots=()):
     """Opt-in generated DECLARED terms for exact resolved test bindings.
 
     This is never autouse, an adapter-name exception, legal evidence or a rights
@@ -558,6 +558,12 @@ def generated_provider_scope(*native_subjects):
     }
     with ExitStack() as stack:
         stack.enter_context(provider_policy_scope(source))
+        if capture_roots:
+            from histdatacom.broker_capture.fingerprint_sources import (
+                broker_fingerprint_sources,
+            )
+
+            stack.enter_context(broker_fingerprint_sources(*capture_roots))
         if len(invocations) == 1:
             stack.enter_context(
                 broker_permission_scope(

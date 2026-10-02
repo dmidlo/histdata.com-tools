@@ -1,0 +1,6 @@
+include README.md DEVELOPER_GUIDE.md OPERATOR.md CONFORMANCE_ABI.md INTEGRATED_QUALIFICATION.md LICENSE metadata-lock.json
+recursive-include .github *.yml *.yaml
+recursive-include tools *.py
+recursive-include conformance *.json
+recursive-include tests *.py
+recursive-include src *.py *.json py.typed

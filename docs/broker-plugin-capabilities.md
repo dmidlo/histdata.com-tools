@@ -1,5 +1,13 @@
 # Broker-plugin capability gates
 
+Unreleased v3 adds closed host event-failure diagnostics for the
+[conformance kit](broker-plugin-conformance.md). Actual gated execution
+distinguishes malformed type/contract, invalid spread, session/sequence and
+receive-clock failures through `BrokerCapabilityError.event_failure`.
+Producer-thrown exceptions cannot impersonate a host validation gate. No rejected
+input bytes/hash or raw exception is retained; historical error `to_dict()`
+bytes remain unchanged. These diagnostics do not grant execution or data rights.
+
 The host-side `histdatacom.broker_plugin_capabilities` public package completes
 the SDK-v1 operation boundary introduced by #615 and the installed registry
 introduced by #616. Its immutable catalog has independent SemVer `1.0.0`;

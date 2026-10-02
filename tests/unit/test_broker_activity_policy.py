@@ -2,6 +2,7 @@
 
 from contextlib import nullcontext
 from dataclasses import replace
+import hashlib
 from pathlib import Path
 
 import pytest
@@ -33,7 +34,10 @@ from histdatacom.synthetic import (
     render_broker_delivery,
 )
 from histdatacom.synthetic import activity
-from tests.fixtures.broker_derived_policy import generated_fingerprint
+from tests.fixtures.broker_derived_policy import (
+    generated_qualified_fingerprint,
+)
+from histdatacom.broker_capture import broker_fingerprint_sources
 from tests.fixtures.broker_provider_policy import (
     MutablePolicySource,
     generated_provider_scope,
@@ -69,11 +73,12 @@ def _summary(streams, *, route="streams", policy=None):
 @pytest.fixture(scope="module")
 def native_activity(tmp_path_factory):
     # Native construction is explicit, not fabricated empirical qualification.
-    fingerprint = generated_fingerprint()
+    capture_root = tmp_path_factory.mktemp("qualified-activity-source")
+    fingerprint = generated_qualified_fingerprint(capture_root)
     run, window, group, constraints = _group_with_constraints(dense=True)
     root = tmp_path_factory.mktemp("generated-activity")
     with (
-        generated_provider_scope(fingerprint),
+        generated_provider_scope(fingerprint, capture_roots=(capture_root,)),
         provider_native_inputs(fingerprint),
     ):
         rendered = render_broker_delivery(
@@ -113,7 +118,8 @@ def native_activity(tmp_path_factory):
             storage_policy=run.storage_policy,
         )
         manifest = _summary(rendered.streams)
-    return fingerprint, rendered.streams, manifest, product
+    with broker_fingerprint_sources(capture_root):
+        yield fingerprint, rendered.streams, manifest, product
 
 
 @pytest.mark.parametrize("route", ["events", "streams"])
@@ -205,7 +211,13 @@ def test_activity_binding_requires_complete_exact_roots(
 ):
     fingerprint, _, manifest, _ = native_activity
     foreign = replace(
-        fingerprint, adapter_id="other-generated", fingerprint_id=""
+        fingerprint,
+        statistics=replace(
+            fingerprint.statistics,
+            effective_end_utc_ns=2**63 - 1,
+            fingerprint_id="",
+        ),
+        fingerprint_id="",
     )
     roots = {
         "omitted": (),
@@ -315,7 +327,13 @@ def test_activity_refuses_truncated_and_projected_away_broker_parents(
 ):
     fingerprint, streams, _, _ = native_activity
     other = replace(
-        fingerprint, adapter_id="other-generated", fingerprint_id=""
+        fingerprint,
+        statistics=replace(
+            fingerprint.statistics,
+            effective_end_utc_ns=2**63 - 1,
+            fingerprint_id="",
+        ),
+        fingerprint_id="",
     )
     stream = streams[0]
     generated = [
@@ -391,8 +409,14 @@ def test_activity_expiry_before_promotion_leaves_no_native_output(
         with pytest.raises(BrokerPolicyError):
             activity.write_reconstruction_activity_manifest(manifest, tmp_path)
     files = tuple(tmp_path.iterdir())
-    assert files
-    assert all(path.name.endswith(".provider-policy.json") for path in files)
+    digest = hashlib.sha256((manifest.to_json() + "\n").encode()).hexdigest()
+    native_name = f"reconstruction-activity-manifest-{digest}.json"
+    assert {path.name for path in files} == {
+        native_name + ".provider-policy.json",
+        native_name + ".broker-provenance.json",
+    }
+    assert all(path.is_file() and not path.is_symlink() for path in files)
+    assert not (tmp_path / native_name).exists()
 
 
 def test_opaque_activity_limitation_requires_raw_permission(

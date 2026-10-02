@@ -146,7 +146,7 @@ def test_health_qualification_rechecks_rights_after_retained_reference_read(
     request, captured = capture(
         tmp_path, messages=inputs.messages[:7] + inputs.messages[-1:]
     )
-    with generated_provider_scope(request) as source:
+    with generated_provider_scope(request, capture_roots=(tmp_path,)) as source:
         fingerprint = fit_broker_delivery_fingerprint(
             tmp_path, (captured.manifest,), provider_requests=(request,)
         )

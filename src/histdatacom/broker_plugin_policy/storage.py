@@ -244,6 +244,9 @@ def verify_broker_policy_receipt(
         raise ValueError(
             "provider policy receipt native classification differs"
         )
+    from .scientific_storage import verify_broker_scientific_lineage
+
+    verify_broker_scientific_lineage(native_path, native_subject)
 
 
 def write_broker_policy_receipt(
@@ -338,6 +341,14 @@ def write_broker_policy_receipt(
                 ) from None
 
     check_current()
+    from .scientific_storage import write_broker_scientific_lineage
+
+    write_broker_scientific_lineage(
+        path.with_name(native_artifact_name),
+        native_subject,
+        native_file_bytes,
+        maximum_bytes=maximum_bytes - len(encoded),
+    )
     descriptor, temporary_name = tempfile.mkstemp(
         prefix=".provider-admission-", dir=path.parent
     )

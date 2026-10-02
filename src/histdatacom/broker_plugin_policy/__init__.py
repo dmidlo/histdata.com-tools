@@ -66,7 +66,14 @@ from .storage import (
     write_broker_policy_receipt,
 )
 
+from .scientific_storage import (
+    BrokerScientificLineageV1,
+    read_broker_scientific_lineage,
+)
+
 __all__ = [
+    "BrokerScientificLineageV1",
+    "read_broker_scientific_lineage",
     "POLICY_NONCLAIM",
     "BrokerDerivedArtifactV1",
     "BrokerFingerprintFitV1",

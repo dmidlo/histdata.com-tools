@@ -2,18 +2,18 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, fields
-from enum import Enum
 import hashlib
 import json
 import re
+from dataclasses import dataclass, fields
+from enum import Enum
 from types import UnionType
 from typing import (
     Any,
     ClassVar,
     Mapping,
-    TypeVar,
     NoReturn,
+    TypeVar,
     cast,
     get_args,
     get_origin,
@@ -53,16 +53,42 @@ class BrokerCapabilityReason(str, Enum):
     RESOURCE_LIMIT = "resource_limit"
 
 
+class BrokerCapabilityEventFailure(str, Enum):
+    """Host-observed validation gates; never plugin exception text or payloads."""
+
+    EVENT_TYPE = "event_type"
+    EVENT_CONTRACT = "event_contract"
+    INVALID_SPREAD = "invalid_spread"
+    SESSION = "session"
+    SEQUENCE = "sequence"
+    CLOCK_IDENTITY = "clock_identity"
+    MONOTONIC_REGRESSION = "monotonic_regression"
+    UTC_REGRESSION = "utc_regression"
+
+
 class BrokerCapabilityError(ValueError):
     """Closed diagnostics: never render a plugin exception or configuration."""
 
-    def __init__(self, reason: BrokerCapabilityReason) -> None:
+    def __init__(
+        self,
+        reason: BrokerCapabilityReason,
+        *,
+        event_failure: BrokerCapabilityEventFailure | None = None,
+    ) -> None:
         if type(reason) is not BrokerCapabilityReason:
             raise ValueError("invalid capability reason")
+        if event_failure is not None and (
+            type(event_failure) is not BrokerCapabilityEventFailure
+            or reason is not BrokerCapabilityReason.CAPABILITY_VIOLATION
+        ):
+            raise ValueError("invalid capability event failure")
         self.reason = reason
+        self.event_failure = event_failure
         super().__init__(reason.value)
 
     def to_dict(self) -> dict[str, object]:
+        # Preserve historical V1 diagnostic bytes. The conformance kit retains
+        # the optional host gate in its separate versioned evidence contract.
         return {"status": "refused", "reason": self.reason.value}
 
 

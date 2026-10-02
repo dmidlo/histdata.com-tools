@@ -181,6 +181,11 @@ def require_provider_operation(
     """
     if type(operation) is not BrokerPolicyOperation:
         raise BrokerPolicyError("invalid_operation")
+    # Source replay performs its own fresh checks on closed capture subjects.
+    # It must run outside this lock; metadata-only resolution remains pure.
+    from .scientific import require_scientific_provenance
+
+    require_scientific_provenance(native_subject)
     # Never wait on a reentrant resolver/source callback. Concurrent use of a
     # copied context must establish separate scopes rather than race its ledger.
     with _locked_current_scope() as state:
@@ -214,7 +219,11 @@ def _require_current(
         raise BrokerPolicyError("invalid_native_subject_resolution")
     now = _current_clock(state)
     request = BrokerPolicyRequestV1(
-        subject, operation, now, intended_retention_deadline_ns, recipient_scope
+        subject,
+        operation,
+        now,
+        intended_retention_deadline_ns,
+        recipient_scope,
     )
     decision = decide_provider_operation(context, request)
     if not decision.allowed:

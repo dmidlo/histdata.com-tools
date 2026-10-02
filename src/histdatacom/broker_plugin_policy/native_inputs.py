@@ -13,23 +13,23 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from ._wire import MAX_BYTES, canonical_json
 from .bindings import (
     BrokerLegacyCaptureV1,
     BrokerProviderOutputContractV1,
-    resolve_provider_subject,
     _restore_native,
+    resolve_provider_subject,
 )
 
 if TYPE_CHECKING:
+    from histdatacom.broker_capture.contracts import BrokerCaptureSessionV1
+    from histdatacom.broker_capture.fingerprint_v2 import (
+        BrokerDeliveryFingerprint,
+    )
     from histdatacom.synthetic.persistence import (
         ReconstructionProductManifestV1,
-    )
-    from histdatacom.broker_capture.contracts import BrokerCaptureSessionV1
-    from histdatacom.broker_capture.fingerprint_contracts import (
-        BrokerDeliveryFingerprintV1,
     )
 
 
@@ -52,6 +52,10 @@ def provider_native_inputs(*native_roots: object) -> Iterator[None]:
     from histdatacom.broker_capture.contracts import BrokerCaptureSessionV1
     from histdatacom.broker_capture.fingerprint_contracts import (
         BrokerDeliveryFingerprintV1,
+    )
+    from histdatacom.broker_capture.fingerprint_v2 import (
+        BrokerDeliveryFingerprintV2,
+        parse_broker_delivery_fingerprint,
     )
     from histdatacom.synthetic.persistence import (
         ReconstructionProductManifestV1,
@@ -80,9 +84,14 @@ def provider_native_inputs(*native_roots: object) -> Iterator[None]:
                 raise ValueError("duplicate native capture root")
             values = (session.to_json(), contract.to_json())
             captures[session.session_id] = values
-        elif type(root) is BrokerDeliveryFingerprintV1:
+        elif type(root) in {
+            BrokerDeliveryFingerprintV1,
+            BrokerDeliveryFingerprintV2,
+        }:
             resolve_provider_subject(root)
-            fingerprint = BrokerDeliveryFingerprintV1.from_json(root.to_json())
+            fingerprint = parse_broker_delivery_fingerprint(
+                cast("BrokerDeliveryFingerprint", root).to_json()
+            )
             if fingerprint.fingerprint_id in fingerprints:
                 raise ValueError("duplicate native fingerprint root")
             values = (fingerprint.to_json(),)
@@ -143,9 +152,9 @@ def capture_request_for(
     )
 
 
-def fingerprint_for(fingerprint_id: str) -> BrokerDeliveryFingerprintV1:
-    from histdatacom.broker_capture.fingerprint_contracts import (
-        BrokerDeliveryFingerprintV1,
+def fingerprint_for(fingerprint_id: str) -> BrokerDeliveryFingerprint:
+    from histdatacom.broker_capture.fingerprint_v2 import (
+        parse_broker_delivery_fingerprint,
     )
 
     if type(fingerprint_id) is not str:
@@ -155,7 +164,7 @@ def fingerprint_for(fingerprint_id: str) -> BrokerDeliveryFingerprintV1:
         raise ValueError(
             "fingerprint is absent from the registered native roots"
         )
-    return BrokerDeliveryFingerprintV1.from_json(text)
+    return parse_broker_delivery_fingerprint(text)
 
 
 def product_for(manifest_id: str) -> ReconstructionProductManifestV1:

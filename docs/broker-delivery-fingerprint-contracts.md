@@ -8,7 +8,7 @@ belongs to #445.
 
 ## Streaming and storage boundary
 
-Fitting makes two bounded streaming passes over capture JSONL:
+Statistical aggregation uses two bounded streaming passes over capture JSONL:
 
 1. `assess_broker_capture_eligibility()` verifies manifest state, partial/orphan
    inspection, partition sidecars, bytes, hashes, row contracts, sequence,
@@ -17,12 +17,20 @@ Fitting makes two bounded streaming passes over capture JSONL:
    bounded aggregators and requires the second logical-content SHA-256 to equal
    the health-pass hash.
 
-No pass materializes a capture or writes augmented capture rows. Distribution
-support, sums, squared sums, extrema, and bounded deterministic bottom-hash
-samples are retained in memory. Input event, capture, cell, sample, context, and
-comparison limits fail closed instead of truncating the evidence. This gives the
-downstream streaming reconstruction pipeline a small profile artifact rather
-than another tick-sized intermediate dataset.
+These statistical aggregators do not materialize tick rows or write augmented
+capture rows. They retain distribution support, sums, squared sums, extrema, and
+bounded deterministic bottom-hash samples in memory.
+
+Fitting additionally performs host-health, provenance, and current-rights
+replays. Provenance verification retains the bounded journal evidence, including
+native payload entries, in memory. The two statistical passes therefore do not
+bound the total number of source reads or imply constant-memory provenance
+verification. Fresh scientific material-use checks can replay sources again.
+
+Input event, capture, journal, cell, sample, context, and comparison limits fail
+closed instead of truncating the evidence. The downstream reconstruction
+pipeline receives a compact profile and exact capture-root inventory rather
+than another augmented tick dataset.
 
 Cadence uses session-local monotonic receive time. Separate capture sessions are
 never bridged, because monotonic clock origins are process-local. Calendar and
@@ -49,9 +57,22 @@ Unreleased v3 additionally requires independently replayed, measured
 degraded or insufficient evidence refuses a new fit; historical V1 inspection is
 still available. Successful fitting writes a separate immutable health
 qualification under the explicit capture root, so that root must be writable.
-The proof links the unchanged V1 fingerprint bytes to the complete native capture,
-audit and health-policy inventory. Pure numerical comparison is not health
-certification, and deserializing a proof does not reauthorize material use.
+The proof links the fingerprint bytes to the complete native capture, audit and
+health-policy inventory. New fitting returns `BrokerDeliveryFingerprintV2`,
+which composes unchanged V1 statistics with every exact native capture manifest,
+output contract, provenance header and final seal. Its outer identity binds the
+entire root inventory. Pure numerical comparison is not health certification,
+and deserializing a proof does not reauthorize material use.
+
+New broker-conditioned consumers require V2 and independently replay the actual
+retained captures against those expected roots at material boundaries. Supply
+explicit source locations with `broker_fingerprint_sources(*roots)` and current
+provider rights separately. Missing, ambiguous, partial or tampered sources
+refuse. Historical V1 readers remain available but cannot admit new science.
+Retained downstream products carry the complete fingerprint-parent lineage.
+See [host-owned provenance](broker-plugin-provenance.md) for anchoring, resource
+bounds and the distinction between integrity and provider truth. SDK-native
+captures are verifiable but are not silently coerced into this legacy fitter.
 
 Every fitted profile also retains `BrokerDeliveryCaptureEvidenceV1` per input
 session: manifest and eligibility IDs, logical content hash, a digest over the

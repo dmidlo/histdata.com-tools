@@ -366,7 +366,14 @@ class BrokerHostHealthDistributionV1(Artifact):
             ):
                 raise ValueError("invalid distribution ordering")
             _finite(self.mean_ns)
-            if not self.minimum_ns <= self.mean_ns <= self.maximum_ns:
+            # Extrema/quantiles retain exact int64 nanoseconds, while the mean
+            # is a correctly rounded float. At large magnitudes even one
+            # sample's float can fall outside its exact integer singleton.
+            # Compare representable bounds, not an arbitrary tolerance or a
+            # clamped mean; adjacent floats outside those bounds still refuse.
+            if not (
+                float(self.minimum_ns) <= self.mean_ns <= float(self.maximum_ns)
+            ):
                 raise ValueError("mean outside observation range")
 
 

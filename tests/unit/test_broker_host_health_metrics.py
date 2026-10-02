@@ -6,6 +6,7 @@ from decimal import Decimal, localcontext
 import pytest
 
 from histdatacom.broker_plugin_health import (
+    BrokerHostHealthDistributionV1,
     health_rate,
     little_law_diagnostic,
     summarize_health_times,
@@ -73,6 +74,46 @@ def test_exact_nearest_rank_signed_deltas_and_large_integer_mean():
     assert result.mean_ns == float(
         sum(Decimal(x) for x in samples) / len(samples)
     )
+
+
+@pytest.mark.parametrize(
+    "sample",
+    [
+        2**53 + 1,
+        2**60 + 1,
+        -(2**60 + 1),
+        1_790_320_460_490_986_001,
+        2**63 - 1,
+        -(2**63 - 1),
+    ],
+)
+def test_single_large_nanosecond_sample_keeps_exact_extrema_and_rounded_mean(
+    sample,
+):
+    summary = summarize_health_times((sample,))
+    assert summary.count == 1
+    assert (
+        summary.minimum_ns,
+        summary.maximum_ns,
+        summary.p50_ns,
+        summary.p95_ns,
+    ) == (sample,) * 4
+    assert summary.mean_ns == float(Decimal(sample))
+    assert (
+        BrokerHostHealthDistributionV1.from_json(summary.to_json()) == summary
+    )
+
+
+@pytest.mark.parametrize("sign", [-1, 1])
+def test_nearby_large_nanosecond_samples_match_independent_decimal_mean(sign):
+    samples = [sign * (2**60 + offset) for offset in (1, 3, 5)]
+    with localcontext() as context:
+        context.prec = 60
+        expected = float(sum(Decimal(value) for value in samples) / 3)
+    summary = summarize_health_times(samples)
+    assert summary.mean_ns == expected
+    assert summary.minimum_ns == min(samples)
+    assert summary.maximum_ns == max(samples)
 
 
 @pytest.mark.parametrize(

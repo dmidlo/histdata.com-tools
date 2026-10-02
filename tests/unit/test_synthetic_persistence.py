@@ -7,6 +7,7 @@ import json
 import shutil
 from contextlib import contextmanager
 from dataclasses import replace
+from itertools import count
 from pathlib import Path
 
 import duckdb
@@ -16,7 +17,7 @@ import pyarrow.parquet as pq
 import pytest
 from pyarrow import ipc
 
-from histdatacom.broker_plugin_policy import provider_native_inputs
+from histdatacom.broker_plugin_policy import provider_native_inputs, scope
 from histdatacom.reconstruction import ReconstructionClient
 from histdatacom.runtime_contracts import ArtifactRef
 from histdatacom.synthetic import (
@@ -53,8 +54,11 @@ from histdatacom.synthetic.cross_currency import (
     CrossCurrencyValidationStage,
     reconcile_cross_currency_window,
 )
+from tests.fixtures.broker_provider_policy import (
+    POLICY_NOW,
+    generated_provider_scope,
+)
 from tests.unit.test_broker_delivery_fingerprints import BASE_WALL_NS, _capture
-from tests.fixtures.broker_provider_policy import generated_provider_scope
 from tests.unit.test_synthetic_broker_transfer import (
     _fit_generated_capture,
     _group_with_constraints,
@@ -858,8 +862,13 @@ def test_arrow_and_polars_scans_prune_files_columns_and_rows(
 
 def test_duckdb_smoke_proves_parquet_projection_and_filter_pushdown(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """DuckDB reads the committed paths with projected columns and filters."""
+    # This is a storage/SQL test, not a machine wall-clock test. Keep fresh
+    # policy checks while making their generated time advance deterministically.
+    ticks = count(POLICY_NOW)
+    monkeypatch.setattr(scope, "_now_ns", ticks.__next__)
     with _publication_inputs_scope(tmp_path) as inputs:
         rendered, anchors, policy, retention = inputs
         published = publish_reconstruction_group(
@@ -1071,7 +1080,9 @@ def _publication_inputs_scope(tmp_path: Path):
         _publication_inputs_with_parent(tmp_path)
     )
     with (
-        generated_provider_scope(fingerprint),
+        generated_provider_scope(
+            fingerprint, capture_roots=(tmp_path / "broker-capture",)
+        ),
         provider_native_inputs(fingerprint),
     ):
         yield rendered, anchors, policy, retention
@@ -1086,7 +1097,9 @@ def _publication_inputs_with_parent(tmp_path: Path):
     )
     fingerprint = _fit_generated_capture(tmp_path / "broker-capture", capture)
     with (
-        generated_provider_scope(fingerprint),
+        generated_provider_scope(
+            fingerprint, capture_roots=(tmp_path / "broker-capture",)
+        ),
         provider_native_inputs(fingerprint),
     ):
         rendered = render_broker_delivery(

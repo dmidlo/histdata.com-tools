@@ -7,7 +7,7 @@ import pytest
 
 from histdatacom.broker_capture import (
     AppendOnlyBrokerCaptureWriterV1,
-    BrokerDeliveryFingerprintV1,
+    BrokerDeliveryFingerprintV2,
     BrokerDeliveryIneligibleCaptureError,
     fit_broker_delivery_fingerprint,
 )
@@ -25,14 +25,14 @@ from tests.fixtures.broker_provider_policy import (
 from tests.unit.test_broker_host_health_runtime_legacy import capture
 
 
-def test_new_native_fit_retains_exact_health_and_policy_without_changing_v1(
+def test_new_native_fit_retains_exact_health_and_policy_in_v2(
     tmp_path,
 ):
     inputs = legacy_policy_inputs()
     request, result = capture(
         tmp_path, messages=inputs.messages[:7] + inputs.messages[-1:]
     )
-    with generated_provider_scope(request):
+    with generated_provider_scope(request, capture_roots=(tmp_path,)):
         fingerprint = fit_broker_delivery_fingerprint(
             tmp_path,
             (result.manifest,),
@@ -59,9 +59,9 @@ def test_new_native_fit_retains_exact_health_and_policy_without_changing_v1(
             read_current_broker_health_qualification(
                 tmp_path, fingerprint, (), ()
             )
-    assert type(fingerprint) is BrokerDeliveryFingerprintV1
+    assert type(fingerprint) is BrokerDeliveryFingerprintV2
     assert (
-        BrokerDeliveryFingerprintV1.from_json(fingerprint.to_json())
+        BrokerDeliveryFingerprintV2.from_json(fingerprint.to_json())
         == fingerprint
     )
     assert qualification.fingerprint_id == fingerprint.fingerprint_id
@@ -80,7 +80,7 @@ def test_new_native_fit_retains_exact_health_and_policy_without_changing_v1(
     (path,) = (tmp_path / "host-health-qualifications").glob("*.json")
     substituted = replace(qualification, native_fingerprint_sha256="0" * 64)
     path.write_text(substituted.to_json())
-    with generated_provider_scope(request):
+    with generated_provider_scope(request, capture_roots=(tmp_path,)):
         with pytest.raises(
             ValueError, match="differs from current source replay"
         ):

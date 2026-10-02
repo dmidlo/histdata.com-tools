@@ -14,26 +14,29 @@ from typing import TYPE_CHECKING, Any, TypeAlias, cast
 
 from ._wire import canonical_json, load_json
 from .bindings import (
-    _ResolvedNative,
     _composite_ref,
     _preflight_native,
     _ref,
     _resolve_native,
+    _ResolvedNative,
     _restore_native,
 )
 from .contracts import BrokerPolicyDataClass as DataClass
 from .contracts import BrokerPolicySubjectV1
 
 if TYPE_CHECKING:
-    from histdatacom.synthetic.activity import ReconstructionActivityManifestV1
-    from histdatacom.broker_capture.fingerprint_contracts import (
-        BrokerDeliveryFingerprintV1,
+    from histdatacom.broker_capture.fingerprint_v2 import (
+        BrokerDeliveryFingerprint,
     )
+    from histdatacom.synthetic.activity import ReconstructionActivityManifestV1
     from histdatacom.synthetic.broker_transfer import (
         BrokerConditionedProposalV1,
         BrokerProfileSelectionV1,
         BrokerRenderedGroupV1,
         BrokerTransferManifestV1,
+    )
+    from histdatacom.synthetic.certification import (
+        ReconstructionCertificationDossierV1,
     )
     from histdatacom.synthetic.persistence import (
         ReconstructionProductManifestV1,
@@ -46,6 +49,7 @@ if TYPE_CHECKING:
         | BrokerRenderedGroupV1
         | ReconstructionProductManifestV1
         | ReconstructionActivityManifestV1
+        | ReconstructionCertificationDossierV1
     )
 
 
@@ -53,14 +57,14 @@ if TYPE_CHECKING:
 class BrokerSyntheticOutputV1:
     """Expected derived shape, not a retained artifact or computation proof."""
 
-    fingerprint: BrokerDeliveryFingerprintV1
+    fingerprint: BrokerDeliveryFingerprint
 
 
 @dataclass(frozen=True, slots=True)
 class BrokerDerivedArtifactV1:
     """Actual native artifact and its complete exact fingerprint inventory."""
 
-    fingerprints: tuple[BrokerDeliveryFingerprintV1, ...]
+    fingerprints: tuple[BrokerDeliveryFingerprint, ...]
     artifact: DerivedNative
 
 
@@ -127,6 +131,30 @@ def _selection_parent(selection: Any, fingerprint: Any) -> None:
         raise ValueError("derived selection metrics differ from native parent")
 
 
+def _certification_parent(artifact: Any, fingerprint: Any) -> None:
+    """Reconcile descriptor bytes, never its caller-supplied verified flag."""
+    import hashlib
+
+    from histdatacom.synthetic.contracts import canonical_contract_json
+
+    selected = tuple(
+        item
+        for item in artifact.artifacts
+        if item.kind == "broker-delivery-fingerprint"
+    )
+    data = canonical_contract_json(fingerprint.to_dict()).encode("utf-8")
+    if not selected or any(
+        item.subject_id != fingerprint.fingerprint_id
+        or item.subject_schema_version != fingerprint.schema_version
+        or item.content_sha256 != hashlib.sha256(data).hexdigest()
+        or item.size_bytes != len(data)
+        for item in selected
+    ):
+        raise ValueError(
+            "certification descriptor differs from actual native parent"
+        )
+
+
 def _rendered_relationships(group: Any) -> None:
     from histdatacom.synthetic.broker_transfer import (
         BrokerTransferStatus,
@@ -136,6 +164,8 @@ def _rendered_relationships(group: Any) -> None:
     from histdatacom.synthetic.contracts import SyntheticEventOrigin
     from histdatacom.synthetic.cross_currency import (
         CrossCurrencyValidationStage,
+    )
+    from histdatacom.synthetic.cross_currency import (
         _streams_content_sha256 as validation_content_sha256,
     )
 
@@ -214,6 +244,9 @@ def _native_snapshot(artifact: object) -> tuple[Any, str, str]:
         BrokerRenderedGroupV1,
         BrokerTransferManifestV1,
     )
+    from histdatacom.synthetic.certification import (
+        ReconstructionCertificationDossierV1,
+    )
     from histdatacom.synthetic.persistence import (
         ReconstructionProductManifestV1,
     )
@@ -235,6 +268,7 @@ def _native_snapshot(artifact: object) -> tuple[Any, str, str]:
         )
         return restored, text, identity
     types = {
+        ReconstructionCertificationDossierV1: "dossier_id",
         BrokerConditionedProposalV1: "proposal_id",
         BrokerTransferManifestV1: "manifest_id",
         BrokerRenderedGroupV1: None,
@@ -268,11 +302,17 @@ def resolve_derived_native(native: object) -> _ResolvedNative:
     from histdatacom.broker_capture.fingerprint_contracts import (
         BrokerDeliveryFingerprintV1,
     )
+    from histdatacom.broker_capture.fingerprint_v2 import (
+        BrokerDeliveryFingerprintV2,
+    )
     from histdatacom.synthetic.broker_transfer import (
         BrokerConditionedProposalV1,
         BrokerProfileSelectionV1,
         BrokerRenderedGroupV1,
         BrokerTransferManifestV1,
+    )
+    from histdatacom.synthetic.certification import (
+        ReconstructionCertificationDossierV1,
     )
     from histdatacom.synthetic.persistence import (
         ReconstructionProductManifestV1,
@@ -280,7 +320,8 @@ def resolve_derived_native(native: object) -> _ResolvedNative:
 
     if type(native) is BrokerSyntheticOutputV1:
         fingerprint = _restore_native(
-            native.fingerprint, {BrokerDeliveryFingerprintV1}
+            native.fingerprint,
+            {BrokerDeliveryFingerprintV1, BrokerDeliveryFingerprintV2},
         )
         parent = _resolve_native(fingerprint).subject
         return _ResolvedNative(
@@ -299,6 +340,7 @@ def resolve_derived_native(native: object) -> _ResolvedNative:
             None,
         )
     if type(native) in {
+        ReconstructionCertificationDossierV1,
         ReconstructionProductManifestV1,
         BrokerProfileSelectionV1,
         BrokerConditionedProposalV1,
@@ -310,6 +352,8 @@ def resolve_derived_native(native: object) -> _ResolvedNative:
         artifact, _, _ = _native_snapshot(native)
         if type(artifact) is ReconstructionProductManifestV1:
             parent_id = artifact.broker_profile_id
+        elif type(artifact) is ReconstructionCertificationDossierV1:
+            parent_id = artifact.policy.broker_fingerprint_id
         elif type(artifact) is BrokerConditionedProposalV1:
             parent_id = artifact.selection.fingerprint_id
         elif type(artifact) is BrokerRenderedGroupV1:
@@ -328,7 +372,9 @@ def resolve_derived_native(native: object) -> _ResolvedNative:
         raise ValueError("derived fingerprints must be a bounded exact tuple")
     _preflight_native(native)
     fingerprints = tuple(
-        _restore_native(item, {BrokerDeliveryFingerprintV1})
+        _restore_native(
+            item, {BrokerDeliveryFingerprintV1, BrokerDeliveryFingerprintV2}
+        )
         for item in native.fingerprints
     )
     parents = {item.fingerprint_id: item for item in fingerprints}
@@ -356,6 +402,8 @@ def resolve_derived_native(native: object) -> _ResolvedNative:
         selections = manifest.selections
         if type(artifact) is BrokerRenderedGroupV1:
             _rendered_relationships(artifact)
+    elif type(artifact) is ReconstructionCertificationDossierV1:
+        fingerprint_id = artifact.policy.broker_fingerprint_id
     else:
         fingerprint_id = artifact.broker_profile_id
         if artifact.quality.broker_fingerprint_id != fingerprint_id:
@@ -365,12 +413,17 @@ def resolve_derived_native(native: object) -> _ResolvedNative:
             "derived fingerprint inventory does not match native parents"
         )
     fingerprint = parents[fingerprint_id]
+    if type(artifact) is ReconstructionCertificationDossierV1:
+        _certification_parent(artifact, fingerprint)
     for selection in selections:
         _selection_parent(selection, fingerprint)
     parent = _resolve_native(fingerprint).subject
     classes = set(parent.data_classes)
     if type(artifact) is not BrokerProfileSelectionV1:
         classes.add(DataClass.BROKER_SYNTHETIC)
+    if type(artifact) is ReconstructionCertificationDossierV1:
+        # Methodology/notes are retained free text, never assumed declassified.
+        classes.add(DataClass.RAW_PAYLOAD)
     ref = _composite_ref(
         "broker-derived-artifact",
         {

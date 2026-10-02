@@ -18,13 +18,13 @@ from histdatacom.synthetic import (
     reconcile_cross_currency_window,
     render_broker_delivery,
 )
-from tests.unit.test_broker_delivery_fingerprints import (
-    BASE_WALL_NS,
-    _capture,
-)
 from tests.fixtures.broker_provider_policy import (
     generated_legacy_request,
     generated_provider_scope,
+)
+from tests.unit.test_broker_delivery_fingerprints import (
+    BASE_WALL_NS,
+    _capture,
 )
 from tests.unit.test_synthetic_cross_currency import (
     START_NS,
@@ -49,7 +49,7 @@ def test_render_is_deterministic_preserves_anchors_and_validates_final_group(
     )
 
     with (
-        generated_provider_scope(fingerprint),
+        generated_provider_scope(fingerprint, capture_roots=(tmp_path,)),
         provider_native_inputs(fingerprint),
     ):
         rendered = render_broker_delivery(
@@ -63,7 +63,7 @@ def test_render_is_deterministic_preserves_anchors_and_validates_final_group(
             quality_period="202001",
         )
     with (
-        generated_provider_scope(fingerprint),
+        generated_provider_scope(fingerprint, capture_roots=(tmp_path,)),
         provider_native_inputs(fingerprint),
     ):
         retry = render_broker_delivery(
@@ -115,7 +115,7 @@ def test_unsupported_profile_cell_refuses_without_exposing_partial_rows(
     fingerprint = _fit_generated_capture(tmp_path, manifest)
 
     with (
-        generated_provider_scope(fingerprint),
+        generated_provider_scope(fingerprint, capture_roots=(tmp_path,)),
         provider_native_inputs(fingerprint),
     ):
         refused = render_broker_delivery(
@@ -152,7 +152,7 @@ def test_render_resource_limit_refuses_before_materializing_output(
     fingerprint = _fit_generated_capture(tmp_path, manifest)
 
     with (
-        generated_provider_scope(fingerprint),
+        generated_provider_scope(fingerprint, capture_roots=(tmp_path,)),
         provider_native_inputs(fingerprint),
     ):
         refused = render_broker_delivery(
@@ -182,7 +182,7 @@ def test_render_applies_measured_batching_to_dense_synthetic_rows(
     )
 
     with (
-        generated_provider_scope(fingerprint),
+        generated_provider_scope(fingerprint, capture_roots=(tmp_path,)),
         provider_native_inputs(fingerprint),
     ):
         rendered = render_broker_delivery(
@@ -218,7 +218,7 @@ def test_render_applies_measured_stale_quotes_independently(
     )
 
     with (
-        generated_provider_scope(fingerprint),
+        generated_provider_scope(fingerprint, capture_roots=(tmp_path,)),
         provider_native_inputs(fingerprint),
     ):
         rendered = render_broker_delivery(
@@ -255,7 +255,7 @@ def test_render_applies_measured_exact_duplicates_independently(
     )
 
     with (
-        generated_provider_scope(fingerprint),
+        generated_provider_scope(fingerprint, capture_roots=(tmp_path,)),
         provider_native_inputs(fingerprint),
     ):
         rendered = render_broker_delivery(
@@ -365,7 +365,11 @@ def _profile_with_metrics(fingerprint, **values: float):
             for metric in cell.metrics
         )
         cells.append(replace(cell, metrics=metrics, cell_id=""))
-    return replace(fingerprint, cells=tuple(cells), fingerprint_id="")
+    # Adjust only explicit synthetic statistical controls; retain real source roots.
+    statistics = replace(
+        fingerprint.statistics, cells=tuple(cells), fingerprint_id=""
+    )
+    return replace(fingerprint, statistics=statistics, fingerprint_id="")
 
 
 def _observed_payloads(streams):

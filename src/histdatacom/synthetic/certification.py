@@ -15,7 +15,12 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path, PurePosixPath
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
+
+if TYPE_CHECKING:
+    from histdatacom.broker_capture.fingerprint_v2 import (
+        BrokerDeliveryFingerprintV2,
+    )
 
 from histdatacom.runtime_contracts import ArtifactRef, JSONScalar, JSONValue
 from histdatacom.synthetic.contracts import canonical_contract_json
@@ -2327,6 +2332,11 @@ def evaluate_reconstruction_certification(
             blocking_limitations, "blocking limitation"
         ),
     )
+    if state in {
+        CertificationState.CERTIFIED,
+        CertificationState.READY_FOR_PROMOTION,
+    }:
+        _require_native_broker_certification(policy, selected_artifacts)
     return ReconstructionCertificationDossierV1(
         policy=policy,
         artifacts=selected_artifacts,
@@ -2415,6 +2425,46 @@ def evaluate_modern_reference_reconstruction_certification(
     )
 
 
+def _require_native_broker_certification(
+    policy: ReconstructionCertificationPolicyV1,
+    artifacts: Sequence[CertificationArtifactV1],
+) -> BrokerDeliveryFingerprintV2:
+    """A positive new broker claim requires the actual retained V2 parent.
+
+    Historical constructors/parsers remain pure. Descriptor labels or a stored
+    ``verified`` Boolean cannot admit a new scientific/release operation.
+    """
+    from histdatacom.broker_capture.fingerprint_v2 import (
+        require_qualified_broker_fingerprint,
+    )
+    from histdatacom.broker_plugin_policy import (
+        BrokerPolicyOperation,
+        fingerprint_for,
+        require_provider_operation,
+    )
+
+    fingerprint = require_qualified_broker_fingerprint(
+        fingerprint_for(policy.broker_fingerprint_id)
+    )
+    selected = tuple(
+        item for item in artifacts if item.kind == "broker-delivery-fingerprint"
+    )
+    payload = canonical_contract_json(fingerprint.to_dict()).encode("utf-8")
+    if not selected or any(
+        item.subject_id != fingerprint.fingerprint_id
+        or item.subject_schema_version != fingerprint.schema_version
+        or item.content_sha256 != hashlib.sha256(payload).hexdigest()
+        or item.size_bytes != len(payload)
+        for item in selected
+    ):
+        raise ValueError(
+            "certification descriptors do not bind the actual qualified broker fingerprint"
+        )
+    require_provider_operation(fingerprint, BrokerPolicyOperation.MATERIAL_USE)
+    require_provider_operation(fingerprint, BrokerPolicyOperation.DERIVE)
+    return fingerprint
+
+
 def write_reconstruction_certification_dossier(
     dossier: ReconstructionCertificationDossierV1,
     *,
@@ -2424,14 +2474,60 @@ def write_reconstruction_certification_dossier(
     """Atomically publish machine and human certification reports."""
     if not isinstance(dossier, ReconstructionCertificationDossierV1):
         raise TypeError("certification publication requires a v1 dossier")
-    json_target = Path(json_path).expanduser().resolve()
-    markdown_target = Path(markdown_path).expanduser().resolve()
+    from histdatacom.broker_plugin_policy import (
+        BrokerDerivedArtifactV1,
+        BrokerPolicyOperation,
+        read_broker_policy_receipt,
+        require_provider_operation,
+        verify_broker_policy_receipt,
+        write_broker_policy_receipt,
+    )
+
+    fingerprint = _require_native_broker_certification(
+        dossier.policy, dossier.artifacts
+    )
+    native = BrokerDerivedArtifactV1((fingerprint,), dossier)
+    require_provider_operation(native, BrokerPolicyOperation.RETAIN_LOCAL)
+    json_input = Path(json_path).expanduser().absolute()
+    markdown_input = Path(markdown_path).expanduser().absolute()
+    json_target = json_input.parent.resolve() / json_input.name
+    markdown_target = markdown_input.parent.resolve() / markdown_input.name
     if json_target == markdown_target:
         raise ValueError("certification JSON and Markdown paths must differ")
+    if json_target.is_symlink() or markdown_target.is_symlink():
+        raise ValueError("certification publication refuses leaf symlinks")
     json_payload = dossier.to_json().encode("utf-8") + b"\n"
     markdown_payload = dossier.to_markdown().encode("utf-8")
+    json_target.parent.mkdir(parents=True, exist_ok=True)
+    receipt_path = json_target.with_name(
+        json_target.name + ".provider-policy.json"
+    )
+    if (
+        json_target.exists()
+        or receipt_path.exists()
+        or receipt_path.is_symlink()
+    ):
+        verify_broker_policy_receipt(
+            read_broker_policy_receipt(receipt_path), native, json_target
+        )
+        if json_target.read_bytes() != json_payload:
+            raise ValueError(
+                "certification native/policy publication differs; no overwrite"
+            )
+    else:
+        write_broker_policy_receipt(
+            receipt_path,
+            native,
+            native_artifact_name=json_target.name,
+            native_file_bytes=json_payload,
+        )
+    require_provider_operation(native, BrokerPolicyOperation.RETAIN_LOCAL)
     _atomic_write(json_target, json_payload)
+    require_provider_operation(native, BrokerPolicyOperation.RETAIN_LOCAL)
     _atomic_write(markdown_target, markdown_payload)
+    verify_broker_policy_receipt(
+        read_broker_policy_receipt(receipt_path), native, json_target
+    )
     restored = ReconstructionCertificationDossierV1.from_json(
         json_target.read_text(encoding="utf-8")
     )
@@ -2456,7 +2552,7 @@ def write_reconstruction_certification_dossier(
 def load_reconstruction_certification_dossier(
     path: str | Path,
 ) -> ReconstructionCertificationDossierV1:
-    """Load and verify a published machine-readable dossier."""
+    """Parse historical declared evidence, not new source/release admission."""
     return ReconstructionCertificationDossierV1.from_json(
         Path(path).expanduser().resolve().read_text(encoding="utf-8")
     )

@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
+import hashlib
+import re
 from dataclasses import replace
 from datetime import datetime, timezone
-import hashlib
 from itertools import islice
 from pathlib import Path
-import re
 
 from histdatacom.broker_capture.contracts import BrokerCaptureSessionManifestV1
-from histdatacom.broker_capture.fingerprint_contracts import (
-    BrokerDeliveryFingerprintV1,
+from histdatacom.broker_capture.fingerprint_v2 import (
+    parse_broker_delivery_fingerprint,
 )
 from histdatacom.broker_capture.fingerprints import (
     fit_broker_delivery_fingerprint,
@@ -19,7 +19,6 @@ from histdatacom.broker_capture.fingerprints import (
 from histdatacom.data_quality.calendar_profiles import (
     calendar_profile_from_mapping,
 )
-from histdatacom.market_context.contracts import MarketContextTimelineV1
 from histdatacom.forecasting.engine_runner import ForecastEngineSnapshotV1
 from histdatacom.forecasting.feature_artifacts import FeatureArtifact
 from histdatacom.forecasting.feature_contracts import FeatureKind
@@ -31,13 +30,14 @@ from histdatacom.forecasting.feature_store import (
     FeatureMatrixSnapshotV1,
     VintageFeatureStoreV1,
 )
+from histdatacom.market_context.contracts import MarketContextTimelineV1
 from histdatacom.market_context.economic_calendar import (
     replay_economic_calendar_corpus,
 )
 from histdatacom.market_context.positioning import (
+    MAX_CFTC_SOURCE_BYTES,
     CftcPositioningCorpusV1,
     CftcPositioningRawSourceV1,
-    MAX_CFTC_SOURCE_BYTES,
     _select_symbol_mapping,
     build_cftc_positioning_corpus_from_sources,
 )
@@ -51,10 +51,10 @@ from .training_join_contracts import (
     TrainingJoinSourceV1,
 )
 from .training_join_sources import (
-    _JoinAdapter,
-    _JoinRecord,
     _bound_file,
     _configuration,
+    _JoinAdapter,
+    _JoinRecord,
     _prefix,
     _semantics,
 )
@@ -592,7 +592,7 @@ def _broker(source: TrainingJoinSourceV1) -> _JoinAdapter:
         raise ValueError(
             "broker source requires root/session paths and one native fingerprint"
         )
-    retained = BrokerDeliveryFingerprintV1.from_json(source.evidence_json[0])
+    retained = parse_broker_delivery_fingerprint(source.evidence_json[0])
     if training_json(retained.to_dict()) != source.evidence_json[0]:
         raise ValueError("noncanonical broker fingerprint")
     from histdatacom.broker_plugin_policy import (

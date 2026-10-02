@@ -85,7 +85,9 @@ def run_secure_broker_plugin(
         "lifecycle_policy",
         BrokerLifecyclePolicyV1(
             startup_timeout_ms=15000,
-            run_timeout_ms=30000,
+            # This fixture tests security/identity, not a capture deadline.
+            # Permit the same bounded journal work as ordinary lifecycle tests.
+            run_timeout_ms=120000,
             acknowledgement_timeout_ms=5000,
         ),
     )
@@ -592,6 +594,16 @@ def test_changing_resolved_host_credential_does_not_change_scientific_identity(
     second_root = tmp_path / "second"
     second_root.mkdir()
     values = (secrets.token_urlsafe(20), secrets.token_urlsafe(24))
+    # Hold transport conditions fixed while varying only the credential.
+    # Fresh host checks and durable journals must not introduce unequal
+    # delivery retries into this identity test. Validate before the listener
+    # thread starts, within the existing ten-second acknowledgement ceiling.
+    lifecycle_policy = BrokerLifecyclePolicyV1(
+        startup_timeout_ms=15000,
+        run_timeout_ms=120000,
+        shutdown_timeout_ms=1000,
+        acknowledgement_timeout_ms=10000,
+    )
     listener = socket.socket()
     listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     origin = urlsplit(
@@ -601,7 +613,10 @@ def test_changing_resolved_host_credential_does_not_change_scientific_identity(
     )
     listener.bind(("127.0.0.1", origin.port))
     listener.listen(2)
-    listener.settimeout(60)
+    # The first capture's fresh authority checks and sealed host journals
+    # finish before the second authentication starts. This listener lifetime
+    # is not the fixture's declared two-second transport exchange deadline.
+    listener.settimeout(180)
     observed = []
 
     def serve():
@@ -631,15 +646,20 @@ def test_changing_resolved_host_credential_does_not_change_scientific_identity(
                 value=value,
                 run_nonce="e" * 32,
                 clock=lambda: (500, 500),
+                lifecycle_policy=lifecycle_policy,
             )
             for directory, value in zip(
                 (first_root, second_root), values, strict=True
             )
         )
     finally:
-        worker.join(60)
+        worker.join(181)
         listener.close()
     assert observed == [True, True]
+    assert first.native.manifest.completion is Completion.COMPLETE
+    assert second.native.manifest.completion is Completion.COMPLETE
+    assert first.native.manifest.duplicate_deliveries == 0
+    assert second.native.manifest.duplicate_deliveries == 0
     assert first.native.manifest.to_json() == second.native.manifest.to_json()
     assert first.security.to_json() == second.security.to_json()
     retained = b"".join(

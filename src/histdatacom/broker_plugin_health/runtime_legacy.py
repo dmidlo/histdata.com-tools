@@ -13,6 +13,15 @@ import os
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from histdatacom.broker_plugin_provenance.contracts import (
+        BrokerProvenanceSealV1,
+    )
+    from histdatacom.broker_plugin_provenance.runtime import (
+        NativeProvenanceRecorder,
+    )
 
 from histdatacom.broker_capture.adapters import (
     BrokerCaptureAdapterV1,
@@ -88,7 +97,11 @@ class LegacyCaptureHealthObserver:
     through a writer alone cannot manufacture an ingress association.
     """
 
-    def __init__(self, recorder: HostHealthRecorder) -> None:
+    def __init__(
+        self,
+        recorder: HostHealthRecorder,
+        provenance: NativeProvenanceRecorder | None = None,
+    ) -> None:
         if type(recorder) is not HostHealthRecorder:
             raise ValueError("exact host health recorder required")
         if (
@@ -101,6 +114,7 @@ class LegacyCaptureHealthObserver:
                 "synchronous legacy transport queue capacity is one"
             )
         self.recorder = recorder
+        self.provenance = provenance
         self.epoch = 0
         self._native_epoch = 0
         self._ingress: dict[int, tuple[str | None, int]] = {}
@@ -145,6 +159,8 @@ class LegacyCaptureHealthObserver:
             assert isinstance(message, BrokerAdapterMessageV1)
             # Revalidate the closed native contract before extracting identity.
             message = BrokerAdapterMessageV1.from_json(message.to_json())
+            if self.provenance is not None:
+                self.provenance.authorize_ingress(message)
             event_id = message.message_id
             if message.kind in (
                 BrokerCaptureEventKind.RECONNECT,
@@ -160,6 +176,8 @@ class LegacyCaptureHealthObserver:
             raise ValueError(
                 "legacy adapter yielded malformed or host-only message"
             )
+        if self.provenance is not None:
+            self.provenance.ingress(message, self.epoch, ingress)
         return ingress
 
     def bind(self, event: BrokerCaptureEventV1, ingress: int | None) -> None:
@@ -212,6 +230,8 @@ class LegacyCaptureHealthObserver:
     def persisted(self, event: BrokerCaptureEventV1) -> None:
         self.require_bound(event)
         _, ingress, epoch = self._bound[event.event_id]
+        if self.provenance is not None:
+            self.provenance.native(event, epoch=epoch)
         self.recorder.persisted(
             event.event_id,
             None if ingress is None else event.message.message_id,
@@ -243,6 +263,8 @@ class BrokerLegacyHostHealthCaptureResultV1:
     manifest: BrokerCaptureSessionManifestV1
     audit: BrokerHostHealthAuditV1
     health_directory: Path
+    provenance: BrokerProvenanceSealV1
+    provenance_directory: Path
 
 
 def _request_json(request: BrokerLegacyCaptureV1) -> str:
@@ -335,9 +357,35 @@ def capture_legacy_with_host_health(
         },
         authorize_artifact=authorize,
     )
+    from histdatacom.broker_plugin_provenance.runtime import (
+        NativeProvenanceRecorder,
+    )
+
+    try:
+        provenance = NativeProvenanceRecorder(
+            root / (session.session_id + "-provenance"),
+            provider_request,
+            session,
+            header,
+            decision,
+        )
+    except BaseException:
+        journal.close()
+        raise
     host_clock = clock or SystemBrokerCaptureClockV1()
-    recorder = HostHealthRecorder(header, host_clock.sample, journal.append)
-    observer = LegacyCaptureHealthObserver(recorder)
+
+    def persist_observation(observation: object) -> None:
+        from .contracts import BrokerHostHealthObservationV1
+
+        if type(observation) is not BrokerHostHealthObservationV1:
+            raise ValueError("exact host observation required")
+        journal.append(observation)
+        provenance.observation(observation)
+
+    recorder = HostHealthRecorder(
+        header, host_clock.sample, persist_observation
+    )
+    observer = LegacyCaptureHealthObserver(recorder, provenance)
     writer: AppendOnlyBrokerCaptureWriterV1 | None = None
     try:
         source = LiveBrokerCaptureSourceV1(
@@ -373,7 +421,15 @@ def capture_legacy_with_host_health(
             provider_request=provider_request,
         )
         journal.finish(audit)
-        return BrokerLegacyHostHealthCaptureResultV1(manifest, audit, directory)
+        provenance.set_stop(recorder.observations[-1])
+        seal = provenance.finish(manifest, audit, epoch=observer.epoch)
+        return BrokerLegacyHostHealthCaptureResultV1(
+            manifest,
+            audit,
+            directory,
+            seal,
+            provenance.directory,
+        )
     finally:
         # No health audit is fabricated on an interrupted path. Native cleanup
         # retains its existing FAILED/OPEN semantics, including partial bytes.
@@ -385,6 +441,7 @@ def capture_legacy_with_host_health(
                 )
         finally:
             journal.close()
+            provenance.close()
 
 
 def read_legacy_host_health(

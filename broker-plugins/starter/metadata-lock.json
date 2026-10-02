@@ -1,0 +1,13 @@
+{
+  "README.md": "35f21f104728f9d11df5964ae6a44472c0a9f51cb05cea5f942ce5211fa5613a",
+  "conformance/driver.json": "5ac911650823fa9141cb8c613228d961701f4ac5a2146e862d6874bdfccacd9c",
+  "docs/CONFORMANCE_ABI.md": "30475f610e1282f2fa1e2024a2b18b1340393d4bc9ce5417191becc9482c5e6f",
+  "pyproject.toml": "c4b71d2a13f15b6625d850a39a8219667b09ca204ab6d2c8d4953b8e60dc9a77",
+  "setup.py": "508d96abcbe5d8033394cbc372b2040a5a937a4e57e54cc51eebf26c26dc0993",
+  "src/histdatacom_broker_starter/__init__.py": "c25b992bede52abf34e373f57d69019689a2320fb19097c34a8cbf805abd76b1",
+  "src/histdatacom_broker_starter/_histdatacom_broker_permissions/org.example.starter.json": "523afa9038538521071c541ae8e26fa6a00f250bb339157c0c962903e9d89271",
+  "src/histdatacom_broker_starter/_histdatacom_broker_plugins/org.example.starter.json": "6215b9cf211838a20259c2347145c090ffa90ae689047921e8ca6003bf8d1d85",
+  "src/histdatacom_broker_starter/plugin.py": "bdc5e8417fa60adbc245d07d50a5ab70397c763f324cb0fa2ecc55b6c0b1bd4e",
+  "tools/check_host.py": "b5eaacbe529b09694b77991391acf26434f83093a9d3e48a43e6120efea20ebe",
+  "tools/generate_metadata.py": "c648b0370ed2ee3c4f6d3e81eb3af771fbe672725645b31d51d1851b0a4f6780"
+}

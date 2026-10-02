@@ -184,6 +184,26 @@ def test_permission_and_host_health_families_have_native_reader_inventory():
     assert not registry.migrations
 
 
+def test_capture_provenance_and_conformance_are_versioned_native_families():
+    from histdatacom.broker_plugin_conformance import broker_conformance_catalog
+    from histdatacom.broker_plugin_provenance import BrokerProvenancePolicyV1
+
+    policy = BrokerProvenancePolicyV1()
+    catalog = broker_conformance_catalog()
+    assert type(policy).from_json(policy.to_json()) == policy
+    assert type(catalog).from_json(catalog.to_json()) == catalog
+    assert can_read(policy.schema_version())
+    assert can_read("histdatacom.broker-conformance.catalog.v1")
+    families = {item.family for item in schema_compatibility_registry().schemas}
+    assert {
+        "histdatacom.broker_plugin_provenance.contracts.BrokerProvenanceHeaderV1",
+        "histdatacom.broker_plugin_provenance.contracts.BrokerProvenanceSealV1",
+        "histdatacom.broker_plugin_conformance.contracts.BrokerConformanceReportV1",
+        "histdatacom.broker_capture.fingerprint_v2.BrokerDeliveryFingerprintV2",
+    } <= families
+    assert not schema_compatibility_registry().migrations
+
+
 def test_new_training_and_old_synthetic_physical_formats_are_registered() -> (
     None
 ):

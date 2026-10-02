@@ -191,12 +191,15 @@ CLASS_READERS = {
     ),
 }
 SERIALIZER_EXEMPTIONS = {
+    "histdatacom.broker_plugin_provenance._wire.Record": "Abstract frozen-dataclass serializer template; no standalone fields or payload. Concrete capture provenance contracts retain their own versioned reader/writer inventory.",
     "histdatacom.broker_plugin_permissions._wire.Record": "Abstract frozen-dataclass serializer template; it has no standalone fields or payload. Concrete embedded permission records and versioned artifact subclasses are inventoried separately.",
     "histdatacom.broker_plugin_policy._wire.Record": "Abstract frozen-dataclass serializer template; it has no standalone fields or payload. Concrete embedded provider-policy records and versioned artifact subclasses are inventoried separately.",
     "histdatacom.attribution._wire.Record": "Abstract frozen-dataclass serializer template; it has no standalone fields or payload. Concrete embedded attribution records and versioned artifact subclasses are inventoried separately.",
     "histdatacom.experiments._wire.Record": "Abstract frozen-dataclass serializer template; it has no standalone fields or payload. Concrete embedded records and versioned artifact subclasses are inventoried separately.",
 }
 FUNCTION_EXEMPTIONS = {
+    "histdatacom.broker_plugin_provenance._wire.Artifact.artifact_id": "Derived digest property for the abstract provenance envelope, not an independent serialized family. Concrete provenance artifacts retain their own reader/writer inventory.",
+    "histdatacom.broker_plugin_conformance._wire.Artifact.artifact_id": "Derived digest property for the abstract conformance envelope, not an independent serialized family. Concrete conformance contracts retain their own reader/writer inventory.",
     "histdatacom.broker_plugin_permissions._wire.Artifact.artifact_id": "Derived digest property for the abstract permission envelope, not an independent serialized family. Concrete permission artifacts retain their own envelope reader/writer inventory.",
     "histdatacom.broker_plugin_health._wire.Artifact.artifact_id": "Derived digest property for the abstract host-health envelope, not an independent serialized family. Concrete host-health artifacts retain their own envelope reader/writer inventory.",
     "histdatacom.broker_plugin_policy._wire.Artifact.artifact_id": "Derived digest property for the abstract provider-policy envelope, not an independent serialized family. Every concrete provider-policy artifact's actual envelope reader/writer is inventoried separately.",

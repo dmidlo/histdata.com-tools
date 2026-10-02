@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "histdatacom-reference-broker"
+version = "0.1.0"
+description = "Credential-free deterministic broker plugin using the public histdatacom SDK"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
+dependencies = ["histdatacom"]
+
+[project.optional-dependencies]
+test = ["pytest>=8,<10"]
+
+[project.entry-points."histdatacom.broker_plugins.v1"]
+"org.histdatacom.reference-broker" = "histdatacom_reference_broker.plugin:factory"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+namespaces = false
+
+[tool.setuptools.package-data]
+histdatacom_reference_broker = ["py.typed", "_histdatacom_broker_plugins/*.json", "_histdatacom_broker_permissions/*.json"]
+
+[tool.black]
+line-length = 88
+target-version = ["py310"]
+
+[tool.ruff]
+target-version = "py310"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--import-mode=importlib"

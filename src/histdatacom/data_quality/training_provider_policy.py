@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from contextlib import AbstractContextManager, nullcontext
+from pathlib import Path
 from typing import TYPE_CHECKING
 
-from histdatacom.broker_capture.fingerprint_contracts import (
-    BrokerDeliveryFingerprintV1,
+from histdatacom.broker_capture.fingerprint_v2 import (
+    BrokerDeliveryFingerprint,
+    BrokerDeliveryFingerprintV2,
+    parse_broker_delivery_fingerprint,
 )
 from histdatacom.broker_plugin_policy import (
     BrokerPolicyOperation,
@@ -77,7 +79,7 @@ def training_provider_subject(
     """
     source, _, joins = _training_parts(batch)
     products: list[TrainingProduct] = []
-    fingerprints: dict[str, BrokerDeliveryFingerprintV1] = {}
+    fingerprints: dict[str, BrokerDeliveryFingerprint] = {}
     for name in source.product_manifest_paths:
         payload = training_load(read_training_regular(Path(name)).decode())
         version = payload.get("schema_version")
@@ -102,9 +104,7 @@ def training_provider_subject(
             raise ValueError(
                 "training broker join needs one native fingerprint"
             )
-        fingerprint = BrokerDeliveryFingerprintV1.from_json(
-            join.evidence_json[0]
-        )
+        fingerprint = parse_broker_delivery_fingerprint(join.evidence_json[0])
         if training_json(fingerprint.to_dict()) != join.evidence_json[0]:
             raise ValueError("training broker fingerprint is not canonical")
         previous = fingerprints.get(fingerprint.fingerprint_id)
@@ -139,6 +139,10 @@ def verify_training_policy_receipt(
 ) -> None:
     if subject is None:
         return
+    required = required or any(
+        type(item) is BrokerDeliveryFingerprintV2
+        for item in subject.fingerprints
+    )
     # Preserve the native writer's path spelling while policy storage binds a
     # canonical parent. Never resolve the native or receipt leaf through a link.
     target = target.parent.resolve(strict=True) / target.name

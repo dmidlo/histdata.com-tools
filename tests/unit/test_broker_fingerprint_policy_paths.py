@@ -5,6 +5,9 @@ from pathlib import Path
 
 import pytest
 
+from histdatacom.broker_capture.fingerprint_sources import (
+    broker_fingerprint_sources,
+)
 from histdatacom.broker_capture.fingerprints import (
     BrokerDeliveryFingerprintArtifactError,
     load_broker_delivery_fingerprint,
@@ -21,7 +24,7 @@ from histdatacom.broker_plugin_policy import (
     scope,
     verify_broker_policy_receipt,
 )
-from tests.fixtures.broker_derived_policy import generated_fingerprint
+from tests.fixtures.broker_derived_policy import generated_qualified_fingerprint
 from tests.fixtures.broker_provider_policy import (
     MutablePolicySource,
     generated_provider_scope,
@@ -56,7 +59,7 @@ def _files(root):
 def test_fingerprint_host_paths_preserve_native_and_admission_on_retry(
     tmp_path, monkeypatch, style
 ):
-    fingerprint = generated_fingerprint()
+    fingerprint = generated_qualified_fingerprint(tmp_path / "capture")
     actual = tmp_path / "real"
     actual.mkdir()
     if style == "parent_alias":
@@ -70,7 +73,9 @@ def test_fingerprint_host_paths_preserve_native_and_admission_on_retry(
         target = actual / "fingerprint.json"
     clock = [100]
     monkeypatch.setattr(scope, "_now_ns", lambda: clock[0])
-    with generated_provider_scope(fingerprint):
+    with generated_provider_scope(
+        fingerprint, capture_roots=(tmp_path / "capture",)
+    ):
         first = write_broker_delivery_fingerprint(target, fingerprint)
         before = _files(actual)
         clock[0] = 200
@@ -88,9 +93,11 @@ def test_fingerprint_host_paths_preserve_native_and_admission_on_retry(
 
 @pytest.mark.parametrize("missing", ("native", "receipt"))
 def test_fingerprint_orphan_is_never_repaired(tmp_path, missing):
-    fingerprint = generated_fingerprint()
+    fingerprint = generated_qualified_fingerprint(tmp_path / "capture")
     target = tmp_path / "fingerprint.json"
-    with generated_provider_scope(fingerprint):
+    with generated_provider_scope(
+        fingerprint, capture_roots=(tmp_path / "capture",)
+    ):
         write_broker_delivery_fingerprint(target, fingerprint)
         (target if missing == "native" else _sidecar(target)).unlink()
         before = _files(tmp_path)
@@ -104,9 +111,11 @@ def test_fingerprint_orphan_is_never_repaired(tmp_path, missing):
 
 @pytest.mark.parametrize("tampered", ("native", "receipt"))
 def test_fingerprint_invalid_pair_is_not_rewritten(tmp_path, tampered):
-    fingerprint = generated_fingerprint()
+    fingerprint = generated_qualified_fingerprint(tmp_path / "capture")
     target = tmp_path / "fingerprint.json"
-    with generated_provider_scope(fingerprint):
+    with generated_provider_scope(
+        fingerprint, capture_roots=(tmp_path / "capture",)
+    ):
         write_broker_delivery_fingerprint(target, fingerprint)
         leaf = target if tampered == "native" else _sidecar(target)
         leaf.write_bytes(b"{}\n")
@@ -120,9 +129,11 @@ def test_fingerprint_invalid_pair_is_not_rewritten(tmp_path, tampered):
 def test_fingerprint_parent_normalization_never_follows_leaf_alias(
     tmp_path, aliased
 ):
-    fingerprint = generated_fingerprint()
+    fingerprint = generated_qualified_fingerprint(tmp_path / "capture")
     target = tmp_path / "fingerprint.json"
-    with generated_provider_scope(fingerprint):
+    with generated_provider_scope(
+        fingerprint, capture_roots=(tmp_path / "capture",)
+    ):
         write_broker_delivery_fingerprint(target, fingerprint)
         leaf = target if aliased == "native" else _sidecar(target)
         preserved = leaf.with_name("retained-" + leaf.name)
@@ -137,8 +148,12 @@ def test_fingerprint_parent_normalization_never_follows_leaf_alias(
 
 def test_fingerprint_missing_scope_refuses_before_directory_creation(tmp_path):
     target = tmp_path / "must-not-exist" / "fingerprint.json"
-    with pytest.raises(BrokerPolicyError):
-        write_broker_delivery_fingerprint(target, generated_fingerprint())
+    fingerprint = generated_qualified_fingerprint(tmp_path / "capture")
+    with (
+        broker_fingerprint_sources(tmp_path / "capture"),
+        pytest.raises(BrokerPolicyError),
+    ):
+        write_broker_delivery_fingerprint(target, fingerprint)
     assert not target.parent.exists()
 
 
@@ -148,9 +163,11 @@ def test_fingerprint_missing_scope_refuses_before_directory_creation(tmp_path):
 def test_fingerprint_existing_pair_still_needs_current_retention(
     tmp_path, status
 ):
-    fingerprint = generated_fingerprint()
+    fingerprint = generated_qualified_fingerprint(tmp_path / "capture")
     target = tmp_path / "fingerprint.json"
-    with generated_provider_scope(fingerprint):
+    with generated_provider_scope(
+        fingerprint, capture_roots=(tmp_path / "capture",)
+    ):
         write_broker_delivery_fingerprint(target, fingerprint)
     before = _files(tmp_path)
     (binding,) = resolve_provider_subject(fingerprint).bindings
@@ -166,6 +183,10 @@ def test_fingerprint_existing_pair_still_needs_current_retention(
             ),
         )
     )
-    with provider_policy_scope(source), pytest.raises(BrokerPolicyError):
+    with (
+        provider_policy_scope(source),
+        broker_fingerprint_sources(tmp_path / "capture"),
+        pytest.raises(BrokerPolicyError),
+    ):
         write_broker_delivery_fingerprint(target, fingerprint)
     assert _files(tmp_path) == before

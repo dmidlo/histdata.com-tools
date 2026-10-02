@@ -6,12 +6,12 @@ against explicit source captures; reading its JSON alone does not qualify data.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-from dataclasses import dataclass
 import hashlib
 import os
-from pathlib import Path
 import re
+from collections.abc import Sequence
+from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
 
 from ._wire import Artifact
@@ -22,8 +22,8 @@ if TYPE_CHECKING:
     from histdatacom.broker_capture.contracts import (
         BrokerCaptureSessionManifestV1,
     )
-    from histdatacom.broker_capture.fingerprint_contracts import (
-        BrokerDeliveryFingerprintV1,
+    from histdatacom.broker_capture.fingerprint_v2 import (
+        BrokerDeliveryFingerprint,
     )
     from histdatacom.broker_plugin_policy.bindings import BrokerLegacyCaptureV1
     from histdatacom.broker_plugin_policy.health_bindings import (
@@ -79,31 +79,32 @@ class BrokerHostHealthQualificationV1(Artifact):
 
 def _current_qualification(
     root: str | Path,
-    fingerprint: BrokerDeliveryFingerprintV1,
+    fingerprint: BrokerDeliveryFingerprint,
     manifests: Sequence[BrokerCaptureSessionManifestV1],
     requests: Sequence[BrokerLegacyCaptureV1],
 ) -> tuple[
     BrokerHostHealthQualificationV1, tuple[BrokerHostHealthEvidenceV1, ...]
 ]:
-    from histdatacom.broker_capture.fingerprint_contracts import (
-        BrokerDeliveryFingerprintV1,
-    )
     from histdatacom.broker_capture.contracts import (
         BrokerCaptureSessionManifestV1,
     )
+    from histdatacom.broker_capture.fingerprint_v2 import (
+        require_qualified_broker_fingerprint,
+    )
     from histdatacom.broker_plugin_policy.bindings import BrokerLegacyCaptureV1
-    from histdatacom.broker_plugin_policy.contracts import BrokerPolicyOperation
-    from histdatacom.broker_plugin_policy.scope import (
-        require_provider_operation,
+    from histdatacom.broker_plugin_policy.contracts import (
+        BrokerPolicyOperation,
     )
     from histdatacom.broker_plugin_policy.health_bindings import (
         BrokerHostHealthEvidenceV1,
     )
+    from histdatacom.broker_plugin_policy.scope import (
+        require_provider_operation,
+    )
+
     from .runtime_legacy import require_legacy_capture_health
 
-    if type(fingerprint) is not BrokerDeliveryFingerprintV1:
-        raise ValueError("exact native health-qualified fingerprint required")
-    fingerprint = BrokerDeliveryFingerprintV1.from_json(fingerprint.to_json())
+    fingerprint = require_qualified_broker_fingerprint(fingerprint)
     require_provider_operation(fingerprint, BrokerPolicyOperation.MATERIAL_USE)
     if len(manifests) != len(requests) or len(manifests) != len(
         fingerprint.capture_evidence
@@ -168,11 +169,13 @@ def _current_qualification(
 
 
 def _fresh_material_use(
-    fingerprint: BrokerDeliveryFingerprintV1,
+    fingerprint: BrokerDeliveryFingerprint,
     requests: Sequence[BrokerLegacyCaptureV1],
     evidence: Sequence[BrokerHostHealthEvidenceV1],
 ) -> None:
-    from histdatacom.broker_plugin_policy.contracts import BrokerPolicyOperation
+    from histdatacom.broker_plugin_policy.contracts import (
+        BrokerPolicyOperation,
+    )
     from histdatacom.broker_plugin_policy.scope import (
         require_provider_operation,
     )
@@ -201,11 +204,13 @@ def _path(
 
 def write_broker_health_qualification(
     root: str | Path,
-    fingerprint: BrokerDeliveryFingerprintV1,
+    fingerprint: BrokerDeliveryFingerprint,
     manifests: Sequence[BrokerCaptureSessionManifestV1],
     provider_requests: Sequence[BrokerLegacyCaptureV1],
 ) -> BrokerHostHealthQualificationV1:
-    from histdatacom.broker_plugin_policy.contracts import BrokerPolicyOperation
+    from histdatacom.broker_plugin_policy.contracts import (
+        BrokerPolicyOperation,
+    )
     from histdatacom.broker_plugin_policy.scope import (
         require_provider_operation,
     )
@@ -243,7 +248,7 @@ def write_broker_health_qualification(
 
 def read_current_broker_health_qualification(
     root: str | Path,
-    fingerprint: BrokerDeliveryFingerprintV1,
+    fingerprint: BrokerDeliveryFingerprint,
     manifests: Sequence[BrokerCaptureSessionManifestV1],
     provider_requests: Sequence[BrokerLegacyCaptureV1],
 ) -> BrokerHostHealthQualificationV1:

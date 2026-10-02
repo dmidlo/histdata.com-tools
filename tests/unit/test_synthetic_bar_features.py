@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import FrozenInstanceError, replace
+from itertools import count
 import json
 import math
 from pathlib import Path
@@ -345,6 +346,18 @@ def published_source(tmp_path: Path):
             yield source, product, tmp_path
 
 
+@pytest.fixture
+def clocked_published_source(tmp_path: Path):
+    """Keep local positive cases independent of machine wall-clock changes."""
+    from histdatacom.broker_plugin_policy import scope
+    from tests.fixtures.broker_provider_policy import POLICY_NOW
+
+    ticks = count(POLICY_NOW)
+    with pytest.MonkeyPatch.context() as clock_patch:
+        clock_patch.setattr(scope, "_now_ns", ticks.__next__)
+        yield from published_source.__wrapped__(tmp_path)
+
+
 def _published_snapshot(source, *, mode=POST, scope=OBS, delay=0):
     policy = BarFeaturePolicyV1(
         mode,
@@ -375,9 +388,9 @@ def _published_snapshot(source, *, mode=POST, scope=OBS, delay=0):
 
 
 def test_verified_source_and_unavailable_future_do_not_change_snapshot(
-    published_source,
+    clocked_published_source,
 ):
-    source, _, _ = published_source
+    source, _, _ = clocked_published_source
     snapshot = _published_snapshot(source)
     source.verify_snapshot(snapshot, information_mode=POST)
     future = BarAvailabilityDeclarationV1(
@@ -425,8 +438,8 @@ def test_verified_source_and_unavailable_future_do_not_change_snapshot(
         BarFeatureState.UNSUPPORTED,
     ),
 )
-def test_cutoff_qualified_absence_reasons(published_source, reason):
-    source, _, _ = published_source
+def test_cutoff_qualified_absence_reasons(clocked_published_source, reason):
+    source, _, _ = clocked_published_source
     snapshot = _published_snapshot(source)
     declaration = BarAbsenceDeclarationV1(
         "EURUSD",
@@ -556,9 +569,9 @@ def test_independent_closed_boundary_and_contradictory_future_canary(
 
 
 def test_actual_stored_future_bar_and_late_outage_are_invisible(
-    published_source,
+    clocked_published_source,
 ):
-    source, _, _ = published_source
+    source, _, _ = clocked_published_source
     available = _published_snapshot(source)
     cutoff = available.decision_time_ns - 1
     before = source.snapshot(
@@ -592,11 +605,11 @@ def test_actual_stored_future_bar_and_late_outage_are_invisible(
 
 
 def test_budget_refusal_precedes_deep_source_reads(
-    published_source, monkeypatch
+    clocked_published_source, monkeypatch
 ):
     from histdatacom.synthetic import bar_features
 
-    source, _, _ = published_source
+    source, _, _ = clocked_published_source
 
     def forbidden(*args, **kwargs):
         pytest.fail(
@@ -618,9 +631,9 @@ def test_budget_refusal_precedes_deep_source_reads(
 
 
 def test_unavailable_snapshot_still_binds_exact_verified_source_products(
-    published_source,
+    clocked_published_source,
 ):
-    source, product, _ = published_source
+    source, product, _ = clocked_published_source
     available = _published_snapshot(source)
     missing = source.snapshot(
         symbol="EURUSD",

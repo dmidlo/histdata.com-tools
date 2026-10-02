@@ -14,7 +14,10 @@ from histdatacom.datasets import (
     build_observed_dataset_version,
     histdata_cache_path,
 )
-from histdatacom.data_quality.training_contracts import DAY_NS, TrainingSourceV1
+from histdatacom.data_quality.training_contracts import (
+    DAY_NS,
+    TrainingSourceV1,
+)
 from histdatacom.orchestration.reconstruction import artifact_ref_for_file
 from histdatacom.synthetic.contracts import (
     SyntheticEventStreamV1,
@@ -252,12 +255,17 @@ def published_product(
             tmp_path / "capture", seed=606, wall_start_ns=BASE_WALL_NS
         )
         request = generated_legacy_request(capture.session)
-        with generated_provider_scope(request), provider_native_inputs(request):
+        with (
+            generated_provider_scope(request),
+            provider_native_inputs(request),
+        ):
             fingerprint = fit_broker_delivery_fingerprint(
                 tmp_path / "capture", (capture,)
             )
         with (
-            generated_provider_scope(fingerprint),
+            generated_provider_scope(
+                fingerprint, capture_roots=(tmp_path / "capture",)
+            ),
             provider_native_inputs(fingerprint),
         ):
             rendered = render_broker_delivery(
@@ -315,7 +323,12 @@ def published_product_scope(tmp_path, version, **kwargs):
         tmp_path, version, _provider_roots=roots, **kwargs
     )
     if roots:
-        with generated_provider_scope(*roots), provider_native_inputs(*roots):
+        with (
+            generated_provider_scope(
+                *roots, capture_roots=(tmp_path / "capture",)
+            ),
+            provider_native_inputs(*roots),
+        ):
             yield result
     else:
         yield result
@@ -396,7 +409,9 @@ def installed_training_smoke(tmp_path):
         materialize_training_rows,
         training_frame,
     )
-    from histdatacom.forecasting.feature_artifacts import write_feature_artifact
+    from histdatacom.forecasting.feature_artifacts import (
+        write_feature_artifact,
+    )
     from tests.fixtures.forecast_feature_store_v1 import (
         feature_forecast_fixture,
     )
@@ -458,4 +473,7 @@ def installed_training_smoke(tmp_path):
     )
     counts.append(training_frame(restored, consumer_mode=mode).height)
     assert counts == [18, 9, 9, 9, 1, 1]
-    return {"row_counts": counts, "forecast_origin": batch.rows[0].origin.value}
+    return {
+        "row_counts": counts,
+        "forecast_origin": batch.rows[0].origin.value,
+    }

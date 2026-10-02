@@ -2,24 +2,24 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import hashlib
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, TypeAlias, cast
 
 from .bindings import (
-    _ResolvedNative,
     _composite_ref,
     _preflight_native,
     _ref,
     _resolve_native,
+    _ResolvedNative,
     _restore_native,
 )
 from .contracts import BrokerPolicyDataClass as DataClass
 from .contracts import BrokerPolicySubjectV1
 
 if TYPE_CHECKING:
-    from histdatacom.broker_capture.fingerprint_contracts import (
-        BrokerDeliveryFingerprintV1,
+    from histdatacom.broker_capture.fingerprint_v2 import (
+        BrokerDeliveryFingerprint,
     )
     from histdatacom.data_quality.training_contracts import TrainingBatchV1
     from histdatacom.data_quality.training_join_contracts import (
@@ -59,7 +59,7 @@ class BrokerTrainingArtifactV1:
     """
 
     products: tuple[TrainingProduct, ...]
-    fingerprints: tuple[BrokerDeliveryFingerprintV1, ...]
+    fingerprints: tuple[BrokerDeliveryFingerprint, ...]
     artifact: TrainingNative
 
 
@@ -94,6 +94,10 @@ def resolve_training_native(
 ) -> _ResolvedNative:
     from histdatacom.broker_capture.fingerprint_contracts import (
         BrokerDeliveryFingerprintV1,
+    )
+    from histdatacom.broker_capture.fingerprint_v2 import (
+        BrokerDeliveryFingerprintV2,
+        parse_broker_delivery_fingerprint,
     )
     from histdatacom.data_quality.training_contracts import (
         TrainingBatchV1,
@@ -165,7 +169,9 @@ def resolve_training_native(
         if retained_roots[product.manifest_id] != digest:
             raise ValueError("training product bytes differ from ownership")
     fingerprints = tuple(
-        _restore_native(item, {BrokerDeliveryFingerprintV1})
+        _restore_native(
+            item, {BrokerDeliveryFingerprintV1, BrokerDeliveryFingerprintV2}
+        )
         for item in native.fingerprints
     )
     parents = {item.fingerprint_id: item for item in fingerprints}
@@ -186,9 +192,7 @@ def resolve_training_native(
             continue
         if len(join.evidence_json) != 1:
             raise ValueError("training broker join needs its exact fingerprint")
-        fingerprint = BrokerDeliveryFingerprintV1.from_json(
-            join.evidence_json[0]
-        )
+        fingerprint = parse_broker_delivery_fingerprint(join.evidence_json[0])
         if training_json(fingerprint.to_dict()) != join.evidence_json[0]:
             raise ValueError("training join fingerprint is not canonical")
         parent = parents.get(fingerprint.fingerprint_id)

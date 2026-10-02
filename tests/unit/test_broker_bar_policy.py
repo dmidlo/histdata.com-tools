@@ -1,46 +1,59 @@
 """Actual generated broker products, never provider permission or market data."""
 
+from contextlib import closing
 from dataclasses import replace
 
 import pytest
 
 from histdatacom.broker_plugin_policy import (
-    BrokerPolicyError,
-    BrokerPolicyOperation as Operation,
     BrokerPolicyDataClass as DataClass,
-    BrokerPolicyStatus as Status,
-    provider_native_inputs,
-    provider_reconstruction_inputs,
-    product_for,
-    provider_policy_scope,
-    resolve_provider_subject,
-    read_broker_policy_receipt,
-    verify_broker_policy_receipt,
-    scope,
 )
-from histdatacom.broker_plugin_policy import native_inputs
+from histdatacom.broker_plugin_policy import (
+    BrokerPolicyError,
+    native_inputs,
+    product_for,
+    provider_native_inputs,
+    provider_policy_scope,
+    provider_reconstruction_inputs,
+    read_broker_policy_receipt,
+    resolve_provider_subject,
+    scope,
+    verify_broker_policy_receipt,
+)
+from histdatacom.broker_plugin_policy import (
+    BrokerPolicyOperation as Operation,
+)
+from histdatacom.broker_plugin_policy import (
+    BrokerPolicyStatus as Status,
+)
 from histdatacom.synthetic import bars
 from histdatacom.synthetic.bar_features import (
-    BarFeatureSourceV1,
     BarFeaturePolicyV1,
+    BarFeatureSourceV1,
 )
-from histdatacom.synthetic.persistence import commit_reconstruction_publication
-from histdatacom.synthetic.information import InformationMode
 from histdatacom.synthetic.bar_hierarchy import (
     aggregate_qualified_bar_projection,
 )
+from histdatacom.synthetic.information import InformationMode
+from histdatacom.synthetic.persistence import commit_reconstruction_publication
 from tests.fixtures.broker_provider_policy import generated_provider_scope
 from tests.unit.test_broker_provider_policy_products import (
-    product_inputs as _product_inputs,
     _source,
     _stage,
+)
+from tests.unit.test_broker_provider_policy_products import (
+    product_inputs as _product_inputs,
 )
 from tests.unit.test_synthetic_bars import _boundary_stream
 
 
 @pytest.fixture(scope="module")
 def published_source(tmp_path_factory):
-    product_inputs = _product_inputs.__wrapped__()
+    with closing(_product_inputs.__wrapped__(tmp_path_factory)) as inputs:
+        yield _publish_source(tmp_path_factory, next(inputs))
+
+
+def _publish_source(tmp_path_factory, product_inputs):
     fingerprint, *_ = product_inputs
     with (
         provider_native_inputs(fingerprint),
@@ -104,40 +117,47 @@ def test_bar_parent_overlay_is_bounded_detached_and_not_authority(
                 )
 
                 require_provider_operation(restored, Operation.MATERIAL_USE)
-            with pytest.raises(ValueError, match="nested"):
-                with provider_native_inputs(fingerprint):
-                    pass
+            with (
+                pytest.raises(ValueError, match="nested"),
+                provider_native_inputs(fingerprint),
+            ):
+                pass
         with pytest.raises(ValueError, match="absent"):
             product_for(manifest.manifest_id)
         monkeypatch.setattr(native_inputs, "MAX_BYTES", 1)
-        with pytest.raises(ValueError, match="aggregate byte"):
-            with provider_reconstruction_inputs(manifest):
-                pass
+        with (
+            pytest.raises(ValueError, match="aggregate byte"),
+            provider_reconstruction_inputs(manifest),
+        ):
+            pass
 
 
 def test_overlay_rejects_foreign_pid_and_stale_product(
     published_source, monkeypatch
 ):
     fingerprint, product = published_source
-    with pytest.raises(ValueError, match="1..128"):
-        with provider_reconstruction_inputs(*((product.manifest,) * 129)):
-            pass
+    with (
+        pytest.raises(ValueError, match="1..128"),
+        provider_reconstruction_inputs(*((product.manifest,) * 129)),
+    ):
+        pass
     stale = type(product.manifest).from_json(product.manifest.to_json())
     object.__setattr__(
         stale, "manifest_id", "reconstruction-manifest:sha256:" + "f" * 64
     )
-    with pytest.raises(ValueError):
-        with provider_reconstruction_inputs(stale):
-            pass
+    with pytest.raises(ValueError), provider_reconstruction_inputs(stale):
+        pass
     with provider_native_inputs(fingerprint):
         monkeypatch.setattr(native_inputs.os, "getpid", lambda: -1)
-        with pytest.raises(ValueError, match="another process"):
-            with provider_reconstruction_inputs(product.manifest):
-                pass
+        with (
+            pytest.raises(ValueError, match="another process"),
+            provider_reconstruction_inputs(product.manifest),
+        ):
+            pass
 
 
 def test_bar_native_roundtrip_sidecar_and_current_read_admission(
-    tmp_path, published_source
+    tmp_path, published_source, monkeypatch
 ):
     fingerprint, source_product = published_source
     with (
@@ -184,6 +204,30 @@ def test_bar_native_roundtrip_sidecar_and_current_read_admission(
         provider_native_inputs(fingerprint, source_product.manifest),
         generated_provider_scope(fingerprint),
     ):
+        lineage = published.manifest_path.with_name(
+            "manifest.json.broker-provenance.json"
+        )
+        originals = {
+            receipt: receipt.read_bytes(),
+            lineage: lineage.read_bytes(),
+        }
+
+        def forbidden_partition_read(*args, **kwargs):
+            pytest.fail("missing companion reached bar partition reads")
+
+        for missing in ((receipt,), (lineage,), (receipt, lineage)):
+            for companion in missing:
+                companion.unlink()
+            with monkeypatch.context() as isolated:
+                isolated.setattr(
+                    bars,
+                    "_validate_bar_partition_file",
+                    forbidden_partition_read,
+                )
+                with pytest.raises((ValueError, OSError)):
+                    bars.verify_derived_bar_publication(published.manifest_path)
+            for companion, original in originals.items():
+                companion.write_bytes(original)
         receipt.write_bytes(b"{}")
         with pytest.raises(ValueError):
             bars.verify_derived_bar_publication(published.manifest_path)
@@ -265,7 +309,8 @@ def test_bar_feature_derive_refuses_before_source_replay(
         pytest.raises(BrokerPolicyError),
     ):
         source.verified_bars(
-            "EURUSD", BarFeaturePolicyV1(InformationMode.EX_POST_RECONSTRUCTION)
+            "EURUSD",
+            BarFeaturePolicyV1(InformationMode.EX_POST_RECONSTRUCTION),
         )
     assert called == []
 
@@ -369,7 +414,7 @@ def test_nonbroker_native_bars_remain_pure_and_ungated():
     )
 
 
-def test_fingerprint_synthetic_bars_do_not_require_raw_or_provider_quotes(
+def test_fingerprint_synthetic_bars_separate_output_rights_from_source_replay(
     tmp_path, published_source
 ):
     fingerprint, product = published_source
@@ -382,6 +427,10 @@ def test_fingerprint_synthetic_bars_do_not_require_raw_or_provider_quotes(
                 DataClass.RAW_PAYLOAD,
                 DataClass.NORMALIZED_QUOTES,
             )
+            # V2 replays its exact native source under fresh read authority.
+            # That does not classify the derived output as provider quotes.
+            if (op, data_class)
+            != (Operation.MATERIAL_USE, DataClass.NORMALIZED_QUOTES)
         ),
     )
     with provider_native_inputs(fingerprint), provider_policy_scope(source):
@@ -398,6 +447,35 @@ def test_fingerprint_synthetic_bars_do_not_require_raw_or_provider_quotes(
                 bars.verify_derived_bar_publication(published.manifest_path)
                 == published.manifest
             )
+
+
+@pytest.mark.parametrize("status", [Status.UNKNOWN, Status.DENIED])
+def test_fingerprint_synthetic_bars_require_current_source_read_before_scratch(
+    tmp_path, published_source, monkeypatch, status
+):
+    fingerprint, product = published_source
+    source = _source(
+        fingerprint,
+        changes=(
+            (Operation.MATERIAL_USE, DataClass.NORMALIZED_QUOTES, status),
+        ),
+    )
+
+    def forbidden_scratch(*args, **kwargs):
+        pytest.fail("source-read refusal reached derived scratch creation")
+
+    monkeypatch.setattr(bars.tempfile, "mkdtemp", forbidden_scratch)
+    with (
+        provider_native_inputs(fingerprint),
+        provider_policy_scope(source),
+        pytest.raises(BrokerPolicyError, match="operation_not_allowed"),
+    ):
+        bars.publish_derived_bars(
+            tmp_path / "no-output",
+            product.manifest_path,
+            policy=bars.DerivedBarPolicyV1(intervals=("1m",)),
+        )
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_broker_hierarchy_requires_current_derive_rights(

@@ -78,6 +78,21 @@ def replay_broker_lifecycle(directory):
         yield from _native_replay(directory, provider_request=request)
 
 
+def replay_provenance(result):
+    from histdatacom.broker_plugin_provenance import (
+        read_lifecycle_capture_provenance,
+    )
+
+    request = _PROVIDER_REQUESTS[result.directory]
+    with runtime_scope(request):
+        return read_lifecycle_capture_provenance(
+            result.directory,
+            result.manifest,
+            provider_request=request,
+            expected_root=result.provenance,
+        )
+
+
 ROOT = Path(__file__).resolve().parents[2]
 BUILD = runpy.run_path(str(ROOT / "tests/fixtures/broker_lifecycle_wheel.py"))[
     "build_lifecycle_wheel"
@@ -142,7 +157,10 @@ def run(request_data, tmp_path, mode="finite", **kwargs):
         "policy",
         BrokerLifecyclePolicyV1(
             startup_timeout_ms=15000,
-            run_timeout_ms=30000,
+            # Ordinary success/refusal fixtures need time for fresh authority
+            # and fsynced provenance on the supported Python floor. Tests of
+            # deadline behavior supply their own explicit shorter policies.
+            run_timeout_ms=120000,
             shutdown_timeout_ms=100,
             acknowledgement_timeout_ms=5000,
         ),
@@ -220,6 +238,15 @@ def test_finite_installed_process_run_is_durable_and_replayable(
     assert audited.native_record_count == len(records)
     assert all(bucket.upstream_loss_unknown for bucket in audited.buckets)
     verify_permission_execution(result.permissions, request, result.manifest)
+    provenance = replay_provenance(result)
+    assert provenance.complete and provenance.anchored
+    assert provenance.seal == result.provenance
+    assert provenance.header.permission_grant_id == (
+        result.permissions.decision.grant_id
+    )
+    assert provenance.seal.terminal.permission_execution_id == (
+        result.permissions.artifact_id
+    )
     assert [record.capture_sequence for record in records] == list(
         range(len(records))
     )
@@ -339,7 +366,10 @@ def test_reconnect_epochs_retain_identical_quotes_and_never_claim_continuity(
         policy=BrokerLifecyclePolicyV1(
             retry_delays_ms=(0, 1),
             startup_timeout_ms=15000,
-            run_timeout_ms=60000,
+            # This fixture must reach all three epochs, including their actual
+            # fresh authorization, health/provenance writes and fsync. The
+            # dedicated deadline cases and production defaults are unchanged.
+            run_timeout_ms=180000,
             acknowledgement_timeout_ms=5000,
             shutdown_timeout_ms=50,
         ),
@@ -357,6 +387,11 @@ def test_reconnect_epochs_retain_identical_quotes_and_never_claim_continuity(
     ]
     assert [record.epoch for record in quotes] == [0, 0, 1, 1, 2, 2]
     assert result.manifest.unknown_loss
+    provenance = replay_provenance(result)
+    assert not provenance.complete
+    assert provenance.seal == result.provenance
+    assert provenance.seal.last_epoch == 2
+    assert not provenance.seal.terminal.native_complete
 
 
 def test_cancellation_cannot_claim_complete(request_data, tmp_path):
@@ -497,6 +532,7 @@ def test_startup_stop_does_not_hide_invalid_late_evidence(
         target="event" if malformed == "event_binding" else "identity",
     )
     decoder = supervisor.FrameDecoder
+    rejected_ids = []
 
     class MalformedDecoder(decoder):
         def feed(self, data):
@@ -513,13 +549,12 @@ def test_startup_stop_does_not_hide_invalid_late_evidence(
                     and malformed == "event_binding"
                 ):
                     admitted = BrokerAdmittedEventV1.from_json(frame["payload"])
-                    frame = {
-                        **frame,
-                        "payload": replace(
-                            admitted,
-                            plan_id="broker-capability-plan:sha256:" + "a" * 64,
-                        ).to_json(),
-                    }
+                    forged = replace(
+                        admitted,
+                        plan_id="broker-capability-plan:sha256:" + "a" * 64,
+                    )
+                    rejected_ids.append(forged.artifact_id)
+                    frame = {**frame, "payload": forged.to_json()}
                 yield frame, size
 
     monkeypatch.setattr(supervisor, "FrameDecoder", MalformedDecoder)
@@ -538,6 +573,16 @@ def test_startup_stop_does_not_hide_invalid_late_evidence(
     assert result.manifest.completion is Completion.PARTIAL
     assert result.manifest.appended_events == 0
     assert result.manifest.worker_reaped
+    if malformed == "event_binding":
+        assert result.reason is Reason.MALFORMED_EVENT
+        assert rejected_ids
+        for directory in (result.health_directory, result.provenance_directory):
+            for path in directory.iterdir():
+                if path.is_file():
+                    assert all(
+                        rejected.encode() not in path.read_bytes()
+                        for rejected in rejected_ids
+                    )
 
 
 def test_exited_worker_with_inherited_pipes_cannot_claim_complete(
@@ -844,6 +889,8 @@ def test_lost_ack_retries_only_exact_delivery_without_duplicate_persistence(
     assert result.manifest.completion is Completion.COMPLETE
     assert result.manifest.duplicate_deliveries == 1
     assert result.manifest.appended_events == 2
+    provenance = replay_provenance(result)
+    assert provenance.complete and provenance.anchored
     assert (
         len(
             [
@@ -988,6 +1035,7 @@ def test_exact_event_budget_never_probes_an_extra_event_or_claims_eof(
         policy=BrokerLifecyclePolicyV1(
             max_events=2,
             startup_timeout_ms=15000,
+            run_timeout_ms=120000,
             acknowledgement_timeout_ms=5000,
         ),
     )
@@ -1003,6 +1051,7 @@ def test_partition_rotation_and_replay(request_data, tmp_path):
         policy=BrokerLifecyclePolicyV1(
             partition_events=1,
             startup_timeout_ms=15000,
+            run_timeout_ms=120000,
             acknowledgement_timeout_ms=5000,
         ),
     )

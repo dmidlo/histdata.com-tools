@@ -1,7 +1,8 @@
 """Real committed products drive all four opt-in consumer operations."""
 
+from contextlib import closing, contextmanager
 from dataclasses import replace
-from contextlib import contextmanager, closing
+from itertools import count
 
 import polars as pl
 import pytest
@@ -42,18 +43,21 @@ from histdatacom.synthetic.strategy_sensitivity import (
     StrategyQuoteV1,
     StrategySourceKind,
 )
+from tests.fixtures.broker_provider_policy import (
+    POLICY_NOW,
+    generated_legacy_request,
+    generated_provider_scope,
+)
 from tests.unit.test_synthetic_bar_features import (
     ANTE,
     OBS,
     POST,
     _published_snapshot,
+)
+from tests.unit.test_synthetic_bar_features import (
     published_source as _published_source_fixture,
 )
 from tests.unit.test_synthetic_motifs import _index
-from tests.fixtures.broker_provider_policy import (
-    generated_legacy_request,
-    generated_provider_scope,
-)
 from tests.unit.test_synthetic_strategy_sensitivity import (
     _audit,
     _engine,
@@ -84,12 +88,25 @@ def _prepared_scopes(*sources):
     subjects = tuple(
         subject for item in sources for subject in (item[3], *item[4])
     )
-    with provider_native_inputs(*roots), generated_provider_scope(*subjects):
+    capture_roots = tuple(item[2] / "broker-capture" for item in sources)
+    with (
+        provider_native_inputs(*roots),
+        generated_provider_scope(*subjects, capture_roots=capture_roots),
+    ):
         yield
 
 
 @pytest.fixture
-def published_source(tmp_path):
+def _generated_policy_clock(monkeypatch):
+    """Advance declared synthetic policy time without host wall-clock drift."""
+    from histdatacom.broker_plugin_policy import scope
+
+    ticks = count(POLICY_NOW)
+    monkeypatch.setattr(scope, "_now_ns", lambda: next(ticks))
+
+
+@pytest.fixture
+def published_source(tmp_path, _generated_policy_clock):
     prepared = _prepared_source(tmp_path)
     with _prepared_scopes(prepared):
         yield prepared[:3]
@@ -405,7 +422,7 @@ def test_broker_fit_invokes_capture_fit_preserves_events_and_deduplicates_state(
 
 
 def test_broker_comparison_runs_existing_delivery_and_separate_state_comparison(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, _generated_policy_clock
 ):
     from tests.unit import test_synthetic_persistence as fixture_module
 
