@@ -1,5 +1,80 @@
 # Reconstruction Certification Contracts
 
+## Matrix-bound successor and current evidence
+
+The [current capability matrix](capability-matrix.md) distinguishes implemented
+software from retained execution and independent verification. It does **not**
+establish a complete 2002-to-cutoff campaign or certified dataset. The missing
+certification-grade index, deep-verification root and era audit (#522–#524)
+remain blockers; this governance implementation does not execute those programs.
+
+`CapabilityCertificationSpecV1` freezes the complete matrix, its exact policy
+and concrete evidence declarations. `CapabilityCertificationDossierV1` embeds
+that specification and the freshly derived independent verification receipt.
+The policy and matrix identities include the versioned catalog's semantic
+membership, dependencies and release-critical requirements. Full v2.5 claims
+cannot omit those requirements or substitute software-scoped evidence for
+complete evidence. Explicitly exercised waivers always produce a limited
+outcome, never the full-campaign label.
+
+The separately versioned public route is:
+
+```sh
+histdatacom reconstruction --json certify-capabilities \
+  --spec capability-certification-spec.json \
+  --evidence-root /absolute/canonical/evidence-root \
+  --output-directory retained-capability-dossier
+```
+
+The equivalent Python method is
+`ReconstructionClient.certify_capabilities(spec_path, evidence_root=...,
+output_directory=...)`. Both run the same fresh native checks, write the exact
+specification and dossier JSON plus readable Markdown, preserve conflicting
+existing outputs, and report `blocked` with refusal exit code 3 or a verified
+exact claim with exit code 0. `verified_limited_claim` does not certify the
+complete campaign or authorize publishing a package. These routes do not
+publish packages, access protected holdouts or execute an entire campaign.
+
+Evidence preparation uses `verify_capability_execution()` from
+`histdatacom.synthetic.capability_verification`. It derives a release identity
+from the current verifier implementation, immutable dataset-version identity,
+closed profile versions and exact declared input graph. Its per-row execution
+and independent-verification IDs can populate a truthful matrix. The final
+certification call repeats verification; it never accepts the preparation
+receipt, a caller callback, a `verified=True` flag, or recorded `executed_passed`
+as authority. Relative evidence paths are rooted explicitly, byte-bounded and
+hash-checked, including declared nested inputs and post-verification drift.
+
+Each row's `implementation_commit` is declared Git attribution, not a Git
+attestation produced by the native verifier. The current snapshot's source
+anchors were separately inspected in Git. Fresh verification binds actual
+package source bytes through `implementation_id`; it does not establish that
+an arbitrary caller-supplied commit label contains those bytes.
+
+Initial closed profiles cover actual reference-kernel recomputation and current
+model-registry comparison at **software** scope, and native source-experiment
+replay at **bounded** scope. Powered-eligibility, selection and publication
+profiles are not admitted by this initial consumer: their real producer
+qualification must precede adding successful verification paths. Existing
+mocked planning controls or eligibility scalars are not substitute fixtures.
+The admitted profiles do not supply complete-campaign, untouched-holdout,
+external process-history or era-audit evidence. Missing profiles or evidence
+block the relevant claim.
+Thus the current implementation cannot honestly produce a full-campaign pass.
+
+Reading a retained dossier only checks its structure and content identity.
+Use `verify_capability_certification_dossier(dossier, evidence_root=...)` before
+relying on it: this repeats native checks and requires the same complete outcome.
+The matrix JSON is not a substitute for those retained execution inputs.
+
+## Historical scalar-aggregation contracts
+
+The V2 contracts and `certify` command below retain their original wire IDs,
+readers and behavior for historical replay. Their scalar aggregation is not the
+matrix-bound successor: a self-consistent report can carry caller-supplied
+measurements. A V2 `certified` label alone therefore does not satisfy current
+capability evidence or authorize a new complete-campaign release.
+
 Certification is the fail-closed evidence boundary for the
 EURUSD/GBPUSD/EURGBP reconstruction product. It aggregates compact reports; it
 does not retain tick rows, analytical frames, model objects, candidate batches,
@@ -170,8 +245,11 @@ no investment recommendation is made.
 6. Run the full plain suite and repository hooks without coverage.
 7. Publish to TestPyPI from `dev` and pass the local simple-registry preflight.
 8. Execute the campaign and publish a `ready-for-promotion` dossier.
-9. During explicit `dev`-to-`main` promotion, run coverage exactly once,
-   publish the final `certified` dossier, and publish the same artifact to PyPI.
+9. During explicit `dev`-to-`main` promotion, run coverage exactly once. Bind
+   the complete current matrix and independently replay its concrete evidence
+   through the matrix-bound successor before relying on a final dossier. A
+   historical V2 scalar label is insufficient. Publish the same artifact to
+   PyPI only after all required evidence and release gates actually pass.
 
 Fixture dossiers and campaign tests prove contract, extraction, comparison,
 serialization, and publication semantics. They cannot certify historical

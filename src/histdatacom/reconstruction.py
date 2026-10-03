@@ -74,6 +74,10 @@ from histdatacom.reconstruction_science import (
     read_reconstruction_scientific_ledger,
 )
 from histdatacom.runtime_contracts import ArtifactRef, JSONValue
+from histdatacom.synthetic.capability_certification import (
+    CapabilityCertificationDossierV1,
+    run_capability_certification,
+)
 from histdatacom.synthetic.certification import (
     ReconstructionCertificationDossierV2,
 )
@@ -5240,6 +5244,26 @@ class ReconstructionClient:
             spec_path, output_directory=output_directory
         )
         return result
+
+    def certify_capabilities(
+        self,
+        spec_path: str | Path,
+        *,
+        evidence_root: str | Path,
+        output_directory: str | Path,
+    ) -> CapabilityCertificationDossierV1:
+        """Enforce a frozen capability matrix using fresh native verification.
+
+        Unlike the historical scalar-aggregation ``certify`` route, this
+        separately versioned successor does not treat a self-reported value
+        or a retained verification receipt as proof. Narrow claims remain
+        explicitly limited and never authorize full-campaign promotion.
+        """
+        return run_capability_certification(
+            spec_path,
+            evidence_root=evidence_root,
+            output_directory=output_directory,
+        )
 
     def _executable_plan(
         self, request: ReconstructionExecutionRequestV1

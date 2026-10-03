@@ -191,6 +191,7 @@ CLASS_READERS = {
     ),
 }
 SERIALIZER_EXEMPTIONS = {
+    "histdatacom.synthetic.capability_matrix._Record": "Abstract bounded serializer template with no standalone payload. Concrete capability requirements, waivers, policy, rows and matrix retain separate versioned reader/writer inventory.",
     "histdatacom.broker_plugin_provenance._wire.Record": "Abstract frozen-dataclass serializer template; no standalone fields or payload. Concrete capture provenance contracts retain their own versioned reader/writer inventory.",
     "histdatacom.broker_plugin_permissions._wire.Record": "Abstract frozen-dataclass serializer template; it has no standalone fields or payload. Concrete embedded permission records and versioned artifact subclasses are inventoried separately.",
     "histdatacom.broker_plugin_policy._wire.Record": "Abstract frozen-dataclass serializer template; it has no standalone fields or payload. Concrete embedded provider-policy records and versioned artifact subclasses are inventoried separately.",

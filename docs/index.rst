@@ -49,6 +49,7 @@ Data and reconstruction foundations
    decision-attribution
    reconstruction-schema-compatibility
    schema-compatibility
+   capability-matrix
    schema-semantic-proofs
    reconstruction-evidence-contracts
    cross-series-constraint-contracts

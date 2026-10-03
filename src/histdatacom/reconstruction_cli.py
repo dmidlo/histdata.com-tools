@@ -31,6 +31,9 @@ from histdatacom.reconstruction import (
     write_reconstruction_plan_set_execution_request,
 )
 from histdatacom.reconstruction_schema import ReconstructionCompatibilityStatus
+from histdatacom.synthetic.capability_certification import (
+    CapabilityCertificationStateV1,
+)
 from histdatacom.synthetic.certification import CertificationState
 from histdatacom.synthetic.information import InformationMode
 from histdatacom.synthetic.resource_envelopes import (
@@ -454,6 +457,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     certify.add_argument("--spec", required=True, metavar="PATH")
     certify.add_argument("--output-directory", required=True, metavar="PATH")
+    capabilities = subparsers.add_parser(
+        "certify-capabilities",
+        help="enforce a frozen capability matrix with fresh native evidence checks",
+    )
+    capabilities.add_argument("--spec", required=True, metavar="PATH")
+    capabilities.add_argument("--evidence-root", required=True, metavar="PATH")
+    capabilities.add_argument(
+        "--output-directory", required=True, metavar="PATH"
+    )
     return parser
 
 
@@ -787,6 +799,18 @@ def _run_command(
         )
     if command == "replay":
         return client.replay(args.manifest), ReconstructionExitCode.SUCCESS
+    if command == "certify-capabilities":
+        capability_dossier = client.certify_capabilities(
+            args.spec,
+            evidence_root=args.evidence_root,
+            output_directory=args.output_directory,
+        )
+        return capability_dossier.to_dict(), (
+            ReconstructionExitCode.REFUSED
+            if capability_dossier.state
+            is CapabilityCertificationStateV1.BLOCKED
+            else ReconstructionExitCode.SUCCESS
+        )
     if command == "certify":
         certification_dossier, result = client.certify(
             args.spec, output_directory=args.output_directory

@@ -19,9 +19,63 @@ Works on macOS, Linux, and Windows.
 
 [![Downloads](https://pepy.tech/badge/histdatacom)](https://pepy.tech/project/histdatacom) ![PyPI - License](https://img.shields.io/pypi/l/histdatacom) ![PyPI](https://img.shields.io/pypi/v/histdatacom) ![PyPI - Status](https://img.shields.io/pypi/status/histdatacom)
 
+<!-- capability-matrix:start -->
+## Current capability and evidence status
+
+The complete 2002-to-cutoff Temporal campaign and certified provider-neutral dataset are **not established by this snapshot**; no materialized dataset identity is supplied. The reconstruction substrate implements contracts and software, but complete execution, deep verification and era-stratified audit remain required. Open #522, #523 and #524 are not satisfied by this matrix.
+
+Later calendar, forecasting, orderflow, broker/multi-feed, schema replay, reproducibility, durability, feature/training-corpus, graph and serving programs remain separate scoped requirements. Their deferred rows do not block the v2.5 claim unless a new frozen policy explicitly includes them. Held #639 semantic-RNG and #622/#764 native-science candidates are not part of this dev-baseline snapshot.
+
+Snapshot `histdatacom-unreleased-dev-c5304b37a0ad1898559693055b347144c0b71d6d` as of 2026-10-03T22:12:00Z. Dataset identity: `absent`. Frozen policy `capability-matrix-policy:sha256:9165fbc09aad2902c9ef8ed1827ab2db9896fe25fcc868284859d210d66846d7` requires 24 rows; structural blockers: 25.
+
+Recorded states across all 93 rows: deferred_blocked: 35, executed_insufficient_evidence: 10, implemented_unexecuted: 41, not_implemented: 7. These counts describe claims, not independent qualification.
+
+| Capability | Recorded state | Evidence scope | Blocking issues |
+|---|---|---|---|
+| Frozen source and experiment identity | implemented_unexecuted | none | #500, #504 |
+| Model-bank registration | implemented_unexecuted | none | #500 |
+| Powered engine eligibility | implemented_unexecuted | none | #500 |
+| Product engine selection | implemented_unexecuted | none | #500 |
+| Observation uncertainty propagation | implemented_unexecuted | none | #500, #529 |
+| Transition uncertainty | implemented_unexecuted | none | #500 |
+| Fresh release holdout | implemented_unexecuted | none | #504 |
+| Adaptive partition qualification | implemented_unexecuted | none | #500 |
+| Exact and bounded-prior alignment qualification | implemented_unexecuted | none | #500 |
+| Projection burden | implemented_unexecuted | none | #500, #524 |
+| Full support-map rebuild and independent replay | implemented_unexecuted | none | #500 |
+| Representative installed Temporal execution | implemented_unexecuted | none | #504 |
+| Crash, cancel and resume | implemented_unexecuted | none | #504 |
+| Storage disconnect, remount and no-fallback | implemented_unexecuted | none | #504 |
+| Complete Temporal campaign | implemented_unexecuted | none | #500, #504 |
+| Complete product rectangle | implemented_unexecuted | none | #522 |
+| Certification-grade product index | not_implemented | none | #522 |
+| Full deep-verification root | not_implemented | none | #523 |
+| Era-stratified audit | not_implemented | none | #524 |
+| Derived bars reconciliation | implemented_unexecuted | none | #522, #523 |
+| Provider-neutral dataset publication | deferred_blocked | none | #522, #523, #524 |
+| Package and release promotion | deferred_blocked | none | #504, #522, #523, #524 |
+| First-party official-source global calendar | deferred_blocked | none | #492, #533 |
+| Professional calendar materialization and projection provenance | deferred_blocked | none | #582, #585, #589 |
+| Autonomous economic-release forecasting | deferred_blocked | none | #556 |
+| Deterministic synthetic-trader and customer-orderflow substrate | deferred_blocked | none | #590 |
+| Public broker-plugin SDK and ecosystem | executed_insufficient_evidence | software | #488, #614, #622, #627 |
+| Independent overlapping-feed observation-process identification | deferred_blocked | none | #529, #627, #628, #629, #630, #631 |
+| Cross-version schema compatibility and semantic replay | executed_insufficient_evidence | software | #632, #635, #636 |
+| Computational reproducibility and cross-platform replay | deferred_blocked | none | #637, #638, #639, #640, #641 |
+| Durable scientific artifact recovery | not_implemented | none | #642, #643, #644, #645, #646 |
+| Live broker and fingerprint-transfer scientific qualification | deferred_blocked | none | #488, #601, #602, #603, #604 |
+| Multi-timeframe market and bar feature plane | executed_insufficient_evidence | bounded | #612, #647, #650, #653, #654 |
+| Origin-aware certified wide ML training substrate | deferred_blocked | none | #605, #607, #609, #611, #612, #613 |
+| Wider currency graph | deferred_blocked | none | #262 |
+| OANDA-compatible selected-product serving | not_implemented | none | #77 |
+
+The [full 93-row matrix](docs/capability-matrix.md) retains each subrequirement, exact evidence identity, scope and limitation. It is generated from the [machine artifact](release-evidence/capability-matrix/current-dev-v1.json), not from issue closure, fixture presence or a report-exists check. No current row claims independently admitted `executed_passed` evidence.
+<!-- capability-matrix:end -->
+
 ---
 
 - [histdata.com-tools](#histdatacom-tools)
+- [Current capability and evidence status](#current-capability-and-evidence-status)
 - [Disclaimer](#disclaimer)
 - [Usage](#usage)
   - [Show the Help and Options](#show-the-help-and-options)
@@ -3612,6 +3666,15 @@ Markdown, the frozen campaign manifest, methodology evidence, and a bounded
 campaign receipt. The dossier contains no tick rows or analytical-frame
 columns and never claims historical truth, selects an automatic winner, makes
 an investment recommendation, or authorizes release before every gate passes.
+
+Those V2 labels retain historical scalar-aggregation semantics; checking report
+identity is not independent recomputation of every producer's claims. A V2
+`certified` label alone is insufficient for current release evidence. The
+separate `histdatacom reconstruction certify-capabilities --spec SPEC.json
+--evidence-root ROOT --output-directory DIR` route binds the complete 93-row
+capability matrix and repeats its admitted native evidence checks. A
+`verified_limited_claim` never establishes a complete campaign or authorizes
+full publication; missing complete-campaign evidence remains blocking.
 
 See
 [`docs/reconstruction-certification-contracts.md`](docs/reconstruction-certification-contracts.md)

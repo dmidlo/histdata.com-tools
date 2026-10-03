@@ -369,6 +369,7 @@ _CLEANUP_ALLOWED_KEYS = (
 )
 _RECONSTRUCTION_COMMANDS = {
     "cancel",
+    "certify-capabilities",
     "outputs",
     "plan",
     "preflight",
@@ -401,10 +402,12 @@ _RECONSTRUCTION_TRUE_FLAG_ARGS = {
     "submit_only": "--submit-only",
 }
 _RECONSTRUCTION_SCALAR_ARGS = {
+    "evidence_root": "--evidence-root",
     "information_mode": "--information-mode",
     "limit": "--limit",
     "manifest": "--manifest",
     "output": "--output",
+    "output_directory": "--output-directory",
     "plan": "--plan",
     "reason": "--reason",
     "receipt": "--receipt",
