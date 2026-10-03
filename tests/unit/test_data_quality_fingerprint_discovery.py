@@ -6,6 +6,8 @@ from copy import deepcopy
 import json
 from pathlib import Path
 
+import pytest
+
 from histdatacom.data_quality.autoregressive import (
     AUTOREGRESSIVE_COLUMNS,
     AUTOREGRESSIVE_CONFIGURATION_SCHEMA_VERSION,
@@ -940,9 +942,11 @@ def test_fingerprint_schema_discovery_reflects_profile_overrides() -> None:
 
 def test_fingerprint_schema_discovery_is_deterministic_and_publish_safe(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Payloads should not contain volatile local absolute paths."""
-    profile_path = tmp_path / "quality-profile.json"
+    monkeypatch.chdir(tmp_path)
+    profile_path = Path("quality-profile.json")
     profile_path.write_text(
         json.dumps(
             {
@@ -965,6 +969,45 @@ def test_fingerprint_schema_discovery_is_deterministic_and_publish_safe(
     assert first["examples"]["series_fingerprint_fragment"]["source"][
         "path"
     ].startswith("data/")
+
+
+@pytest.mark.parametrize(
+    ("relative_path", "expected_path"),
+    [
+        ("reports/quality-profile.json", "reports/quality-profile.json"),
+        (
+            ".histdatacom/quality-profile.json",
+            ".histdatacom/quality-profile.json",
+        ),
+    ],
+)
+def test_fingerprint_schema_discovery_preserves_explicit_public_anchor(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    relative_path: str,
+    expected_path: str,
+) -> None:
+    """Actual profile reads retain declared public paths, not temp parents."""
+    monkeypatch.chdir(tmp_path)
+    profile_path = Path(relative_path)
+    profile_path.parent.mkdir()
+    profile_path.write_text(
+        json.dumps(
+            {
+                "schema_version": QUALITY_PROFILE_SCHEMA_VERSION,
+                "name": "path-profile",
+                "rules": {SERIES_FINGERPRINT_RULE_ID: {"max_rows": 10}},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    payload = fingerprint_schema_discovery(
+        load_quality_profile_file(profile_path)
+    )
+
+    assert payload["profile"]["source_path"] == expected_path
+    assert str(tmp_path) not in json.dumps(payload, sort_keys=True)
 
 
 def test_format_fingerprint_schema_discovery_renders_human_summary() -> None:

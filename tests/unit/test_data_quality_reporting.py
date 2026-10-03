@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from histdatacom.data_quality import (
     CROSS_SERIES_FINGERPRINT_METADATA_KEY,
     QUALITY_ENGINE_METADATA_KEY,
@@ -181,15 +183,14 @@ def test_synthetic_constraints_have_report_bounded_and_console_surfaces() -> (
     assert "Synthetic fingerprint constraints" in console
 
 
-def test_quality_report_payload_is_publish_safe_by_default(
-    tmp_path: Path,
-) -> None:
+def test_quality_report_payload_is_publish_safe_by_default() -> None:
     """Public report JSON should not expose local filesystem roots."""
-    report = _mixed_report(tmp_path)
+    private_root = Path("/home/alice/private-cache")
+    report = _mixed_report(private_root)
     payload = quality_report_payload(report)
     encoded = json.dumps(payload, sort_keys=True)
 
-    assert str(tmp_path) not in encoded
+    assert str(private_root) not in encoded
     assert "/Users/" not in encoded
     assert "/home/" not in encoded
     assert payload["targets"][0]["path"] == "clean.csv"
@@ -197,6 +198,95 @@ def test_quality_report_payload_is_publish_safe_by_default(
         payload["rule_results"][1]["findings"][0]["location"]["path"]
         == "warning.csv"
     )
+
+
+@pytest.mark.parametrize(
+    ("private_root", "clean_path", "warning_path"),
+    [
+        (
+            "/home/alice/private-cache/reports",
+            "reports/clean.csv",
+            "reports/warning.csv",
+        ),
+        (
+            "/home/alice/private-cache/.histdatacom",
+            ".histdatacom/clean.csv",
+            ".histdatacom/warning.csv",
+        ),
+    ],
+)
+def test_quality_report_payload_preserves_explicit_public_anchors(
+    private_root: str,
+    clean_path: str,
+    warning_path: str,
+) -> None:
+    """Absolute metadata loses private prefixes but retains public anchors."""
+    payload = quality_report_payload(_mixed_report(Path(private_root)))
+
+    assert payload["targets"][0]["path"] == clean_path
+    assert (
+        payload["rule_results"][1]["findings"][0]["location"]["path"]
+        == warning_path
+    )
+    assert "/home/alice/private-cache" not in json.dumps(payload)
+
+
+@pytest.mark.parametrize(
+    ("raw_path", "expected_path"),
+    [
+        ("/home/alice/private-cache/quality.json", "quality.json"),
+        ("/Users/alice/private-cache/quality.json", "quality.json"),
+        ("/tmp/pytest-of-alice/session/quality.json", "quality.json"),
+        (r"C:\Users\alice\private-cache\quality.json", "quality.json"),
+        ("file:///home/alice/private-cache/quality.json", "quality.json"),
+        (
+            "/home/alice/private-cache/data/case/quality.json",
+            "data/case/quality.json",
+        ),
+        (
+            "/home/alice/private-cache/docs/case/quality.json",
+            "docs/case/quality.json",
+        ),
+        (
+            "/home/alice/private-cache/tests/case/quality.json",
+            "tests/case/quality.json",
+        ),
+        (
+            "/home/alice/private-cache/fixtures/case/quality.json",
+            "fixtures/case/quality.json",
+        ),
+        (
+            "/home/alice/private-cache/quality-fixtures/case/quality.json",
+            "quality-fixtures/case/quality.json",
+        ),
+        (
+            "/home/alice/private-cache/.quality/case/quality.json",
+            ".quality/case/quality.json",
+        ),
+        (
+            "/home/alice/private-cache/reports/case/quality.json",
+            "reports/case/quality.json",
+        ),
+        (
+            "/home/alice/private-cache/.histdatacom/case/quality.json",
+            ".histdatacom/case/quality.json",
+        ),
+        (
+            "/home/alice/private-cache/manifests/case/quality.json",
+            "manifests/case/quality.json",
+        ),
+    ],
+)
+def test_publish_safe_path_has_independent_portable_root_expectations(
+    raw_path: str,
+    expected_path: str,
+) -> None:
+    """Literal policy vectors must not depend on pytest's physical root."""
+    safe = publish_safe_path(raw_path)
+
+    assert safe == expected_path
+    assert "alice" not in safe
+    assert not safe.startswith(("/", "C:", "file:"))
 
 
 def test_quality_report_payload_can_preserve_raw_local_paths(

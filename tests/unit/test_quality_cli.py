@@ -408,9 +408,11 @@ histdatacom:
 def test_quality_fingerprint_schema_cli_reports_json(
     capsys: pytest.CaptureFixture[str],
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The fingerprint schema command should expose machine-readable JSON."""
-    profile_path = tmp_path / "quality-profile.json"
+    monkeypatch.chdir(tmp_path)
+    profile_path = Path("quality-profile.json")
     profile_path.write_text(
         json.dumps(
             {
@@ -724,9 +726,11 @@ histdatacom:
 def test_quality_fingerprint_readiness_cli_reports_json(
     capsys: pytest.CaptureFixture[str],
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The readiness command should rank risks from a saved report."""
-    report_path = _write_fingerprint_quality_report(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    report_path = _write_fingerprint_quality_report(Path("."))
 
     exit_code = main(
         [
@@ -769,9 +773,11 @@ def test_quality_fingerprint_readiness_cli_reports_json(
 def test_quality_fingerprint_readiness_cli_reports_human_output(
     capsys: pytest.CaptureFixture[str],
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The readiness command should render a concise text ranking."""
-    report_path = _write_fingerprint_quality_report(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    report_path = _write_fingerprint_quality_report(Path("."))
 
     exit_code = main(["fingerprint-readiness", "--report", str(report_path)])
     output = capsys.readouterr().out
@@ -782,6 +788,86 @@ def test_quality_fingerprint_readiness_cli_reports_human_output(
     assert "Fingerprint readiness risk" in output
     assert "#1 ascii GBPUSD T 201202 csv: high" in output
     assert "invalid_timestamps_skipped" in output
+    assert str(tmp_path) not in output
+
+
+@pytest.mark.parametrize(
+    ("surface", "relative_root", "expected_path"),
+    [
+        ("schema-json", "reports", "reports/quality-profile.json"),
+        (
+            "schema-json",
+            ".histdatacom",
+            ".histdatacom/quality-profile.json",
+        ),
+        (
+            "readiness-json",
+            "reports",
+            "reports/fingerprint-quality.json",
+        ),
+        (
+            "readiness-json",
+            ".histdatacom",
+            ".histdatacom/fingerprint-quality.json",
+        ),
+        (
+            "readiness-human",
+            "reports",
+            "reports/fingerprint-quality.json",
+        ),
+        (
+            "readiness-human",
+            ".histdatacom",
+            ".histdatacom/fingerprint-quality.json",
+        ),
+    ],
+)
+def test_quality_fingerprint_cli_preserves_explicit_public_anchor(
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    surface: str,
+    relative_root: str,
+    expected_path: str,
+) -> None:
+    """Real CLI file reads preserve public paths without absolute parents."""
+    monkeypatch.chdir(tmp_path)
+    root = Path(relative_root)
+    root.mkdir()
+    if surface == "schema-json":
+        path = root / "quality-profile.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "schema_version": QUALITY_PROFILE_SCHEMA_VERSION,
+                    "name": "portable-cli-profile",
+                    "rules": {SERIES_FINGERPRINT_RULE_ID: {"max_rows": 25}},
+                }
+            ),
+            encoding="utf-8",
+        )
+        argv = ["fingerprint-schema", "--quality-profile", str(path), "--json"]
+    else:
+        path = _write_fingerprint_quality_report(root)
+        argv = ["fingerprint-readiness", "--report", str(path)]
+        if surface == "readiness-json":
+            argv.append("--json")
+
+    exit_code = main(argv)
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    if surface == "schema-json":
+        payload = json.loads(output)
+        assert payload["profile"]["source_path"] == expected_path
+        assert payload["profile"]["name"] == "portable-cli-profile"
+    elif surface == "readiness-json":
+        payload = json.loads(output)
+        assert payload["reports"][0]["report_path"] == expected_path
+        assert payload["risk_report_count"] == 1
+    else:
+        assert f"Report: {expected_path}" in output.splitlines()
+        assert "#1 ascii GBPUSD T 201202 csv: high" in output
     assert str(tmp_path) not in output
 
 
