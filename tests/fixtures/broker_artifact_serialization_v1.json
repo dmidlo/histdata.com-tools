@@ -1,0 +1,55 @@
+{
+  "schema_version": "histdatacom.synthetic-broker-serialization-golden.v1",
+  "baseline_commit": "a4b0586a8f90c803c439094c248b7fc4980ac826",
+  "purpose": "Synthetic historical wire bytes; no provider or execution authority.",
+  "artifacts": {
+    "sdk": {
+      "class": "BrokerPluginMetadataV1",
+      "canonical_json": "{\"artifact_id\":\"broker-plugin-metadata:sha256:1aee744343ee15e8d9bf66561bb467fb7e71226989f2c69973598e26fca0884c\",\"display_name\":\"Fixture\",\"extensions\":[{\"artifact_id\":\"broker-plugin-extension:sha256:17d20e0c8ff46df52bf9a1a94c1fc2aa684af3f9561b8650a5fe54af42ae2419\",\"namespace\":\"org.example.fixture\",\"payload_json\":\"{\\\"answer\\\":42}\",\"schema_version\":\"histdatacom.broker-plugin.extension.v1\"}],\"plugin_id\":\"org.example.fixture\",\"plugin_version\":\"1.0.0\",\"schema_version\":\"histdatacom.broker-plugin.metadata.v1\",\"sdk_version\":\"1.0.0\"}",
+      "canonical_sha256": "c408ceae77ae8138543e2e937aec57559916635ed1339b5bdc3da7c92893e64b",
+      "artifact_id": "broker-plugin-metadata:sha256:1aee744343ee15e8d9bf66561bb467fb7e71226989f2c69973598e26fca0884c",
+      "payload_calls": {
+        "BrokerExtensionV1": 4,
+        "BrokerPluginMetadataV1": 2
+      }
+    },
+    "registry": {
+      "class": "BrokerPluginInventoryV1",
+      "canonical_json": "{\"artifact_id\":\"broker-plugin-inventory:sha256:edb6bd554934ba133f565e460d40eca9d65cdf70fbc8f78d44b22e79c2b0cd98\",\"candidates\":[{\"artifact_id\":\"broker-plugin-candidate:sha256:d4d42fd1b757d48011a52bce12accc1638baa349ffa3a1a483bf79e37611703e\",\"implementation_sha256\":\"2222222222222222222222222222222222222222222222222222222222222222\",\"registration\":{\"artifact_id\":\"broker-plugin-registration:sha256:3670f5489c355e6cd9a0e164e01b6182bef2c5d07302bd326efcf08a573166b8\",\"build_id\":\"\",\"capabilities\":[\"quotes.bid-ask.v1\"],\"display_name\":\"Fixture\",\"distribution_name\":\"fixture\",\"distribution_version\":\"1.0.0\",\"entry_point\":\"fixture.plugin:factory\",\"plugin_id\":\"org.example.fixture\",\"plugin_version\":\"1.0.0\",\"provider_ids\":[\"fixture\"],\"schema_version\":\"histdatacom.broker-plugin-registration.v1\",\"sdk_max_version\":\"2.0.0\",\"sdk_min_version\":\"1.0.0\",\"source_repository\":\"\",\"source_revision\":\"\"},\"registration_sha256\":\"1111111111111111111111111111111111111111111111111111111111111111\",\"schema_version\":\"histdatacom.broker-plugin-candidate.v1\"}],\"diagnostics\":[],\"entry_point_group\":\"histdatacom.broker_plugins.v1\",\"purpose\":\"installed_software_inventory_not_activation\",\"schema_version\":\"histdatacom.broker-plugin-inventory.v1\",\"sdk_version\":\"1.0.0\"}",
+      "canonical_sha256": "641ad28dc2e9185b75f0da096ab1fa2398ba2e9ea3e1bf0df4a82ccaa1f7b287",
+      "artifact_id": "broker-plugin-inventory:sha256:edb6bd554934ba133f565e460d40eca9d65cdf70fbc8f78d44b22e79c2b0cd98",
+      "payload_calls": {
+        "BrokerPluginCandidateV1": 4,
+        "BrokerPluginInventoryV1": 2,
+        "BrokerPluginRegistrationV1": 8
+      }
+    },
+    "capability": {
+      "class": "BrokerAdmittedMetadataV1",
+      "canonical_json": "{\"artifact_id\":\"broker-capability-admitted-metadata:sha256:8792d326ac4253ef9c2f925616180fa20e934d250ab1a14940969da2f28db29f\",\"fields\":[{\"artifact_id\":\"broker-capability-field-receipt:sha256:5aacc2e3ca6f6029463075e11e654ebfc80646095e52225e0be66f965450fef0\",\"capability_id\":\"metadata.account_class.v1\",\"field\":\"account_class\",\"schema_version\":\"histdatacom.broker-capability.field-receipt.v1\",\"support\":\"supported_not_reported\"},{\"artifact_id\":\"broker-capability-field-receipt:sha256:4c45dcc0261491a9d1e8344b98eed007304cb3b7b309b7e996d5c9f393f3c9b4\",\"capability_id\":\"metadata.feed_class.v1\",\"field\":\"feed_class\",\"schema_version\":\"histdatacom.broker-capability.field-receipt.v1\",\"support\":\"supported_not_reported\"},{\"artifact_id\":\"broker-capability-field-receipt:sha256:cce60578ba3d35103b78162b506b8ac8b9de80cb9d8e751379d8459bc5b67ca2\",\"capability_id\":\"metadata.server_label.v1\",\"field\":\"server_label\",\"schema_version\":\"histdatacom.broker-capability.field-receipt.v1\",\"support\":\"supported_not_reported\"}],\"metadata\":{\"artifact_id\":\"broker-plugin-metadata:sha256:1aee744343ee15e8d9bf66561bb467fb7e71226989f2c69973598e26fca0884c\",\"display_name\":\"Fixture\",\"extensions\":[{\"artifact_id\":\"broker-plugin-extension:sha256:17d20e0c8ff46df52bf9a1a94c1fc2aa684af3f9561b8650a5fe54af42ae2419\",\"namespace\":\"org.example.fixture\",\"payload_json\":\"{\\\"answer\\\":42}\",\"schema_version\":\"histdatacom.broker-plugin.extension.v1\"}],\"plugin_id\":\"org.example.fixture\",\"plugin_version\":\"1.0.0\",\"schema_version\":\"histdatacom.broker-plugin.metadata.v1\",\"sdk_version\":\"1.0.0\"},\"plan_id\":\"broker-capability-plan:sha256:3333333333333333333333333333333333333333333333333333333333333333\",\"schema_version\":\"histdatacom.broker-capability.admitted-metadata.v1\"}",
+      "canonical_sha256": "bf9ed4a9ea3bbd31dd3c6bb9e2d2a42cdc36c1c66aea62131e50969fb992b413",
+      "artifact_id": "broker-capability-admitted-metadata:sha256:8792d326ac4253ef9c2f925616180fa20e934d250ab1a14940969da2f28db29f",
+      "payload_calls": {
+        "BrokerAdmittedMetadataV1": 2,
+        "BrokerExtensionV1": 8,
+        "BrokerFieldReceiptV1": 12,
+        "BrokerPluginMetadataV1": 4
+      }
+    },
+    "lifecycle": {
+      "class": "BrokerLifecycleIdentityV1",
+      "canonical_json": "{\"artifact_id\":\"broker-lifecycle-worker-identity:sha256:82cf6c9b462ef3bf91ecb4f608f312d75d91ad4c99ec07096771b8dcd61afbd6\",\"binding\":{\"artifact_id\":\"broker-capability-invocation-binding:sha256:eb6e0163d15a5f613609ff2bfa780c2fb6211765161ad2d3597a5facf5a3ccbf\",\"association\":\"installed_entrypoint_module_verified\",\"candidate_id\":\"broker-plugin-candidate:sha256:d4d42fd1b757d48011a52bce12accc1638baa349ffa3a1a483bf79e37611703e\",\"metadata_id\":\"broker-plugin-metadata:sha256:1aee744343ee15e8d9bf66561bb467fb7e71226989f2c69973598e26fca0884c\",\"module_sha256\":\"4444444444444444444444444444444444444444444444444444444444444444\",\"plan_id\":\"broker-capability-plan:sha256:3333333333333333333333333333333333333333333333333333333333333333\",\"schema_version\":\"histdatacom.broker-capability.invocation-binding.v1\"},\"configuration_schema\":{\"artifact_id\":\"broker-plugin-configuration-schema:sha256:fd8faef4f33bb25412dd5fc888eb8cb28c0609e483859aff7b4778e392a44483\",\"fields\":[],\"schema_version\":\"histdatacom.broker-plugin.configuration-schema.v1\"},\"metadata\":{\"artifact_id\":\"broker-capability-admitted-metadata:sha256:8792d326ac4253ef9c2f925616180fa20e934d250ab1a14940969da2f28db29f\",\"fields\":[{\"artifact_id\":\"broker-capability-field-receipt:sha256:5aacc2e3ca6f6029463075e11e654ebfc80646095e52225e0be66f965450fef0\",\"capability_id\":\"metadata.account_class.v1\",\"field\":\"account_class\",\"schema_version\":\"histdatacom.broker-capability.field-receipt.v1\",\"support\":\"supported_not_reported\"},{\"artifact_id\":\"broker-capability-field-receipt:sha256:4c45dcc0261491a9d1e8344b98eed007304cb3b7b309b7e996d5c9f393f3c9b4\",\"capability_id\":\"metadata.feed_class.v1\",\"field\":\"feed_class\",\"schema_version\":\"histdatacom.broker-capability.field-receipt.v1\",\"support\":\"supported_not_reported\"},{\"artifact_id\":\"broker-capability-field-receipt:sha256:cce60578ba3d35103b78162b506b8ac8b9de80cb9d8e751379d8459bc5b67ca2\",\"capability_id\":\"metadata.server_label.v1\",\"field\":\"server_label\",\"schema_version\":\"histdatacom.broker-capability.field-receipt.v1\",\"support\":\"supported_not_reported\"}],\"metadata\":{\"artifact_id\":\"broker-plugin-metadata:sha256:1aee744343ee15e8d9bf66561bb467fb7e71226989f2c69973598e26fca0884c\",\"display_name\":\"Fixture\",\"extensions\":[{\"artifact_id\":\"broker-plugin-extension:sha256:17d20e0c8ff46df52bf9a1a94c1fc2aa684af3f9561b8650a5fe54af42ae2419\",\"namespace\":\"org.example.fixture\",\"payload_json\":\"{\\\"answer\\\":42}\",\"schema_version\":\"histdatacom.broker-plugin.extension.v1\"}],\"plugin_id\":\"org.example.fixture\",\"plugin_version\":\"1.0.0\",\"schema_version\":\"histdatacom.broker-plugin.metadata.v1\",\"sdk_version\":\"1.0.0\"},\"plan_id\":\"broker-capability-plan:sha256:3333333333333333333333333333333333333333333333333333333333333333\",\"schema_version\":\"histdatacom.broker-capability.admitted-metadata.v1\"},\"schema_version\":\"histdatacom.broker-lifecycle.worker-identity.v1\"}",
+      "canonical_sha256": "fe544440b53bd9e6af7d273c74bb44b922682c731228b643b1df00e3ae410883",
+      "artifact_id": "broker-lifecycle-worker-identity:sha256:82cf6c9b462ef3bf91ecb4f608f312d75d91ad4c99ec07096771b8dcd61afbd6",
+      "payload_calls": {
+        "BrokerAdmittedMetadataV1": 4,
+        "BrokerConfigurationSchemaV1": 4,
+        "BrokerExtensionV1": 16,
+        "BrokerFieldReceiptV1": 24,
+        "BrokerInvocationBindingV1": 4,
+        "BrokerLifecycleIdentityV1": 2,
+        "BrokerPluginMetadataV1": 8
+      }
+    }
+  }
+}

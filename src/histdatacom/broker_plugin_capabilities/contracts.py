@@ -272,7 +272,17 @@ class _Artifact:
         )
 
     def to_dict(self) -> dict[str, object]:
-        return {**self._payload(), "artifact_id": self.artifact_id}
+        payload = self._payload()
+        digest = hashlib.sha256(
+            canonical_capability_json(payload).encode("ascii")
+        ).hexdigest()
+        return {
+            **payload,
+            "artifact_id": "broker-capability-"
+            + self.KIND
+            + ":sha256:"
+            + digest,
+        }
 
     def to_json(self) -> str:
         return canonical_capability_json(self.to_dict())

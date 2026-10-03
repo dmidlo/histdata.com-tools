@@ -17,12 +17,15 @@ from .contracts import SemanticProjectionV1
 _SOURCES = {
     "synthetic/contracts.py": "f7e9430905bedb71344336be0c5388a6e49197ad1bc1c30bd29d1eb792b5e933",
     "reconstruction_evidence.py": "a1ca4dd5705cbdd0adffa935272d10fc1ec42119ca95062cf0cf475484a552ab",
-    "broker_plugins/contracts.py": "e17a51c0b406fe96cf73066abd5e9ae25804f9bb944ec5358d6fb17f7fdba18c",
-    "broker_plugin_lifecycle/contracts.py": "ece9eb834a271bf3387fc85677fcb9f30b377a40a319ecfd7c1cd1de4b00b2bb",
-    "broker_plugin_registry/contracts.py": "c15f3f0dfca961fb086018b65dd4c675c2c66026067b606e3b9d3d25468cfee3",
+    # #766 reuses one fresh serialization payload, never cross-call state.
+    # Full-module AST review and retained canonical byte/ID parity preserve
+    # the complete reader/writer/validator domain for these four source pins.
+    "broker_plugins/contracts.py": "1d8278397b0163a9a282821cbfdb8f0a387f0d190391cc4c18eff24702a66712",
+    "broker_plugin_lifecycle/contracts.py": "ed011613d6a99a7cccc1fdb0ef01ae0d97e23c59c576269d82abd55b83c2b1d6",
+    "broker_plugin_registry/contracts.py": "46f892e0792c69c1b2c690956a0126a04ce146446e35be1f9c35fb261dc5a9a0",
     # #620 adds closed exception metadata only; the complete artifact
     # reader/writer/validator domain and historical error wire are unchanged.
-    "broker_plugin_capabilities/contracts.py": "46adf9c4831f4a2dbb950081dfb56ba02c35e03c223ae8d3b6c3fc1215cbdd3a",
+    "broker_plugin_capabilities/contracts.py": "8f2c73ac70896b180d17f0f5b1b843e65a477bbb0c2586fa34d8efb90f7bfc96",
     "market_context/economic_calendar.py": "e71254fdb69032fe032e1559ae89b19409d72d8e72c464bab7d2b42bc9db9761",
     "market_context/contracts.py": "6319014257ab8852f19626c0d6f71f45c9630371f2c8e65d94e9d60c76093bed",
     "forecasting/scoring.py": "97ef6d6fdeb1b2aa5a8033abac4970ec599ac871e334a89ac238ff7632070456",

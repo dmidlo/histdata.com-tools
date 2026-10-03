@@ -251,7 +251,14 @@ class _Artifact:
         return f"broker-plugin-{self.KIND}:sha256:{digest}"
 
     def to_dict(self) -> dict[str, object]:
-        return {**self._payload(), "artifact_id": self.artifact_id}
+        payload = self._payload()
+        digest = hashlib.sha256(
+            canonical_plugin_registry_json(payload).encode("ascii")
+        ).hexdigest()
+        return {
+            **payload,
+            "artifact_id": f"broker-plugin-{self.KIND}:sha256:{digest}",
+        }
 
     def to_json(self) -> str:
         return canonical_plugin_registry_json(self.to_dict())

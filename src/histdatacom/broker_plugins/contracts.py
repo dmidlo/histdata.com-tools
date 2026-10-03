@@ -289,7 +289,14 @@ class _Artifact:
 
     def to_dict(self) -> dict[str, object]:
         """Return an independent mutable wire copy of this immutable object."""
-        return {**self.identity_payload(), "artifact_id": self.artifact_id}
+        payload = self.identity_payload()
+        digest = hashlib.sha256(
+            canonical_broker_sdk_json(payload).encode("utf-8")
+        ).hexdigest()
+        return {
+            **payload,
+            "artifact_id": f"broker-plugin-{self.KIND}:sha256:{digest}",
+        }
 
     def to_json(self) -> str:
         return canonical_broker_sdk_json(self.to_dict())
