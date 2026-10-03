@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import argparse
 import html
+import os
+import stat
 import sys
 from collections import Counter
 from pathlib import Path
@@ -19,19 +21,63 @@ from histdatacom.synthetic.capability_matrix import (
     render_capability_matrix_markdown,
     structural_matrix_blockers,
 )
+from histdatacom.synthetic.trader_maturity import (
+    MAX_WIRE_BYTES,
+    TRADER_MATURITY_CATALOG,
+    TraderMaturityMatrixV1,
+    render_trader_maturity_markdown,
+    validate_parent,
+)
 
 ARTIFACT_DIRECTORY = Path("release-evidence/capability-matrix")
 MATRIX_PATH = ARTIFACT_DIRECTORY / "current-dev-v1.json"
 POLICY_PATH = ARTIFACT_DIRECTORY / "current-dev-policy-v1.json"
+TRADER_PATH = ARTIFACT_DIRECTORY / "current-trader-maturity-v1.json"
 START = "<!-- capability-matrix:start -->"
 END = "<!-- capability-matrix:end -->"
 
 
-def _read(path: Path) -> str:
-    with path.open("rb") as handle:
-        raw = handle.read(MAX_MATRIX_BYTES + 1)
-    if len(raw) > MAX_MATRIX_BYTES:
+def _read(path: Path, maximum: int = MAX_MATRIX_BYTES) -> str:
+    def identity(value: os.stat_result) -> tuple[int, ...]:
+        return (
+            value.st_dev,
+            value.st_ino,
+            value.st_mode,
+            value.st_size,
+            value.st_mtime_ns,
+            value.st_ctime_ns,
+        )
+
+    initial = path.lstat()
+    if not stat.S_ISREG(initial.st_mode):
+        raise ValueError("capability input must be a regular file")
+    if initial.st_size > maximum:
         raise ValueError("capability documentation input exceeds byte bound")
+    # Fallback platforms retain explicit type/identity checks, but do not
+    # acquire POSIX atomic no-follow/nonblocking guarantees from absent flags.
+    flags = (
+        os.O_RDONLY
+        | getattr(os, "O_NONBLOCK", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+    )
+    descriptor = os.open(path, flags)
+    try:
+        before = os.fstat(descriptor)
+        if not stat.S_ISREG(before.st_mode) or identity(initial) != identity(
+            before
+        ):
+            raise ValueError("capability input changed before admission")
+        with os.fdopen(descriptor, "rb", closefd=False) as handle:
+            raw = handle.read(maximum + 1)
+        after = os.fstat(descriptor)
+    finally:
+        os.close(descriptor)
+    if len(raw) > maximum:
+        raise ValueError("capability documentation input exceeds byte bound")
+    if identity(before) != identity(after) or identity(after) != identity(
+        path.lstat()
+    ):
+        raise ValueError("capability input changed while reading")
     return raw.decode("ascii")
 
 
@@ -47,6 +93,17 @@ def read_inputs(
     # This checks identity and declared scope, not scientific evidence.
     structural_matrix_blockers(matrix, policy)
     return matrix, policy
+
+
+def read_trader_input(
+    root: Path, parent: CapabilityMatrixV1
+) -> TraderMaturityMatrixV1:
+    text = _read(root / TRADER_PATH, MAX_WIRE_BYTES)
+    supplement = TraderMaturityMatrixV1.from_json(text)
+    if supplement.to_json() != text:
+        raise ValueError("trader input must use exact canonical JSON")
+    supplement, _ = validate_parent(supplement, parent)
+    return supplement
 
 
 def _escape(value: str) -> str:
@@ -194,8 +251,69 @@ def render_docs(
     )
 
 
+def _trader_notice() -> str:
+    return (
+        "Authoritative v33 source bytes are unavailable (#680). Declared "
+        "source-byte and canonical catalog hashes do not establish retained "
+        "archive integrity or all-1,000 production compilation. The five "
+        "trader input seams are implemented; historical customer flow, a "
+        "complete trader campaign and ML incremental value are not "
+        "established. Historical issue comments are retrieval references, "
+        "not execution or independent verification artifacts."
+    )
+
+
+def render_trader_readme(
+    supplement: TraderMaturityMatrixV1, parent: CapabilityMatrixV1
+) -> str:
+    supplement, parent = validate_parent(supplement, parent)
+    titles = dict(TRADER_MATURITY_CATALOG)
+    lines = [
+        "### Trader maturity: separate 16-stage supplement",
+        "",
+        "These are non-authoritative recorded claims alongside the unchanged "
+        "93-row matrix, not 16 additional certification requirements. No "
+        "earlier state implies a later pass; this supplement grants no "
+        "certification or publication authority and admits no waivers.",
+        "",
+        _trader_notice(),
+        "",
+        f"Parent: `{parent.matrix_id}`. Supplement: `{supplement.matrix_id}`. "
+        f"Release: `{supplement.release_id}`; dataset: "
+        f"`{supplement.dataset_id or 'absent'}`; as of {supplement.as_of_utc}.",
+        "",
+        "| Trader stage | Recorded state | Evidence scope | Blocking issues |",
+        "|---|---|---|---|",
+    ]
+    for row in supplement.rows:
+        values = (
+            titles[row.stage_id],
+            row.state.value,
+            row.evidence_scope.value,
+            ", ".join(f"#{issue}" for issue in row.blocking_issues)
+            or "none declared",
+        )
+        lines.append(
+            "| " + " | ".join(_escape(value) for value in values) + " |"
+        )
+    lines.extend(
+        (
+            "",
+            "The [full trader supplement](docs/capability-matrix.md#trader-"
+            "maturity-supplement) retains exact identity declarations and "
+            "limitations from its [separate machine artifact]"
+            "(release-evidence/capability-matrix/"
+            "current-trader-maturity-v1.json). Parent V1 identities and "
+            "certification behavior are unchanged.",
+        )
+    )
+    return "\n".join(lines)
+
+
 def expected_outputs(root: Path) -> dict[Path, str]:
     matrix, policy = read_inputs(root)
+    # Validate every input and parent binding before constructing outputs.
+    supplement = read_trader_input(root, matrix)
     readme = (root / "README.md").read_text(encoding="utf-8")
     if readme.count(START) != 1 or readme.count(END) != 1:
         raise ValueError("README requires exactly one capability marker pair")
@@ -204,9 +322,17 @@ def expected_outputs(root: Path) -> dict[Path, str]:
         raise ValueError("README capability markers are reversed")
     return {
         root / "README.md": readme[:start]
-        + render_readme(matrix, policy)
+        + render_readme(matrix, policy).removesuffix(END)
+        + "\n"
+        + render_trader_readme(supplement, matrix)
+        + "\n"
+        + END
         + readme[end + len(END) :],
-        root / "docs/capability-matrix.md": render_docs(matrix, policy),
+        root / "docs/capability-matrix.md": render_docs(matrix, policy)
+        + "\n"
+        + _trader_notice()
+        + "\n\n"
+        + render_trader_maturity_markdown(supplement, matrix),
     }
 
 
@@ -227,7 +353,10 @@ def main() -> int:
     if drift:
         print("Capability documentation drift: " + ", ".join(drift))
         return 1
-    print("93 scoped capability claims; README and documentation agree")
+    print(
+        "93 capability claims and separate 16-stage trader supplement; "
+        "README and documentation agree"
+    )
     return 0
 
 

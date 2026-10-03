@@ -70,6 +70,35 @@ Recorded states across all 93 rows: deferred_blocked: 35, executed_insufficient_
 | OANDA-compatible selected-product serving | not_implemented | none | #77 |
 
 The [full 93-row matrix](docs/capability-matrix.md) retains each subrequirement, exact evidence identity, scope and limitation. It is generated from the [machine artifact](release-evidence/capability-matrix/current-dev-v1.json), not from issue closure, fixture presence or a report-exists check. No current row claims independently admitted `executed_passed` evidence.
+
+### Trader maturity: separate 16-stage supplement
+
+These are non-authoritative recorded claims alongside the unchanged 93-row matrix, not 16 additional certification requirements. No earlier state implies a later pass; this supplement grants no certification or publication authority and admits no waivers.
+
+Authoritative v33 source bytes are unavailable (#680). Declared source-byte and canonical catalog hashes do not establish retained archive integrity or all-1,000 production compilation. The five trader input seams are implemented; historical customer flow, a complete trader campaign and ML incremental value are not established. Historical issue comments are retrieval references, not execution or independent verification artifacts.
+
+Parent: `capability-matrix:sha256:f23e1a7ef34987f9c2eabaa31fba98f3b53fe46dfba879c9e0d3352400eb122a`. Supplement: `trader-maturity-matrix:sha256:8c58e1f5d3a0dec87a0cdda71efbc7050a02fc7fb12551f98cd787ec6418bdd3`. Release: `histdatacom-unreleased-dev-c5304b37a0ad1898559693055b347144c0b71d6d`; dataset: `absent`; as of 2026-10-03T23:23:35Z.
+
+| Trader stage | Recorded state | Evidence scope | Blocking issues |
+|---|---|---|---|
+| v33 archive integrity | deferred_blocked | none | #668, #680 |
+| 1,000 canonical strategy IDs and catalog identity | deferred_blocked | none | #592, #659, #680 |
+| Typed DSL/operator compiler | not_implemented | none | #659, #660, #661 |
+| Shared point-in-time TraderFeatureSnapshotV1 | deferred_blocked | none | #660 |
+| Jurisdiction, execution and account ledger | not_implemented | none | #593, #594, #595 |
+| All 1,000 strategies compile in production | deferred_blocked | none | #659, #660, #661, #680 |
+| Post-compiler portfolio exposure duplicate gate | not_implemented | none | #659, #661, #664 |
+| Dynamic strategy-response feature bank | not_implemented | none | #659, #660, #661, #662 |
+| Reconciled synthetic-flow aggregates | not_implemented | none | #594, #597, #598 |
+| SyntheticTraderPopulationFingerprintV1 | not_implemented | none | #597, #598, #599, #663 |
+| Atomic trader persistence, CLI and replay | not_implemented | none | #594, #598, #662, #663, #665 |
+| Branch and input integration gate | implemented_unexecuted | none | none declared |
+| Bounded representative historical campaign | deferred_blocked | none | #593, #594, #598, #600, #659, #660, #661, #665, #667, #680 |
+| Complete historical 1,000-strategy campaign | deferred_blocked | none | #600, #659, #660, #661, #662, #663, #664, #665, #667, #680 |
+| X-versus-X+Z and negative-control qualification | deferred_blocked | none | #598, #599, #657 |
+| Verified strategy/population columns in final wide ML corpus | deferred_blocked | none | #598, #605, #612, #662, #663, #667 |
+
+The [full trader supplement](docs/capability-matrix.md#trader-maturity-supplement) retains exact identity declarations and limitations from its [separate machine artifact](release-evidence/capability-matrix/current-trader-maturity-v1.json). Parent V1 identities and certification behavior are unchanged.
 <!-- capability-matrix:end -->
 
 ---

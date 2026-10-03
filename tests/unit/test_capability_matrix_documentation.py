@@ -28,7 +28,11 @@ BASE = "c5304b37a0ad1898559693055b347144c0b71d6d"
 
 @pytest.fixture
 def generated_root(tmp_path: Path) -> Path:
-    for relative in (generator.MATRIX_PATH, generator.POLICY_PATH):
+    for relative in (
+        generator.MATRIX_PATH,
+        generator.POLICY_PATH,
+        generator.TRADER_PATH,
+    ):
         destination = tmp_path / relative
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_bytes((ROOT / relative).read_bytes())
@@ -157,7 +161,11 @@ def _invoke(monkeypatch: pytest.MonkeyPatch, root: Path, flag: str) -> int:
 def test_write_is_repeatable_preserves_unrelated_readme_and_inputs(
     generated_root: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    paths = (generator.MATRIX_PATH, generator.POLICY_PATH)
+    paths = (
+        generator.MATRIX_PATH,
+        generator.POLICY_PATH,
+        generator.TRADER_PATH,
+    )
     before = {
         str(path): hashlib.sha256(
             (generated_root / path).read_bytes()
