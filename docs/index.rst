@@ -127,6 +127,7 @@ Data quality
    data-quality/report-compatibility
    training-row-contracts
    training-join-contracts
+   training-wide-views
    training-temporal-contracts
    training-overlap-contracts
    training-weight-contracts
