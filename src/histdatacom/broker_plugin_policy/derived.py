@@ -20,6 +20,7 @@ from .bindings import (
     _resolve_native,
     _ResolvedNative,
     _restore_native,
+    _restore_native_with_json,
 )
 from .contracts import BrokerPolicyDataClass as DataClass
 from .contracts import BrokerPolicySubjectV1
@@ -276,8 +277,7 @@ def _native_snapshot(artifact: object) -> tuple[Any, str, str]:
     }
     if type(artifact) not in types:
         raise ValueError("unsupported exact broker-derived native artifact")
-    restored = _restore_native(artifact, set(types))
-    text = cast(str, restored.to_json())
+    restored, text = _restore_native_with_json(artifact, set(types))
     field = types[type(artifact)]
     identity = (
         _composite_ref("rendered-group", {"native": load_json(text)}).native_id

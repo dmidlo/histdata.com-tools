@@ -74,6 +74,18 @@ def _native_ref(
 
 
 def _restore_native(value: object, allowed: set[type[Any]]) -> Any:
+    restored, _ = _restore_native_with_json(value, allowed)
+    return restored
+
+
+def _restore_native_with_json(
+    value: object, allowed: set[type[Any]]
+) -> tuple[Any, str]:
+    """Return one detached native snapshot and its round-trip-checked bytes.
+
+    The text is local to this restoration, never a cache across resolutions or
+    a substitute for source verification or current provider rights.
+    """
     if type(value) not in allowed:
         raise ValueError("unsupported native provider artifact type")
     _preflight_native(value)
@@ -88,7 +100,7 @@ def _restore_native(value: object, allowed: set[type[Any]]) -> Any:
         raise ValueError(
             "native provider artifact does not round-trip byte-for-byte"
         )
-    return restored
+    return restored, text
 
 
 def _preflight_native(value: object) -> None:
@@ -1269,7 +1281,7 @@ def _resolve_native(native_subject: object) -> _ResolvedNative:
         BrokerDeliveryFingerprintV1,
         BrokerDeliveryFingerprintV2,
     }:
-        fingerprint = _restore_native(
+        fingerprint, text = _restore_native_with_json(
             native_subject,
             {BrokerDeliveryFingerprintV1, BrokerDeliveryFingerprintV2},
         )
@@ -1297,11 +1309,13 @@ def _resolve_native(native_subject: object) -> _ResolvedNative:
                     classes.add(DataClass.RAW_PAYLOAD)
         return _ResolvedNative(
             BrokerPolicySubjectV1(
-                _native_ref(fingerprint, "fingerprint_id"),
+                _ref(
+                    type(fingerprint).__name__, fingerprint.fingerprint_id, text
+                ),
                 (_legacy_binding(fingerprint),),
                 tuple(sorted(classes)),
             ),
-            cast(str, fingerprint.to_json()),
+            text,
         )
     from .derived import resolve_derived_native
     from .training_bindings import (
