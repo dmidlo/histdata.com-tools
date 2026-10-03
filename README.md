@@ -985,6 +985,15 @@ surfaces should derive from or stay consistent with those row-level columns, so
 downstream training code does not need to parse report JSON or join separate
 quality tables to assemble a training row.
 
+The additive [wide-feature view API](docs/training-wide-views.md) composes
+source-replayed training spines and native feature joins into explicit event,
+decision-grid, anchor-bar and member/scenario row grains. It retains an ordered
+unit/provenance registry, deterministic schema/content hashes, native-receipted
+column groups, scoped column projection and bounded descriptive dependence
+diagnostics. Native join/source limits and current provider rights remain in
+force. Synthetic tests qualify software behavior, not a complete historical
+training corpus or independent-information claim.
+
 When the engine intentionally skips a target-rule evaluation—for example, a
 semantic scan of a ZIP whose matching extracted CSV is preferred—the report
 adds optional `metadata.quality_engine` reconciliation metadata. Its
