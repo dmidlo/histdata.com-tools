@@ -237,7 +237,14 @@ class _Artifact:
         return f"causal-bar-{self.KIND}:sha256:{digest}"
 
     def to_dict(self) -> dict[str, object]:
-        return {**self.identity_payload(), "artifact_id": self.artifact_id}
+        payload = self.identity_payload()
+        digest = hashlib.sha256(
+            canonical_bar_feature_json(payload).encode()
+        ).hexdigest()
+        return {
+            **payload,
+            "artifact_id": f"causal-bar-{self.KIND}:sha256:{digest}",
+        }
 
     def to_json(self) -> str:
         return canonical_bar_feature_json(self.to_dict())
