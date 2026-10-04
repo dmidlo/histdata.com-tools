@@ -8,6 +8,10 @@ transaction. Readers must refuse a missing or mismatched pair.
 
 from __future__ import annotations
 
+from histdatacom.managed_artifact_boundary import (
+    assert_unmanaged_mutation_paths,
+)
+
 import hashlib
 import os
 import stat
@@ -105,6 +109,7 @@ def write_broker_policy_context(
     path: Path, context: BrokerPolicyContextV1
 ) -> None:
     """Publish an immutable review snapshot, not an execution approval shortcut."""
+    assert_unmanaged_mutation_paths((path,))
     path = _path(path)
     if type(context) is not BrokerPolicyContextV1:
         raise ValueError("exact provider review context required")
@@ -270,6 +275,7 @@ def write_broker_policy_receipt(
     A trusted host may add a refusal-only private-input check over the complete
     canonical receipt. It is repeated before promotion and grants no rights.
     """
+    assert_unmanaged_mutation_paths((path,))
     operation_admission = require_provider_operation(
         native_subject, operation, recipient_scope=recipient_scope
     )

@@ -8,6 +8,10 @@ left persistence, the historical linear bridge, and early right adoption.
 
 from __future__ import annotations
 
+from histdatacom.managed_artifact_boundary import (
+    assert_unmanaged_mutation_paths,
+)
+
 import hashlib
 import json
 import math
@@ -928,6 +932,7 @@ def _write_contract(
     kind: str,
     metadata: Mapping[str, JSONValue],
 ) -> ArtifactRef:
+    assert_unmanaged_mutation_paths((output_directory,))
     from histdatacom.orchestration.reconstruction import artifact_ref_for_file
 
     payload = text.encode("utf-8")
@@ -938,6 +943,7 @@ def _write_contract(
     directory.mkdir(parents=True, exist_ok=True)
     target = directory / f"{prefix}-{digest}.json"
     temporary = directory / f".{prefix}-{os.getpid()}-{digest}.tmp"
+    assert_unmanaged_mutation_paths((temporary,))
     try:
         with temporary.open("wb") as stream:
             stream.write(payload)

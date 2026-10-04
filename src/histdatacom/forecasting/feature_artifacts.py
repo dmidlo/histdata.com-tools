@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from histdatacom.managed_artifact_boundary import (
+    assert_unmanaged_mutation_paths,
+)
+
 import hashlib
 import os
 import stat
@@ -59,6 +63,7 @@ def write_feature_artifact(
     artifact: FeatureArtifact, directory: str | Path
 ) -> Path:
     """Write once or compare existing exact bytes; reject calendar projections."""
+    assert_unmanaged_mutation_paths((directory,))
     if not isinstance(
         artifact,
         (

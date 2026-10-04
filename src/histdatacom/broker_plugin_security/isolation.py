@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from histdatacom.managed_artifact_boundary import (
+    assert_unmanaged_mutation_paths,
+)
+
 from dataclasses import dataclass, field
 import json
 import os
@@ -143,6 +147,7 @@ def prepare_kernel_launch(
     are intentionally usable. Network is off except exact declared loopback
     ports; their server/proxy is a separate caller-owned trust boundary.
     """
+    assert_unmanaged_mutation_paths((working_directory,))
     require_kernel_backend()
     try:
         roots, search = _runtime_layout(worker_python, source_root)
@@ -197,6 +202,7 @@ def prepare_kernel_launch(
             search,
         )
         probe = working_directory / "kernel-probe"
+        assert_unmanaged_mutation_paths((probe,))
         probe.write_bytes(b"synthetic-probe-only")
         denied_port = next(
             port for port in range(1, 65536) if port not in loopback_ports

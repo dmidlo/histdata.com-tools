@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from histdatacom.managed_artifact_boundary import (
+    assert_unmanaged_mutation_paths,
+)
+
 import hashlib
 import os
 import stat
@@ -74,6 +78,7 @@ def _read(path: Path) -> bytes:
 def write_math_artifact(
     artifact: ForecastMathArtifact, directory: str | Path
 ) -> Path:
+    assert_unmanaged_mutation_paths((directory,))
     if type(artifact) not in (
         ForecastMathVerificationV1,
         ForecastMathCheckedReportV1,

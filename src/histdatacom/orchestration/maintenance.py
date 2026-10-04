@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from histdatacom.managed_artifact_boundary import (
+    assert_unmanaged_mutation_paths,
+)
+
 import sqlite3
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -216,6 +220,11 @@ def run_orchestration_maintenance(
         )
         warnings = (*warnings, skip_reason)
 
+    if not skip_reason:
+        assert_unmanaged_mutation_paths(
+            (runtime_policy.paths.logs_dir, runtime_policy.paths.manifests_dir),
+            recursive=True,
+        )
     logs = _maintain_logs(
         runtime_policy.paths.logs_dir,
         policy,
@@ -278,6 +287,8 @@ def _maintain_logs(
     *,
     skip_reason: str = "",
 ) -> tuple[LogMaintenanceResult, ...]:
+    if not skip_reason:
+        assert_unmanaged_mutation_paths((logs_dir,), recursive=True)
     paths = _orchestration_log_paths(logs_dir)
     return tuple(
         _log_result(path, policy, skip_reason=skip_reason) for path in paths
@@ -347,6 +358,10 @@ def _log_result(
 
 
 def _rotate_log_path(path: Path, max_rotated_logs: int) -> int:
+    assert_unmanaged_mutation_paths(
+        path if index == 0 else _rotated_log_path(path, index)
+        for index in range(max_rotated_logs + 1)
+    )
     removed = 0
     if max_rotated_logs == 0:
         path.unlink(missing_ok=True)
@@ -375,6 +390,8 @@ def _status_store_result(
     *,
     skip_reason: str = "",
 ) -> StatusStoreMaintenanceResult:
+    if not skip_reason:
+        assert_unmanaged_mutation_paths((runtime_policy.paths.manifests_dir,))
     store_root = runtime_policy.paths.manifests_dir
     store_path = ManifestStatusStore.path_for_root(store_root)
     size_before = _sqlite_file_size(store_path)
@@ -496,6 +513,7 @@ def _sqlite_file_size(path: Path) -> int:
 
 def _compact_sqlite_store(path: Path) -> None:
     """Checkpoint and vacuum a stopped local SQLite store after row pruning."""
+    assert_unmanaged_mutation_paths((path,))
     with sqlite3.connect(path) as conn:
         conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
         conn.execute("VACUUM")

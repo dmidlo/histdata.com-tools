@@ -9,6 +9,10 @@ weakening source identity or replay.
 
 from __future__ import annotations
 
+from histdatacom.managed_artifact_boundary import (
+    assert_unmanaged_mutation_paths,
+)
+
 import hashlib
 import json
 import os
@@ -1828,6 +1832,9 @@ def write_official_fetch_bundle(
     bundle: OfficialFetchBundleV1, directory: str | Path
 ) -> Mapping[str, ArtifactRef]:
     """Write immutable raw blobs and a content-addressed replay manifest."""
+    assert_unmanaged_mutation_paths(
+        (directory, Path(directory).expanduser() / "sources")
+    )
     if not isinstance(bundle, OfficialFetchBundleV1):
         raise TypeError("official artifact writer requires a v1 fetch bundle")
     root = Path(directory).expanduser().resolve()
@@ -2777,6 +2784,7 @@ def _require_schema(data: Mapping[str, Any], expected: str) -> None:
 
 
 def _write_once(path: Path, content: bytes) -> None:
+    assert_unmanaged_mutation_paths((path,))
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists():
         if path.read_bytes() != content:
@@ -2785,6 +2793,7 @@ def _write_once(path: Path, content: bytes) -> None:
     temporary = path.with_name(
         f".{path.name}.tmp-{os.getpid()}-{time.time_ns()}"
     )
+    assert_unmanaged_mutation_paths((temporary,))
     try:
         with temporary.open("xb") as stream:
             stream.write(content)

@@ -9,6 +9,10 @@ candidate-scoped so evidence from one candidate cannot certify another.
 
 from __future__ import annotations
 
+from histdatacom.managed_artifact_boundary import (
+    assert_unmanaged_mutation_paths,
+)
+
 import hashlib
 import json
 import os
@@ -1630,6 +1634,7 @@ def _write_contract(
     kind: str,
     metadata: Mapping[str, JSONValue],
 ) -> ArtifactRef:
+    assert_unmanaged_mutation_paths((output_directory,))
     payload = (text + "\n").encode("utf-8")
     if len(payload) > MAX_RELEASE_CANDIDATE_ARTIFACT_BYTES:
         raise ValueError("release candidate artifact exceeds size limit")

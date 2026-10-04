@@ -9,6 +9,10 @@ committed Parquet product.
 
 from __future__ import annotations
 
+from histdatacom.managed_artifact_boundary import (
+    assert_unmanaged_mutation_paths,
+)
+
 import hashlib
 import json
 import math
@@ -1634,6 +1638,7 @@ def write_reconstruction_activity_manifest(
     directory: str | Path,
 ) -> ArtifactRef:
     """Atomically persist and read back one compact activity manifest."""
+    assert_unmanaged_mutation_paths((directory,))
     if type(manifest) is not ReconstructionActivityManifestV1:
         raise TypeError("activity persistence requires a v1 manifest")
     from histdatacom.broker_plugin_policy.bindings import _restore_native

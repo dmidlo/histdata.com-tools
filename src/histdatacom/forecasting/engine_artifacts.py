@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from histdatacom.managed_artifact_boundary import (
+    assert_unmanaged_mutation_paths,
+)
+
 import hashlib
 import os
 import tempfile
@@ -48,6 +52,7 @@ def _restore(text: str) -> ForecastEngineArtifact:
 def write_engine_artifact(
     artifact: ForecastEngineArtifact, directory: str | Path
 ) -> Path:
+    assert_unmanaged_mutation_paths((directory,))
     if not isinstance(
         artifact,
         (

@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from histdatacom.managed_artifact_boundary import (
+    assert_unmanaged_mutation_paths,
+)
+
 import json
 import os
 import signal
@@ -693,6 +697,16 @@ class OrchestrationSupervisor:
         startup_timeout: float = DEFAULT_STARTUP_TIMEOUT_SECONDS,
     ) -> OrchestrationStatus:
         """Start the orchestration, or return running status if already healthy."""
+        assert_unmanaged_mutation_paths(
+            (
+                self.paths.runtime_dir,
+                self.paths.state_dir,
+                self.paths.logs_dir,
+                self.paths.sqlite_dir,
+                self.paths.manifests_dir,
+            ),
+            recursive=True,
+        )
         current = self.status(repair=True)
         if current.running:
             return self._status(
@@ -986,6 +1000,8 @@ class OrchestrationSupervisor:
 
     def _acquire_lock(self) -> None:
         """Create the transient supervisor lock file."""
+        assert_unmanaged_mutation_paths((self.paths.lock_file,))
+        assert_unmanaged_mutation_paths((self.paths.state_dir,))
         self.paths.state_dir.mkdir(parents=True, exist_ok=True)
         if self.paths.lock_file.exists():
             try:
@@ -1010,6 +1026,7 @@ class OrchestrationSupervisor:
 
     def _release_lock(self) -> None:
         """Remove the transient supervisor lock file."""
+        assert_unmanaged_mutation_paths((self.paths.lock_file,))
         self.paths.lock_file.unlink(missing_ok=True)
 
     def _read_state(self) -> dict[str, Any]:
@@ -1021,6 +1038,7 @@ class OrchestrationSupervisor:
 
     def _write_state(self, state: Mapping[str, Any]) -> None:
         """Write persisted orchestration process state."""
+        assert_unmanaged_mutation_paths((self.paths.pid_file,))
         self.paths.pid_file.write_text(
             json.dumps(dict(state), indent=2, sort_keys=True),
             encoding="utf-8",
@@ -1516,6 +1534,7 @@ class OrchestrationSupervisor:
         log_path: Path,
     ) -> Any:
         """Launch one orchestration component process."""
+        assert_unmanaged_mutation_paths((log_path,))
         log_path.parent.mkdir(parents=True, exist_ok=True)
         log = log_path.open("ab")
         try:
@@ -2044,6 +2063,12 @@ class OrchestrationSupervisor:
 
     def _remove_state_files(self) -> None:
         """Remove PID and lock files."""
+        assert_unmanaged_mutation_paths(
+            (
+                self.paths.pid_file,
+                self.paths.lock_file,
+            )
+        )
         self.paths.pid_file.unlink(missing_ok=True)
         self.paths.lock_file.unlink(missing_ok=True)
 

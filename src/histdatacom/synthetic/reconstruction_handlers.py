@@ -10,6 +10,10 @@ recovered without referring to a vanished staging path.
 
 from __future__ import annotations
 
+from histdatacom.managed_artifact_boundary import (
+    assert_unmanaged_mutation_paths,
+)
+
 import asyncio
 import gzip
 import hashlib
@@ -500,6 +504,9 @@ def proposal_handler(
     invocation: ReconstructionStageInvocationV1,
 ) -> ReconstructionStageOutcomeV1:
     """Dispatch the explicitly qualified engine selected by the portfolio."""
+    assert_unmanaged_mutation_paths(
+        (invocation.task.scratch_directory,), recursive=True
+    )
     started = time.perf_counter()
     ledger_stream: Any | None = None
     ledger_raw_stream: Any | None = None
@@ -1515,6 +1522,9 @@ def carving_handler(
     invocation: ReconstructionStageInvocationV1,
 ) -> ReconstructionStageOutcomeV1:
     """Apply historical carving and materialize accepted narrow streams."""
+    assert_unmanaged_mutation_paths(
+        (invocation.task.scratch_directory,), recursive=True
+    )
     started = time.perf_counter()
     ledger_stream: Any | None = None
     ledger_raw_stream: Any | None = None
@@ -2000,6 +2010,9 @@ def validation_handler(
     invocation: ReconstructionStageInvocationV1,
 ) -> ReconstructionStageOutcomeV1:
     """Enforce scientific gates, then stage an atomic v2 publication."""
+    assert_unmanaged_mutation_paths(
+        (invocation.task.scratch_directory,), recursive=True
+    )
     started = time.perf_counter()
     staged: (
         StagedReconstructionPublicationV2
@@ -4306,6 +4319,9 @@ def _completed(
 def _cancel_if_requested(invocation: ReconstructionStageInvocationV1) -> None:
     if not invocation.cancellation_requested:
         return
+    assert_unmanaged_mutation_paths(
+        (invocation.task.scratch_directory,), recursive=True
+    )
     shutil.rmtree(invocation.task.scratch_directory, ignore_errors=True)
     raise asyncio.CancelledError
 
@@ -4316,6 +4332,9 @@ def _cleanup_committed_window_scratch(
     recovery_ref: ArtifactRef,
 ) -> int:
     """Remove committed intermediates while retaining atomic retry evidence."""
+    assert_unmanaged_mutation_paths(
+        (invocation.task.scratch_directory,), recursive=True
+    )
     verify_artifact_ref(recovery_ref)
     root = Path(invocation.task.scratch_directory).expanduser().resolve()
     recovery_path = Path(recovery_ref.path).expanduser().resolve()
@@ -4339,19 +4358,21 @@ def _cleanup_committed_window_scratch(
 def _stage_directory(
     invocation: ReconstructionStageInvocationV1, name: str
 ) -> Path:
+    assert_unmanaged_mutation_paths((invocation.task.scratch_directory,))
+    root = Path(invocation.task.scratch_directory).expanduser().resolve()
+    assert_unmanaged_mutation_paths((root / name,))
+    directory = (root / name).resolve()
+    if not directory.is_relative_to(root):
+        raise ValueError("stage directory escaped window scratch")
     storage = verify_reconstruction_storage_for_execution(
         invocation.command.configuration_refs[0]
     )
     if storage is None:
         raise ValueError("first-party stage lacks a storage-root guard")
     _, guard = storage
-    root = Path(invocation.task.scratch_directory).expanduser().resolve()
     require_guarded_storage_path(
         guard, root, role="scratch", allow_descendant=True
     )
-    directory = (root / name).resolve()
-    if not directory.is_relative_to(root):
-        raise ValueError("stage directory escaped window scratch")
     return directory
 
 

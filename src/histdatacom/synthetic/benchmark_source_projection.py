@@ -10,6 +10,10 @@ Arrow record-batch boundaries.
 
 from __future__ import annotations
 
+from histdatacom.managed_artifact_boundary import (
+    assert_unmanaged_mutation_paths,
+)
+
 import hashlib
 import json
 import os
@@ -314,6 +318,7 @@ def build_benchmark_source_projection_manifest(
     frozen_at_utc: str,
 ) -> BenchmarkSourceProjectionManifestV1:
     """Create and verify canonical projections for explicitly pinned parents."""
+    assert_unmanaged_mutation_paths((projection_root,), recursive=True)
     source_root = Path(parent_root).expanduser().resolve()
     target_root = Path(projection_root).expanduser().resolve()
     if not source_root.is_dir():
@@ -367,6 +372,7 @@ def build_benchmark_source_projection_manifest(
         )
         output_directory.mkdir(parents=True, exist_ok=True)
         temporary = output_directory / f".source-projection.{os.getpid()}.tmp"
+        assert_unmanaged_mutation_paths((temporary,))
         temporary.unlink(missing_ok=True)
         try:
             parent_scan = _write_projection(parent_path, temporary)
@@ -445,6 +451,7 @@ def write_benchmark_source_projection_manifest(
     artifact_directory: str | Path,
 ) -> ArtifactRef:
     """Write a content-addressed, row-free projection manifest."""
+    assert_unmanaged_mutation_paths((artifact_directory,))
     if not isinstance(manifest, BenchmarkSourceProjectionManifestV1):
         raise TypeError("projection manifest must use the v1 contract")
     content = manifest.to_json().encode("utf-8") + b"\n"
@@ -732,11 +739,13 @@ def _file_identity(path: Path) -> tuple[int, int, int, int, int]:
 
 
 def _write_once(path: Path, content: bytes) -> None:
+    assert_unmanaged_mutation_paths((path,))
     if path.exists():
         if path.read_bytes() != content:
             raise ValueError("content-addressed projection artifact differs")
         return
     temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    assert_unmanaged_mutation_paths((temporary,))
     try:
         with temporary.open("xb") as handle:
             handle.write(content)

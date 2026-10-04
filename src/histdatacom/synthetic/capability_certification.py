@@ -8,6 +8,10 @@ evaluation and dossier verification repeats the concrete evidence dispatch.
 
 from __future__ import annotations
 
+from histdatacom.managed_artifact_boundary import (
+    assert_unmanaged_mutation_paths,
+)
+
 import hashlib
 import html
 import json
@@ -469,6 +473,7 @@ def render_capability_certification_markdown(
 
 def _publish_exact(path: Path, encoded: bytes) -> None:
     """Publish without replacing an existing, potentially unrelated artifact."""
+    assert_unmanaged_mutation_paths((path,))
     path.parent.mkdir(parents=True, exist_ok=True)
     descriptor, temporary = tempfile.mkstemp(
         prefix=".capability-", dir=path.parent

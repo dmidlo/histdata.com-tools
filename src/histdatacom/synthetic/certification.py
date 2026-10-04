@@ -7,6 +7,10 @@ frames, model objects, or other tick-sized intermediates.
 
 from __future__ import annotations
 
+from histdatacom.managed_artifact_boundary import (
+    assert_unmanaged_mutation_paths,
+)
+
 import hashlib
 import json
 import math
@@ -2472,6 +2476,14 @@ def write_reconstruction_certification_dossier(
     markdown_path: str | Path,
 ) -> tuple[ArtifactRef, ArtifactRef]:
     """Atomically publish machine and human certification reports."""
+    raw_json = Path(json_path).expanduser()
+    assert_unmanaged_mutation_paths(
+        (
+            json_path,
+            markdown_path,
+            raw_json.with_name(raw_json.name + ".provider-policy.json"),
+        )
+    )
     if not isinstance(dossier, ReconstructionCertificationDossierV1):
         raise TypeError("certification publication requires a v1 dossier")
     from histdatacom.broker_plugin_policy import (
@@ -2868,10 +2880,12 @@ def _artifact_ref(
 
 
 def _atomic_write(path: Path, payload: bytes) -> None:
+    assert_unmanaged_mutation_paths((path,))
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(
         f".{path.name}.tmp-{hashlib.sha256(payload).hexdigest()[:12]}"
     )
+    assert_unmanaged_mutation_paths((temporary,))
     try:
         with temporary.open("wb") as stream:
             stream.write(payload)

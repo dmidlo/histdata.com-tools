@@ -7,6 +7,10 @@ replay and current provider rights. A path is never a provenance identity.
 
 from __future__ import annotations
 
+from histdatacom.managed_artifact_boundary import (
+    assert_unmanaged_mutation_paths,
+)
+
 import hashlib
 import os
 import re
@@ -197,6 +201,7 @@ def write_broker_scientific_lineage(
     maximum_bytes: int,
 ) -> int:
     """Write a bounded no-clobber parent envelope before the native commit."""
+    assert_unmanaged_mutation_paths((native_path,))
     from .contracts import BrokerPolicyOperation
     from .scope import require_provider_operation
     from .storage import _path, _sync

@@ -116,7 +116,10 @@ def test_storage_backed_campaign_plan_updates_repo_before_cache_cleanup() -> (
     )
     assert commands[2] == {
         "step": "cleanup_after_repo_quality",
-        "command": "find data/ASCII/T/audusd -name .data -type f -delete",
+        "command": (
+            "python -m histdatacom.managed_artifact_boundary "
+            "--cleanup-mode cache -- data/ASCII/T/audusd"
+        ),
         "preserves_repo": True,
         "preserves_quality_reports": True,
     }
@@ -173,7 +176,9 @@ def test_storage_backed_campaign_plan_can_remove_slice_artifacts() -> None:
     )
     assert cleanup["step"] == "cleanup_after_repo_quality"
     assert cleanup["command"] == (
-        "rm -rf '/Volumes/histdata/data root/ASCII/T/audusd'"
+        "python -m histdatacom.managed_artifact_boundary "
+        "--cleanup-mode working-artifacts -- "
+        "'/Volumes/histdata/data root/ASCII/T/audusd'"
     )
 
 

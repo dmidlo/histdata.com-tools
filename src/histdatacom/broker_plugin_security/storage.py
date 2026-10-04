@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from histdatacom.managed_artifact_boundary import (
+    assert_unmanaged_mutation_paths,
+)
+
 from collections.abc import Callable
 import os
 from pathlib import Path
@@ -51,6 +55,7 @@ def write_security_receipt(
     before_persist: Callable[[str], None] | None = None,
 ) -> None:
     """Create once without clobbering; caller owns the separate output path."""
+    assert_unmanaged_mutation_paths((path,))
     from histdatacom.broker_plugin_policy.bindings import BrokerSDKSecurityV1
     from histdatacom.broker_plugin_policy.contracts import BrokerPolicyOperation
     from histdatacom.broker_plugin_policy.scope import (

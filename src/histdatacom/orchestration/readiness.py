@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from histdatacom.managed_artifact_boundary import (
+    assert_unmanaged_mutation_paths,
+)
+
 import json
 from datetime import datetime, timezone
 from pathlib import Path
@@ -42,6 +46,7 @@ def write_worker_readiness_payload(
     output.setdefault("lane", resolved_lane.value)
     output.setdefault("updated_at_utc", _utc_now())
     path = worker_readiness_path(state_dir, resolved_lane)
+    assert_unmanaged_mutation_paths((path,))
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         json.dumps(output, indent=2, sort_keys=True),
@@ -97,6 +102,7 @@ def remove_worker_readiness(
     lane: str | TaskQueueLane | None = None,
 ) -> None:
     """Remove worker readiness markers."""
+    assert_unmanaged_mutation_paths((state_dir,), recursive=True)
     if lane is not None:
         worker_readiness_path(state_dir, lane).unlink(missing_ok=True)
         return

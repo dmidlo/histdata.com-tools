@@ -18,6 +18,10 @@ there, and promoted with one atomic rename.  Discovery looks only below
 
 from __future__ import annotations
 
+from histdatacom.managed_artifact_boundary import (
+    assert_unmanaged_mutation_paths,
+)
+
 import hashlib
 import json
 import math
@@ -3050,6 +3054,7 @@ def stage_reconstruction_publication(
     row_group_size: int = DEFAULT_RECONSTRUCTION_ROW_GROUP_SIZE,
 ) -> StagedReconstructionPublicationV1:
     """Write and validate one synchronized group below hidden scratch."""
+    assert_unmanaged_mutation_paths((root,))
     _require_broker_policy(rendered_group, "material_use")
     _require_broker_policy(rendered_group, "retain_local")
     _validate_publication_inputs(rendered_group, retention_plan, storage_policy)
@@ -3078,6 +3083,7 @@ def stage_reconstruction_publication(
         symbol_group_id=group_id,
     )
     scratch = axis_directory / ".scratch"
+    assert_unmanaged_mutation_paths((scratch,))
     _require_broker_policy(rendered_group.manifest, "retain_local")
     scratch.mkdir(parents=True, exist_ok=True)
     staging_directory = Path(
@@ -3196,6 +3202,9 @@ def commit_reconstruction_publication(
     """Revalidate and atomically promote one staged publication."""
     if not isinstance(staged, StagedReconstructionPublicationV1):
         raise TypeError("commit requires a staged reconstruction publication")
+    assert_unmanaged_mutation_paths(
+        (staged.staging_directory, staged.committed_directory), recursive=True
+    )
     manifest = staged.manifest
     _require_broker_policy(manifest, "material_use")
     _require_broker_policy(manifest, "retain_local")
@@ -3340,6 +3349,13 @@ def stage_delivery_reconstruction_publication(
     row_group_size: int = DEFAULT_RECONSTRUCTION_ROW_GROUP_SIZE,
 ) -> StagedReconstructionPublicationV2 | StagedReconstructionPublicationV3:
     """Stage one validated generic-delivery group in cancellable scratch."""
+    assert_unmanaged_mutation_paths(
+        (
+            root,
+            staging_root,
+        ),
+        recursive=True,
+    )
     _validate_delivery_publication_inputs(
         delivered_group,
         final_validation,
@@ -3611,6 +3627,9 @@ def commit_delivery_reconstruction_publication(
         raise TypeError(
             "delivery commit requires a staged delivery publication"
         )
+    assert_unmanaged_mutation_paths(
+        (staged.staging_directory, staged.committed_directory), recursive=True
+    )
     manifest = staged.manifest
     if storage_guard_ref is not None:
         guard = verify_reconstruction_storage_root_guard(
@@ -4143,6 +4162,7 @@ def read_reconstruction_streams(
 
 def cleanup_reconstruction_scratch(root: str | Path) -> tuple[Path, ...]:
     """Remove only unpublished transaction directories below ``.scratch``."""
+    assert_unmanaged_mutation_paths((root,), recursive=True)
     root_path = Path(root).expanduser().resolve()
     product_root = root_path / RECONSTRUCTION_PRODUCT_DIRECTORY
     if not product_root.exists():
@@ -4402,8 +4422,10 @@ def _materialize_portable_source_artifacts(
     artifacts_by_series_id: Mapping[str, ArtifactRef],
 ) -> dict[str, ArtifactRef]:
     """Deduplicate exact source Arrow files beneath the retained bundle root."""
+    assert_unmanaged_mutation_paths((root,))
     product_root = root / RECONSTRUCTION_PRODUCT_DIRECTORY
     source_root = product_root / "source-artifacts"
+    assert_unmanaged_mutation_paths((source_root,))
     source_root.mkdir(parents=True, exist_ok=True)
     portable: dict[str, ArtifactRef] = {}
     for series_id, artifact in sorted(artifacts_by_series_id.items()):
@@ -4532,6 +4554,7 @@ def _write_product_partitions(
             )
             relative = _partition_relative_path(stream.symbol, event_date)
             target = staging_directory / relative
+            assert_unmanaged_mutation_paths((target,))
             if provider_subject is not None:
                 _require_broker_policy(provider_subject, "retain_local")
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -4675,8 +4698,10 @@ def _write_parquet_partition(
     anchor_event_ids: Sequence[str] = (),
     provider_subject: object | None = None,
 ) -> None:
-    _, pq = _arrow_modules()
+    assert_unmanaged_mutation_paths((target,))
     partial = target.with_name(target.name + ".partial")
+    assert_unmanaged_mutation_paths((partial,))
+    _, pq = _arrow_modules()
     try:
         if provider_subject is not None:
             _require_broker_policy(provider_subject, "retain_local")
@@ -5665,6 +5690,7 @@ def _artifact_ref_for_manifest(
 def _atomic_write_bytes(
     path: Path, payload: bytes, *, provider_subject: object | None = None
 ) -> None:
+    assert_unmanaged_mutation_paths((path,))
     if provider_subject is not None:
         _require_broker_policy(provider_subject, "retain_local")
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -5708,6 +5734,7 @@ def _fsync_directory(path: Path) -> None:
 
 
 def _remove_scratch_entry(path: Path, root: Path) -> None:
+    assert_unmanaged_mutation_paths((path,), recursive=True)
     root_resolved = root.resolve()
     if path.is_symlink():
         path.unlink(missing_ok=True)

@@ -10,6 +10,10 @@ point-in-time bridge to the reconstruction information audit.
 
 from __future__ import annotations
 
+from histdatacom.managed_artifact_boundary import (
+    assert_unmanaged_mutation_paths,
+)
+
 from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -1900,6 +1904,7 @@ def write_reference_motif_index(
     path: str | Path,
 ) -> ArtifactRef:
     """Atomically write an index and return a content-verifiable reference."""
+    assert_unmanaged_mutation_paths((path,))
     if not isinstance(index, ReferenceMotifIndexV1):
         raise ValueError("reference motif writer requires a v1 index")
     target = Path(path)
@@ -1910,6 +1915,7 @@ def write_reference_motif_index(
         )
     target.parent.mkdir(parents=True, exist_ok=True)
     temporary = target.with_name(f".{target.name}.{os.getpid()}.tmp")
+    assert_unmanaged_mutation_paths((temporary,))
     try:
         temporary.write_bytes(payload)
         temporary.replace(target)

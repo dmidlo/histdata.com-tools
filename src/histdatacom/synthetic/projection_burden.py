@@ -14,6 +14,10 @@ the L1 bid/ask movement divided by that scale.
 
 from __future__ import annotations
 
+from histdatacom.managed_artifact_boundary import (
+    assert_unmanaged_mutation_paths,
+)
+
 import hashlib
 import json
 import math
@@ -2452,6 +2456,7 @@ def write_projection_burden_report(
     report: ProjectionBurdenReportV1, output_directory: str | Path
 ) -> ArtifactRef:
     """Write one bounded content-addressed report and verify readback."""
+    assert_unmanaged_mutation_paths((output_directory,))
     root = Path(output_directory).expanduser().resolve()
     root.mkdir(parents=True, exist_ok=True)
     encoded = report.to_json().encode("utf-8") + b"\n"
@@ -2501,6 +2506,7 @@ def write_projection_burden_release_coverage(
     coverage: ProjectionBurdenReleaseCoverageV1, output_directory: str | Path
 ) -> ArtifactRef:
     """Write the content-addressed certification handoff and verify readback."""
+    assert_unmanaged_mutation_paths((output_directory,))
     root = Path(output_directory).expanduser().resolve()
     root.mkdir(parents=True, exist_ok=True)
     encoded = coverage.to_json().encode("utf-8") + b"\n"
@@ -3278,6 +3284,7 @@ def _text_digest(values: Any) -> str:
 
 
 def _write_once(path: Path, encoded: bytes) -> None:
+    assert_unmanaged_mutation_paths((path,))
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
     try:
         descriptor = os.open(path, flags, 0o644)

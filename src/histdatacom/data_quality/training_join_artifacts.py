@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from histdatacom.managed_artifact_boundary import (
+    assert_unmanaged_mutation_paths,
+)
+
 import hashlib
 import os
 import tempfile
@@ -21,6 +25,7 @@ from .training_provider_policy import (
 def write_training_join_artifact(
     batch: TrainingJoinBatchV1, directory: str | Path
 ) -> Path:
+    assert_unmanaged_mutation_paths((directory,))
     subject = training_provider_subject(batch)
     require_training_retention(subject)
     replay_training_joins(batch)

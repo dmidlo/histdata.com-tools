@@ -7,6 +7,10 @@ strong :class:`~histdatacom.runtime_contracts.ArtifactRef` objects only.
 
 from __future__ import annotations
 
+from histdatacom.managed_artifact_boundary import (
+    assert_unmanaged_mutation_paths,
+)
+
 import asyncio
 import hashlib
 import inspect
@@ -1791,6 +1795,7 @@ def write_reconstruction_report(
         / ".histdatacom"
         / RECONSTRUCTION_REPORT_DIRECTORY
     )
+    assert_unmanaged_mutation_paths((root, directory))
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / f"{_safe_filename(report.request_id)}.json"
     payload = report.to_json().encode("utf-8")
@@ -1842,6 +1847,7 @@ def artifact_ref_for_file(
 
 def cleanup_reconstruction_window_scratch(path: str | Path) -> bool:
     """Remove only the explicitly scoped uncommitted window scratch tree."""
+    assert_unmanaged_mutation_paths((path,), recursive=True)
     target = Path(path).expanduser()
     if not target.exists():
         return False
@@ -2030,6 +2036,7 @@ def _read_stage_receipt(path: Path) -> ReconstructionStageOutcomeV1:
 def _write_stage_receipt(
     path: Path, outcome: ReconstructionStageOutcomeV1
 ) -> None:
+    assert_unmanaged_mutation_paths((path,))
     payload = outcome.to_json().encode("utf-8")
     if path.exists():
         existing = _read_stage_receipt(path)
@@ -2043,6 +2050,7 @@ def _write_stage_receipt(
 
 
 def _atomic_write(path: Path, payload: bytes) -> None:
+    assert_unmanaged_mutation_paths((path,))
     path.parent.mkdir(parents=True, exist_ok=True)
     descriptor, temporary = tempfile.mkstemp(
         prefix=f".{path.name}.", dir=path.parent

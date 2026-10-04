@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from histdatacom.managed_artifact_boundary import (
+    assert_unmanaged_mutation_paths,
+)
+
 import hashlib
 import os
 import tempfile
@@ -28,6 +32,7 @@ def _restore(text: str) -> ForecastBenchmarkArtifact:
 def write_benchmark_artifact(
     artifact: ForecastBenchmarkArtifact, directory: str | Path
 ) -> Path:
+    assert_unmanaged_mutation_paths((directory,))
     if type(artifact) not in (ForecastBenchmarkSuiteV1, ForecastBenchmarkRunV1):
         raise TypeError(
             "benchmark writer requires a full suite or executed run"

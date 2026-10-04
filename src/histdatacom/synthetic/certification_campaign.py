@@ -7,6 +7,10 @@ through a declared JSON pointer and remains bound to every supporting artifact.
 
 from __future__ import annotations
 
+from histdatacom.managed_artifact_boundary import (
+    assert_unmanaged_mutation_paths,
+)
+
 import hashlib
 import json
 import os
@@ -676,10 +680,12 @@ def _json_bytes_mapping(encoded: bytes, path: Path) -> Mapping[str, Any]:
 
 
 def _atomic_write(path: Path, payload: bytes) -> None:
+    assert_unmanaged_mutation_paths((path,))
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(
         f".{path.name}.tmp-{hashlib.sha256(payload).hexdigest()[:12]}"
     )
+    assert_unmanaged_mutation_paths((temporary,))
     try:
         with temporary.open("wb") as stream:
             stream.write(payload)

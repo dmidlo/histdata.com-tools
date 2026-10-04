@@ -96,6 +96,7 @@ Persistence, projections, and validation
    :maxdepth: 2
 
    reconstruction-persistence-contracts
+   artifact-retention
    reconstruction-activity-semantics
    derived-bar-contracts
    causal-bar-features

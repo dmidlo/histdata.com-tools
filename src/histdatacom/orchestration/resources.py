@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from histdatacom.managed_artifact_boundary import (
+    assert_unmanaged_mutation_paths,
+)
+
 import json
 import os
 import platform
@@ -618,6 +622,7 @@ def prune_temporal_runtime_cache(
         if cache_dir is not None
         else default_temporal_runtime_cache_dir(environ=env)
     )
+    assert_unmanaged_mutation_paths((root,), recursive=True)
     current_path: Path | None = None
     if keep_current:
         loaded_index = index or load_temporal_runtime_index()
@@ -825,8 +830,14 @@ def _provision_temporal_runtime(
     download_timeout: float,
     lock_timeout: float,
 ) -> TemporalRuntimeResolution:
-    entry_dir.parent.mkdir(parents=True, exist_ok=True)
     lock_dir = entry_dir.with_name(f"{entry_dir.name}.lock")
+    temporary_dir = entry_dir.with_name(
+        f".{entry_dir.name}.{os.getpid()}.{time.monotonic_ns()}.tmp"
+    )
+    assert_unmanaged_mutation_paths(
+        (entry_dir, lock_dir, temporary_dir), recursive=True
+    )
+    entry_dir.parent.mkdir(parents=True, exist_ok=True)
     with _DirectoryLock(lock_dir, timeout=lock_timeout):
         cached = _cache_resolution(entry_dir, artifact, index)
         if cached is not None:
@@ -835,9 +846,7 @@ def _provision_temporal_runtime(
         if entry_dir.exists():
             shutil.rmtree(entry_dir)
 
-        temporary_dir = entry_dir.with_name(
-            f".{entry_dir.name}.{os.getpid()}.{time.monotonic_ns()}.tmp"
-        )
+        assert_unmanaged_mutation_paths((temporary_dir,), recursive=True)
         if temporary_dir.exists():
             shutil.rmtree(temporary_dir)
         try:
@@ -908,6 +917,7 @@ class _DirectoryLock:
         self.timeout = timeout
 
     def __enter__(self) -> "_DirectoryLock":
+        assert_unmanaged_mutation_paths((self.path,), recursive=True)
         deadline = time.monotonic() + self.timeout
         while True:
             try:
@@ -930,6 +940,7 @@ class _DirectoryLock:
                 time.sleep(DEFAULT_TEMPORAL_RUNTIME_LOCK_POLL_SECONDS)
 
     def __exit__(self, *_exc_info: object) -> None:
+        assert_unmanaged_mutation_paths((self.path,), recursive=True)
         shutil.rmtree(self.path, ignore_errors=True)
 
 

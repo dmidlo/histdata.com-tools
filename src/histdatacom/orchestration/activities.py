@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from histdatacom.managed_artifact_boundary import (
+    assert_unmanaged_mutation_paths,
+)
+
 import asyncio
 import contextvars
 from dataclasses import replace
@@ -665,7 +669,8 @@ def reconstruction_window_activity(
                 )
             cleanup_reconstruction_window_scratch(task.scratch_directory)
             raise
-    return cast(dict[str, Any], state.to_dict())
+    result_payload: dict[str, Any] = state.to_dict()
+    return result_payload
 
 
 @activity_defn(name="reconstruction_report")
@@ -1051,6 +1056,7 @@ def _quality_report_disposition(
     }
     if explicit or not success:
         return disposition
+    assert_unmanaged_mutation_paths((artifact.path,))
     try:
         Path(artifact.path).unlink()
     except FileNotFoundError:

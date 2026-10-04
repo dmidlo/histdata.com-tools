@@ -2,6 +2,13 @@
 
 from __future__ import annotations
 
+from itertools import islice
+
+from histdatacom.managed_artifact_boundary import (
+    MAX_BOUNDARY_PATHS,
+    assert_unmanaged_mutation_paths,
+)
+
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -310,6 +317,8 @@ def cleanup_partial_artifacts(
     paths: Iterable[Path],
 ) -> tuple[CleanupResult, ...]:
     """Remove partial artifact candidates and report each action."""
+    paths = tuple(islice(paths, MAX_BOUNDARY_PATHS + 1))
+    assert_unmanaged_mutation_paths(paths)
     results: list[CleanupResult] = []
     for path in paths:
         try:

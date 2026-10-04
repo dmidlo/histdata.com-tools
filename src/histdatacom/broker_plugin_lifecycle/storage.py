@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from histdatacom.managed_artifact_boundary import (
+    assert_unmanaged_mutation_paths,
+)
+
 from collections.abc import Callable, Iterator
 from copy import copy
 from dataclasses import dataclass, replace
@@ -69,6 +73,7 @@ class Journal:
         provider_request: BrokerSDKInvocationV1,
         before_persist: Callable[[str], None] | None = None,
     ) -> None:
+        assert_unmanaged_mutation_paths((directory,))
         from histdatacom.broker_plugin_capabilities.execution import (
             _provider_request,
         )
@@ -100,6 +105,8 @@ class Journal:
         )
 
     def append(self, record: BrokerLifecycleRecordV1) -> None:
+        assert_unmanaged_mutation_paths((self.directory,))
+        assert_unmanaged_mutation_paths((self._name(),))
         if self.poisoned:
             raise BrokerLifecycleError(Reason.PERSISTENCE)
         from histdatacom.broker_plugin_permissions.scope import (
@@ -209,6 +216,8 @@ class Journal:
         )
 
     def seal(self) -> None:
+        assert_unmanaged_mutation_paths((self.directory,))
+        assert_unmanaged_mutation_paths((self._name(), self._name(False)))
         receipt = self._receipt()
         if receipt is None:
             return
@@ -226,6 +235,15 @@ class Journal:
         self.bytes = self.records = self.events = 0
 
     def publish(self, manifest: BrokerLifecycleManifestV1) -> None:
+        temporary = self.directory / "manifest.pending"
+        assert_unmanaged_mutation_paths(
+            (
+                self.directory,
+                temporary,
+                self.directory / "manifest.json",
+                self.directory / "manifest.json.provider-policy.json",
+            )
+        )
         from histdatacom.broker_plugin_policy.bindings import (
             BrokerSDKLifecycleV1,
         )
@@ -254,7 +272,7 @@ class Journal:
             before_persist=self.before_persist,
         )
         self._remaining_bytes(len(encoded))
-        temporary = self.directory / "manifest.pending"
+        assert_unmanaged_mutation_paths((temporary,))
         descriptor = os.open(
             temporary,
             os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,

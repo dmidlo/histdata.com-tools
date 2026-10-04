@@ -10,6 +10,10 @@ from a common semantic parent, and compares replicate feature distributions.
 
 from __future__ import annotations
 
+from histdatacom.managed_artifact_boundary import (
+    assert_unmanaged_mutation_paths,
+)
+
 import hashlib
 import json
 import math
@@ -1941,6 +1945,7 @@ def _write_contract(
     kind: str,
     metadata: Mapping[str, JSONValue],
 ) -> ArtifactRef:
+    assert_unmanaged_mutation_paths((output_directory,))
     payload = (text + "\n").encode("utf-8")
     if len(payload) > MAX_PARTITION_ARTIFACT_BYTES:
         raise ValueError("partition qualification artifact exceeds size limit")

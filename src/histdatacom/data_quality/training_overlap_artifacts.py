@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from histdatacom.managed_artifact_boundary import (
+    assert_unmanaged_mutation_paths,
+)
+
 import hashlib
 import os
 import stat
@@ -96,6 +100,7 @@ def _fsync_directory(root: Path) -> None:
 def write_training_overlap_artifact(
     batch: TrainingOverlapBatchV1, directory: str | Path
 ) -> Path:
+    assert_unmanaged_mutation_paths((directory,))
     subject = training_provider_subject(batch)
     require_training_retention(subject)
     replay_training_overlap(batch)

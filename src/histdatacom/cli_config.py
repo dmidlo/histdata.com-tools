@@ -336,7 +336,23 @@ _GROUPS_TRUE_FLAG_ARGS = {
     "triangles": "--triangles",
 }
 _GROUPS_ALLOWED_KEYS = {"command", "group"} | set(_GROUPS_TRUE_FLAG_ARGS)
-_CLEANUP_COMMANDS = {"sources", "status", "transient-sources"}
+_ARTIFACT_CLEANUP_COMMANDS = {
+    "artifacts-inspect",
+    "artifacts-plan",
+    "artifacts-apply",
+}
+_CLEANUP_COMMANDS = {
+    "sources",
+    "status",
+    "transient-sources",
+    *_ARTIFACT_CLEANUP_COMMANDS,
+}
+_ARTIFACT_CLEANUP_SCALAR_ARGS = {
+    "store": "--store",
+    "plan": "--plan",
+    "cutoff_ns": "--cutoff-ns",
+    "output": "--output",
+}
 _CLEANUP_ALIASES = {
     **_COMMAND_KEY_ALIASES,
     "cleanup_command": "command",
@@ -366,6 +382,7 @@ _CLEANUP_ALLOWED_KEYS = (
     | set(_CLEANUP_TRUE_FLAG_ARGS)
     | set(_CLEANUP_SCALAR_ARGS)
     | set(_CLEANUP_LIST_ARGS)
+    | set(_ARTIFACT_CLEANUP_SCALAR_ARGS)
 )
 _RECONSTRUCTION_COMMANDS = {
     "cancel",
@@ -791,20 +808,93 @@ def configured_analytics_argv(args: Sequence[str]) -> list[str]:
 
 
 def configured_cleanup_argv(args: Sequence[str]) -> list[str]:
-    """Return cleanup argv with YAML defaults injected."""
-    return _configured_subcommand_argv(
-        args,
-        section_name="cleanup",
-        commands=_CLEANUP_COMMANDS,
+    """Expand cleanup defaults without promoting a flag value to a command."""
+    config_path = config_path_from_cli_args(args)
+    explicit_args = strip_config_option(args)
+    if not config_path:
+        return explicit_args
+    config = _normalized_section_mapping(
+        _section_mapping(config_path, "cleanup"),
         allowed_keys=_CLEANUP_ALLOWED_KEYS,
         aliases=_CLEANUP_ALIASES,
-        global_true_flags=_COMMON_TRUE_FLAG_ARGS,
-        global_scalar_args={},
-        global_list_args={},
-        command_true_flags=_CLEANUP_TRUE_FLAG_ARGS,
-        command_scalar_args=_CLEANUP_SCALAR_ARGS,
-        command_list_args=_CLEANUP_LIST_ARGS,
+        section_name="cleanup",
     )
+    prefix, explicit_command, suffix = _split_cleanup_command(explicit_args)
+    configured_command = _command_from_config(
+        config,
+        section_name="cleanup",
+        commands=_CLEANUP_COMMANDS,
+    )
+    command = explicit_command or configured_command
+    declared = configured_command or command
+    artifact_keys = set(_ARTIFACT_CLEANUP_SCALAR_ARGS)
+    if declared in _ARTIFACT_CLEANUP_COMMANDS:
+        allowed = {"command", "json", "store", "output"}
+        if declared == "artifacts-plan":
+            allowed.add("cutoff_ns")
+        elif declared == "artifacts-apply":
+            allowed.add("plan")
+        unsupported = set(config) - allowed
+        if unsupported:
+            raise CliConfigError(
+                f"unsupported {declared} config option(s): "
+                + ", ".join(sorted(unsupported))
+            )
+    elif set(config) & artifact_keys:
+        raise CliConfigError(
+            "artifact config options require an artifact command"
+        )
+    global_args = _mapped_args(
+        config, true_flags=_COMMON_TRUE_FLAG_ARGS, scalar_args={}, list_args={}
+    )
+    command_args: list[str] = []
+    if _include_command_defaults(configured_command, command):
+        if command in _ARTIFACT_CLEANUP_COMMANDS:
+            command_args = _mapped_args(
+                config,
+                true_flags={},
+                scalar_args=_ARTIFACT_CLEANUP_SCALAR_ARGS,
+                list_args={},
+            )
+        else:
+            command_args = _mapped_args(
+                config,
+                true_flags=_CLEANUP_TRUE_FLAG_ARGS,
+                scalar_args=_CLEANUP_SCALAR_ARGS,
+                list_args=_CLEANUP_LIST_ARGS,
+            )
+    if command:
+        if not explicit_command:
+            # Put a configured command before a trailing nargs='+' option;
+            # otherwise argparse consumes the command as another option value.
+            return [*global_args, command, *command_args, *explicit_args]
+        return [*global_args, *prefix, command, *command_args, *suffix]
+    return [*global_args, *explicit_args]
+
+
+def _split_cleanup_command(
+    args: Sequence[str],
+) -> tuple[list[str], str, list[str]]:
+    """Match argparse's cleanup option arities, including list-valued flags."""
+    scalar_flags = set(_CLEANUP_SCALAR_ARGS.values()) | set(
+        _ARTIFACT_CLEANUP_SCALAR_ARGS.values()
+    )
+    list_flags = set(_CLEANUP_LIST_ARGS.values()) | {"-p", "-t", "-f"}
+    index = 0
+    while index < len(args):
+        arg = args[index]
+        if arg in scalar_flags:
+            index += 2
+            continue
+        if arg in list_flags:
+            index += 1
+            while index < len(args) and not args[index].startswith("-"):
+                index += 1
+            continue
+        if arg in _CLEANUP_COMMANDS:
+            return list(args[:index]), arg, list(args[index + 1 :])
+        index += 1
+    return list(args), "", []
 
 
 def configured_groups_argv(args: Sequence[str]) -> list[str]:

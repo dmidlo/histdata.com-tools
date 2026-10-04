@@ -599,13 +599,19 @@ def _cleanup_policy(cleanup_mode: str) -> dict[str, JSONValue]:
             command_shape = ""
         case "cache":
             removes = "canonical .data cache files under each slice target"
-            command_shape = "find <slice-target> -name .data -type f -delete"
+            command_shape = (
+                "python -m histdatacom.managed_artifact_boundary "
+                "--cleanup-mode cache -- <slice-target>"
+            )
         case "working-artifacts":
             removes = (
                 "slice target directories after --repo-quality has written "
                 "the detailed report and .repo summary"
             )
-            command_shape = "rm -rf <slice-target>"
+            command_shape = (
+                "python -m histdatacom.managed_artifact_boundary "
+                "--cleanup-mode working-artifacts -- <slice-target>"
+            )
         case _:
             raise ValueError(f"unknown campaign cleanup mode: {cleanup_mode}")
 
@@ -622,21 +628,16 @@ def _cleanup_policy(cleanup_mode: str) -> dict[str, JSONValue]:
 def _cleanup_command(cleanup_mode: str, target_paths: list[str]) -> str:
     if cleanup_mode == "none":
         return ""
-    if cleanup_mode == "cache":
-        return " && ".join(
-            _shell_command(
-                "find",
-                target_path,
-                "-name",
-                ".data",
-                "-type",
-                "f",
-                "-delete",
-            )
-            for target_path in target_paths
+    if cleanup_mode in {"cache", "working-artifacts"}:
+        return _shell_command(
+            "python",
+            "-m",
+            "histdatacom.managed_artifact_boundary",
+            "--cleanup-mode",
+            cleanup_mode,
+            "--",
+            *target_paths,
         )
-    if cleanup_mode == "working-artifacts":
-        return _shell_command("rm", "-rf", *target_paths)
     raise ValueError(f"unknown campaign cleanup mode: {cleanup_mode}")
 
 

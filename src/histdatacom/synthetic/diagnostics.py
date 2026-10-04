@@ -8,6 +8,10 @@ promotion gate.  Optional static rendering is imported lazily from
 
 from __future__ import annotations
 
+from histdatacom.managed_artifact_boundary import (
+    assert_unmanaged_mutation_paths,
+)
+
 import hashlib
 import json
 import math
@@ -1237,6 +1241,7 @@ def publish_reconstruction_diagnostics(
     output_directory: str | Path,
 ) -> DiagnosticPublicationManifestV1:
     """Build, optionally render, atomically write, and verify diagnostics."""
+    assert_unmanaged_mutation_paths((output_directory,))
     selected = (
         read_diagnostic_publication_spec(spec)
         if isinstance(spec, (str, Path))
@@ -1387,6 +1392,7 @@ def write_diagnostic_publication_spec(
     path: str | Path,
 ) -> Path:
     """Write one local regeneration specification atomically."""
+    assert_unmanaged_mutation_paths((path,))
     if not isinstance(spec, DiagnosticPublicationSpecV1):
         raise TypeError("diagnostic publication spec must use v1")
     target = Path(path).expanduser().resolve()
@@ -3285,6 +3291,7 @@ def _reject_unsafe_optional_values(value: Any, *, key: str = "") -> None:
 
 
 def _write_once(path: Path, payload: bytes) -> None:
+    assert_unmanaged_mutation_paths((path,))
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists():
         if path.is_file() and path.read_bytes() == payload:
@@ -3293,6 +3300,7 @@ def _write_once(path: Path, payload: bytes) -> None:
             f"refusing to overwrite differing artifact: {path.name}"
         )
     temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    assert_unmanaged_mutation_paths((temporary,))
     try:
         with temporary.open("xb") as handle:
             handle.write(payload)

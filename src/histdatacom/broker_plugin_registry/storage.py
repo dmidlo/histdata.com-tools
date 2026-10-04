@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from histdatacom.managed_artifact_boundary import (
+    assert_unmanaged_mutation_paths,
+)
+
 import hashlib
 import os
 from pathlib import Path
@@ -53,6 +57,7 @@ def write_plugin_inventory(
     path: str | Path,
 ) -> ArtifactRef:
     """Create once; replay identical bytes, never replace differing evidence."""
+    assert_unmanaged_mutation_paths((path,))
     if type(inventory) not in (
         BrokerPluginInventoryV1,
         BrokerPluginExperimentInventoryV1,

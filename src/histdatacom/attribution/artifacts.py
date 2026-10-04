@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from histdatacom.managed_artifact_boundary import (
+    assert_unmanaged_mutation_paths,
+)
+
 import os
 import stat
 import tempfile
@@ -110,6 +114,7 @@ def write_attribution_artifact(artifact: _A, directory: str | Path) -> Path:
     different bytes or symlinks at the content path refuse. POSIX fsync is used
     for file and directory durability; this is not a hostile-user filesystem.
     """
+    assert_unmanaged_mutation_paths((directory,))
     target = Path(directory)
     _directory(target)
     encoded = artifact.to_json().encode("ascii")

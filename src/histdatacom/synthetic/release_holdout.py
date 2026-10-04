@@ -9,6 +9,10 @@ holdout before an evaluation callback can observe protected data.
 
 from __future__ import annotations
 
+from histdatacom.managed_artifact_boundary import (
+    assert_unmanaged_mutation_paths,
+)
+
 import hashlib
 import json
 import os
@@ -1430,6 +1434,7 @@ def execute_release_holdout_once(
     evaluated_at_utc: str,
 ) -> tuple[ReleaseHoldoutEvaluationReceiptV1, ArtifactRef]:
     """Consume the holdout before invoking its sole evaluation callback."""
+    assert_unmanaged_mutation_paths((state_directory,))
     _verify_artifact_ref(authorization.manifest_ref)
     _verify_artifact_ref(authorization.graph_ref)
     manifest = read_protected_release_holdout_manifest(
@@ -1823,6 +1828,7 @@ def _write_contract(
     kind: str,
     metadata: Mapping[str, JSONValue],
 ) -> ArtifactRef:
+    assert_unmanaged_mutation_paths((output_directory,))
     root = Path(output_directory).expanduser().resolve()
     root.mkdir(parents=True, exist_ok=True)
     payload = text.encode("utf-8") + b"\n"
@@ -1852,6 +1858,7 @@ def _read_contract(path: str | Path, prefix: str) -> Mapping[str, Any]:
 
 
 def _write_once(path: Path, payload: bytes) -> None:
+    assert_unmanaged_mutation_paths((path,))
     try:
         descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
     except FileExistsError:
@@ -1865,6 +1872,7 @@ def _write_once(path: Path, payload: bytes) -> None:
 
 
 def _reserve_once(path: Path, payload: bytes) -> None:
+    assert_unmanaged_mutation_paths((path,))
     try:
         descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     except FileExistsError as error:
@@ -1878,7 +1886,9 @@ def _reserve_once(path: Path, payload: bytes) -> None:
 
 
 def _atomic_replace(path: Path, payload: bytes) -> None:
+    assert_unmanaged_mutation_paths((path,))
     temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    assert_unmanaged_mutation_paths((temporary,))
     try:
         with temporary.open("xb") as stream:
             stream.write(payload)

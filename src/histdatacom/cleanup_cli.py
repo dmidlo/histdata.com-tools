@@ -37,7 +37,14 @@ def build_parser() -> argparse.ArgumentParser:
         "cleanup_command",
         nargs="?",
         default="sources",
-        choices=("sources", "transient-sources", "status"),
+        choices=(
+            "sources",
+            "transient-sources",
+            "status",
+            "artifacts-inspect",
+            "artifacts-plan",
+            "artifacts-apply",
+        ),
         help="cleanup operation to run",
     )
     parser.add_argument(
@@ -108,6 +115,14 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="emit the machine-readable cleanup payload",
     )
+    parser.add_argument("--store", help="explicit managed artifact store")
+    parser.add_argument(
+        "--plan", help="exact persisted artifact collection plan"
+    )
+    parser.add_argument(
+        "--cutoff-ns", help="artifact plan cutoff in UTC nanoseconds"
+    )
+    parser.add_argument("--output", help="new unmanaged artifact report file")
     return parser
 
 
@@ -116,10 +131,20 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     raw_argv = list(argv) if argv is not None else sys.argv[1:]
     try:
-        args = parser.parse_args(configured_cleanup_argv(raw_argv))
+        effective_argv = configured_cleanup_argv(raw_argv)
+        args = parser.parse_args(effective_argv)
     except CliConfigError as exc:
         print(f"config error: {exc}", file=sys.stderr)  # noqa:T201
         return 1
+    if args.cleanup_command.startswith("artifacts-"):
+        from histdatacom.artifact_retention.cli import main as artifacts_main
+
+        return artifacts_main(effective_argv)
+    if any(
+        getattr(args, name) is not None
+        for name in ("store", "plan", "cutoff_ns", "output")
+    ):
+        parser.error("artifact options require an explicit artifact command")
     if args.cleanup_command == "status":
         try:
             status_result = _collect_status(args)

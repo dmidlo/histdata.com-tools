@@ -13,6 +13,10 @@ queries merely because an official publication time is known.
 
 from __future__ import annotations
 
+from histdatacom.managed_artifact_boundary import (
+    assert_unmanaged_mutation_paths,
+)
+
 import csv
 import hashlib
 import io
@@ -2526,6 +2530,9 @@ def write_cftc_positioning_corpus(
     previous_corpus: CftcPositioningCorpusV1 | None = None,
 ) -> Mapping[str, ArtifactRef]:
     """Write raw, corpus, coverage, archive, and optional diff artifacts once."""
+    assert_unmanaged_mutation_paths(
+        (directory, Path(directory).expanduser() / "sources")
+    )
     if not isinstance(build, CftcPositioningCorpusBuildV1):
         raise ValueError("CFTC artifact writer requires a v1 corpus build")
     root = Path(directory).expanduser().resolve()
@@ -3678,6 +3685,7 @@ def _write_json_artifact(
     *,
     metadata: Mapping[str, JSONValue],
 ) -> ArtifactRef:
+    assert_unmanaged_mutation_paths((root,))
     root.mkdir(parents=True, exist_ok=True)
     content = canonical_contract_json(payload).encode("utf-8") + b"\n"
     digest = hashlib.sha256(content).hexdigest()
@@ -3693,6 +3701,7 @@ def _write_json_artifact(
 
 
 def _write_once(path: Path, content: bytes) -> None:
+    assert_unmanaged_mutation_paths((path,))
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists():
         if path.read_bytes() != content:

@@ -10,6 +10,10 @@ or age-conditioned output coherence differs from the frozen policy.
 
 from __future__ import annotations
 
+from histdatacom.managed_artifact_boundary import (
+    assert_unmanaged_mutation_paths,
+)
+
 import hashlib
 import json
 import math
@@ -3028,6 +3032,7 @@ def _write_content_addressed(
     kind: str,
     metadata: Mapping[str, JSONValue],
 ) -> ArtifactRef:
+    assert_unmanaged_mutation_paths((root,))
     if len(payload) > MAX_ALIGNMENT_ARTIFACT_BYTES:
         raise ValueError("alignment qualification artifact exceeds size limit")
     destination = Path(root).expanduser()

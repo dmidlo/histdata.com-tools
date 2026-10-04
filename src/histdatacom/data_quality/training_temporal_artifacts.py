@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from histdatacom.managed_artifact_boundary import (
+    assert_unmanaged_mutation_paths,
+)
+
 import hashlib
 import os
 import tempfile
@@ -25,6 +29,7 @@ def write_training_temporal_artifact(
     batch: TrainingTemporalBatchV1, directory: str | Path
 ) -> Path:
     """Re-execute before publication; interrupted writes never claim a target."""
+    assert_unmanaged_mutation_paths((directory,))
     subject = training_provider_subject(batch)
     require_training_retention(subject)
     replay_training_temporal(batch)

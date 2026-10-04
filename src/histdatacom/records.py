@@ -1,5 +1,9 @@
 """Record work object used by orchestration, legacy helpers, and cache code."""
 
+from histdatacom.managed_artifact_boundary import (
+    assert_unmanaged_mutation_paths,
+)
+
 import os
 import warnings
 from pathlib import Path
@@ -10,7 +14,6 @@ from rich import print  # pylint: disable=redefined-builtin
 from histdatacom.fx_enums import Format, Timeframe
 from histdatacom.manifest_store import (
     ManifestStatusStore,
-    delete_record_from_manifest,
     restore_record_from_manifest,
 )
 from histdatacom.runtime_contracts import WorkStatus
@@ -136,9 +139,20 @@ class Record:  # noqa:H601
     def delete_manifest_status(self, base_dir: str = "") -> None:
         """Delete manifest/status state and any legacy ``.meta`` orchestration."""
         meta_path = Path(self.data_dir, ".meta")
+        assert_unmanaged_mutation_paths(
+            (
+                self.data_dir,
+                base_dir or self.data_dir,
+                meta_path,
+            )
+        )
+        # Resolve/admit the actual ancestor-discovered database before either
+        # member of this legacy metadata pair can be changed.
+        store = ManifestStatusStore.existing_for_record(self, base_dir=base_dir)
         if meta_path.exists():
             meta_path.unlink()
-        delete_record_from_manifest(self, base_dir=base_dir)
+        if store is not None:
+            store.delete_record(self)
 
     def delete_momento_file(self, base_dir: str = "") -> None:
         """Deprecated alias for :meth:`delete_manifest_status`."""

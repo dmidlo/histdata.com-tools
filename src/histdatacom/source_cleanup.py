@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from histdatacom.managed_artifact_boundary import (
+    assert_unmanaged_mutation_paths,
+)
+
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable
@@ -46,7 +50,7 @@ def find_transient_source_artifacts(
     *,
     suffixes: Iterable[str] = TRANSIENT_SOURCE_SUFFIXES,
 ) -> tuple[Path, ...]:
-    """Return source artifacts below ``root`` that can be safely regenerated."""
+    """Return legacy suffix matches, not proof of source regenerability."""
     root_path = Path(root).expanduser()
     if not root_path.exists():
         return ()
@@ -70,6 +74,8 @@ def cleanup_transient_source_artifacts(
     suffixes: Iterable[str] = TRANSIENT_SOURCE_SUFFIXES,
 ) -> SourceCleanupResult:
     """Inspect or delete transient source artifacts while preserving caches."""
+    if apply:
+        assert_unmanaged_mutation_paths((root,), recursive=True)
     root_path = Path(root).expanduser()
     normalized_suffixes = _normalized_suffixes(suffixes)
     by_suffix = _empty_suffix_counts(normalized_suffixes)

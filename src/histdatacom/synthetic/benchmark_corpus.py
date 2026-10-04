@@ -9,6 +9,10 @@ trusted.  Dense or holdout event rows are never written to the artifacts.
 
 from __future__ import annotations
 
+from histdatacom.managed_artifact_boundary import (
+    assert_unmanaged_mutation_paths,
+)
+
 import hashlib
 import json
 import math
@@ -5372,6 +5376,7 @@ def write_reverse_degradation_benchmark_artifacts(
     artifact_directory: str | Path,
 ) -> Mapping[str, ArtifactRef]:
     """Atomically write the corpus, scorecard, and companion audits."""
+    assert_unmanaged_mutation_paths((artifact_directory,))
     if campaign.corpus_id != corpus.corpus_id:
         raise ValueError("campaign corpus identity differs")
     if campaign.motif_index_id != motif_index.index_id:
@@ -5415,6 +5420,7 @@ def write_reverse_degradation_benchmark_corpus(
     artifact_directory: str | Path,
 ) -> ArtifactRef:
     """Write a sealed row-free corpus before any benchmark campaign runs."""
+    assert_unmanaged_mutation_paths((artifact_directory,))
     if not isinstance(corpus, ReverseDegradationBenchmarkCorpusV1):
         raise TypeError("benchmark corpus must use the v1 contract")
     payload = {
@@ -5449,6 +5455,7 @@ def write_benchmark_window_metric_trace(
     artifact_directory: str | Path,
 ) -> ArtifactRef:
     """Write one bounded row-free trace as a content-addressed artifact."""
+    assert_unmanaged_mutation_paths((artifact_directory,))
     if not isinstance(trace, BenchmarkWindowMetricTraceV1):
         raise TypeError("metric trace must use the v1 contract")
     root = Path(artifact_directory).expanduser().resolve()
@@ -6013,11 +6020,13 @@ def _file_sha256(path: Path) -> str:
 
 
 def _write_once(path: Path, content: bytes) -> None:
+    assert_unmanaged_mutation_paths((path,))
     if path.exists():
         if path.read_bytes() != content:
             raise ValueError("content-addressed benchmark artifact differs")
         return
     temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    assert_unmanaged_mutation_paths((temporary,))
     try:
         with temporary.open("xb") as handle:
             handle.write(content)

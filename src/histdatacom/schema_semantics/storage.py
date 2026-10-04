@@ -1,5 +1,9 @@
 """Canonical write-once proofs; reads always rerun admitted implementations."""
 
+from histdatacom.managed_artifact_boundary import (
+    assert_unmanaged_mutation_paths,
+)
+
 import os
 import stat
 from pathlib import Path
@@ -68,6 +72,7 @@ def read_semantic_proof(
 def write_semantic_proof(
     proof: SemanticProofV1, directory: Path, registry: CompatibilityRegistryV1
 ) -> Path:
+    assert_unmanaged_mutation_paths((directory,))
     verify_semantic_proof(registry, proof)
     data = proof.to_json().encode("ascii")
     directory.mkdir(parents=True, exist_ok=True)

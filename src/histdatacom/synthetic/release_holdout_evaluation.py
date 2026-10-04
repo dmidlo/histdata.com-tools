@@ -10,6 +10,10 @@ metric trace under the already committed benchmark gates.
 
 from __future__ import annotations
 
+from histdatacom.managed_artifact_boundary import (
+    assert_unmanaged_mutation_paths,
+)
+
 import hashlib
 import json
 import os
@@ -1081,6 +1085,7 @@ def execute_reconstruction_release_holdout_once(
     evaluated_at_utc: str | None = None,
 ) -> tuple[ReconstructionReleaseHoldoutReceiptV1, ArtifactRef]:
     """Reserve before evaluation and accept only a rebuilt gate report."""
+    assert_unmanaged_mutation_paths((state_directory,))
     manifest, graph, candidate, policy, corpus = _authorization_inputs(
         authorization
     )
@@ -1641,6 +1646,7 @@ def _write_contract(
     kind: str,
     metadata: Mapping[str, JSONValue],
 ) -> ArtifactRef:
+    assert_unmanaged_mutation_paths((output_directory,))
     payload = (text + "\n").encode("utf-8")
     if len(payload) > MAX_RELEASE_HOLDOUT_EVALUATION_ARTIFACT_BYTES:
         raise ValueError("release-holdout evaluation artifact exceeds limit")
@@ -1682,6 +1688,7 @@ def _read_contract(path: str | Path, prefix: str) -> Mapping[str, Any]:
 
 
 def _reserve_once(path: Path, payload: bytes) -> None:
+    assert_unmanaged_mutation_paths((path,))
     try:
         descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     except FileExistsError as error:
@@ -1696,6 +1703,7 @@ def _reserve_once(path: Path, payload: bytes) -> None:
 
 def _atomic_replace(path: Path, payload: bytes) -> None:
     temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    assert_unmanaged_mutation_paths((path, temporary))
     with temporary.open("xb") as handle:
         handle.write(payload)
         handle.flush()

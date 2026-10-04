@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from histdatacom.managed_artifact_boundary import (
+    assert_unmanaged_mutation_paths,
+)
+
 import hashlib
 import heapq
 import math
@@ -1109,6 +1113,14 @@ def write_broker_delivery_fingerprint(
     fingerprint: BrokerDeliveryFingerprint,
 ) -> ArtifactRef:
     """Atomically publish an immutable fingerprint or verify idempotence."""
+    assert_unmanaged_mutation_paths((path,))
+    target = Path(path).absolute()
+    assert_unmanaged_mutation_paths(
+        (
+            target.with_name(target.name + ".partial"),
+            target.with_name(target.name + ".provider-policy.json"),
+        )
+    )
     from histdatacom.broker_plugin_policy import (
         BrokerPolicyOperation,
         require_provider_operation,
@@ -1120,7 +1132,6 @@ def write_broker_delivery_fingerprint(
     )
 
     require_provider_operation(fingerprint, BrokerPolicyOperation.RETAIN_LOCAL)
-    target = Path(path).absolute()
     payload = fingerprint.to_json() + "\n"
     encoded = payload.encode("utf-8")
     digest = hashlib.sha256(encoded).hexdigest()
@@ -1169,6 +1180,7 @@ def write_broker_delivery_fingerprint(
             fingerprint, BrokerPolicyOperation.RETAIN_LOCAL
         )
         partial = target.with_name(target.name + ".partial")
+        assert_unmanaged_mutation_paths((partial,))
         created = False
         try:
             with partial.open("xb") as handle:

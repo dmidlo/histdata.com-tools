@@ -9,6 +9,10 @@ device and to an immutable marker that is verified before runtime writes.
 
 from __future__ import annotations
 
+from histdatacom.managed_artifact_boundary import (
+    assert_unmanaged_mutation_paths,
+)
+
 import hashlib
 import json
 import os
@@ -139,8 +143,15 @@ def create_reconstruction_storage_root_guard(
     artifact_root: str | Path,
 ) -> tuple[ReconstructionStorageRootGuardV1, ArtifactRef]:
     """Create roots, bind their device, and persist identical root markers."""
+    assert_unmanaged_mutation_paths((output_root, scratch_root, artifact_root))
     output = _resolved_root(output_root, "output_root")
     scratch = _resolved_root(scratch_root, "scratch_root")
+    assert_unmanaged_mutation_paths(
+        tuple(
+            root / RECONSTRUCTION_STORAGE_ROOT_GUARD_MARKER
+            for root in (output, scratch)
+        )
+    )
     for root in (output, scratch):
         root.mkdir(parents=True, exist_ok=True)
         _require_plain_directory(root)
@@ -346,6 +357,7 @@ def _verified_ref_bytes(ref: ArtifactRef) -> bytes:
 def _write_exact_file(
     path: Path, payload: bytes, *, replace_existing: bool
 ) -> None:
+    assert_unmanaged_mutation_paths((path,))
     if path.exists() and not replace_existing:
         if path.read_bytes() != payload:
             raise ReconstructionStorageRootError(

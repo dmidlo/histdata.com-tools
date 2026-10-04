@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from histdatacom.managed_artifact_boundary import (
+    assert_unmanaged_mutation_paths,
+)
+
 import json
 import sqlite3
 from dataclasses import dataclass
@@ -52,8 +56,10 @@ class ManifestStatusStore:
 
     def __init__(self, root_dir: str | Path):
         """Create a store rooted at a data directory."""
+        assert_unmanaged_mutation_paths((root_dir,))
         self.root_dir = Path(root_dir).expanduser()
         self.db_path = self.path_for_root(self.root_dir)
+        assert_unmanaged_mutation_paths((self.db_path,))
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._ensure_schema()
 
@@ -426,6 +432,13 @@ class ManifestStatusStore:
         record: Any | None = None,
     ) -> ManifestMigrationResult:
         """Import one legacy `.meta` file into manifest storage."""
+        assert_unmanaged_mutation_paths(
+            (
+                meta_path,
+                self.root_dir,
+            )
+        )
+        assert_unmanaged_mutation_paths((self.db_path,))
         path = Path(meta_path)
         if not path.exists():
             return ManifestMigrationResult(
@@ -925,6 +938,7 @@ class ManifestStatusStore:
         max_dataset_plans_per_request: int,
     ) -> dict[str, int]:
         """Prune append-only orchestration rows while preserving current work items."""
+        assert_unmanaged_mutation_paths((self.root_dir,))
         _validate_retention_limit("max_job_snapshots", max_job_snapshots)
         _validate_retention_limit(
             "max_status_events_per_owner",
@@ -1111,6 +1125,7 @@ class ManifestStatusStore:
             _migrate_manifest_schema(conn, user_version)
 
     def _connect(self) -> sqlite3.Connection:
+        assert_unmanaged_mutation_paths((self.db_path,))
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         return conn

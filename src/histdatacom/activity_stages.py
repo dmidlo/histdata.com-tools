@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from histdatacom.managed_artifact_boundary import (
+    assert_unmanaged_mutation_paths,
+)
+
 import hashlib
 from html.parser import HTMLParser
 import json
@@ -870,6 +874,7 @@ def atomic_write_zip_archive(
     work_id: str,
 ) -> Path:
     """Write a ZIP through a temp file, validate it, then rename."""
+    assert_unmanaged_mutation_paths((data_dir,))
     if filename_has_unsupported_raw_dimensions(filename):
         raise ArchiveDownloadError(
             "UNSUPPORTED_RAW_INPUT",
@@ -881,6 +886,7 @@ def atomic_write_zip_archive(
     temp_path = target_path.with_name(
         f".{target_path.name}.{derive_work_id(work_id).removeprefix('work-')}.tmp"
     )
+    assert_unmanaged_mutation_paths((target_path, temp_path))
     try:
         target_path.parent.mkdir(parents=True, exist_ok=True)
         temp_path.write_bytes(content)
@@ -1074,6 +1080,7 @@ def extract_archive_to_record(
     zip_persist: bool,
 ) -> ArchiveExtractionResult:
     """Extract the single CSV member from a ZIP into record.data_dir."""
+    assert_unmanaged_mutation_paths((record.data_dir,))
     _validate_extraction_request(record)
     zip_path = Path(record.data_dir, record.zip_filename)
     if not zip_path.exists():
@@ -1157,6 +1164,7 @@ def atomic_extract_archive_member(
     work_id: str,
 ) -> Path:
     """Extract one ZIP member through a temp file, then rename atomically."""
+    assert_unmanaged_mutation_paths((target_path,))
     if filename_has_unsupported_raw_dimensions(target_path.name):
         raise ArchiveExtractionError(
             "UNSUPPORTED_RAW_INPUT",
@@ -1167,6 +1175,7 @@ def atomic_extract_archive_member(
     temp_path = target_path.with_name(
         f".{target_path.name}.{derive_work_id(work_id).removeprefix('work-')}.tmp"
     )
+    assert_unmanaged_mutation_paths((target_path, temp_path))
     try:
         target_path.parent.mkdir(parents=True, exist_ok=True)
         with zip_ref.open(member, "r") as source, temp_path.open("wb") as sink:
@@ -2211,8 +2220,10 @@ def write_repository_data_file(
     repo_local_path: str | Path,
 ) -> ArtifactRef:
     """Write repository metadata to disk and return an artifact reference."""
+    assert_unmanaged_mutation_paths((repo_local_path,))
     repo_path = Path(repo_local_path)
     temp_path = deterministic_partial_path(repo_path, str(repo_path))
+    assert_unmanaged_mutation_paths((temp_path,))
     create_full_path(repo_path.parent)
     hashed_data = hash_repository_data(repo_data)
     try:
@@ -2970,6 +2981,7 @@ def _delete_zip_after_extraction(
         return False
 
     zip_path = Path(record.data_dir, record.zip_filename)
+    assert_unmanaged_mutation_paths((zip_path,))
     if not zip_path.exists():
         return False
 
@@ -2992,6 +3004,13 @@ def _delete_cache_source_artifacts(
     if not _truthy_config_value(args.get("delete_after_cache")):
         return ()
 
+    assert_unmanaged_mutation_paths(
+        tuple(
+            Path(record.data_dir, filename)
+            for name in ("zip_filename", "csv_filename")
+            if (filename := str(getattr(record, name, "") or ""))
+        )
+    )
     deleted: list[str] = []
     for field_name in ("zip_filename", "csv_filename"):
         filename = str(getattr(record, field_name, "") or "")
@@ -3072,6 +3091,7 @@ def _validate_zip_payload(path: Path) -> None:
 
 
 def _unlink_path(path: Path) -> None:
+    assert_unmanaged_mutation_paths((path,))
     if path.exists():
         path.unlink()
 
@@ -3179,6 +3199,7 @@ def _source_artifact_path(record: Record, filename: str) -> Path | None:
 
 
 def create_cache_file(record: Record, args: Mapping[str, Any]) -> None:
+    assert_unmanaged_mutation_paths((record.data_dir,))
     _validate_cache_raw_dimensions(record)
     zip_path = _source_artifact_path(record, record.zip_filename)
     csv_path = _source_artifact_path(record, record.csv_filename)
@@ -3274,9 +3295,11 @@ def atomic_write_polars_cache(
     work_id: str,
 ) -> Path:
     """Write a Polars IPC cache through a temp file, then rename."""
+    assert_unmanaged_mutation_paths((target_path,))
     temp_path = target_path.with_name(
         f".{target_path.name}.{derive_work_id(work_id).removeprefix('work-')}.tmp"
     )
+    assert_unmanaged_mutation_paths((target_path, temp_path))
     try:
         target_path.parent.mkdir(parents=True, exist_ok=True)
         write_polars_cache(frame, temp_path)
@@ -3609,5 +3632,6 @@ def _unlink_if_present(data_dir: str, filename: str) -> None:
     if not filename:
         return
     path = Path(data_dir, filename)
+    assert_unmanaged_mutation_paths((path,))
     if path.exists():
         path.unlink()

@@ -9,6 +9,10 @@ the frozen real reverse-degradation campaign.
 
 from __future__ import annotations
 
+from histdatacom.managed_artifact_boundary import (
+    assert_unmanaged_mutation_paths,
+)
+
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
@@ -773,6 +777,7 @@ def write_modern_reference_motif_artifacts(
     artifact_directory: str | Path,
 ) -> Mapping[str, ArtifactRef]:
     """Write the compact library and qualification evidence exactly once."""
+    assert_unmanaged_mutation_paths((artifact_directory,))
     if not isinstance(build, ModernReferenceMotifBuildV1):
         raise ValueError("modern motif writer requires a v1 build")
     root = Path(artifact_directory).expanduser().resolve()
@@ -1252,11 +1257,13 @@ def _enforce_runtime(started: float, maximum: float) -> None:
 
 
 def _write_once(path: Path, content: bytes) -> None:
+    assert_unmanaged_mutation_paths((path,))
     if path.exists():
         if path.read_bytes() != content:
             raise ValueError("content-addressed modern motif artifact differs")
         return
     temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    assert_unmanaged_mutation_paths((temporary,))
     try:
         with temporary.open("xb") as handle:
             handle.write(content)

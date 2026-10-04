@@ -9,6 +9,10 @@ the complete scheduled shard from fresh source/model evidence.
 
 from __future__ import annotations
 
+from histdatacom.managed_artifact_boundary import (
+    assert_unmanaged_mutation_paths,
+)
+
 from dataclasses import dataclass
 import hashlib
 import os
@@ -241,6 +245,7 @@ def _sync(directory: Path) -> None:
 
 
 def _publish(path: Path, payload: bytes) -> None:
+    assert_unmanaged_mutation_paths((path,))
     temporary: Path | None = None
     try:
         with tempfile.NamedTemporaryFile(
@@ -276,9 +281,16 @@ def write_training_weight_candidate_shard(
     Existing exact components are reusable; mismatches and symlinks refuse.
     No successful root manifest is published for an interrupted component set.
     """
+    assert_unmanaged_mutation_paths((directory,))
     manifest, payloads = _manifest(shard)
-    replay_training_weight_candidate_shard(shard, approval=approval)
     root = Path(directory)
+    manifest_payload = manifest.to_json().encode("ascii")
+    digest = hashlib.sha256(manifest_payload).hexdigest()
+    target = root / f"weight-candidate-shard-{digest}.json"
+    assert_unmanaged_mutation_paths(
+        (target, *(root / name for name in payloads))
+    )
+    replay_training_weight_candidate_shard(shard, approval=approval)
     if root.is_symlink():
         raise ValueError("research artifact directory cannot be a symlink")
     existed = root.exists()
@@ -289,10 +301,7 @@ def write_training_weight_candidate_shard(
         _sync(root.parent)
     for name, payload in sorted(payloads.items()):
         _publish(root / name, payload)
-    payload = manifest.to_json().encode("ascii")
-    digest = hashlib.sha256(payload).hexdigest()
-    target = root / f"weight-candidate-shard-{digest}.json"
-    _publish(target, payload)
+    _publish(target, manifest_payload)
     return target
 
 

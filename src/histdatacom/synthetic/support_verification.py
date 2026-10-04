@@ -10,6 +10,10 @@ campaign execution requests.
 
 from __future__ import annotations
 
+from histdatacom.managed_artifact_boundary import (
+    assert_unmanaged_mutation_paths,
+)
+
 import hashlib
 import json
 import math
@@ -3167,6 +3171,7 @@ def _verify_plan_shard(
 
 
 def _write_json(path: Path, payload: Mapping[str, JSONValue]) -> Path:
+    assert_unmanaged_mutation_paths((path,))
     path.parent.mkdir(parents=True, exist_ok=True)
     encoded = (canonical_contract_json(payload) + "\n").encode("utf-8")
     if len(encoded) > MAX_FINAL_SUPPORT_ARTIFACT_BYTES:

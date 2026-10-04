@@ -8,6 +8,10 @@ groups or their receipts were verified. Full reads open every native group.
 
 from __future__ import annotations
 
+from histdatacom.managed_artifact_boundary import (
+    assert_unmanaged_mutation_paths,
+)
+
 import hashlib
 import os
 import tempfile
@@ -83,6 +87,7 @@ def write_training_wide_artifact(
     A failure may leave valid native children; it never repairs missing native
     receipts or overwrites conflicting bytes. Layout hashes confer no rights.
     """
+    assert_unmanaged_mutation_paths((directory,))
     expected = replay_training_wide_view(view)
     batches = expected.controls + expected.groups
     _current(batches, retention=True)

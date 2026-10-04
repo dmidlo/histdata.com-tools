@@ -13,6 +13,10 @@ sidecar, never repeated macro/news columns on every tick.
 
 from __future__ import annotations
 
+from histdatacom.managed_artifact_boundary import (
+    assert_unmanaged_mutation_paths,
+)
+
 import csv
 import hashlib
 import io
@@ -1716,6 +1720,9 @@ def write_market_context_corpus(
     directory: str | Path,
 ) -> Mapping[str, ArtifactRef]:
     """Write content-addressed raw, timeline, and corpus artifacts once."""
+    assert_unmanaged_mutation_paths(
+        (directory, Path(directory).expanduser() / "sources")
+    )
     root = Path(directory).expanduser().resolve()
     raw_root = root / "sources"
     raw_root.mkdir(parents=True, exist_ok=True)
@@ -2707,6 +2714,7 @@ def _verify_snapshot_adapter(
 
 
 def _write_once(path: Path, content: bytes) -> None:
+    assert_unmanaged_mutation_paths((path,))
     if path.exists():
         if path.read_bytes() != content:
             raise ValueError(

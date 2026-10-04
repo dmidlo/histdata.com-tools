@@ -9,6 +9,10 @@ bounded state below hidden scratch, verified, and promoted with one rename.
 
 from __future__ import annotations
 
+from histdatacom.managed_artifact_boundary import (
+    assert_unmanaged_mutation_paths,
+)
+
 import hashlib
 import json
 import math
@@ -1865,6 +1869,7 @@ class _PartitionWriter:
         row_group_size: int,
         buffer_rows: int,
     ) -> None:
+        assert_unmanaged_mutation_paths((staging_directory,))
         _require_bar_policy(first, "retain_local")
         self.provider_bar = first
         self.symbol = first.symbol
@@ -1875,6 +1880,7 @@ class _PartitionWriter:
             self.symbol, self.scope, self.interval_code, self.bar_month
         )
         self.path = staging_directory / self.relative_path
+        assert_unmanaged_mutation_paths((self.path,))
         self.path.parent.mkdir(parents=True, exist_ok=True)
         _, pq = _arrow_modules()
         self.writer = pq.ParquetWriter(
@@ -2066,6 +2072,7 @@ def stage_derived_bar_publication(
     write_buffer_rows: int = DEFAULT_DERIVED_BAR_WRITE_BUFFER_ROWS,
 ) -> StagedDerivedBarPublicationV1:
     """Aggregate and validate one bar product below hidden scratch."""
+    assert_unmanaged_mutation_paths((root,))
     source_path = Path(source_manifest_path).expanduser().resolve()
     source = verify_reconstruction_publication(source_path)
     _require_bar_source(source, "derive")
@@ -2085,6 +2092,7 @@ def stage_derived_bar_publication(
         root_path, source.manifest_id, selected.policy_id
     )
     scratch = axis / ".scratch"
+    assert_unmanaged_mutation_paths((scratch,))
     _require_bar_source(source, "retain_local")
     scratch.mkdir(parents=True, exist_ok=True)
     staging = Path(tempfile.mkdtemp(prefix="publication.tmp-", dir=scratch))
@@ -2165,6 +2173,9 @@ def commit_derived_bar_publication(
     """Atomically promote one validated derived-bar product."""
     if not isinstance(staged, StagedDerivedBarPublicationV1):
         raise TypeError("derived bar commit requires staged publication")
+    assert_unmanaged_mutation_paths(
+        (staged.staging_directory, staged.committed_directory), recursive=True
+    )
     final = staged.committed_directory
     manifest = staged.manifest
     _require_bar_policy(manifest, "retain_local")
@@ -2980,6 +2991,7 @@ def _artifact_ref_for_manifest(
 
 
 def _atomic_write_bytes(path: Path, payload: bytes) -> None:
+    assert_unmanaged_mutation_paths((path,))
     path.parent.mkdir(parents=True, exist_ok=True)
     handle, temporary_name = tempfile.mkstemp(
         prefix=path.name + ".tmp-", dir=path.parent
@@ -2997,6 +3009,7 @@ def _atomic_write_bytes(path: Path, payload: bytes) -> None:
 
 
 def _remove_bar_scratch(path: Path, root: Path) -> None:
+    assert_unmanaged_mutation_paths((path,), recursive=True)
     if not path.exists() and not path.is_symlink():
         return
     if path.is_symlink():

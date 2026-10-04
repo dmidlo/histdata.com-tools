@@ -9,6 +9,10 @@ need to invoke pytest or mutate source code.
 
 from __future__ import annotations
 
+from histdatacom.managed_artifact_boundary import (
+    assert_unmanaged_mutation_paths,
+)
+
 import hashlib
 import json
 import os
@@ -198,12 +202,14 @@ def write_critical_path_gate_report(
     path: str | Path,
 ) -> ArtifactRef:
     """Atomically persist a report and return release-gate-ready evidence."""
+    assert_unmanaged_mutation_paths((path,))
     if not isinstance(report, CriticalPathGateReportV1):
         raise TypeError("critical-path report must be a v1 report")
     target = Path(path).expanduser().resolve()
     target.parent.mkdir(parents=True, exist_ok=True)
     encoded = (report.to_json() + "\n").encode("utf-8")
     temporary = target.with_name(f".{target.name}.tmp-{os.getpid()}")
+    assert_unmanaged_mutation_paths((temporary,))
     try:
         with temporary.open("wb") as stream:
             stream.write(encoded)

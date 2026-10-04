@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from histdatacom.managed_artifact_boundary import (
+    assert_unmanaged_mutation_paths,
+)
+
 import hashlib
 import os
 import tempfile
@@ -22,6 +26,7 @@ def write_training_artifact(
     batch: TrainingBatchV1, directory: str | Path
 ) -> Path:
     """Replay before persistence; publish exact bytes without overwriting."""
+    assert_unmanaged_mutation_paths((directory,))
     subject = training_provider_subject(batch)
     require_training_retention(subject)
     replay_training_batch(batch)
@@ -84,4 +89,5 @@ def read_training_artifact(
     if batch.request.consumer_mode != consumer_mode:
         raise ValueError("training artifact consumer mode differs")
     verify_training_policy_receipt(training_provider_subject(batch), source)
-    return replay_training_batch(batch)
+    replayed: TrainingBatchV1 = replay_training_batch(batch)
+    return replayed
