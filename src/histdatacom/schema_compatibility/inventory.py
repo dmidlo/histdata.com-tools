@@ -197,6 +197,7 @@ CLASS_SCHEMA_FIELDS = {
     "histdatacom.synthetic.traders.account_codec.AccountRecord": "SCHEMA",
 }
 SERIALIZER_EXEMPTIONS = {
+    "histdatacom.cross_feed._wire.Artifact": "Abstract bounded cross-feed content-addressed envelope with no standalone payload; concrete clock, capture-projection and matching artifacts retain actual versioned reader/writer inventory. A decoded artifact is not native replay or provider authority.",
     "histdatacom.campaign_index_contracts._Record": "Abstract bounded campaign receipt serializer; no standalone payload. Concrete structural/deep/product records retain versioned reader/writer inventory. Constructing or loading a receipt grants no fresh verification authority.",
     "histdatacom.data_quality.vendor_m1_contracts._Wire": "Abstract closed M1 diagnostic serializer with no standalone payload. Five concrete validation-only contracts retain their actual versioned readers/writers; decoding is not source replay or publication authority.",
     "histdatacom.synthetic.traders.account_codec.AccountRecord": "Abstract closed account serializer template with no standalone payload; concrete account records retain their inherited readers/writers. Structural decoding is not account-ledger replay authority.",

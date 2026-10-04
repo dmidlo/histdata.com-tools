@@ -85,6 +85,7 @@ Empirical reconstruction pipeline
    broker-provider-policy
    broker-host-health
    broker-plugin-provenance
+   cross-feed-diagnostics
    broker-plugin-conformance
    broker-delivery-fingerprint-contracts
    broker-delivery-transfer-contracts

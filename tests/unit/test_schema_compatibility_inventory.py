@@ -22,6 +22,39 @@ from histdatacom.schema_compatibility.inventory import (
 ROOT = Path(__file__).resolve().parents[2]
 
 
+def test_cross_feed_artifacts_have_native_versioned_codec_inventory() -> None:
+    registry = schema_compatibility_registry()
+    families = {item.family: item for item in registry.schemas}
+    expected = {
+        "capture_contracts.NativeCaptureV1": "native-capture",
+        "clock_contracts.ClockFitPolicyV1": "clock-fit-policy",
+        "clock_contracts.ClockFitRequestV1": "clock-fit-request",
+        "clock_contracts.ClockModelV1": "clock-model",
+        "clock_contracts.ClockSegmentV1": "clock-segment",
+        "matching_contracts.MatchingPolicyV1": "matching-policy",
+        "matching_contracts.MatchingReportV1": "matching-report",
+        "matching_contracts.MatchingTruthV1": "matching-truth",
+        "matching_contracts.MatchingEvaluationV1": "matching-evaluation",
+        "matching_contracts.MatchingSensitivityV1": "matching-sensitivity",
+    }
+    for name, suffix in expected.items():
+        schema = families["histdatacom.cross_feed." + name]
+        assert schema.wire_schema == f"histdatacom.cross-feed-{suffix}.v1"
+        assert schema.version == "1.0.0"
+        assert schema.status is SupportStatus.SUPPORTED
+        assert schema.readers and schema.writers
+        assert can_read(schema.wire_schema)
+    assert "histdatacom.cross_feed._wire.Artifact" not in families
+    assert "histdatacom.cross_feed._wire.Artifact" in {
+        item.qualified_name for item in registry.exemptions
+    }
+    # Embedded plain records do not invent separate versioned envelopes.
+    assert (
+        families["histdatacom.cross_feed._wire.RationalV1"].version
+        == "unversioned"
+    )
+
+
 def test_campaign_and_vendor_m1_wires_have_real_versioned_codecs() -> None:
     """Shared serializers remain inventoried under concrete public wires."""
     registry = schema_compatibility_registry()

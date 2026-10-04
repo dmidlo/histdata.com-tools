@@ -1247,6 +1247,13 @@ def _sdk_security_subject(native: BrokerSDKSecurityV1) -> _ResolvedNative:
 
 
 def _resolve_native(native_subject: object) -> _ResolvedNative:
+    from histdatacom.cross_feed.rights import (
+        CrossFeedDerivationV1,
+        resolve_cross_feed_native,
+    )
+
+    if type(native_subject) is CrossFeedDerivationV1:
+        return resolve_cross_feed_native(native_subject)
     from .provenance_bindings import (
         BrokerProvenanceEvidenceV1,
         resolve_provenance_native,
