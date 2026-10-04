@@ -193,9 +193,12 @@ CLASS_READERS = {
 # Reviewed class metadata consumed by a shared encoder outside the class AST.
 # Do not infer a wire from unrelated classes' similarly named constants.
 CLASS_SCHEMA_FIELDS = {
+    "histdatacom.campaign_index_contracts._Record": "SCHEMA",
     "histdatacom.synthetic.traders.account_codec.AccountRecord": "SCHEMA",
 }
 SERIALIZER_EXEMPTIONS = {
+    "histdatacom.campaign_index_contracts._Record": "Abstract bounded campaign receipt serializer; no standalone payload. Concrete structural/deep/product records retain versioned reader/writer inventory. Constructing or loading a receipt grants no fresh verification authority.",
+    "histdatacom.data_quality.vendor_m1_contracts._Wire": "Abstract closed M1 diagnostic serializer with no standalone payload. Five concrete validation-only contracts retain their actual versioned readers/writers; decoding is not source replay or publication authority.",
     "histdatacom.synthetic.traders.account_codec.AccountRecord": "Abstract closed account serializer template with no standalone payload; concrete account records retain their inherited readers/writers. Structural decoding is not account-ledger replay authority.",
     "histdatacom.synthetic.trader_maturity._Record": "Abstract strict serializer template with no standalone payload. Concrete trader catalog identity, evidence, row and matrix retain separate versioned reader/writer inventory; the supplement grants no certification authority.",
     "histdatacom.synthetic.capability_matrix._Record": "Abstract bounded serializer template with no standalone payload. Concrete capability requirements, waivers, policy, rows and matrix retain separate versioned reader/writer inventory.",

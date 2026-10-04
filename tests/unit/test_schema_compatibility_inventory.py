@@ -22,6 +22,47 @@ from histdatacom.schema_compatibility.inventory import (
 ROOT = Path(__file__).resolve().parents[2]
 
 
+def test_campaign_and_vendor_m1_wires_have_real_versioned_codecs() -> None:
+    """Shared serializers remain inventoried under concrete public wires."""
+    registry = schema_compatibility_registry()
+    families = {item.family: item for item in registry.schemas}
+    implementations = {
+        item.implementation_id: item for item in registry.implementations
+    }
+    expected = {
+        "histdatacom.campaign_index_contracts.CampaignStructuralVerificationV1": "histdatacom.campaign-structural-verification.v1",
+        "histdatacom.campaign_index_contracts.CampaignDeepVerificationV1": "histdatacom.campaign-deep-verification.v1",
+        "histdatacom.campaign_index_contracts.CampaignProductVerificationV1": "histdatacom.campaign-product-verification.v1",
+        "histdatacom.data_quality.vendor_m1_contracts.VendorM1PolicyV1": "histdatacom.vendor-m1-policy.v1",
+        "histdatacom.data_quality.vendor_m1_contracts.VendorM1ReferenceV1": "histdatacom.vendor-m1-reference.v1",
+        "histdatacom.data_quality.vendor_m1_contracts.VendorM1DifferenceV1": "histdatacom.vendor-m1-difference.v1",
+        "histdatacom.data_quality.vendor_m1_contracts.VendorM1MinuteV1": "histdatacom.vendor-m1-minute.v1",
+        "histdatacom.data_quality.vendor_m1_contracts.VendorM1ReportV1": "histdatacom.vendor-m1-report.v1",
+    }
+    for family, wire in expected.items():
+        schema = families[family]
+        assert schema.wire_schema == wire
+        assert schema.version == "1.0.0"
+        assert schema.status is SupportStatus.SUPPORTED
+        assert can_read(wire)
+        assert {
+            implementations[key].qualified_name for key in schema.readers
+        } == {
+            family + ".from_dict",
+            family + ".from_json",
+        }
+        assert {
+            implementations[key].qualified_name for key in schema.writers
+        } == {
+            family + ".to_dict",
+            family + ".to_json",
+        }
+    exemptions = {item.qualified_name for item in registry.exemptions}
+    assert "histdatacom.campaign_index_contracts._Record" in exemptions
+    assert "histdatacom.data_quality.vendor_m1_contracts._Wire" in exemptions
+    assert not registry.migrations
+
+
 def test_account_inherited_wires_are_exact_reader_writer_inventory() -> None:
     registry = schema_compatibility_registry()
     families = {item.family: item for item in registry.schemas}

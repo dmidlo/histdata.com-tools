@@ -77,6 +77,8 @@ def test_installed_help_lists_complete_reconstruction_family(
         "support-inspect",
         "resource-audit",
         "product-index",
+        "product-inventory",
+        "product-verify",
         "product-inspect",
         "dataset-publish",
         "request",

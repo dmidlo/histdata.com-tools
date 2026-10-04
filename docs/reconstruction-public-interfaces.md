@@ -443,11 +443,27 @@ histdatacom reconstruction --json certify \
   --output-directory evidence/dossier
 ```
 
+Campaign product APIs separate exploration from current verification:
+
+- `ReconstructionClient.inventory_campaign_products(...)` emits only an
+  explicitly unverified, publication-ineligible inventory.
+- `construct_verified_campaign_product_index(...)` always performs deep
+  verification and accepts no verification switch. The legacy
+  `construct_campaign_product_index(..., verify_products=True)` wrapper remains;
+  `False` now refuses with migration guidance instead of certifying manifests.
+- `inspect_campaign_products(...)` checks structural shards/counts only;
+  `verify_campaign_products(index_path)` freshly checks actual products/inputs.
+- `publish_campaign_dataset(...)` always freshly verifies a complete index;
+  it cannot consume exploratory output or a caller-supplied receipt as proof.
+
 The campaign fixes the broker-neutral `modern_reference` /
 `unconditioned_reference` release claim. It verifies every JSON evidence file's
 SHA-256, schema version, and subject identity before extracting a scalar through
 the JSON pointer declared by the campaign. Scalar values are not allowed inline
-in the campaign specification. The command publishes the frozen campaign,
+in the campaign specification. Product-index/publication checks are derived
+from fresh native replay, not scalar pointers; see the
+[certification contract](reconstruction-certification-contracts.md).
+The command publishes the frozen campaign,
 methodology report, canonical dossier JSON, human Markdown, and a bounded result
 receipt.
 

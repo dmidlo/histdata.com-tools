@@ -4998,6 +4998,31 @@ def _delivery_quality_manifest(
         raise ReconstructionPersistenceError(
             "delivery output hash differs before persistence"
         )
+    # Commit the exact normalized collections retained by the quality DTO.
+    # The previous raw-list hash lost ordering/duplicates when the DTO then
+    # normalized these fields, preventing reconstruction from durable evidence.
+    benchmark_artifact_ids = _normalized_text_tuple(benchmark_artifact_ids)
+    point_in_time_evidence_projection_ids = _normalized_text_tuple(
+        point_in_time_evidence_projection_ids
+    )
+    point_in_time_evidence_decision_ids = _normalized_text_tuple(
+        point_in_time_evidence_decision_ids
+    )
+    cross_series_constraint_bundle_ids = _normalized_text_tuple(
+        cross_series_constraint_bundle_ids
+    )
+    cross_series_constraint_window_ids = _normalized_text_tuple(
+        cross_series_constraint_window_ids
+    )
+    cross_series_constraint_decision_ids = _normalized_text_tuple(
+        cross_series_constraint_decision_ids
+    )
+    projection_burden_report_ids = _normalized_text_tuple(
+        projection_burden_report_ids
+    )
+    projection_burden_receipt_ids = _normalized_text_tuple(
+        projection_burden_receipt_ids
+    )
     evidence: dict[str, JSONValue] = {
         "final_validation": final_validation.to_dict(),
         "benchmark_artifact_ids": list(benchmark_artifact_ids),

@@ -176,11 +176,28 @@ Every observation supplies a measurement evidence key, a JSON pointer, and the
 exact supporting evidence keys. It does not contain an `actual` value.
 `run_modern_reference_certification_campaign()` reads the file, verifies its
 hash, schema and subject identity, resolves the JSON pointer, verifies that the
-result is a scalar, and only then creates a certification observation.
+result is a scalar, and only then creates an ordinary certification observation.
 
-This prevents a handwritten summary boolean from standing in for a producer
-report. Producer-specific contracts still own how reports calculate their
+Four product checks are an explicit exception: `campaign_product_index_valid`,
+`campaign_dataset_publication_valid`,
+`executable_retained_product_missing_count`, and
+`fabricated_liquidity_terminal_outcome_count`. Their values come from fresh
+native campaign replay, never their declared JSON scalar pointers. Native
+index/publication artifacts are verified even if no protected observation
+references them. Publication/index/support identities and bytes must describe
+one graph; an unrelated valid index cannot certify another publication or
+support map. An unverified inventory or resealed passing summary is rejected.
+Publication checks also reconstruct the exact normalization, parent role/order,
+scientific ledger and closed qualification-evidence graph. Material use requires
+the retained deep receipt to equal current replay. Legacy publication envelopes
+without that receipt remain structurally readable, but must be republished with
+fresh evidence before certification; decoding alone is not qualification.
+
+Hash checking alone proves the declared bytes, not the truth of a report.
+Producer-specific contracts still own how ordinary reports calculate their
 metrics; the campaign owns identity, extraction, aggregation, and publication.
+The protected product path independently checks actual retained products and
+native validation, rather than granting authority to a handwritten boolean.
 The projection-burden producer contract is described in
 [`projection-burden-diagnostics.md`](projection-burden-diagnostics.md); its
 report and release-consumption receipts are mandatory cross-currency evidence.

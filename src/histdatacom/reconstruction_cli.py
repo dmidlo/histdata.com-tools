@@ -273,7 +273,27 @@ def build_parser() -> argparse.ArgumentParser:
     product_index.add_argument(
         "--manifest-only",
         action="store_true",
-        help="skip full Parquet replay while building an in-progress index",
+        help=(
+            "deprecated alias for product-inventory; writes explicitly "
+            "unverified inventory, never a product index"
+        ),
+    )
+
+    product_inventory = subparsers.add_parser(
+        "product-inventory",
+        help="discover unverified manifests, ineligible for publication",
+    )
+    product_inventory.add_argument("--plan-set", required=True, metavar="PATH")
+    product_inventory.add_argument(
+        "--output-directory", required=True, metavar="PATH"
+    )
+
+    product_verify = subparsers.add_parser(
+        "product-verify",
+        help="freshly deep-verify an index and all retained products",
+    )
+    product_verify.add_argument(
+        "--product-index", required=True, metavar="PATH"
     )
 
     product_inspect = subparsers.add_parser(
@@ -656,14 +676,25 @@ def _run_command(
             output_directory=args.output_directory,
         )
         return ref.to_dict(), ReconstructionExitCode.SUCCESS
+    if command == "product-inventory" or (
+        command == "product-index" and args.manifest_only
+    ):
+        ref = client.inventory_campaign_products(
+            args.plan_set, output_directory=args.output_directory
+        )
+        return ref.to_dict(), ReconstructionExitCode.SUCCESS
     if command == "product-index":
-        ref = client.construct_campaign_product_index(
+        ref = client.construct_verified_campaign_product_index(
             args.plan_set,
             args.support_map,
             output_directory=args.output_directory,
-            verify_products=not args.manifest_only,
         )
         return ref.to_dict(), ReconstructionExitCode.SUCCESS
+    if command == "product-verify":
+        return (
+            client.verify_campaign_products(args.product_index),
+            ReconstructionExitCode.SUCCESS,
+        )
     if command == "product-inspect":
         return (
             client.inspect_campaign_products(

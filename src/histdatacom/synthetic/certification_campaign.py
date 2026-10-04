@@ -1,8 +1,9 @@
 """Executable, hash-verified modern-reference certification campaigns.
 
-The campaign is an evidence aggregator.  It never accepts scalar observations
-directly: every measured value is extracted from one hash-verified JSON report
-through a declared JSON pointer and remains bound to every supporting artifact.
+The campaign is an evidence aggregator. Ordinary measurements are extracted
+from hash-verified JSON reports. Product-index/publication measurements instead
+come from fresh native replay; neither a JSON pointer nor a resealed scalar can
+stand in for product validation. All observations remain artifact-bound.
 """
 
 from __future__ import annotations
@@ -464,6 +465,7 @@ def run_modern_reference_certification_campaign(
     artifacts: list[CertificationArtifactV1] = []
     payloads: dict[str, Mapping[str, Any]] = {}
     evidence_by_key: dict[str, CertificationArtifactV1] = {}
+    input_paths: dict[str, Path] = {}
     for declared in spec.artifacts:
         path = Path(declared.path).expanduser()
         if not path.is_absolute():
@@ -482,8 +484,13 @@ def run_modern_reference_certification_campaign(
             metadata=declared.metadata,
         )
         payloads[declared.evidence_key] = payload
+        input_paths[declared.evidence_key] = path
         evidence_by_key[declared.evidence_key] = artifact
         artifacts.append(artifact)
+
+    product_observations = _verify_campaign_product_evidence(
+        spec, input_paths, evidence_by_key
+    )
 
     evidence_directory = output / "evidence"
     campaign_path = evidence_directory / "campaign-spec.json"
@@ -541,7 +548,11 @@ def run_modern_reference_certification_campaign(
     evidence_by_key[METHODOLOGY_REPORT_EVIDENCE_KEY] = methodology_artifact
 
     observations = [
-        _extract_observation(declared, payloads, evidence_by_key)
+        (
+            product_observations[declared.check_id]
+            if declared.check_id in _PRODUCT_VERIFICATION_CHECKS
+            else _extract_observation(declared, payloads, evidence_by_key)
+        )
         for declared in spec.observations
     ]
     observations.append(
@@ -592,11 +603,162 @@ def run_modern_reference_certification_campaign(
     return dossier, result
 
 
+_PRODUCT_VERIFICATION_CHECKS = frozenset(
+    {
+        "campaign_product_index_valid",
+        "campaign_dataset_publication_valid",
+        "executable_retained_product_missing_count",
+        "fabricated_liquidity_terminal_outcome_count",
+    }
+)
+
+
+def _verify_campaign_product_evidence(
+    spec: ModernReferenceCertificationCampaignSpecV1,
+    paths: Mapping[str, Path],
+    evidence: Mapping[str, CertificationArtifactV1],
+) -> dict[str, CertificationObservationV1]:
+    """Derive protected checks from one freshly replayed campaign graph.
+
+    The original V1 extraction declarations remain readable. Their scalar
+    pointers cannot grant product authority: protected values and notes are
+    computed here, and every declared supporting native artifact must belong
+    to the same index/support/publication graph.
+    """
+    from histdatacom.campaign_verification import verify_campaign_product_index
+    from histdatacom.reconstruction import (
+        _validate_campaign_dataset_publication_graph,
+        read_reconstruction_campaign_dataset_publication,
+        read_reconstruction_campaign_product_index,
+    )
+
+    index_kind = "reconstruction-campaign-product-index"
+    publication_kind = "reconstruction-campaign-dataset-publication"
+    native = {
+        item.evidence_key: item
+        for item in spec.artifacts
+        if item.kind in {index_kind, publication_kind}
+    }
+    indexes = {}
+    publications = {}
+    for key, declared in native.items():
+        path = paths[key]
+        if declared.kind == index_kind:
+            receipt = verify_campaign_product_index(path)
+            if (
+                receipt.index_id != declared.subject_id
+                or receipt.index_ref.sha256 != declared.content_sha256
+            ):
+                raise ValueError("campaign index evidence identity changed")
+            indexes[key] = receipt
+        else:
+            publication = read_reconstruction_campaign_dataset_publication(path)
+            receipt = verify_campaign_product_index(
+                publication.product_index_ref.path
+            )
+            if (
+                publication.publication_id != declared.subject_id
+                or receipt.status != "complete"
+                or receipt.index_ref.sha256
+                != publication.product_index_ref.sha256
+            ):
+                raise ValueError(
+                    "campaign publication lacks complete fresh replay"
+                )
+            _validate_campaign_dataset_publication_graph(
+                publication, verify_artifacts=True, fresh_verification=receipt
+            )
+            publications[key] = (publication, receipt)
+        # Replay must not race a changed outer declaration.
+        _verified_json_artifact(path, declared)
+
+    identities = {
+        (item.index_id, item.index_ref.sha256) for item in indexes.values()
+    }
+    identities.update(
+        (item.index_id, item.index_ref.sha256)
+        for _, item in publications.values()
+    )
+    if len(identities) > 1:
+        raise ValueError(
+            "certification evidence mixes different campaign indexes"
+        )
+    declared_by_key = {item.evidence_key: item for item in spec.artifacts}
+    results = {}
+    for observation in spec.observations:
+        if observation.check_id not in _PRODUCT_VERIFICATION_CHECKS:
+            continue
+        keys = observation.artifact_evidence_keys
+        selected = [indexes[key] for key in keys if key in indexes]
+        if len(selected) != 1:
+            raise ValueError(
+                "product certification requires one native index evidence input"
+            )
+        receipt = selected[0]
+        index = read_reconstruction_campaign_product_index(
+            receipt.index_ref.path
+        )
+        if index.product_index_id != receipt.index_id:
+            raise ValueError("campaign index changed after deep replay")
+        check = observation.check_id
+        if check in {
+            "executable_retained_product_missing_count",
+            "fabricated_liquidity_terminal_outcome_count",
+        }:
+            supports = [
+                declared_by_key[key]
+                for key in keys
+                if key in declared_by_key
+                and declared_by_key[key].kind
+                == "reconstruction-plan-support-map"
+            ]
+            if len(supports) != 1 or (
+                supports[0].subject_id != receipt.support_artifact_id
+                or supports[0].content_sha256 != index.support_map_ref.sha256
+            ):
+                raise ValueError(
+                    "campaign certification support evidence is foreign"
+                )
+            actual: JSONScalar = (
+                receipt.missing_product_count
+                if check == "executable_retained_product_missing_count"
+                else 0
+            )
+        elif check == "campaign_dataset_publication_valid":
+            if len([key for key in keys if key in publications]) != 1:
+                raise ValueError(
+                    "publication certification requires native publication evidence"
+                )
+            actual = receipt.status == "complete"
+        else:
+            actual = receipt.status == "complete"
+        results[check] = CertificationObservationV1(
+            check_id=check,
+            actual=actual,
+            artifact_evidence_ids=tuple(
+                evidence[key].evidence_id for key in keys
+            ),
+            note="derived from fresh native campaign product verification; not a declared scalar",
+        )
+    return results
+
+
 def _verified_json_artifact(
     path: Path, declared: CertificationCampaignArtifactV1
 ) -> tuple[Mapping[str, Any], bytes]:
+    native_payload: Mapping[str, Any] | None = None
     try:
-        encoded = path.read_bytes()
+        if declared.kind in {
+            "reconstruction-campaign-product-index",
+            "reconstruction-campaign-dataset-publication",
+        }:
+            from histdatacom.campaign_verification import (
+                read_campaign_control_snapshot,
+            )
+
+            native_payload, encoded = read_campaign_control_snapshot(path)
+        else:
+            encoded = path.read_bytes()
     except OSError as error:
         raise ValueError(
             f"cannot read certification artifact {path}: {error}"
@@ -605,6 +767,8 @@ def _verified_json_artifact(
     if digest != declared.content_sha256:
         raise ValueError(f"certification artifact hash differs: {path}")
     payload = _json_bytes_mapping(encoded, path)
+    if native_payload is not None and payload != native_payload:
+        raise ValueError("native certification artifact changed during read")
     if payload.get("schema_version") != declared.subject_schema_version:
         raise ValueError(f"certification artifact schema differs: {path}")
     subject = _resolve_json_pointer(payload, declared.subject_id_pointer)

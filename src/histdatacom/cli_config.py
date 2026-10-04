@@ -387,9 +387,14 @@ _CLEANUP_ALLOWED_KEYS = (
 _RECONSTRUCTION_COMMANDS = {
     "cancel",
     "certify-capabilities",
+    "dataset-publish",
     "outputs",
     "plan",
     "preflight",
+    "product-index",
+    "product-inspect",
+    "product-inventory",
+    "product-verify",
     "preview",
     "replay",
     "request",
@@ -415,10 +420,13 @@ _RECONSTRUCTION_TRUE_FLAG_ARGS = {
     "acknowledge_scientific_nonclaim": ("--acknowledge-scientific-nonclaim"),
     "allow_refusals": "--allow-refusals",
     "local": "--local",
+    "manifest_only": "--manifest-only",
     "offline": "--offline",
     "submit_only": "--submit-only",
 }
 _RECONSTRUCTION_SCALAR_ARGS = {
+    "dataset_id": "--dataset-id",
+    "end_ns": "--end-ns",
     "evidence_root": "--evidence-root",
     "information_mode": "--information-mode",
     "limit": "--limit",
@@ -426,10 +434,14 @@ _RECONSTRUCTION_SCALAR_ARGS = {
     "output": "--output",
     "output_directory": "--output-directory",
     "plan": "--plan",
+    "plan_set": "--plan-set",
+    "product_index": "--product-index",
     "reason": "--reason",
     "receipt": "--receipt",
     "request": "--request",
     "spec": "--spec",
+    "start_ns": "--start-ns",
+    "support_map": "--support-map",
     "window_id": "--window-id",
 }
 _RECONSTRUCTION_ALLOWED_KEYS = (

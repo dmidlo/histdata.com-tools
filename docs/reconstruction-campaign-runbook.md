@@ -192,11 +192,29 @@ duplicated.
 
 ## Reconcile products and publish the dataset
 
-An in-progress diagnostic index may use `--manifest-only`; it is not a release
-artifact. Final indexing omits that flag and integrity-replays every committed
-Parquet product against the support map and retained-member rectangle.
+For in-progress exploration, use `product-inventory`. Its separate inventory
+schema is always `unverified`, with publication and certification ineligible.
+The old `product-index --manifest-only` spelling is a deprecated alias for that
+inventory, **not** an index builder. Inventory V1 refuses rather than truncates
+more than 5,000 candidates in total, 100,000 tree entries per output root,
+16 directory levels, or 16 MiB of canonical metadata. Candidate metadata is
+reserved before accumulation; these are finite work/wire limits, not a measured
+whole-call memory guarantee. Select smaller plan sets for exploration.
+Its stable no-follow manifest reads currently require POSIX support; unsupported
+platforms refuse explicitly instead of implying equivalent protection.
+
+`product-index` has no verification bypass. It replays committed Parquet,
+observed anchors, source/plan/scenario bindings, and final native validation
+against the exact support/member rectangle. Missing products make the index
+incomplete. Empty/refused support stays explicit; out-of-plan products are
+reported separately rather than admitted. A same-run product containing actual
+events in planned empty/refused support is refused, not hidden in that report.
 
 ```sh
+histdatacom reconstruction --json product-inventory \
+  --plan-set work/artifacts/reconstruction-plan-set-<sha256>.json \
+  --output-directory work/product-inventory
+
 histdatacom reconstruction --json product-index \
   --plan-set work/artifacts/reconstruction-plan-set-<sha256>.json \
   --support-map work/support-map/reconstruction-plan-support-map-index-<sha256>.json \
@@ -206,15 +224,52 @@ histdatacom reconstruction --json product-inspect \
   --product-index work/product-index/reconstruction-campaign-product-index-<sha256>.json \
   --limit 100
 
+histdatacom reconstruction --json product-verify \
+  --product-index work/product-index/reconstruction-campaign-product-index-<sha256>.json
+
 histdatacom reconstruction --json dataset-publish \
   --product-index work/product-index/reconstruction-campaign-product-index-<sha256>.json \
   --output-directory work/dataset
 ```
 
-Publication requires a complete product index. It preserves explicit terminal
+`product-inspect` is a **structural** read: actual shard identities/counts are
+checked, but its serialized output explicitly says product bytes were not
+verified. `product-verify` is a fresh deep read. Durable V1 index/manifest labels
+alone are not current authority. Constructing or loading a deep receipt does
+not grant authority either: this implementation always replays inputs afresh
+and does not implement the reusable receipt-tree route under #523.
+
+Older native product writers could hash caller-ordered evidence IDs and then
+retain only sorted, deduplicated IDs. That lost ordering cannot be inferred
+from the stored product. Fresh verification refuses such unreproducible quality
+commitments with republishing guidance; existing structural readers remain
+compatible. Reissue affected products through the corrected writer with their
+actual validation/evidence inputs in a new output location. Do not edit old
+hashes or overwrite retained evidence to make it appear verified.
+
+Publication requires a freshly deep-verified complete product index and retains
+the replay evidence in the dataset version's qualification evidence. Changing
+any referenced bytes invalidates a subsequent verification/publication, even
+if an older receipt says complete. It preserves explicit terminal
 non-product outcomes and emits one provider-neutral synthetic dataset version;
 it does not relabel the output as HistData observations or broker data. Use
 `outputs`, `preview`, and `replay` for bounded per-request/product inspection.
+
+These are product-integrity checks, not a rerun of model training or scientific
+promotion qualification and not evidence that a historical campaign ran.
+Final-local checks reproduce the native terminal invariants and retained
+lineage; they do not prove a unique stochastic price path or recreate discarded
+pre-cross-currency candidate quotes. Cross-currency validation is recomputed
+from actual output and source anchors. A different plausible price path cannot
+be ruled out merely by passing those terminal constraints.
+Artifact trees must remain quiescent during verification/publication; bounded
+reads and before/after byte checks are not a hostile-filesystem transaction.
+The fresh verifier refuses control documents over 64 MiB, aggregate retained
+plan controls over 256 MiB, more than 262,144 planned coordinates/tracked files,
+or an over-limit discovered artifact tree. Native shard limits still apply.
+Canonical receipt content is bounded to 4 MiB with at most 4,096 separately reported
+out-of-plan products. Refusal is explicit, never a truncated complete claim;
+larger campaigns require a separately designed scalable proof path.
 
 ## Closure evidence
 

@@ -136,6 +136,7 @@ from histdatacom.synthetic.reconstruction_plan import (
     DEFAULT_RECONSTRUCTION_WINDOW_SIZE_NS,
     SCIENTIFIC_NONCLAIM,
     ReconstructionDeliveryMode,
+    ReconstructionPlanConfigurationV1,
     ReconstructionPlanConfigurationV2,
     ReconstructionPlanResourceSummaryV1,
     ReconstructionPlanSourceSupportStatus,
@@ -4453,12 +4454,61 @@ class ReconstructionClient:
         output_directory: str | Path,
         verify_products: bool = True,
     ) -> ArtifactRef:
-        """Reconcile every support outcome with retained-member products."""
+        """Compatibility wrapper; manifest-only certification is refused.
+
+        Use ``inventory_campaign_products`` for exploratory manifest discovery
+        or ``construct_verified_campaign_product_index`` for certification.
+        The legacy keyword remains accepted only when it is exactly True.
+        """
+        if verify_products is not True:
+            raise ReconstructionUnsupportedError(
+                "manifest-only indexing cannot certify products; use "
+                "inventory_campaign_products for unverified exploration"
+            )
+        return self.construct_verified_campaign_product_index(
+            plan_set_path,
+            support_map_path,
+            output_directory=output_directory,
+        )
+
+    def construct_verified_campaign_product_index(
+        self,
+        plan_set_path: str | Path,
+        support_map_path: str | Path,
+        *,
+        output_directory: str | Path,
+    ) -> ArtifactRef:
+        """Build a freshly deep-verified index with no verification bypass."""
         return _build_reconstruction_campaign_product_index(
             plan_set_path,
             support_map_path,
             output_directory=output_directory,
-            verify_products=verify_products,
+        )
+
+    def inventory_campaign_products(
+        self,
+        plan_set_path: str | Path,
+        *,
+        output_directory: str | Path,
+    ) -> ArtifactRef:
+        """Discover manifests only; never certify or qualify their products."""
+        from histdatacom.campaign_inventory import inventory_campaign_products
+
+        return inventory_campaign_products(
+            plan_set_path, output_directory=output_directory
+        )
+
+    def verify_campaign_products(
+        self, product_index_path: str | Path
+    ) -> Mapping[str, JSONValue]:
+        """Freshly replay the index and every required product and input."""
+        from histdatacom.campaign_verification import (
+            verify_campaign_product_index,
+        )
+
+        return cast(
+            Mapping[str, JSONValue],
+            verify_campaign_product_index(product_index_path).to_dict(),
         )
 
     def publish_campaign_dataset(
@@ -4483,7 +4533,11 @@ class ReconstructionClient:
         end_ns: int | None = None,
         limit: int = 100,
     ) -> Mapping[str, JSONValue]:
-        """Inspect a bounded product/outcome slice from a campaign index."""
+        """Structurally inspect an index, without claiming product replay."""
+        from histdatacom.campaign_verification import (
+            inspect_campaign_product_index,
+        )
+
         if (
             isinstance(limit, bool)
             or not isinstance(limit, int)
@@ -4503,9 +4557,10 @@ class ReconstructionClient:
                 raise ReconstructionUnsupportedError(
                     "campaign product inspection interval is empty"
                 )
-        index = read_reconstruction_campaign_product_index(
-            product_index_path, verify_shards=False
-        )
+        structural = inspect_campaign_product_index(product_index_path)
+        index = read_reconstruction_campaign_product_index(product_index_path)
+        if index.product_index_id != structural.index_id:
+            raise ReconstructionPlanError("campaign index changed during read")
         selected_count = 0
         returned: list[dict[str, JSONValue]] = []
         for ref in index.shard_refs:
@@ -4538,6 +4593,10 @@ class ReconstructionClient:
         return {
             "schema_version": "histdatacom.reconstruction-campaign-product-inspection.v1",
             "product_index_id": index.product_index_id,
+            "verification_level": "structural",
+            "product_bytes_verified": False,
+            "publication_eligible": False,
+            "structural_verification": structural.to_dict(),
             "status": index.status,
             "requested_start_ns": index.requested_start_ns,
             "requested_end_ns": index.requested_end_ns,
@@ -5458,7 +5517,7 @@ def write_reconstruction_campaign_product_shard(
         "reconstruction-campaign-product-shard-"
         f"{shard.product_shard_id.rsplit(':', 1)[-1]}.json"
     )
-    written = _write_json(path, shard.to_dict())
+    written = _write_campaign_json(path, shard.to_dict())
     return artifact_ref_for_file(
         written,
         kind="reconstruction_campaign_product_shard_v1",
@@ -5508,7 +5567,7 @@ def write_reconstruction_campaign_product_index(
         "reconstruction-campaign-product-index-"
         f"{index.product_index_id.rsplit(':', 1)[-1]}.json"
     )
-    written = _write_json(path, index.to_dict())
+    written = _write_campaign_json(path, index.to_dict())
     return artifact_ref_for_file(
         written,
         kind="reconstruction_campaign_product_index_v1",
@@ -5534,7 +5593,11 @@ def read_reconstruction_campaign_product_index(
     *,
     verify_shards: bool = True,
 ) -> ReconstructionCampaignProductIndexV1:
-    """Read and reconcile a campaign index with every bounded shard."""
+    """Read structural metadata only, not product verification authority.
+
+    With ``verify_shards=True`` all actual shard identities and row-derived
+    counts must match. Use ``verify_campaign_product_index`` for fresh replay.
+    """
     target = Path(path).expanduser().resolve()
     if target.stat().st_size > MAX_RECONSTRUCTION_PLAN_SET_CONTROL_BYTES:
         raise ReconstructionPlanError(
@@ -5558,6 +5621,33 @@ def read_reconstruction_campaign_product_index(
                 raise ReconstructionPlanError(
                     "campaign product shard differs from its index descriptor"
                 )
+            for name in (
+                "requested_start_ns",
+                "requested_end_ns",
+                "support_window_count",
+                "verified_product_count",
+                "missing_product_count",
+                "empty_window_count",
+                "refused_window_count",
+                "observed_event_count",
+                "synthetic_event_count",
+                "status",
+            ):
+                actual = getattr(shard, name)
+                if type(metadata.get(name)) is not type(actual) or (
+                    metadata.get(name) != actual
+                ):
+                    raise ReconstructionPlanError(
+                        "campaign product shard metadata differs from "
+                        f"actual rows: {name}"
+                    )
+            projection_count = metadata.get("projection_burden_receipt_count")
+            if type(projection_count) is not int or projection_count != len(
+                shard.projection_burden_receipt_ids
+            ):
+                raise ReconstructionPlanError(
+                    "campaign projection receipt count differs from actual rows"
+                )
     return index
 
 
@@ -5565,13 +5655,47 @@ def write_reconstruction_campaign_dataset_publication(
     publication: ReconstructionCampaignDatasetPublicationV1,
     directory: str | Path,
 ) -> ArtifactRef:
-    """Persist a provider-neutral synthetic dataset publication receipt."""
+    """Persist a qualified receipt only after fresh native product replay."""
+    from histdatacom.campaign_index_contracts import canonical
+    from histdatacom.campaign_verification import verify_campaign_product_index
+
+    # Verify and serialize the same detached native object. A caller's
+    # overridable serializer must not substitute bytes after graph validation.
+    if type(publication) is not ReconstructionCampaignDatasetPublicationV1:
+        raise ReconstructionPlanError(
+            "campaign publication requires the exact native publication type"
+        )
+    for ref in (
+        publication.product_index_ref,
+        publication.dataset_version_ref,
+        publication.catalog_ref,
+    ):
+        if type(ref) is not ArtifactRef or type(ref.metadata) is not dict:
+            raise ReconstructionPlanError(
+                "campaign publication requires exact native artifact references"
+            )
+    publication = ReconstructionCampaignDatasetPublicationV1.from_dict(
+        json.loads(canonical(publication.to_dict()))
+    )
+    verification = verify_campaign_product_index(
+        publication.product_index_ref.path
+    )
+    if (
+        verification.status != "complete"
+        or verification.index_ref.sha256 != publication.product_index_ref.sha256
+    ):
+        raise ReconstructionRefusedError(
+            "campaign publication receipt requires complete fresh verification"
+        )
+    _validate_campaign_dataset_publication_graph(
+        publication, verify_artifacts=True, fresh_verification=verification
+    )
     root = Path(directory).expanduser().resolve()
     path = root / (
         "reconstruction-campaign-dataset-publication-"
         f"{publication.publication_id.rsplit(':', 1)[-1]}.json"
     )
-    written = _write_json(path, publication.to_dict())
+    written = _write_campaign_json(path, publication.to_dict())
     return artifact_ref_for_file(
         written,
         kind="reconstruction_campaign_dataset_publication_v1",
@@ -5593,10 +5717,27 @@ def read_reconstruction_campaign_dataset_publication(
     *,
     verify_artifacts: bool = True,
 ) -> ReconstructionCampaignDatasetPublicationV1:
-    """Read and verify a campaign dataset publication and its graph."""
+    """Read the structural publication graph, not fresh product authority.
+
+    Certification must additionally call ``verify_campaign_product_index``.
+    A persisted ``qualified`` label describes publication-time evidence only.
+    """
     publication = ReconstructionCampaignDatasetPublicationV1.from_dict(
         _read_json_mapping(path)
     )
+    _validate_campaign_dataset_publication_graph(
+        publication, verify_artifacts=verify_artifacts
+    )
+    return publication
+
+
+def _validate_campaign_dataset_publication_graph(
+    publication: ReconstructionCampaignDatasetPublicationV1,
+    *,
+    verify_artifacts: bool,
+    fresh_verification: Any | None = None,
+) -> None:
+    """Reconcile structural graph edges, never stand in for product replay."""
     if verify_artifacts:
         for ref in (
             publication.product_index_ref,
@@ -5618,17 +5759,98 @@ def read_reconstruction_campaign_dataset_publication(
         != publication.observed_parent_dataset_version_id
         or version.dataset_version_id
         != publication.synthetic_dataset_version_id
+        or version.origin is not DatasetOrigin.SYNTHETIC
+        or version.qualification_status
+        is not DatasetQualificationStatus.QUALIFIED
+        or version.delivery_profile_id != index.delivery_profile_id
+        or publication.product_index_ref not in version.qualification_evidence
+        or index.plan_set_ref not in version.qualification_evidence
+        or index.support_map_ref not in version.qualification_evidence
         or tuple(item.parent_dataset_version_id for item in version.parents)
         != (publication.observed_parent_dataset_version_id,)
-        or not any(
-            item.dataset_version_id == publication.synthetic_dataset_version_id
-            for item in catalog.versions
-        )
+        or not any(item == version for item in catalog.versions)
     ):
         raise ReconstructionPlanError(
             "campaign dataset publication graph does not reconcile"
         )
-    return publication
+    from histdatacom.campaign_index_contracts import CampaignDeepVerificationV1
+    from histdatacom.campaign_verification import read_campaign_control_json
+
+    plan_set = read_reconstruction_plan_set(index.plan_set_ref.path)
+    first_plan = read_synthetic_infill_plan(plan_set.shards[0].plan_ref.path)
+    ledger_ref = first_plan.artifact_graph.get("scientific_ledger")
+    if ledger_ref is None:
+        raise ReconstructionPlanError(
+            "campaign publication lacks scientific ledger"
+        )
+    base_evidence = (
+        ledger_ref,
+        publication.product_index_ref,
+        index.plan_set_ref,
+        index.support_map_ref,
+    )
+    if verify_artifacts:
+        for ref in base_evidence:
+            verify_artifact_ref(ref)
+    if read_reconstruction_scientific_ledger(ledger_ref.path) != (
+        current_histdata_reconstruction_scientific_ledger()
+    ):
+        raise ReconstructionPlanError(
+            "campaign publication ledger differs from target"
+        )
+    proof_refs = tuple(
+        ref
+        for ref in version.qualification_evidence
+        if ref.kind == "campaign_deep_verification_v1"
+    )
+    if len(proof_refs) > 1:
+        raise ReconstructionPlanError(
+            "campaign publication has ambiguous deep evidence"
+        )
+    if proof_refs:
+        proof_ref = proof_refs[0]
+        if verify_artifacts:
+            verify_artifact_ref(proof_ref)
+        proof = CampaignDeepVerificationV1.from_dict(
+            read_campaign_control_json(proof_ref.path)
+        )
+        if (
+            proof.index_id != index.product_index_id
+            or proof.index_ref.sha256 != publication.product_index_ref.sha256
+            or proof.plan_set_id != index.plan_set_id
+            or proof.support_artifact_id != index.support_artifact_id
+            or proof.status != "complete"
+        ):
+            raise ReconstructionPlanError(
+                "campaign publication deep evidence is foreign"
+            )
+        if fresh_verification is not None and proof != fresh_verification:
+            raise ReconstructionPlanError(
+                "campaign publication deep evidence is stale"
+            )
+    elif fresh_verification is not None:
+        raise ReconstructionPlanError(
+            "republish legacy campaign with fresh deep evidence"
+        )
+    expected_version = DatasetVersionManifestV1(
+        dataset_id=version.dataset_id,
+        origin=DatasetOrigin.SYNTHETIC,
+        normalization_policy_id="reconstruction-campaign-product-index-v1",
+        qualification_status=DatasetQualificationStatus.QUALIFIED,
+        parents=(
+            DatasetParentV1(
+                parent_dataset_version_id=index.observed_dataset_version_id,
+                role="immutable-observed-histdata-anchor",
+                ordinal=0,
+            ),
+        ),
+        qualification_evidence=(*base_evidence, *proof_refs),
+        delivery_profile_id=index.delivery_profile_id,
+    )
+    if version != expected_version:
+        raise ReconstructionPlanError(
+            "campaign publication semantic projection differs"
+        )
 
 
 def write_execution_request(
@@ -6539,9 +6761,13 @@ def _build_reconstruction_campaign_product_index(
     support_map_path: str | Path,
     *,
     output_directory: str | Path,
-    verify_products: bool,
 ) -> ArtifactRef:
     """Reconcile planned support with exact committed member products."""
+    from histdatacom.campaign_verification import (
+        iter_campaign_manifest_paths,
+        verify_campaign_product_index,
+    )
+
     plan_set_target = Path(plan_set_path).expanduser().resolve()
     support_target = Path(support_map_path).expanduser().resolve()
     plan_set = read_reconstruction_plan_set(plan_set_target)
@@ -6664,16 +6890,35 @@ def _build_reconstruction_campaign_product_index(
             "campaign source is not a provider-neutral dataset version"
         )
     delivery_profile_id = next(iter(delivery_profile_ids))
+    if not selected_engine_ids:
+        # Historical V1 support records omit a portfolio roster. The native
+        # V1 handler nevertheless has one closed engine: empirical motif.
+        # Derive that fact from every verified configuration, never from a
+        # caller flag or a synthesized V2 eligibility report.
+        from histdatacom.synthetic.generation import (
+            EMPIRICAL_MOTIF_GENERATOR_ID,
+        )
+
+        for plan in plans.values():
+            configuration_ref = plan.artifact_graph["configuration"]
+            verify_artifact_ref(configuration_ref)
+            configuration = read_reconstruction_plan_configuration(
+                configuration_ref.path
+            )
+            if (
+                type(configuration) is not ReconstructionPlanConfigurationV1
+                or configuration.configuration_id != plan.configuration_id
+            ):
+                raise ReconstructionPlanError(
+                    "empty campaign engine selection requires exact legacy V1 configuration"
+                )
+        selected_engine_ids = (EMPIRICAL_MOTIF_GENERATOR_ID,)
     products: dict[
         tuple[str, str, str], tuple[ReconstructionProductManifestV3, Path]
     ] = {}
     for output_root in sorted(output_roots):
-        for path in discover_reconstruction_manifests(output_root):
-            manifest = (
-                verify_reconstruction_publication(path)
-                if verify_products
-                else load_reconstruction_manifest(path)
-            )
+        for path in iter_campaign_manifest_paths(output_root):
+            manifest = verify_reconstruction_publication(path)
             if not isinstance(manifest, ReconstructionProductManifestV3):
                 continue
             if manifest.run_id not in run_ids:
@@ -6934,8 +7179,45 @@ def _build_reconstruction_campaign_product_index(
         ),
     )
     ref = write_reconstruction_campaign_product_index(index, output_directory)
-    read_reconstruction_campaign_product_index(ref.path)
-    return ref
+    try:
+        verification = verify_campaign_product_index(ref.path)
+    except (ValueError, OSError, ReconstructionPublicError) as error:
+        raise ReconstructionPlanError(
+            f"campaign deep verification failed: {error}"
+        ) from error
+    verification_ref = _write_campaign_deep_verification(
+        verification.to_dict(), output_directory
+    )
+    return replace(
+        ref,
+        metadata={
+            **ref.metadata,
+            "verification_level": "fresh_deep",
+            "deep_verification_ref": verification_ref.to_dict(),
+        },
+    )
+
+
+def _write_campaign_deep_verification(
+    payload: Mapping[str, JSONValue], directory: str | Path
+) -> ArtifactRef:
+    """Retain bounded replay evidence, never reusable authority by itself."""
+    encoded = canonical_contract_json(payload).encode("utf-8")
+    if len(encoded) > MAX_RECONSTRUCTION_PLAN_SET_CONTROL_BYTES:
+        raise ReconstructionPlanError("campaign verification exceeds bounds")
+    digest = hashlib.sha256(encoded).hexdigest()
+    path = Path(directory).expanduser().resolve() / (
+        f"campaign-deep-verification-{digest}.json"
+    )
+    _write_campaign_json(path, payload)
+    return artifact_ref_for_file(
+        path,
+        kind="campaign_deep_verification_v1",
+        metadata={
+            "verification_level": "fresh_deep_at_issue_time_only",
+            "standalone_publication_authority": False,
+        },
+    )
 
 
 def _publish_reconstruction_campaign_dataset(
@@ -6945,9 +7227,16 @@ def _publish_reconstruction_campaign_dataset(
     dataset_id: str,
 ) -> ArtifactRef:
     """Bind a complete campaign index into the provider-neutral catalog."""
+    from histdatacom.campaign_verification import verify_campaign_product_index
+
     index_target = Path(product_index_path).expanduser().resolve()
+    verification = verify_campaign_product_index(index_target)
     index = read_reconstruction_campaign_product_index(index_target)
-    if index.status != "complete" or index.missing_product_count:
+    if (
+        verification.status != "complete"
+        or index.status != "complete"
+        or index.missing_product_count
+    ):
         raise ReconstructionRefusedError(
             "campaign dataset publication requires every retained product"
         )
@@ -6969,6 +7258,15 @@ def _publish_reconstruction_campaign_dataset(
             "status": index.status,
         },
     )
+    verified_ref = verification.index_ref.to_artifact_ref()
+    if (
+        verified_ref.sha256 != product_index_ref.sha256
+        or verified_ref.size_bytes != product_index_ref.size_bytes
+        or verification.index_id != index.product_index_id
+    ):
+        raise ReconstructionPlanError(
+            "campaign index changed after fresh deep verification"
+        )
     plan_set = read_reconstruction_plan_set(index.plan_set_ref.path)
     first_plan = read_synthetic_infill_plan(plan_set.shards[0].plan_ref.path)
     scientific_ledger_ref = first_plan.artifact_graph.get("scientific_ledger")
@@ -7032,6 +7330,9 @@ def _publish_reconstruction_campaign_dataset(
         raise ReconstructionPlanError(
             "campaign synthetic dataset descriptor already differs"
         )
+    verification_ref = _write_campaign_deep_verification(
+        verification.to_dict(), output_directory
+    )
     version = DatasetVersionManifestV1(
         dataset_id=descriptor.dataset_id,
         origin=DatasetOrigin.SYNTHETIC,
@@ -7049,6 +7350,7 @@ def _publish_reconstruction_campaign_dataset(
             product_index_ref,
             index.plan_set_ref,
             index.support_map_ref,
+            verification_ref,
         ),
         delivery_profile_id=index.delivery_profile_id,
     )
@@ -7058,7 +7360,7 @@ def _publish_reconstruction_campaign_dataset(
         + version.dataset_version_id.rsplit(":", 1)[-1]
         + ".json"
     )
-    written_version = _write_json(version_path, version.to_dict())
+    written_version = _write_campaign_json(version_path, version.to_dict())
     version_ref = artifact_ref_for_file(
         written_version,
         kind="dataset_version_manifest_v1",
@@ -7237,6 +7539,20 @@ def _read_json_mapping(path: str | Path) -> dict[str, Any]:
     if not isinstance(payload, Mapping):
         raise ReconstructionPlanError(f"JSON root must be an object: {target}")
     return dict(payload)
+
+
+def _write_campaign_json(
+    path: str | Path, payload: Mapping[str, JSONValue]
+) -> Path:
+    """Preserve opt-in managed evidence at campaign output boundaries."""
+    from histdatacom.managed_artifact_boundary import (
+        assert_unmanaged_mutation_paths,
+    )
+
+    target = Path(path).expanduser()
+    temporary = target.with_name(f".{target.name}.partial")
+    assert_unmanaged_mutation_paths((target, temporary))
+    return _write_json(target, payload)
 
 
 def _write_json(path: str | Path, payload: Mapping[str, JSONValue]) -> Path:

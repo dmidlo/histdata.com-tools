@@ -24,7 +24,6 @@ from histdatacom.cross_series_constraints import (
 from histdatacom.data_quality.training_features import (
     enrich_tick_cache_with_training_features,
 )
-from histdatacom.datasets import DatasetVersionManifestV1
 from histdatacom.manifest_store import ManifestStatusStore
 from histdatacom.orchestration.queues import build_orchestration_worker_config
 from histdatacom.orchestration.reconstruction import (
@@ -34,7 +33,6 @@ from histdatacom.orchestration.reconstruction import (
     artifact_ref_for_file,
 )
 from histdatacom.reconstruction import (
-    ReconstructionCampaignDatasetPublicationV1,
     ReconstructionCampaignProductIndexV1,
     ReconstructionCampaignProductShardV1,
     ReconstructionClient,
@@ -54,7 +52,6 @@ from histdatacom.reconstruction import (
     read_execution_request,
     read_operation_receipt,
     read_plan_spec,
-    read_reconstruction_campaign_dataset_publication,
     read_reconstruction_campaign_product_index,
     read_reconstruction_campaign_product_shard,
     read_reconstruction_plan_set,
@@ -3007,9 +3004,11 @@ def test_public_plan_spec_supports_exact_paired_window_bounds(
     monkeypatch.setattr(
         reconstruction_module, "ReconstructionProductManifestV3", FakeProduct
     )
+    from histdatacom import campaign_verification
+
     monkeypatch.setattr(
-        reconstruction_module,
-        "discover_reconstruction_manifests",
+        campaign_verification,
+        "iter_campaign_manifest_paths",
         lambda _: tuple(fake_products),
     )
     monkeypatch.setattr(
@@ -3017,13 +3016,22 @@ def test_public_plan_spec_supports_exact_paired_window_bounds(
         "verify_reconstruction_publication",
         lambda path: fake_products[Path(path).resolve()],
     )
-    product_index_ref = ReconstructionClient().construct_campaign_product_index(
-        plan_set_ref.path,
-        support_ref.path,
-        output_directory=source_root / "product-index",
+    # These fake products once reached QUALIFIED. They may exercise rectangle
+    # assembly, but cannot pass the independent native deep verifier.
+    product_directory = source_root / "product-index"
+    with pytest.raises(
+        ReconstructionPlanError, match="campaign deep verification failed"
+    ):
+        ReconstructionClient().construct_campaign_product_index(
+            plan_set_ref.path,
+            support_ref.path,
+            output_directory=product_directory,
+        )
+    product_index_path = next(
+        product_directory.glob("reconstruction-campaign-product-index-*.json")
     )
     product_index = read_reconstruction_campaign_product_index(
-        product_index_ref.path
+        product_index_path
     )
     product_shard = read_reconstruction_campaign_product_shard(
         product_index.shard_refs[0].path
@@ -3062,7 +3070,7 @@ def test_public_plan_spec_supports_exact_paired_window_bounds(
         ),
     }
     product_inspection = ReconstructionClient().inspect_campaign_products(
-        product_index_ref.path,
+        product_index_path,
         start_ns=start_ns,
         end_ns=end_ns,
         limit=1,
@@ -3070,50 +3078,42 @@ def test_public_plan_spec_supports_exact_paired_window_bounds(
     assert product_inspection["selected_entry_count"] == 2
     assert product_inspection["returned_entry_count"] == 1
     assert product_inspection["truncated"]
-    publication_ref = ReconstructionClient().publish_campaign_dataset(
-        product_index_ref.path,
-        output_directory=source_root / "dataset-publication",
-    )
-    publication = read_reconstruction_campaign_dataset_publication(
-        publication_ref.path
-    )
-    assert isinstance(publication, ReconstructionCampaignDatasetPublicationV1)
-    assert publication.observed_parent_dataset_version_id == (
-        product_index.observed_dataset_version_id
-    )
-    assert publication.synthetic_dataset_version_id.startswith(
-        "dataset-version:sha256:"
-    )
-    dataset_version = DatasetVersionManifestV1.from_dict(
-        json.loads(
-            Path(publication.dataset_version_ref.path).read_text("utf-8")
+    assert product_inspection["verification_level"] == "structural"
+    assert product_inspection["product_bytes_verified"] is False
+    with pytest.raises((ValueError, OSError, ReconstructionPlanError)):
+        ReconstructionClient().publish_campaign_dataset(
+            product_index_path,
+            output_directory=source_root / "dataset-publication",
         )
-    )
-    assert scientific_ledger_ref in dataset_version.qualification_evidence
-    assert publication.dataset_version_ref.metadata["scientific_ledger_id"] == (
-        scientific_ledger.ledger_id
-    )
+    assert not (source_root / "dataset-publication").exists()
 
     missing_path = next(iter(fake_products))
     monkeypatch.setattr(
-        reconstruction_module,
-        "discover_reconstruction_manifests",
+        campaign_verification,
+        "iter_campaign_manifest_paths",
         lambda _: (missing_path,),
     )
-    incomplete_ref = ReconstructionClient().construct_campaign_product_index(
-        plan_set_ref.path,
-        support_ref.path,
-        output_directory=source_root / "product-index-incomplete",
+    incomplete_directory = source_root / "product-index-incomplete"
+    with pytest.raises(
+        ReconstructionPlanError, match="campaign deep verification failed"
+    ):
+        ReconstructionClient().construct_campaign_product_index(
+            plan_set_ref.path,
+            support_ref.path,
+            output_directory=incomplete_directory,
+        )
+    incomplete_path = next(
+        incomplete_directory.glob(
+            "reconstruction-campaign-product-index-*.json"
+        )
     )
-    incomplete = read_reconstruction_campaign_product_index(incomplete_ref.path)
+    incomplete = read_reconstruction_campaign_product_index(incomplete_path)
     assert incomplete.status == "incomplete"
     assert incomplete.verified_product_count == 1
     assert incomplete.missing_product_count == 1
-    with pytest.raises(
-        ReconstructionRefusedError, match="every retained product"
-    ):
+    with pytest.raises((ValueError, OSError, ReconstructionPlanError)):
         ReconstructionClient().publish_campaign_dataset(
-            incomplete_ref.path,
+            incomplete_path,
             output_directory=source_root / "incomplete-dataset-publication",
         )
 

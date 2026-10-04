@@ -128,6 +128,7 @@ Data quality
    :maxdepth: 2
 
    data-quality/report-compatibility
+   vendor-m1-validation
    training-row-contracts
    training-join-contracts
    training-wide-views

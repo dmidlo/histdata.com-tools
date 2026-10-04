@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import hashlib
+from dataclasses import replace
 from pathlib import Path
 from typing import cast
 
 import pytest
 
+from histdatacom.reconstruction import ReconstructionPlanError
 from histdatacom.runtime_contracts import JSONScalar, JSONValue
 from histdatacom.synthetic import CertificationComparator, CertificationState
 from histdatacom.synthetic.certification import (
@@ -161,19 +163,105 @@ def _write_spec(
     return path
 
 
-def test_campaign_extracts_every_value_and_reaches_ready_for_promotion(
+def test_campaign_refuses_hash_bound_fake_product_evidence(
     tmp_path: Path,
 ) -> None:
-    """A campaign can pass only with exact hash-bound scalar extractions."""
+    """Resealed passing scalars are not native product/index evidence."""
     spec = _complete_spec(tmp_path)
+    spec_path = _write_spec(tmp_path, spec)
+
+    with pytest.raises(
+        ReconstructionPlanError, match="publication status/nonclaim differs"
+    ):
+        run_modern_reference_certification_campaign(
+            spec_path, output_directory=tmp_path / "output"
+        )
+    assert not (tmp_path / "output" / "certification.json").exists()
+
+
+@pytest.mark.parametrize(
+    "kind",
+    [
+        "reconstruction-campaign-product-index",
+        "reconstruction-campaign-dataset-publication",
+    ],
+)
+def test_native_json_admission_uses_one_guarded_byte_snapshot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str
+) -> None:
+    """JSON admission alone is not authority and must not reopen unsafely."""
+    from histdatacom.synthetic.certification_campaign import (
+        _verified_json_artifact,
+    )
+
+    payload: dict[str, JSONValue] = {
+        "schema_version": "synthetic-byte-admission-only.v1",
+        "report_id": "synthetic-byte-admission-only",
+    }
+    path = tmp_path / "snapshot.json"
+    digest = _write_json(path, payload)
+    encoded = path.read_bytes()
+    declared = CertificationCampaignArtifactV1(
+        evidence_key="snapshot",
+        kind=kind,
+        path=str(path),
+        content_sha256=digest,
+        subject_id="synthetic-byte-admission-only",
+        subject_id_pointer="/report_id",
+        subject_schema_version="synthetic-byte-admission-only.v1",
+        relative_path="snapshot.json",
+        metadata={},
+    )
+
+    def unsafe_reopen(*args: object, **kwargs: object) -> None:
+        pytest.fail("native admission used an unguarded Path.open")
+
+    monkeypatch.setattr(Path, "open", unsafe_reopen)
+    actual, actual_bytes = _verified_json_artifact(path, declared)
+    assert actual == payload
+    assert actual_bytes == encoded
+
+
+def test_scalar_aggregation_without_native_product_proof_remains_incomplete(
+    tmp_path: Path,
+) -> None:
+    """Generic extraction still works but cannot impersonate product replay."""
+    original = _complete_spec(tmp_path)
+    protected = {
+        "campaign_product_index_valid",
+        "campaign_dataset_publication_valid",
+        "executable_retained_product_missing_count",
+        "fabricated_liquidity_terminal_outcome_count",
+    }
+    artifacts = tuple(
+        item
+        for item in original.artifacts
+        if item.kind
+        not in {
+            "reconstruction-campaign-product-index",
+            "reconstruction-campaign-dataset-publication",
+        }
+    )
+    available = {item.evidence_key for item in artifacts}
+    spec = replace(
+        original,
+        artifacts=artifacts,
+        observations=tuple(
+            item
+            for item in original.observations
+            if item.check_id not in protected
+            and set(item.artifact_evidence_keys) <= available
+        ),
+        campaign_id="",
+    )
     spec_path = _write_spec(tmp_path, spec)
 
     dossier, result = run_modern_reference_certification_campaign(
         spec_path, output_directory=tmp_path / "output"
     )
 
-    assert dossier.state is CertificationState.READY_FOR_PROMOTION
-    assert result.state is CertificationState.READY_FOR_PROMOTION
+    assert dossier.state is CertificationState.INCOMPLETE
+    assert result.state is CertificationState.INCOMPLETE
     assert result.verified_input_count == len(spec.artifacts)
     assert result.observation_count == len(spec.observations) + 2
     assert read_modern_reference_certification_campaign_spec(spec_path) == spec
