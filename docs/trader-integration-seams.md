@@ -10,10 +10,15 @@ provide a broker connection, or authorize an empirical campaign.
 
 Public imports live under `histdatacom.synthetic.traders`. This small package
 has its own `py.typed`; no new typing claim is made for an entire legacy
-namespace. It introduces no persistent artifact format or second source
-registry. New requests, results, protocols and locator adapters are
+namespace. The five input seams introduce no persistent artifact format or
+second source registry. Their requests, results, protocols and locator adapters are
 process-local. Native returned contracts keep their existing identity and
 serialization owners.
+
+The separate [fictional account policy and ledger](trader-account-policy.md)
+added in #593 also has public imports in this package. Its bounded account
+wires have their own versioned identities; they do not replace these native
+input owners or imply source qualification.
 
 | Input | Trader-facing boundary | Canonical implementation and wire owner |
 | --- | --- | --- |

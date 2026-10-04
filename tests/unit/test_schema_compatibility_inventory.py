@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import ast
+import hashlib
 import subprocess
 import sys
 from pathlib import Path
 
 from histdatacom.schema_compatibility import (
     EvidenceKind,
+    SupportStatus,
     can_read,
     schema_compatibility_registry,
 )
@@ -18,6 +20,115 @@ from histdatacom.schema_compatibility.inventory import (
 )
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def test_account_inherited_wires_are_exact_reader_writer_inventory() -> None:
+    registry = schema_compatibility_registry()
+    families = {item.family: item for item in registry.schemas}
+    implementations = {
+        item.implementation_id: item for item in registry.implementations
+    }
+    evidence = {item.evidence_id: item for item in registry.evidence}
+    prefix = "histdatacom.synthetic.traders."
+    codec = "src/histdatacom/synthetic/traders/account_codec.py"
+    contracts = "src/histdatacom/synthetic/traders/account_contracts.py"
+    expected = {
+        "PolicySourceV1": "histdatacom.trader-account-policy-source.v1",
+        "AccountPolicyV1": "histdatacom.trader-account-policy.v1",
+        "AccountSpecV1": "histdatacom.trader-account-spec.v1",
+        "AccountFillV1": "histdatacom.trader-account-fill.v1",
+        "AccountLotV1": "histdatacom.trader-account-lot.v1",
+        "AccountAllocationV1": "histdatacom.trader-account-allocation.v1",
+        "CurrencyExposureV1": "histdatacom.trader-currency-exposure.v1",
+        "AccountStateV1": "histdatacom.trader-account-state.v1",
+        "AccountFillReceiptV1": "histdatacom.trader-account-fill-receipt.v1",
+        "AccountLedgerV1": "histdatacom.trader-account-ledger.v1",
+    }
+    for name, wire in expected.items():
+        family = prefix + "account_contracts." + name
+        schema = families[family]
+        assert schema.wire_schema == wire
+        assert schema.version == "1.0.0"
+        assert schema.status is SupportStatus.SUPPORTED
+        assert can_read(wire)
+        assert {
+            implementations[key].qualified_name for key in schema.readers
+        } == {family + ".from_dict", family + ".from_json"}
+        assert {
+            implementations[key].qualified_name for key in schema.writers
+        } == {family + ".to_dict", family + ".to_json"}
+        assert {
+            implementations[key].source_sha256
+            for key in (*schema.readers, *schema.writers)
+        } == {hashlib.sha256((ROOT / codec).read_bytes()).hexdigest()}
+        assert {
+            evidence[key].locator
+            for key in schema.evidence
+            if evidence[key].kind is EvidenceKind.SOURCE_DEFINITION
+        } == {codec, contracts}
+    exemptions = {item.qualified_name: item for item in registry.exemptions}
+    for name in ("AccountRecord", "_record_wire"):
+        key = prefix + "account_codec." + name
+        assert key in exemptions
+        assert key not in families
+    # Implemented codecs alone do not establish migration or accounting proof.
+    assert not registry.migrations
+    assert not registry.compositions
+
+
+def test_account_exact_amount_keeps_its_unversioned_native_shape() -> None:
+    from histdatacom.synthetic.traders.account_codec import ExactAmountV1
+
+    family = "histdatacom.synthetic.traders.account_codec.ExactAmountV1"
+    registry = schema_compatibility_registry()
+    schema = next(item for item in registry.schemas if item.family == family)
+    assert schema.version == "unversioned"
+    assert schema.wire_schema == "unversioned:" + family
+    assert schema.status is SupportStatus.SUPPORTED
+    assert len(schema.readers) == len(schema.writers) == 2
+    amount = ExactAmountV1(3, 5)
+    assert amount.to_dict() == {"numerator": 3, "denominator": 5}
+    assert ExactAmountV1.from_dict(amount.to_dict()) == amount
+    assert ExactAmountV1.from_json(amount.to_json()) == amount
+    assert can_read(schema.schema_id)
+
+
+def test_account_shared_schema_field_does_not_reclassify_other_constants(
+    tmp_path: Path,
+) -> None:
+    package = tmp_path / "src/histdatacom"
+    account = package / "synthetic/traders"
+    account.mkdir(parents=True)
+    (package / "__init__.py").write_text("__version__ = '3.0.0'\n")
+    (account / "account_codec.py").write_text(
+        "class AccountRecord:\n"
+        "    KIND: str\n"
+        "    def to_dict(self): return {}\n"
+        "    def to_json(self): return '{}'\n"
+        "    @classmethod\n"
+        "    def from_dict(cls, value): return cls()\n"
+        "    @classmethod\n"
+        "    def from_json(cls, value): return cls()\n"
+    )
+    (account / "account_contracts.py").write_text(
+        "from .account_codec import AccountRecord as Base\n"
+        "class FixtureV1(Base):\n"
+        "    KIND = 'fixture'\n"
+        "    SCHEMA = 'histdatacom.account-inventory-fixture.v1'\n"
+        "class Unrelated:\n"
+        "    SCHEMA = 'not-an-emitted-wire.v7'\n"
+        "    def to_dict(self): return {}\n"
+    )
+    registry = build_registry(tmp_path)
+    schemas = {item.family.rsplit(".", 1)[1]: item for item in registry.schemas}
+    assert set(schemas) == {"FixtureV1", "Unrelated"}
+    assert schemas["FixtureV1"].wire_schema == (
+        "histdatacom.account-inventory-fixture.v1"
+    )
+    assert len(schemas["FixtureV1"].readers) == 2
+    assert len(schemas["FixtureV1"].writers) == 2
+    assert schemas["Unrelated"].version == "unversioned"
+    assert schemas["Unrelated"].wire_schema.startswith("unversioned:")
 
 
 def test_generated_asset_and_documentation_match_independent_current_source() -> (

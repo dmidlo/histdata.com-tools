@@ -190,7 +190,13 @@ CLASS_READERS = {
         "calendar_profile_from_mapping",
     ),
 }
+# Reviewed class metadata consumed by a shared encoder outside the class AST.
+# Do not infer a wire from unrelated classes' similarly named constants.
+CLASS_SCHEMA_FIELDS = {
+    "histdatacom.synthetic.traders.account_codec.AccountRecord": "SCHEMA",
+}
 SERIALIZER_EXEMPTIONS = {
+    "histdatacom.synthetic.traders.account_codec.AccountRecord": "Abstract closed account serializer template with no standalone payload; concrete account records retain their inherited readers/writers. Structural decoding is not account-ledger replay authority.",
     "histdatacom.synthetic.trader_maturity._Record": "Abstract strict serializer template with no standalone payload. Concrete trader catalog identity, evidence, row and matrix retain separate versioned reader/writer inventory; the supplement grants no certification authority.",
     "histdatacom.synthetic.capability_matrix._Record": "Abstract bounded serializer template with no standalone payload. Concrete capability requirements, waivers, policy, rows and matrix retain separate versioned reader/writer inventory.",
     "histdatacom.broker_plugin_provenance._wire.Record": "Abstract frozen-dataclass serializer template; no standalone fields or payload. Concrete capture provenance contracts retain their own versioned reader/writer inventory.",
@@ -200,6 +206,7 @@ SERIALIZER_EXEMPTIONS = {
     "histdatacom.experiments._wire.Record": "Abstract frozen-dataclass serializer template; it has no standalone fields or payload. Concrete embedded records and versioned artifact subclasses are inventoried separately.",
 }
 FUNCTION_EXEMPTIONS = {
+    "histdatacom.synthetic.traders.account_codec._record_wire": "Closed shared account encoder dispatching only concrete AccountRecord types; their actual inherited readers/writers and explicit SCHEMA values are inventoried separately. This helper is not another durable family or replay verifier.",
     "histdatacom.broker_plugin_provenance._wire.Artifact.artifact_id": "Derived digest property for the abstract provenance envelope, not an independent serialized family. Concrete provenance artifacts retain their own reader/writer inventory.",
     "histdatacom.broker_plugin_conformance._wire.Artifact.artifact_id": "Derived digest property for the abstract conformance envelope, not an independent serialized family. Concrete conformance contracts retain their own reader/writer inventory.",
     "histdatacom.broker_plugin_permissions._wire.Artifact.artifact_id": "Derived digest property for the abstract permission envelope, not an independent serialized family. Concrete permission artifacts retain their own envelope reader/writer inventory.",
@@ -377,9 +384,14 @@ def build_registry(root: Path) -> CompatibilityRegistryV1:
         local: dict[str, ast.expr] = {}
         for _module, node in chain:
             local.update(_assignments(node.body))
+        shared_fields = tuple(
+            CLASS_SCHEMA_FIELDS[module.name + "." + node.name]
+            for module, node in chain
+            if module.name + "." + node.name in CLASS_SCHEMA_FIELDS
+        )
         for module, node in reversed(chain):
             assignments = _assignments(node.body)
-            for field in ("schema_version", "schema"):
+            for field in ("schema_version", "schema", *shared_fields):
                 if field in assignments:
                     value = evaluate(module, assignments[field], local)
                     if value:

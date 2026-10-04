@@ -103,6 +103,7 @@ Persistence, projections, and validation
    triangle-bar-features
    strategy-sensitivity-contracts
    trader-integration-seams
+   trader-account-policy
    reverse-degradation-benchmark-contracts
    reverse-degradation-benchmark-corpus
    powered-reconstruction-qualification
