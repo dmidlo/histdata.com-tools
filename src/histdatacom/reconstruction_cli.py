@@ -296,6 +296,50 @@ def build_parser() -> argparse.ArgumentParser:
         "--product-index", required=True, metavar="PATH"
     )
 
+    receipt_run = subparsers.add_parser(
+        "product-verify-tree",
+        help="deep-verify every product into a new external receipt tree",
+    )
+    receipt_run.add_argument("--product-index", required=True, metavar="PATH")
+    receipt_run.add_argument(
+        "--output-directory", required=True, metavar="PATH"
+    )
+    receipt_run.add_argument("--products-per-shard", type=int, default=64)
+
+    receipt_resume = subparsers.add_parser(
+        "product-resume-verification",
+        help="resume a receipt journal with fresh native verification",
+    )
+    receipt_resume.add_argument(
+        "--product-index", required=True, metavar="PATH"
+    )
+    receipt_resume.add_argument(
+        "--store-directory", required=True, metavar="PATH"
+    )
+    receipt_resume.add_argument("--expected-checkpoint-id")
+
+    receipt_inspect = subparsers.add_parser(
+        "product-inspect-verification",
+        help="inspect receipt structure only, without rereading product bytes",
+    )
+    receipt_inspect.add_argument(
+        "--store-directory", required=True, metavar="PATH"
+    )
+    receipt_inspect.add_argument("--expected-root-id", required=True)
+
+    receipt_audit = subparsers.add_parser(
+        "product-audit-verification",
+        help="audit selected products against receipts; never a full-pass substitute",
+    )
+    receipt_audit.add_argument("--product-index", required=True, metavar="PATH")
+    receipt_audit.add_argument(
+        "--store-directory", required=True, metavar="PATH"
+    )
+    receipt_audit.add_argument("--expected-root-id", required=True)
+    receipt_audit.add_argument(
+        "--product-ordinal", type=int, action="extend", nargs="+", required=True
+    )
+
     product_inspect = subparsers.add_parser(
         "product-inspect",
         help="inspect bounded products/outcomes from a campaign",
@@ -693,6 +737,41 @@ def _run_command(
     if command == "product-verify":
         return (
             client.verify_campaign_products(args.product_index),
+            ReconstructionExitCode.SUCCESS,
+        )
+    if command == "product-verify-tree":
+        return (
+            client.verify_campaign_receipts(
+                args.product_index,
+                output_directory=args.output_directory,
+                products_per_shard=args.products_per_shard,
+            ),
+            ReconstructionExitCode.SUCCESS,
+        )
+    if command == "product-resume-verification":
+        return (
+            client.resume_campaign_receipts(
+                args.product_index,
+                store_directory=args.store_directory,
+                expected_checkpoint_id=args.expected_checkpoint_id,
+            ),
+            ReconstructionExitCode.SUCCESS,
+        )
+    if command == "product-inspect-verification":
+        return (
+            client.inspect_campaign_receipts(
+                args.store_directory, expected_root_id=args.expected_root_id
+            ),
+            ReconstructionExitCode.SUCCESS,
+        )
+    if command == "product-audit-verification":
+        return (
+            client.audit_campaign_receipts(
+                args.product_index,
+                args.store_directory,
+                expected_root_id=args.expected_root_id,
+                product_ordinals=tuple(args.product_ordinal),
+            ),
             ReconstructionExitCode.SUCCESS,
         )
     if command == "product-inspect":

@@ -9,7 +9,6 @@ from typing import cast
 
 import pytest
 
-from histdatacom.reconstruction import ReconstructionPlanError
 from histdatacom.runtime_contracts import JSONScalar, JSONValue
 from histdatacom.synthetic import CertificationComparator, CertificationState
 from histdatacom.synthetic.certification import (
@@ -170,9 +169,10 @@ def test_campaign_refuses_hash_bound_fake_product_evidence(
     spec = _complete_spec(tmp_path)
     spec_path = _write_spec(tmp_path, spec)
 
-    with pytest.raises(
-        ReconstructionPlanError, match="publication status/nonclaim differs"
-    ):
+    # The current policy additionally requires a native receipt root. These
+    # fabricated scalar documents supply neither a root store nor publication;
+    # root admission now refuses before the older publication-shape check.
+    with pytest.raises(FileNotFoundError, match=".lock"):
         run_modern_reference_certification_campaign(
             spec_path, output_directory=tmp_path / "output"
         )
@@ -184,6 +184,7 @@ def test_campaign_refuses_hash_bound_fake_product_evidence(
     [
         "reconstruction-campaign-product-index",
         "reconstruction-campaign-dataset-publication",
+        "campaign-verification-root",
     ],
 )
 def test_native_json_admission_uses_one_guarded_byte_snapshot(
@@ -240,6 +241,7 @@ def test_scalar_aggregation_without_native_product_proof_remains_incomplete(
         not in {
             "reconstruction-campaign-product-index",
             "reconstruction-campaign-dataset-publication",
+            "campaign-verification-root",
         }
     )
     available = {item.evidence_key for item in artifacts}

@@ -101,6 +101,12 @@ Parent: `capability-matrix:sha256:f23e1a7ef34987f9c2eabaa31fba98f3b53fe46dfba879
 The [full trader supplement](docs/capability-matrix.md#trader-maturity-supplement) retains exact identity declarations and limitations from its [separate machine artifact](release-evidence/capability-matrix/current-trader-maturity-v1.json). Parent V1 identities and certification behavior are unchanged.
 <!-- capability-matrix:end -->
 
+Development update: the [campaign receipt-tree tooling](docs/reconstruction-campaign-runbook.md)
+now supports durable verification, checkpoint recovery, structural inspection,
+sampled audits, and exact-root publication/certification binding. Its synthetic
+integrity and process-crash tests do not establish a complete historical campaign
+or promote the frozen capability snapshot above; #523 remains open for that evidence.
+
 ---
 
 - [histdata.com-tools](#histdatacom-tools)

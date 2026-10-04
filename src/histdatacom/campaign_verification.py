@@ -14,12 +14,13 @@ import json
 import math
 import os
 import stat
+import time
 from bisect import bisect_right
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from itertools import pairwise
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from histdatacom.campaign_index_contracts import (
     MAX_OUT_OF_PLAN_PRODUCTS,
@@ -30,6 +31,11 @@ from histdatacom.campaign_index_contracts import (
     canonical,
 )
 from histdatacom.runtime_contracts import ArtifactRef
+
+if TYPE_CHECKING:
+    from histdatacom.campaign_receipt_contracts import (
+        CampaignVerificationSummaryV1,
+    )
 
 # Control documents retain the existing native bound. Execution is serial by
 # shard/window; event allocation additionally obeys the retained plan limits.
@@ -239,9 +245,12 @@ class _Snapshot:
 
 
 class _Guard:
-    def __init__(self) -> None:
+    def __init__(self, *, maximum_files: int = MAX_TRACKED_FILES) -> None:
         self.files: dict[Path, _Snapshot] = {}
         self.graph_seen: set[Path] = set()
+        self.roles: dict[Path, str] = {}
+        self.read_bytes = 0
+        self.maximum_files = maximum_files
 
     def read(
         self,
@@ -260,7 +269,7 @@ class _Guard:
             )
         if control and before.st_size > MAX_CONTROL_BYTES:
             raise ValueError("campaign control byte bound exceeded")
-        if len(self.files) >= MAX_TRACKED_FILES and target not in self.files:
+        if len(self.files) >= self.maximum_files and target not in self.files:
             raise ValueError(
                 "campaign verification file-inventory bound exceeded"
             )
@@ -283,6 +292,7 @@ class _Guard:
                 raise ValueError("campaign evidence changed while opening")
             size = 0
             while chunk := os.read(descriptor, 1024 * 1024):
+                self.read_bytes += len(chunk)
                 size += len(chunk)
                 if size > before.st_size:
                     raise ValueError("campaign evidence grew while reading")
@@ -304,6 +314,15 @@ class _Guard:
         if target in self.files and self.files[target] != snapshot:
             raise ValueError("campaign evidence changed during verification")
         self.files[target] = snapshot
+        role = (
+            "control"
+            if control
+            else "parquet" if target.suffix == ".parquet" else "input"
+        )
+        if target.suffix == ".data":
+            role = "source"
+        if target not in self.roles or role != "input":
+            self.roles[target] = role
         return b"".join(chunks)
 
     def document(
@@ -492,7 +511,9 @@ def inspect_campaign_product_index(
     )
 
 
-def _plans(index: Any, guard: _Guard) -> tuple[Any, dict[str, tuple[Any, Any]]]:
+def _plans(
+    index: Any, guard: _Guard, *, verify_graph: bool = True
+) -> tuple[Any, dict[str, tuple[Any, Any]]]:
     from histdatacom import reconstruction as native
     from histdatacom.synthetic.reconstruction_plan import SyntheticInfillPlanV1
 
@@ -544,7 +565,8 @@ def _plans(index: Any, guard: _Guard) -> tuple[Any, dict[str, tuple[Any, Any]]]:
             or shard.empty_window_count != plan.resources.empty_window_count
         ):
             raise ValueError("campaign plan shard outcomes differ")
-        guard.graph(plan.to_dict())
+        if verify_graph:
+            guard.graph(plan.to_dict())
         result[shard.shard_id] = (shard, plan)
     _validate_support(index, plan_set, guard, result)
     return plan_set, result
@@ -761,17 +783,16 @@ def _refuse_terminal_product(
     )
 
 
-def _verify_shard(
+def _shard_product_rows(
     shard: Any,
     descriptor: Any,
     plan: Any,
     index: Any,
     products: Any,
-    guard: _Guard,
-    product_digest: Any,
+    guard: _Guard | None,
     seen_coordinates: set[Any],
     plan_set: Any,
-) -> None:
+) -> Iterator[tuple[Any, Any, Path, Any]]:
     from histdatacom import reconstruction as native
 
     expected_support = native._build_reconstruction_plan_support_map_shard(
@@ -855,7 +876,8 @@ def _verify_shard(
                 "campaign index omits an existing required product"
             )
         path, manifest = actual
-        guard.read(path, ref=row.product_ref)
+        if guard is not None:
+            guard.read(path, ref=row.product_ref)
         if _path(row.product_ref.path) != path:
             raise ValueError(
                 "campaign row points outside discovered committed product"
@@ -885,12 +907,36 @@ def _verify_shard(
             manifest.synthetic_event_count,
         ):
             raise ValueError("campaign row event counts differ")
+        yield task, row, path, manifest
+    if actual_rows != expected_rows:
+        raise ValueError("campaign row denominator omits planned outcomes")
+
+
+def _verify_shard(
+    shard: Any,
+    descriptor: Any,
+    plan: Any,
+    index: Any,
+    products: Any,
+    guard: _Guard,
+    product_digest: Any,
+    seen_coordinates: set[Any],
+    plan_set: Any,
+) -> None:
+    for task, row, path, manifest in _shard_product_rows(
+        shard,
+        descriptor,
+        plan,
+        index,
+        products,
+        guard,
+        seen_coordinates,
+        plan_set,
+    ):
         verified = _verify_product(
             plan, task, row, path, manifest, index, guard
         )
         product_digest.update(verified.to_json().encode("ascii") + b"\n")
-    if actual_rows != expected_rows:
-        raise ValueError("campaign row denominator omits planned outcomes")
 
 
 def _source_context(invocation: Any, stage_plan: Any) -> tuple[Any, ...]:
@@ -1935,6 +1981,793 @@ def read_campaign_control_snapshot(
 def read_campaign_control_json(path: str | Path) -> dict[str, Any]:
     """Read bounded duplicate-free JSON, without verification authority."""
     return read_campaign_control_snapshot(path)[0]
+
+
+@dataclass(frozen=True, slots=True)
+class CampaignVerifiedFileEvidence:
+    """Process-local observation, not an independently trusted receipt."""
+
+    path: str
+    size_bytes: int
+    sha256: str
+    role: str
+    identity: tuple[int, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class CampaignVerificationCoordinate:
+    ordinal: int
+    plan_id: str
+    shard_id: str
+    support_id: str
+    run_id: str
+    window_id: str
+    ensemble_member_id: str
+    product_path: str
+
+
+@dataclass(frozen=True, slots=True)
+class CampaignVerificationInventory:
+    structural: CampaignStructuralVerificationV1
+    control_files: tuple[CampaignVerifiedFileEvidence, ...]
+    coordinates: tuple[CampaignVerificationCoordinate, ...]
+    forbidden_roots: tuple[str, ...]
+    discovery_sha256: str
+    inventory_sha256: str
+
+
+@dataclass(frozen=True, slots=True)
+class CampaignVerifiedProductEvidence:
+    ordinal: int
+    verification: CampaignProductVerificationV1
+    files: tuple[CampaignVerifiedFileEvidence, ...]
+    parquet_paths: tuple[str, ...]
+    lineage_json: str
+    read_bytes: int
+    elapsed_ns: int
+    inputs_sha256: str
+
+
+@dataclass(frozen=True, slots=True)
+class CampaignVerifiedControlEvidence:
+    ordinal: int
+    scope: str
+    plan_id: str | None
+    shard_id: str | None
+    files: tuple[CampaignVerifiedFileEvidence, ...]
+    inputs_sha256: str
+    read_bytes: int
+    elapsed_ns: int
+
+
+@dataclass(frozen=True, slots=True)
+class _ReplayObservation:
+    logical_content_sha256: str
+
+
+@dataclass(frozen=True, slots=True)
+class _ManifestObservation:
+    """Compact admission facts, not a retained full native manifest tree."""
+
+    manifest_id: str
+    publication_id: str
+    run_id: str
+    window_id: str
+    ensemble_member_id: str
+    delivery_profile_id: str
+    observed_event_count: int
+    synthetic_event_count: int
+    replay: _ReplayObservation
+    sha256: str
+
+
+def _file_evidence(guard: _Guard) -> tuple[CampaignVerifiedFileEvidence, ...]:
+    return tuple(
+        CampaignVerifiedFileEvidence(
+            str(path),
+            value.identity[3],
+            value.sha256,
+            guard.roles.get(path, "input"),
+            value.identity,
+        )
+        for path, value in sorted(guard.files.items())
+    )
+
+
+def _parquet_membership(path: Path, manifest: Any) -> tuple[str, ...]:
+    """Census the complete committed directory, not just declared filenames."""
+    from histdatacom.campaign_receipt_contracts import MAX_PRODUCT_INPUT_FILES
+
+    expected: set[Path] = set()
+    for partition in manifest.partitions:
+        relative = Path(partition.relative_path)
+        if relative.is_absolute() or ".." in relative.parts:
+            raise ValueError("campaign partition escapes its product")
+        target = path.parent / relative
+        if target in expected or target.suffix != ".parquet":
+            raise ValueError("campaign Parquet declarations differ")
+        expected.add(target)
+    actual: set[Path] = set()
+    pending = [(path.parent, 0)]
+    visited = 0
+    while pending:
+        directory, depth = pending.pop()
+        if depth > 16:
+            raise ValueError("campaign product directory depth bound exceeded")
+        _regular_ancestors(directory / "admission-placeholder")
+        with os.scandir(directory) as entries:
+            for entry in entries:
+                visited += 1
+                if visited > MAX_PRODUCT_INPUT_FILES:
+                    raise ValueError(
+                        "campaign product directory bound exceeded"
+                    )
+                if entry.is_symlink():
+                    raise ValueError("campaign product contains a symlink")
+                target = Path(entry.path)
+                if entry.is_dir(follow_symlinks=False):
+                    pending.append((target, depth + 1))
+                elif entry.is_file(follow_symlinks=False):
+                    if target.suffix == ".parquet":
+                        actual.add(target)
+                else:
+                    raise ValueError("campaign product contains a special file")
+    if actual != expected:
+        raise ValueError("campaign actual Parquet membership differs")
+    return tuple(str(item) for item in sorted(actual))
+
+
+def _manifest_observation(
+    path: Path, guard: _Guard
+) -> tuple[Any, tuple[str, ...]]:
+    from histdatacom.synthetic import persistence
+
+    payload = guard.document(path)
+    classes: dict[str, Any] = {
+        persistence.RECONSTRUCTION_PRODUCT_SCHEMA_VERSION: persistence.ReconstructionProductManifestV1,
+        persistence.RECONSTRUCTION_PRODUCT_V2_SCHEMA_VERSION: persistence.ReconstructionProductManifestV2,
+        persistence.RECONSTRUCTION_PRODUCT_V3_SCHEMA_VERSION: persistence.ReconstructionProductManifestV3,
+    }
+    schema = payload.get("schema_version")
+    cls = classes.get(schema) if type(schema) is str else None
+    if cls is None:
+        raise ValueError("unsupported campaign product schema")
+    manifest = cls.from_dict(payload)
+    _same(
+        manifest.to_dict(), payload, "campaign product canonical fields differ"
+    )
+    persistence._validate_committed_manifest_location(path, manifest)
+    guard.roles[path] = "product"
+    return manifest, _parquet_membership(path, manifest)
+
+
+def _observe_product_bytes(path: Path, manifest: Any, guard: _Guard) -> None:
+    from histdatacom.synthetic import persistence
+
+    guard.graph(
+        manifest.to_dict(),
+        relative_root=persistence._reconstruction_product_root_from_path(
+            path.parent
+        ),
+    )
+    for partition in manifest.partitions:
+        target = path.parent / partition.relative_path
+        guard.read(
+            target,
+            ref=ArtifactRef(
+                "reconstruction_partition",
+                str(target),
+                partition.size_bytes,
+                partition.byte_sha256,
+            ),
+        )
+    actual = persistence.verify_reconstruction_publication(path)
+    _same(actual.to_dict(), manifest.to_dict(), "native product changed")
+
+
+def _selected_product_ordinals(
+    selected: tuple[int, ...] | None, count: int
+) -> tuple[int, ...]:
+    if selected is None:
+        return tuple(range(count))
+    if (
+        type(selected) is not tuple
+        or not 1 <= len(selected) <= 64
+        or any(
+            type(item) is not int or not 0 <= item < count for item in selected
+        )
+        or selected != tuple(sorted(set(selected)))
+    ):
+        raise ValueError(
+            "sample ordinals require 1..64 sorted unique coordinates"
+        )
+    return selected
+
+
+def _plan_input_guard(
+    descriptor: Any, plan: Any, *, guard: _Guard | None = None
+) -> _Guard:
+    """One actual native plan/experiment/catalog closure, never all shards.
+
+    The native stage loader verifies the complete retained experiment catalog,
+    so narrowing this to only the window's IPC sources would omit real inputs.
+    Its closed per-product budget remains independent of campaign shard count.
+    """
+    from histdatacom.campaign_receipt_contracts import MAX_PRODUCT_INPUT_FILES
+
+    if guard is None:
+        guard = _Guard(maximum_files=MAX_PRODUCT_INPUT_FILES)
+    guard.read(descriptor.plan_ref.path, ref=descriptor.plan_ref, control=True)
+    guard.graph(plan.to_dict())
+    return guard
+
+
+class CampaignVerificationTraversal(Iterator[CampaignVerifiedProductEvidence]):
+    """Bounded native execution, never an accepted-prior-receipt interface.
+
+    File evidence is detached before yielding and includes reused shared inputs.
+    The runner must independently rehash ALL persisted leaves before publishing
+    a root: finish checks controls and discovery, not discarded product guards.
+    read_bytes measures guarded hashing reads (including rereads), not unobserved
+    Arrow/native-library I/O. Elapsed time uses the monotonic clock.
+    """
+
+    def __init__(
+        self,
+        index_path: str | Path,
+        *,
+        selected_ordinals: tuple[int, ...] | None = None,
+    ) -> None:
+        from histdatacom.campaign_receipt_contracts import (
+            MAX_VERIFICATION_PRODUCTS,
+        )
+        from histdatacom.synthetic.reconstruction_plan import (
+            ReconstructionPlanExecutionManifestV1,
+        )
+
+        if selected_ordinals is not None:
+            _selected_product_ordinals(
+                selected_ordinals, MAX_VERIFICATION_PRODUCTS
+            )
+        self._started_ns = time.monotonic_ns()
+        self._read_bytes = 0
+        self._active: _Guard | None = None
+        self._finished = False
+        self._exhausted = False
+        self._controls_started = False
+        self._controls_exhausted = False
+        self._failed = False
+        self._sampled = selected_ordinals is not None
+        self._position = 0
+        # Global compact control inventory uses the existing campaign ceiling;
+        # the much smaller product closure limit is NOT a campaign file cap.
+        self._guard = _Guard()
+        self._index, self._fields = _structural(_path(index_path), self._guard)
+        self._plan_set, self._plans = _plans(
+            self._index, self._guard, verify_graph=False
+        )
+        self._plan_inputs: dict[str, str] = {}
+        self._plan_digest = self._check_plan_inputs(initial=True)
+        self._terminal = _terminal_support_intervals(
+            self._plan_set, self._plans
+        )
+        executions = []
+        expected: dict[tuple[str, str, str], str] = {}
+        for shard_id, (_, plan) in self._plans.items():
+            ref = plan.artifact_graph["execution_manifest"]
+            execution = self._guard.native(
+                ref.path, ReconstructionPlanExecutionManifestV1, ref
+            )
+            if (
+                execution.configuration_id != plan.configuration_id
+                or execution.manifest_id != plan.execution_manifest_id
+            ):
+                raise ValueError("campaign execution graph differs from plan")
+            executions.append(execution)
+            for request in plan.workflow_requests:
+                for task in request.tasks:
+                    key = (
+                        plan.run.run_id,
+                        task.window.window_id,
+                        task.window.ensemble_member_id,
+                    )
+                    if (
+                        key in expected
+                        or len(expected) >= MAX_VERIFICATION_PRODUCTS
+                    ):
+                        raise ValueError(
+                            "campaign coordinate duplicate or bound"
+                        )
+                    expected[key] = shard_id
+        self._roots = tuple(sorted({item.output_root for item in executions}))
+        self._expected = expected
+        self._products: dict[Any, tuple[Path, Any]] = {}
+        self._outside: list[CampaignArtifactRefV1] = []
+        self._discovery = self._scan(initial=True)
+        self._rows: list[tuple[Any, Any, Any, Path, Any]] = []
+        self._shard_paths: dict[str, str] = {}
+        shard_paths = {
+            ref.metadata["product_shard_id"]: ref.path
+            for ref in self._index.shard_refs
+        }
+        seen_coordinates: set[Any] = set()
+        seen_shards: set[str] = set()
+        for shard in _shards(self._index, self._guard):
+            if (
+                shard.shard_id not in self._plans
+                or shard.shard_id in seen_shards
+            ):
+                raise ValueError("campaign shard membership differs")
+            seen_shards.add(shard.shard_id)
+            self._shard_paths[shard.shard_id] = shard_paths[
+                shard.product_shard_id
+            ]
+            descriptor, plan = self._plans[shard.shard_id]
+            for task, row, path, manifest in _shard_product_rows(
+                shard,
+                descriptor,
+                plan,
+                self._index,
+                self._products,
+                None,
+                seen_coordinates,
+                self._plan_set,
+            ):
+                self._rows.append((plan, task, row, path, manifest))
+        if seen_shards != set(self._plans) or seen_coordinates != set(expected):
+            raise ValueError("campaign product rectangle omits coordinates")
+        if len(self._rows) != self._fields["product_count"]:
+            raise ValueError("campaign product count differs from actual rows")
+        self._selected = _selected_product_ordinals(
+            selected_ordinals, len(self._rows)
+        )
+        self._global_control_digest = self._guard.finish()
+        self._control_digest = _digest(
+            {
+                "domain": "histdatacom.campaign-control-inputs.v1",
+                "global_controls_sha256": self._global_control_digest,
+                "plan_inputs_sha256": self._plan_digest,
+            }
+        )
+        structural = CampaignStructuralVerificationV1(
+            **self._fields, verified_inputs_sha256=self._control_digest
+        )
+        coordinates = tuple(
+            CampaignVerificationCoordinate(
+                ordinal,
+                row.plan_id,
+                row.shard_id,
+                row.support_id,
+                plan.run.run_id,
+                task.window.window_id,
+                task.window.ensemble_member_id,
+                str(path),
+            )
+            for ordinal, (plan, task, row, path, _) in enumerate(self._rows)
+        )
+        forbidden = tuple(
+            sorted(
+                {
+                    str(_path(root))
+                    for item in executions
+                    for root in (item.output_root, item.scratch_root)
+                }
+            )
+        )
+        inventory_digest = hashlib.sha256(
+            b"histdatacom.campaign-traversal-inventory.v1\n"
+        )
+        inventory_digest.update(
+            _wire(
+                {
+                    "index": structural.index_ref.to_dict(),
+                    "controls": self._control_digest,
+                    "discovery": self._discovery,
+                }
+            ).encode("ascii")
+            + b"\n"
+        )
+        for coordinate in coordinates:
+            inventory_digest.update(
+                _wire(_coordinate_payload(coordinate)).encode("ascii") + b"\n"
+            )
+        self.inventory = CampaignVerificationInventory(
+            structural,
+            _file_evidence(self._guard),
+            coordinates,
+            forbidden,
+            self._discovery,
+            inventory_digest.hexdigest(),
+        )
+        self._product_digest = hashlib.sha256(
+            b"histdatacom.campaign-products.v1\n"
+        )
+        self._input_digest = hashlib.sha256(
+            b"histdatacom.campaign-product-inputs.v1\n"
+        )
+
+    @property
+    def read_bytes(self) -> int:
+        return (
+            self._read_bytes
+            + self._guard.read_bytes
+            + (self._active.read_bytes if self._active is not None else 0)
+        )
+
+    @property
+    def elapsed_ns(self) -> int:
+        return time.monotonic_ns() - self._started_ns
+
+    @property
+    def scope(self) -> str:
+        return "sampled" if self._sampled else "full"
+
+    def iter_control_evidence(
+        self,
+    ) -> Iterator[CampaignVerifiedControlEvidence]:
+        """Yield at most 64 compact-global + 4096 native-plan input leaves.
+
+        Controls include empty/refused-only plans. Exhaust this iterator before
+        product iteration; neither a partial control pass nor a sample can
+        manufacture full completion. The runner persists and rehashes them.
+        """
+        from histdatacom.campaign_receipt_contracts import (
+            MAX_PRODUCT_INPUT_FILES,
+        )
+
+        if self._failed or self._finished or self._controls_started:
+            raise ValueError(
+                "campaign control iteration requires a fresh traversal"
+            )
+        self._controls_started = True
+        ordinal = 0
+        try:
+            paths = tuple(sorted(self._guard.files))
+            for start in range(0, len(paths), MAX_PRODUCT_INPUT_FILES):
+                started = time.monotonic_ns()
+                guard = _Guard(maximum_files=MAX_PRODUCT_INPUT_FILES)
+                self._active = guard
+                try:
+                    for path in paths[start : start + MAX_PRODUCT_INPUT_FILES]:
+                        guard.files[path] = self._guard.files[path]
+                        guard.roles[path] = self._guard.roles[path]
+                        guard.read(path)
+                    inputs = guard.finish()
+                    evidence = CampaignVerifiedControlEvidence(
+                        ordinal,
+                        "global",
+                        None,
+                        None,
+                        _file_evidence(guard),
+                        inputs,
+                        guard.read_bytes,
+                        time.monotonic_ns() - started,
+                    )
+                finally:
+                    self._read_bytes += guard.read_bytes
+                    self._active = None
+                yield evidence
+                ordinal += 1
+            for shard_id, (descriptor, plan) in self._plans.items():
+                started = time.monotonic_ns()
+                guard = _Guard(maximum_files=MAX_PRODUCT_INPUT_FILES)
+                self._active = guard
+                try:
+                    _plan_input_guard(descriptor, plan, guard=guard)
+                    inputs = guard.finish()
+                    if inputs != self._plan_inputs[shard_id]:
+                        raise ValueError("campaign plan input closure changed")
+                    evidence = CampaignVerifiedControlEvidence(
+                        ordinal,
+                        "plan",
+                        plan.plan_id,
+                        shard_id,
+                        _file_evidence(guard),
+                        inputs,
+                        guard.read_bytes,
+                        time.monotonic_ns() - started,
+                    )
+                finally:
+                    self._read_bytes += guard.read_bytes
+                    self._active = None
+                yield evidence
+                ordinal += 1
+            self._controls_exhausted = True
+        except BaseException:
+            self._failed = True
+            raise
+
+    def _check_plan_inputs(self, *, initial: bool) -> str:
+        digest = hashlib.sha256(b"histdatacom.campaign-plan-inputs.v1\n")
+        for shard_id, (descriptor, plan) in self._plans.items():
+            guard = _plan_input_guard(descriptor, plan)
+            try:
+                actual = guard.finish()
+                if initial:
+                    self._plan_inputs[shard_id] = actual
+                elif self._plan_inputs[shard_id] != actual:
+                    raise ValueError("campaign plan input closure changed")
+                digest.update(
+                    _wire(
+                        {"shard_id": shard_id, "inputs_sha256": actual}
+                    ).encode("ascii")
+                    + b"\n"
+                )
+            finally:
+                self._read_bytes += guard.read_bytes
+        return digest.hexdigest()
+
+    def _bind_product_controls(self, guard: _Guard, row: Any) -> None:
+        paths = {
+            self._fields["index_ref"].path,
+            self._index.plan_set_ref.path,
+            self._index.support_map_ref.path,
+            self._shard_paths[row.shard_id],
+        }
+        if (
+            self._index.support_map_ref.kind
+            != "reconstruction_plan_support_map_v1"
+        ):
+            # Support V2 is ordered exactly with plan-set shards by the native
+            # admission above. Bind only this product's support-shard bytes.
+            support = self._guard.document(self._index.support_map_ref.path)
+            for ref, descriptor in zip(
+                support["shard_refs"], self._plan_set.shards, strict=True
+            ):
+                if descriptor.shard_id == row.shard_id:
+                    paths.add(ref["path"])
+                    break
+        for text in sorted(paths):
+            path = _path(text)
+            snapshot = self._guard.files[path]
+            guard.read(path, control=True)
+            if guard.files[path] != snapshot:
+                raise ValueError("campaign product control binding changed")
+
+    def _scan(self, *, initial: bool) -> str:
+        from histdatacom.campaign_receipt_contracts import (
+            MAX_PRODUCT_INPUT_FILES,
+            MAX_VERIFICATION_PRODUCTS,
+        )
+        from histdatacom.synthetic.persistence import (
+            RECONSTRUCTION_MANIFEST_ARTIFACT_KIND,
+            ReconstructionProductManifestV3,
+        )
+
+        digest = hashlib.sha256()
+        seen: set[Path] = set()
+        for root in self._roots:
+            for path in iter_campaign_manifest_paths(root):
+                if path in seen:
+                    continue
+                seen.add(path)
+                if (
+                    len(seen)
+                    > MAX_VERIFICATION_PRODUCTS + MAX_OUT_OF_PLAN_PRODUCTS
+                ):
+                    raise ValueError(
+                        "campaign receipt discovery bound exceeded"
+                    )
+                guard = _Guard(maximum_files=MAX_PRODUCT_INPUT_FILES)
+                try:
+                    manifest, parquet = _manifest_observation(path, guard)
+                    key = (
+                        manifest.run_id,
+                        manifest.window_id,
+                        manifest.ensemble_member_id,
+                    )
+                    # Foreign products are still actually native-verified; they
+                    # are never quietly credited to this campaign denominator.
+                    if (
+                        key not in self._expected
+                        or manifest.run_id in self._terminal
+                    ):
+                        _observe_product_bytes(path, manifest, guard)
+                        _refuse_terminal_product(path, manifest, self._terminal)
+                    guard.finish()
+                    observation = {
+                        "path": str(path),
+                        "manifest_id": manifest.manifest_id,
+                        "sha256": guard.files[path].sha256,
+                        "parquet_paths": list(parquet),
+                    }
+                    digest.update(_wire(observation).encode("ascii") + b"\n")
+                    if initial:
+                        if key in self._expected:
+                            if (
+                                type(manifest)
+                                is not ReconstructionProductManifestV3
+                            ):
+                                raise ValueError(
+                                    "required campaign product is not V3"
+                                )
+                            if key in self._products:
+                                raise ValueError(
+                                    "duplicate committed campaign coordinate"
+                                )
+                            self._products[key] = (
+                                path,
+                                _ManifestObservation(
+                                    manifest.manifest_id,
+                                    manifest.publication_id,
+                                    manifest.run_id,
+                                    manifest.window_id,
+                                    manifest.ensemble_member_id,
+                                    manifest.delivery_profile_id,
+                                    manifest.observed_event_count,
+                                    manifest.synthetic_event_count,
+                                    _ReplayObservation(
+                                        manifest.replay.logical_content_sha256
+                                    ),
+                                    guard.files[path].sha256,
+                                ),
+                            )
+                        else:
+                            if len(self._outside) >= MAX_OUT_OF_PLAN_PRODUCTS:
+                                raise ValueError(
+                                    "out-of-plan product bound exceeded"
+                                )
+                            self._outside.append(
+                                guard.ref(
+                                    path, RECONSTRUCTION_MANIFEST_ARTIFACT_KIND
+                                )
+                            )
+                finally:
+                    self._read_bytes += guard.read_bytes
+        return digest.hexdigest()
+
+    def __iter__(self) -> CampaignVerificationTraversal:
+        return self
+
+    def __next__(self) -> CampaignVerifiedProductEvidence:
+        from histdatacom.campaign_receipt_contracts import (
+            MAX_PRODUCT_INPUT_FILES,
+        )
+
+        if self._failed or self._finished:
+            raise ValueError("campaign traversal is failed or finished")
+        if not self._controls_exhausted:
+            raise ValueError(
+                "campaign control evidence must exhaust before products"
+            )
+        if self._position >= len(self._selected):
+            self._exhausted = True
+            raise StopIteration
+        ordinal = self._selected[self._position]
+        plan, task, row, path, retained = self._rows[ordinal]
+        descriptor, _ = self._plans[row.shard_id]
+        guard = _Guard(maximum_files=MAX_PRODUCT_INPUT_FILES)
+        self._active = guard
+        started = time.monotonic_ns()
+        try:
+            # Reobserve this plan's complete shared closure for every member,
+            # without copying unrelated campaign plans/sources into the leaf.
+            _plan_input_guard(descriptor, plan, guard=guard)
+            if guard.finish() != self._plan_inputs[row.shard_id]:
+                raise ValueError("campaign plan input closure changed")
+            self._bind_product_controls(guard, row)
+            manifest, parquet = _manifest_observation(path, guard)
+            if (
+                manifest.manifest_id != retained.manifest_id
+                or guard.files[path].sha256 != retained.sha256
+            ):
+                raise ValueError("campaign product changed")
+            guard.read(path, ref=row.product_ref)
+            _observe_product_bytes(path, manifest, guard)
+            verified = _verify_product(
+                plan, task, row, path, manifest, self._index, guard
+            )
+            lineage = canonical(
+                {
+                    "publication_id": manifest.publication_id,
+                    "source": manifest.source.to_dict(),
+                    "quality": manifest.quality.to_dict(),
+                    "replay": manifest.replay.to_dict(),
+                    "ensemble": manifest.ensemble.to_dict(),
+                    "constraints": manifest.constraints.to_dict(),
+                    "runtime_scope": _json(
+                        verified.runtime_scope_json.encode("ascii")
+                    ),
+                    "scope": "native_final_validation_not_producer_replay",
+                }
+            )
+            inputs = guard.finish()
+            if _parquet_membership(path, manifest) != parquet:
+                raise ValueError("campaign Parquet membership changed")
+            evidence = CampaignVerifiedProductEvidence(
+                ordinal,
+                verified,
+                _file_evidence(guard),
+                parquet,
+                lineage,
+                guard.read_bytes,
+                time.monotonic_ns() - started,
+                inputs,
+            )
+            self._product_digest.update(
+                verified.to_json().encode("ascii") + b"\n"
+            )
+            self._input_digest.update(
+                _wire({"ordinal": ordinal, "inputs_sha256": inputs}).encode(
+                    "ascii"
+                )
+                + b"\n"
+            )
+            self._position += 1
+            return evidence
+        except BaseException:
+            self._failed = True
+            raise
+        finally:
+            self._read_bytes += guard.read_bytes
+            self._active = None
+
+    def finish(self) -> CampaignVerificationSummaryV1 | None:
+        from histdatacom.campaign_receipt_contracts import (
+            CampaignVerificationSummaryV1,
+        )
+
+        if (
+            self._failed
+            or self._finished
+            or not self._exhausted
+            or not self._controls_exhausted
+        ):
+            raise ValueError(
+                "campaign traversal must exhaust successfully once"
+            )
+        try:
+            if self._scan(initial=False) != self._discovery:
+                raise ValueError("campaign discovery changed during traversal")
+            if self._check_plan_inputs(initial=False) != self._plan_digest:
+                raise ValueError("campaign plan inventory changed")
+            if self._guard.finish() != self._global_control_digest:
+                raise ValueError("campaign controls changed during traversal")
+            self._finished = True
+            if self._sampled:
+                return None
+            fields = dict(self._fields)
+            ref = fields.pop("index_ref")
+            return CampaignVerificationSummaryV1(
+                **fields,
+                index_ref_json=canonical(ref.to_dict()),
+                control_inputs_sha256=self._control_digest,
+                product_verifications_sha256=self._product_digest.hexdigest(),
+                product_inputs_sha256=self._input_digest.hexdigest(),
+                out_of_plan_json=canonical(
+                    [
+                        item.to_dict()
+                        for item in sorted(
+                            self._outside,
+                            key=lambda item: (item.path, item.sha256),
+                        )
+                    ]
+                ),
+            )
+        except BaseException:
+            self._failed = True
+            raise
+
+
+def _coordinate_payload(
+    value: CampaignVerificationCoordinate,
+) -> dict[str, Any]:
+    return {name: getattr(value, name) for name in value.__slots__}
+
+
+def open_campaign_verification(
+    index_path: str | Path,
+    *,
+    selected_ordinals: tuple[int, ...] | None = None,
+) -> CampaignVerificationTraversal:
+    """Open a fresh full traversal, or an explicitly non-authorizing sample.
+
+    There is no prior-receipt/callback/skip-success argument. Constructing any
+    evidence dataclass does not cause this traversal to accept its fields.
+    """
+    return CampaignVerificationTraversal(
+        index_path, selected_ordinals=selected_ordinals
+    )
 
 
 def verify_campaign_product_index(

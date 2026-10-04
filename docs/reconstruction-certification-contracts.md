@@ -69,6 +69,20 @@ The matrix JSON is not a substitute for those retained execution inputs.
 
 ## Historical scalar-aggregation contracts
 
+The native product checks in `certify-campaign` require an exact, freshly
+reverified receipt-tree root in addition to the native index. Declare an artifact
+of kind `campaign-verification-root`, with its root JSON path, byte SHA-256,
+`/artifact_id` subject pointer and `histdatacom.campaign-receipt-root.v1` schema.
+Include that evidence key in each protected product observation. The current
+policy factory requires that evidence kind explicitly; retained older policies
+keep their original wire contents and identities. Publication observations also
+include the native dataset-publication evidence key: its dataset version must
+bind exactly that root and the runner freshly checks the same graph.
+An index alone, a sampled receipt,
+caller scalars or a structurally valid historical root cannot pass these native
+checks. This does not add a complete-campaign profile to the capability-bound
+successor or turn synthetic fixtures into release evidence.
+
 The V2 contracts and `certify` command below retain their original wire IDs,
 readers and behavior for historical replay. Their scalar aggregation is not the
 matrix-bound successor: a self-consistent report can carry caller-supplied

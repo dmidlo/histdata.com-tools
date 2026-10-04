@@ -96,6 +96,33 @@ def test_campaign_and_vendor_m1_wires_have_real_versioned_codecs() -> None:
     assert not registry.migrations
 
 
+def test_campaign_receipt_tree_wires_are_separate_versioned_codecs() -> None:
+    registry = schema_compatibility_registry()
+    families = {item.family: item for item in registry.schemas}
+    names = {
+        "CampaignVerificationRunV1": "run",
+        "CampaignControlReceiptV1": "control",
+        "CampaignProductReceiptV1": "product",
+        "CampaignVerificationShardV1": "shard",
+        "CampaignVerificationCheckpointV1": "checkpoint",
+        "CampaignVerificationSummaryV1": "summary",
+        "CampaignVerificationRootV1": "root",
+        "CampaignVerificationJournalV1": "journal",
+        "CampaignVerificationFailureV1": "failure",
+        "CampaignVerificationSampleV1": "sample",
+    }
+    for name, suffix in names.items():
+        schema = families["histdatacom.campaign_receipt_contracts." + name]
+        assert schema.wire_schema == f"histdatacom.campaign-receipt-{suffix}.v1"
+        assert schema.version == "1.0.0"
+        assert schema.status is SupportStatus.SUPPORTED
+        assert schema.readers and schema.writers
+        assert can_read(schema.wire_schema)
+    assert "histdatacom.campaign_receipt_contracts.CampaignReceipt" in {
+        item.qualified_name for item in registry.exemptions
+    }
+
+
 def test_account_inherited_wires_are_exact_reader_writer_inventory() -> None:
     registry = schema_compatibility_registry()
     families = {item.family: item for item in registry.schemas}

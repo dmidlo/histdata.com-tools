@@ -634,13 +634,16 @@ def _verify_campaign_product_evidence(
 
     index_kind = "reconstruction-campaign-product-index"
     publication_kind = "reconstruction-campaign-dataset-publication"
+    root_kind = "campaign-verification-root"
     native = {
         item.evidence_key: item
         for item in spec.artifacts
-        if item.kind in {index_kind, publication_kind}
+        if item.kind in {index_kind, publication_kind, root_kind}
     }
     indexes = {}
     publications = {}
+    roots = {}
+    publication_roots = {}
     for key, declared in native.items():
         path = paths[key]
         if declared.kind == index_kind:
@@ -651,6 +654,34 @@ def _verify_campaign_product_evidence(
             ):
                 raise ValueError("campaign index evidence identity changed")
             indexes[key] = receipt
+        elif declared.kind == root_kind:
+            from histdatacom.campaign_index_contracts import (
+                CampaignArtifactRefV1,
+                load_json,
+            )
+            from histdatacom.campaign_receipt_contracts import (
+                CampaignVerificationSummaryV1,
+            )
+            from histdatacom.campaign_receipt_publication import (
+                validate_publication_root,
+            )
+            from histdatacom.campaign_receipt_store import (
+                get_campaign_verification_root_ref,
+            )
+
+            ref = get_campaign_verification_root_ref(
+                path.parent.parent, expected_root_id=declared.subject_id
+            )
+            if ref.path != str(path) or ref.sha256 != declared.content_sha256:
+                raise ValueError("certification root declaration differs")
+            root = validate_publication_root(ref)
+            summary = CampaignVerificationSummaryV1.from_json(root.summary_json)
+            index_ref = CampaignArtifactRefV1.from_dict(
+                load_json(summary.index_ref_json)
+            )
+            receipt = verify_campaign_product_index(index_ref.path)
+            root = validate_publication_root(ref, verification=receipt)
+            roots[key] = (root, receipt)
         else:
             publication = read_reconstruction_campaign_dataset_publication(path)
             receipt = verify_campaign_product_index(
@@ -669,6 +700,27 @@ def _verify_campaign_product_evidence(
                 publication, verify_artifacts=True, fresh_verification=receipt
             )
             publications[key] = (publication, receipt)
+            from histdatacom.campaign_verification import (
+                read_campaign_control_json,
+            )
+            from histdatacom.datasets import DatasetVersionManifestV1
+
+            version = DatasetVersionManifestV1.from_dict(
+                read_campaign_control_json(publication.dataset_version_ref.path)
+            )
+            root_refs = [
+                ref
+                for ref in version.qualification_evidence
+                if ref.kind == "campaign_verification_root_v1"
+            ]
+            if len(root_refs) != 1:
+                raise ValueError(
+                    "certification publication requires one verification root"
+                )
+            publication_root_id = root_refs[0].metadata["verification_root_id"]
+            if not isinstance(publication_root_id, str):
+                raise ValueError("certification publication root ID is invalid")
+            publication_roots[key] = publication_root_id
         # Replay must not race a changed outer declaration.
         _verified_json_artifact(path, declared)
 
@@ -678,6 +730,9 @@ def _verify_campaign_product_evidence(
     identities.update(
         (item.index_id, item.index_ref.sha256)
         for _, item in publications.values()
+    )
+    identities.update(
+        (item.index_id, item.index_ref.sha256) for _, item in roots.values()
     )
     if len(identities) > 1:
         raise ValueError(
@@ -695,6 +750,20 @@ def _verify_campaign_product_evidence(
                 "product certification requires one native index evidence input"
             )
         receipt = selected[0]
+        selected_root_ids = [
+            roots[key][0].artifact_id for key in keys if key in roots
+        ]
+        if len(selected_root_ids) != 1:
+            raise ValueError(
+                "product certification requires one exact fully reverified root"
+            )
+        selected_root_ids.extend(
+            publication_roots[key] for key in keys if key in publication_roots
+        )
+        if not selected_root_ids or len(set(selected_root_ids)) != 1:
+            raise ValueError(
+                "product certification requires one exact fully reverified root"
+            )
         index = read_reconstruction_campaign_product_index(
             receipt.index_ref.path
         )
@@ -738,7 +807,11 @@ def _verify_campaign_product_evidence(
             artifact_evidence_ids=tuple(
                 evidence[key].evidence_id for key in keys
             ),
-            note="derived from fresh native campaign product verification; not a declared scalar",
+            note=(
+                "derived from fresh native campaign product verification and exact root "
+                + selected_root_ids[0]
+                + "; not a declared scalar"
+            ),
         )
     return results
 
@@ -751,6 +824,7 @@ def _verified_json_artifact(
         if declared.kind in {
             "reconstruction-campaign-product-index",
             "reconstruction-campaign-dataset-publication",
+            "campaign-verification-root",
         }:
             from histdatacom.campaign_verification import (
                 read_campaign_control_snapshot,

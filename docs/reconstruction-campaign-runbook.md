@@ -236,8 +236,65 @@ histdatacom reconstruction --json dataset-publish \
 checked, but its serialized output explicitly says product bytes were not
 verified. `product-verify` is a fresh deep read. Durable V1 index/manifest labels
 alone are not current authority. Constructing or loading a deep receipt does
-not grant authority either: this implementation always replays inputs afresh
-and does not implement the reusable receipt-tree route under #523.
+not grant authority either. The additive receipt-tree route retains independently
+verified product evidence for structural inspection and explicitly scoped audits:
+
+```sh
+histdatacom reconstruction --json product-verify-tree \
+  --product-index work/product-index/reconstruction-campaign-product-index-<sha256>.json \
+  --output-directory work/verification --products-per-shard 64
+
+histdatacom reconstruction --json product-resume-verification \
+  --product-index work/product-index/reconstruction-campaign-product-index-<sha256>.json \
+  --store-directory work/verification
+
+histdatacom reconstruction --json product-inspect-verification \
+  --store-directory work/verification \
+  --expected-root-id campaign-receipt-root:sha256:<digest>
+
+histdatacom reconstruction --json product-audit-verification \
+  --product-index work/product-index/reconstruction-campaign-product-index-<sha256>.json \
+  --store-directory work/verification \
+  --expected-root-id campaign-receipt-root:sha256:<digest> \
+  --product-ordinal 0 12
+```
+
+The corresponding client methods are `verify_campaign_receipts`,
+`resume_campaign_receipts`, `inspect_campaign_receipts`, and
+`audit_campaign_receipts`. YAML uses `store_directory`, `expected_root_id`,
+`expected_checkpoint_id`, `products_per_shard`, and `product_ordinals`.
+Sample ordinals must be sorted, unique and explicitly selected (at most 64).
+Sampling does not issue a new full-campaign root or certify unselected products.
+
+Use a dedicated, initially absent or empty directory outside every product and
+scratch root. Receipts use exact canonical JSON, independent byte/content
+digests, no-follow paths, an exclusive lock, no-clobber writes, and fsynced
+publication plus journal events. Temporary files and orphan roots are not
+completion evidence. Recovery preserves evidence and resumes the durable
+receipt sequence without duplicate coordinates. It selects the latest committed
+checkpoint by default; an explicit checkpoint ID selects exactly that retained
+prefix. Recovery repeats native verification, including already retained
+products, and reuses the old product/shard receipts only after their exact
+semantic evidence matches. Uncheckpointed orphans are not promoted. New control
+receipts and suffix products describe the current attempt; the root and journal
+identify the reused checkpoint. An independently retained checkpoint ID selects
+provenance, **not permission to skip native work**. Structural inspection reads
+receipts, not product/source data; it cannot
+establish current data integrity. These hashes are not signatures or protection
+against replacement of both an entire store and an externally trusted root ID.
+
+Every product leaf binds its unchanged native verification core, exact manifest
+and Parquet inventory, source/engine/configuration lineage, elapsed time and
+measured read bytes. Separate control leaves retain global metadata and each
+plan's actual transitive source closure, including plans with only empty/refused
+outcomes. Product and control inputs are reread before successful finalization.
+The run binds actual implementation Python bytes and runtime/dependency versions;
+it does not attest installed binary libraries or a separate operating system.
+Measured reads count guarded **campaign-input hashing**, including repeated
+reads, but exclude native decoder, implementation-code and receipt-store I/O.
+Root elapsed time and read bytes measure the current finalization attempt.
+Reused prefix leaves retain their original historical measurements; they are not
+silently attributed to the current attempt or used to inflate its wall time.
 
 Older native product writers could hash caller-ordered evidence IDs and then
 retain only sorted, deduplicated IDs. That lost ordering cannot be inferred
@@ -248,7 +305,10 @@ actual validation/evidence inputs in a new output location. Do not edit old
 hashes or overwrite retained evidence to make it appear verified.
 
 Publication requires a freshly deep-verified complete product index and retains
-the replay evidence in the dataset version's qualification evidence. Changing
+both the replay evidence and exact successful tree root in the dataset version's
+qualification evidence. Material publication and campaign certification fully
+reverify that exact root. Historical publications lacking a tree remain
+structurally readable but must be republished to gain fresh authority. Changing
 any referenced bytes invalidates a subsequent verification/publication, even
 if an older receipt says complete. It preserves explicit terminal
 non-product outcomes and emits one provider-neutral synthetic dataset version;
@@ -270,6 +330,20 @@ or an over-limit discovered artifact tree. Native shard limits still apply.
 Canonical receipt content is bounded to 4 MiB with at most 4,096 separately reported
 out-of-plan products. Refusal is explicit, never a truncated complete claim;
 larger campaigns require a separately designed scalable proof path.
+
+Tree products are grouped into 1–64 leaves per shard (default 64), with at most
+4,096 receipt shards and 262,144 products. Each product or plan-control closure
+is bounded to 4,096 files; global controls are separately bounded to 262,144
+files and split across at most 64 control leaves. The root separates global
+and plan-control references so no collection exceeds 4,096 elements. Each
+canonical receipt is at most 4 MiB. Store capacity is finite: admission reserves
+known journal/checkpoint overhead, and actual receipt sizes are charged before
+writes; reaching the 64 GiB store limit refuses completion rather than truncating
+evidence. The product-count ceiling is not a promise every such campaign fits.
+Checkpoints occur at completed shard boundaries, not after every product.
+Inputs must remain quiescent; these checks do not provide an atomic snapshot of
+an adversarially changing filesystem. No real historical campaign root is
+established by the synthetic integrity/crash tests.
 
 ## Closure evidence
 

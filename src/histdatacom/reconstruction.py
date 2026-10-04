@@ -4525,6 +4525,84 @@ class ReconstructionClient:
             dataset_id=dataset_id,
         )
 
+    def verify_campaign_receipts(
+        self,
+        product_index_path: str | Path,
+        *,
+        output_directory: str | Path,
+        products_per_shard: int = 64,
+    ) -> Mapping[str, JSONValue]:
+        """Run full native verification into a new external receipt store."""
+        from histdatacom.campaign_receipt_runner import (
+            run_campaign_verification,
+        )
+
+        root = run_campaign_verification(
+            product_index_path,
+            output_directory=output_directory,
+            products_per_shard=products_per_shard,
+        )
+        return cast(Mapping[str, JSONValue], root.to_dict())
+
+    def resume_campaign_receipts(
+        self,
+        product_index_path: str | Path,
+        *,
+        store_directory: str | Path,
+        expected_checkpoint_id: str | None = None,
+    ) -> Mapping[str, JSONValue]:
+        """Recover durable work without treating cached receipts as authority."""
+        from histdatacom.campaign_receipt_runner import (
+            resume_campaign_verification,
+        )
+
+        root = resume_campaign_verification(
+            product_index_path,
+            store_directory=store_directory,
+            expected_checkpoint_id=expected_checkpoint_id,
+        )
+        return cast(Mapping[str, JSONValue], root.to_dict())
+
+    def inspect_campaign_receipts(
+        self,
+        store_directory: str | Path,
+        *,
+        expected_root_id: str,
+    ) -> Mapping[str, JSONValue]:
+        """Inspect receipt structure only; do not establish current integrity."""
+        from histdatacom.campaign_receipt_runner import (
+            read_campaign_verification_tree,
+        )
+
+        root = read_campaign_verification_tree(
+            store_directory, expected_root_id=expected_root_id
+        )
+        return {
+            "verification_scope": "receipt_structure_only_inputs_not_reverified",
+            "root": cast(JSONValue, root.to_dict()),
+        }
+
+    def audit_campaign_receipts(
+        self,
+        product_index_path: str | Path,
+        store_directory: str | Path,
+        *,
+        expected_root_id: str,
+        product_ordinals: tuple[int, ...],
+    ) -> Mapping[str, JSONValue]:
+        """Natively audit explicit selected products, never certify a whole run."""
+        from histdatacom.campaign_receipt_runner import (
+            audit_campaign_verification_tree,
+        )
+
+        result = audit_campaign_verification_tree(
+            product_index_path,
+            store_directory,
+            expected_root_id=expected_root_id,
+            product_ordinals=product_ordinals,
+        )
+        return cast(Mapping[str, JSONValue], result.to_dict())
+
     def inspect_campaign_products(
         self,
         product_index_path: str | Path,
@@ -5832,6 +5910,54 @@ def _validate_campaign_dataset_publication_graph(
         raise ReconstructionPlanError(
             "republish legacy campaign with fresh deep evidence"
         )
+    tree_refs = tuple(
+        ref
+        for ref in version.qualification_evidence
+        if ref.kind == "campaign_verification_root_v1"
+    )
+    if len(tree_refs) > 1:
+        raise ReconstructionPlanError(
+            "campaign publication has ambiguous roots"
+        )
+    if tree_refs:
+        from histdatacom.campaign_index_contracts import CampaignArtifactRefV1
+        from histdatacom.campaign_receipt_contracts import (
+            CampaignVerificationSummaryV1,
+        )
+        from histdatacom.campaign_receipt_publication import (
+            validate_publication_root,
+        )
+
+        root = validate_publication_root(
+            CampaignArtifactRefV1.from_artifact_ref(tree_refs[0]),
+            verification=fresh_verification,
+        )
+        summary = CampaignVerificationSummaryV1.from_json(root.summary_json)
+        root_index_ref = CampaignArtifactRefV1.from_dict(
+            json.loads(summary.index_ref_json)
+        )
+        if (
+            summary.index_id != index.product_index_id
+            or summary.plan_set_id != index.plan_set_id
+            or summary.support_artifact_id != index.support_artifact_id
+            or (
+                root_index_ref.path,
+                root_index_ref.size_bytes,
+                root_index_ref.sha256,
+            )
+            != (
+                publication.product_index_ref.path,
+                publication.product_index_ref.size_bytes,
+                publication.product_index_ref.sha256,
+            )
+        ):
+            raise ReconstructionPlanError(
+                "campaign publication root is foreign"
+            )
+    elif fresh_verification is not None:
+        raise ReconstructionPlanError(
+            "republish legacy campaign with exact verification root"
+        )
     expected_version = DatasetVersionManifestV1(
         dataset_id=version.dataset_id,
         origin=DatasetOrigin.SYNTHETIC,
@@ -5844,7 +5970,7 @@ def _validate_campaign_dataset_publication_graph(
                 ordinal=0,
             ),
         ),
-        qualification_evidence=(*base_evidence, *proof_refs),
+        qualification_evidence=(*base_evidence, *proof_refs, *tree_refs),
         delivery_profile_id=index.delivery_profile_id,
     )
     if version != expected_version:
@@ -7333,6 +7459,13 @@ def _publish_reconstruction_campaign_dataset(
     verification_ref = _write_campaign_deep_verification(
         verification.to_dict(), output_directory
     )
+    from histdatacom.campaign_receipt_publication import retain_publication_root
+
+    tree_ref = retain_publication_root(
+        index_target,
+        output_directory=output_directory,
+        verification=verification,
+    ).to_artifact_ref()
     version = DatasetVersionManifestV1(
         dataset_id=descriptor.dataset_id,
         origin=DatasetOrigin.SYNTHETIC,
@@ -7351,6 +7484,7 @@ def _publish_reconstruction_campaign_dataset(
             index.plan_set_ref,
             index.support_map_ref,
             verification_ref,
+            tree_ref,
         ),
         delivery_profile_id=index.delivery_profile_id,
     )

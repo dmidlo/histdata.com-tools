@@ -395,6 +395,10 @@ _RECONSTRUCTION_COMMANDS = {
     "product-inspect",
     "product-inventory",
     "product-verify",
+    "product-verify-tree",
+    "product-resume-verification",
+    "product-inspect-verification",
+    "product-audit-verification",
     "preview",
     "replay",
     "request",
@@ -428,6 +432,8 @@ _RECONSTRUCTION_SCALAR_ARGS = {
     "dataset_id": "--dataset-id",
     "end_ns": "--end-ns",
     "evidence_root": "--evidence-root",
+    "expected_checkpoint_id": "--expected-checkpoint-id",
+    "expected_root_id": "--expected-root-id",
     "information_mode": "--information-mode",
     "limit": "--limit",
     "manifest": "--manifest",
@@ -436,19 +442,23 @@ _RECONSTRUCTION_SCALAR_ARGS = {
     "plan": "--plan",
     "plan_set": "--plan-set",
     "product_index": "--product-index",
+    "products_per_shard": "--products-per-shard",
     "reason": "--reason",
     "receipt": "--receipt",
     "request": "--request",
     "spec": "--spec",
     "start_ns": "--start-ns",
+    "store_directory": "--store-directory",
     "support_map": "--support-map",
     "window_id": "--window-id",
 }
+_RECONSTRUCTION_LIST_ARGS = {"product_ordinals": "--product-ordinal"}
 _RECONSTRUCTION_ALLOWED_KEYS = (
     {"command"}
     | set(_RECONSTRUCTION_GLOBAL_TRUE_FLAG_ARGS)
     | set(_RECONSTRUCTION_TRUE_FLAG_ARGS)
     | set(_RECONSTRUCTION_SCALAR_ARGS)
+    | set(_RECONSTRUCTION_LIST_ARGS)
 )
 _QUALITY_COMMANDS = {
     "catalog",
@@ -972,7 +982,7 @@ def configured_reconstruction_argv(args: Sequence[str]) -> list[str]:
         global_list_args={},
         command_true_flags=_RECONSTRUCTION_TRUE_FLAG_ARGS,
         command_scalar_args=_RECONSTRUCTION_SCALAR_ARGS,
-        command_list_args={},
+        command_list_args=_RECONSTRUCTION_LIST_ARGS,
     )
 
 

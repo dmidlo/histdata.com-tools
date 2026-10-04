@@ -300,6 +300,19 @@ def _certification_spec(
         _index(fixture).support_map_ref if support_ref is None else support_ref
     )
     artifacts = []
+    from histdatacom.datasets import DatasetVersionManifestV1
+
+    publication = public.read_reconstruction_campaign_dataset_publication(
+        fixture.publication_ref.path
+    )
+    version = DatasetVersionManifestV1.from_dict(
+        _json(publication.dataset_version_ref.path)
+    )
+    root_ref = next(
+        ref
+        for ref in version.qualification_evidence
+        if ref.kind == "campaign_verification_root_v1"
+    )
     for key, kind, ref, identity in (
         (
             "index",
@@ -312,6 +325,12 @@ def _certification_spec(
             "reconstruction-campaign-dataset-publication",
             fixture.publication_ref,
             "publication_id",
+        ),
+        (
+            "root",
+            "campaign-verification-root",
+            root_ref,
+            "artifact_id",
         ),
         (
             "support",
@@ -335,10 +354,18 @@ def _certification_spec(
             )
         )
     keys = {
-        "campaign_product_index_valid": ("index",),
-        "campaign_dataset_publication_valid": ("index", "publication"),
-        "executable_retained_product_missing_count": ("index", "support"),
-        "fabricated_liquidity_terminal_outcome_count": ("index", "support"),
+        "campaign_product_index_valid": ("index", "root"),
+        "campaign_dataset_publication_valid": ("index", "publication", "root"),
+        "executable_retained_product_missing_count": (
+            "index",
+            "support",
+            "root",
+        ),
+        "fabricated_liquidity_terminal_outcome_count": (
+            "index",
+            "support",
+            "root",
+        ),
     }
     return ModernReferenceCertificationCampaignSpecV1(
         common_end_period="201506",
@@ -641,7 +668,7 @@ def test_genuine_two_member_native_v3_local_cross_and_publication(
     assert len(version.parents) == 1
     assert version.parents[0].role == "immutable-observed-histdata-anchor"
     assert version.parents[0].ordinal == 0
-    assert len(version.qualification_evidence) == 5
+    assert len(version.qualification_evidence) == 6
     proofs = [
         item
         for item in version.qualification_evidence

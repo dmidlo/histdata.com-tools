@@ -2006,6 +2006,7 @@ def modern_reference_triangle_certification_policy(
             (
                 "reconstruction-campaign-product-index",
                 "reconstruction-plan-support-map",
+                "campaign-verification-root",
             ),
             "Every executable window contains the complete retained-member product rectangle.",
         ),
@@ -2017,6 +2018,7 @@ def modern_reference_triangle_certification_policy(
             (
                 "reconstruction-campaign-product-index",
                 "reconstruction-plan-support-map",
+                "campaign-verification-root",
             ),
             "Empty, closed, and unsupported windows publish no invented liquidity.",
         ),
@@ -2025,7 +2027,10 @@ def modern_reference_triangle_certification_policy(
             "campaign_product_index_valid",
             CertificationComparator.TRUE,
             True,
-            ("reconstruction-campaign-product-index",),
+            (
+                "reconstruction-campaign-product-index",
+                "campaign-verification-root",
+            ),
             "The content-addressed campaign index fully verifies every product and terminal outcome.",
         ),
         _requirement(
@@ -2036,6 +2041,7 @@ def modern_reference_triangle_certification_policy(
             (
                 "reconstruction-campaign-dataset-publication",
                 "reconstruction-campaign-product-index",
+                "campaign-verification-root",
             ),
             "The provider-neutral synthetic dataset version binds the complete campaign index.",
         ),
