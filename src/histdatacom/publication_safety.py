@@ -25,6 +25,7 @@ _PATHISH_KEYS = {
     "directory",
     "path",
     "paths",
+    "report_name",
     "reports_directory",
     "root",
     "roots",

@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import hashlib
+import json
 from pathlib import Path
+
+import pytest
 
 from histdatacom.data_quality.contracts import (
     QualityReport,
@@ -318,13 +322,121 @@ def test_next_work_is_publish_safe_and_does_not_mutate_report_golden(
     )
 
     assert first == second
-    assert first["input_reports"][0]["report_name"] == (
-        "fingerprint-report.json"
+    report_name = first["input_reports"][0]["report_name"]
+    assert isinstance(report_name, str)
+    # A public anchor in the configured tmp root may preserve a relative path.
+    # Exact ordinary/anchored display paths are covered independently below.
+    assert report_name.rsplit("/", 1)[-1] == "fingerprint-report.json"
+    assert (
+        first["input_reports"][0]["content_sha256"]
+        == hashlib.sha256(before.encode("utf-8")).hexdigest()
     )
-    assert len(first["input_reports"][0]["content_sha256"]) == 64
     assert str(tmp_path) not in str(first)
     assert quality_report_to_json(report) == before
     assert "Next fingerprint work" in format_fingerprint_next_work(first)
+
+
+@pytest.mark.parametrize(
+    ("report_path", "expected_name", "host_prefix"),
+    (
+        (
+            "/tmp/fixture/fingerprint-report.json",
+            "fingerprint-report.json",
+            "/tmp/fixture",
+        ),
+        (
+            "/Users/fixture/work/fingerprint-report.json",
+            "fingerprint-report.json",
+            "/Users/fixture",
+        ),
+        (
+            r"C:\Users\fixture\Temp\fingerprint-report.json",
+            "fingerprint-report.json",
+            r"C:\Users\fixture",
+        ),
+        (
+            "/Users/fixture/work/.histdatacom/check/fingerprint-report.json",
+            ".histdatacom/check/fingerprint-report.json",
+            "/Users/fixture",
+        ),
+        (
+            r"C:\Users\fixture\work\.histdatacom\check\fingerprint-report.json",
+            ".histdatacom/check/fingerprint-report.json",
+            r"C:\Users\fixture",
+        ),
+        (
+            "/home/fixture/work/reports/fingerprint-report.json",
+            "reports/fingerprint-report.json",
+            "/home/fixture",
+        ),
+        (
+            "/Users/fixture/work/.histdatacom/run/tmp/fingerprint-report.json",
+            ".histdatacom/run/tmp/fingerprint-report.json",
+            "/Users/fixture",
+        ),
+        (
+            "/Users/fixture/.histdatacom/run/private/fingerprint-report.json",
+            ".histdatacom/run/private/fingerprint-report.json",
+            "/Users/fixture",
+        ),
+        (
+            "/Users/fixture/work/.histdatacom/run/home/fingerprint-report.json",
+            ".histdatacom/run/home/fingerprint-report.json",
+            "/Users/fixture",
+        ),
+        (
+            "/Users/fixture/.histdatacom/run/Users/fingerprint-report.json",
+            ".histdatacom/run/Users/fingerprint-report.json",
+            "/Users/fixture",
+        ),
+        (
+            "/Users/fixture/.histdatacom/run/var/folders/fingerprint-report.json",
+            ".histdatacom/run/var/folders/fingerprint-report.json",
+            "/Users/fixture",
+        ),
+        (
+            r"C:\Users\fixture\.histdatacom\run\tmp\fingerprint-report.json",
+            ".histdatacom/run/tmp/fingerprint-report.json",
+            r"C:\Users\fixture",
+        ),
+    ),
+    ids=(
+        "ordinary-posix-temp",
+        "ordinary-macos",
+        "ordinary-windows",
+        "histdatacom-posix",
+        "histdatacom-windows",
+        "reports-posix",
+        "histdatacom-internal-tmp",
+        "histdatacom-internal-private",
+        "histdatacom-internal-home",
+        "histdatacom-internal-users",
+        "histdatacom-internal-var-folders",
+        "histdatacom-windows-internal-tmp",
+    ),
+)
+def test_next_work_report_display_path_is_portable(
+    report_path: str,
+    expected_name: str,
+    host_prefix: str,
+) -> None:
+    """Literal display-path oracles must not depend on the pytest tmp root."""
+    report = _report(targets=(_target("EURUSD"),), target_risks=())
+    before = quality_report_to_json(report)
+
+    first = fingerprint_next_work_recommendation([(report_path, report)])
+    second = fingerprint_next_work_recommendation([(report_path, report)])
+
+    assert first == second
+    assert first["input_reports"][0]["report_name"] == expected_name
+    assert (
+        first["input_reports"][0]["content_sha256"]
+        == hashlib.sha256(before.encode("utf-8")).hexdigest()
+    )
+    serialized = json.dumps(first, sort_keys=True)
+    for forbidden_prefix in (host_prefix, host_prefix.replace("\\", "/")):
+        assert json.dumps(forbidden_prefix)[1:-1] not in serialized
+    assert quality_report_to_json(report) == before
 
 
 def _report(
