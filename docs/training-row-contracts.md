@@ -95,6 +95,15 @@ declared; source values are not silently rewritten. Generated events must name
 actual retained enclosing observed anchors for the same symbol. A cross-midnight
 pair therefore merges both days, and a three-day product merges all three.
 
+The #774 patch also recognizes the native reconstruction producer's
+`ascii-tick:lowercase_symbol:PERIOD:sha256:PARTITION_SHA` series identity alongside the
+catalog's unchanged `ascii:T:SYMBOL:histdata.com` identity. This is an exact alias
+derived only after verifying the concrete HistData partition bytes, descriptor
+and rows. It is not a caller-supplied mapping or a fallback to matching prices.
+Wrong digests, periods, symbol spellings and row ordinals still refuse; two aliases cannot
+duplicate one observed source row inside a product. Existing product bytes and
+canonical source identities are not rewritten.
+
 Context feature matrices merge their complete reference-period, observation,
 schedule and cutoff support. Feature-aware forecasts conservatively include
 both inference and training matrices, retained calendar coverage and generation

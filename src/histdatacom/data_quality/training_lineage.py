@@ -264,6 +264,7 @@ def verify_training_source(source: TrainingSourceV1) -> _VerifiedSource:
         )
     ]
     observed: list[_ObservedRow] = []
+    native_series_aliases: dict[tuple[str, str], str] = {}
     for partition in version.partitions:
         adapter: HistDataProviderAdapter | FixtureProviderAdapter
         if partition.source_provider_id == "histdata.com":
@@ -279,6 +280,27 @@ def verify_training_source(source: TrainingSourceV1) -> _VerifiedSource:
         frame = adapter.read_partition(partition)
         if frame.height != partition.row_count:
             raise ValueError("observed source row count changed")
+        if (
+            type(adapter) is HistDataProviderAdapter
+            and partition.series_id
+            == f"ascii:T:{partition.symbol}:histdata.com"
+        ):
+            # The native reconstruction producer commits this byte-bound name,
+            # while the observed catalog deliberately retains its older series
+            # key. Derive the alias only after the concrete adapter has checked
+            # the partition descriptor, actual source hash and physical rows.
+            # ReconstructionSourcePartitionV1 uses lowercase symbols; the
+            # catalog uses uppercase. Do not normalize an incoming alias.
+            alias = (
+                f"ascii-tick:{partition.symbol.lower()}:{partition.period}:"
+                f"sha256:{partition.artifact.sha256}"
+            )
+            alias_key = alias, partition.period
+            previous = native_series_aliases.setdefault(
+                alias_key, partition.series_id
+            )
+            if previous != partition.series_id:
+                raise ValueError("ambiguous native source series alias")
         projection = (
             partition.artifact.metadata.get("quote_order_projection_policy")
             == "rowwise-min-bid-max-ask-preserve-raw-v1"
@@ -314,6 +336,12 @@ def verify_training_source(source: TrainingSourceV1) -> _VerifiedSource:
     by_key = {row.key: row for row in observed}
     if len(by_key) != len(observed):
         raise ValueError("ambiguous observed row ownership")
+    if any(
+        (row.series_id, row.period) in native_series_aliases
+        and native_series_aliases[(row.series_id, row.period)] != row.series_id
+        for row in observed
+    ):
+        raise ValueError("native source alias collides with a canonical series")
     graph = tuple(sorted({p.symbol for p in version.partitions}))
     products: list[_VerifiedProduct] = []
     seen_products: set[str] = set()
@@ -336,6 +364,7 @@ def verify_training_source(source: TrainingSourceV1) -> _VerifiedSource:
         if len(events) != manifest.event_count or not events:
             raise ValueError("product row count differs or is empty")
         anchors: dict[str, SyntheticEventV1] = {}
+        anchor_rows: set[tuple[str, str, int]] = set()
         for event in events:
             if event.source_version_id != version.dataset_version_id:
                 raise ValueError("event parent source differs")
@@ -347,6 +376,18 @@ def verify_training_source(source: TrainingSourceV1) -> _VerifiedSource:
                 event.source_row_id,
             )
             parent = by_key.get(key)  # type: ignore[arg-type]
+            if parent is None:
+                canonical_series = native_series_aliases.get(
+                    (event.source_series_id, event.source_period)  # type: ignore[arg-type]
+                )
+                if canonical_series is not None:
+                    parent = by_key.get(
+                        (
+                            canonical_series,
+                            event.source_period,
+                            event.source_row_id,
+                        )  # type: ignore[arg-type]
+                    )
             if parent is None:
                 raise ValueError(
                     "product observed anchor has no exact source row"
@@ -365,9 +406,10 @@ def verify_training_source(source: TrainingSourceV1) -> _VerifiedSource:
                 raise ValueError(
                     "product observed anchor differs from source values"
                 )
-            if event.event_id in anchors:
+            if event.event_id in anchors or parent.key in anchor_rows:
                 raise ValueError("product repeats an observed anchor")
             anchors[event.event_id] = event
+            anchor_rows.add(parent.key)
         if not anchors:
             raise ValueError("reconstruction lacks verified observed anchors")
         for event in events:

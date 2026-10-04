@@ -133,6 +133,7 @@ Data quality
    training-row-contracts
    training-join-contracts
    training-wide-views
+   training-scenario-views
    training-temporal-contracts
    training-overlap-contracts
    training-weight-contracts
