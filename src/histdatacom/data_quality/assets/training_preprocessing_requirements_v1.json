@@ -1,0 +1,822 @@
+{
+  "schema_version": "histdatacom.training-preprocessing-public-requirements.v1",
+  "issues": [
+    655,
+    697
+  ],
+  "version": "1.0.0",
+  "ownership_comments": [
+    "https://github.com/dmidlo/histdata.com-tools/issues/655#issuecomment-5979064789",
+    "https://github.com/dmidlo/histdata.com-tools/issues/697#issuecomment-5979064956"
+  ],
+  "scope": "public_required_contract",
+  "implementation_state": "implemented",
+  "qualification_scope": "synthetic_native_replay_and_reference_math_only",
+  "public_contract_execution_state": "synthetic_native_gates_passed",
+  "execution_evidence": {
+    "platform": "macOS",
+    "separate_legacy_native_join_cases_per_runtime": 154,
+    "counting_policy": "Distinct current test cases per runtime, not a sum of repeated, development, superseded or cross-runtime executions. The state/regression group includes 10 preprocessing cases and 154 existing native-join cases.",
+    "current_views_sha256": "5b1b154248baad0cc27e8c800577fb2730d2ab67ebdbe8a84bb137cda5811130",
+    "final_adversarial_test_sha256": "164de44a3026d6891eed68a6b41705d78e7a2ca68593be3ddee0698578e5fb42",
+    "qualification_limits": [
+      "Synthetic native replay, reference arithmetic and frozen synthetic learner comparisons only; no historical campaign or scientific/financial utility qualification.",
+      "No package release, publication, Windows runtime qualification or complete repository-suite execution is claimed.",
+      "Record metadata added after the original oracle/donor imports is covered by separate current-byte native export-schema tests. A passing subset in an exit-1 carrier is not a passing carrier.",
+      "The public API verifies the declared policy and exact TRAIN-derived fit state. It cannot certify an external person's hidden policy-selection intent, preregistration or undisclosed tuning of a new declared policy.",
+      "Fixed deterministic unit conversion is not implemented; its conditional exemption is represented by explicit closed-request refusal, not a claimed successful conversion."
+    ],
+    "groups": [
+      {
+        "module": "contracts_math",
+        "modules": [
+          "test_training_preprocessing_contracts.py",
+          "test_training_preprocessing_math.py"
+        ],
+        "runs": [
+          {
+            "python": "3.13.5",
+            "passed": 125,
+            "seconds": 27.23,
+            "receipt": "05fa0c",
+            "xml": ".histdatacom/issue697-contractmath-313.IcugyP/junit.xml",
+            "xml_sha256": "0f0f651221986c4fefeb697c1594a9cbc79e451edff6060d77af8f5b1f890886"
+          },
+          {
+            "python": "3.10.19",
+            "passed": 125,
+            "seconds": 33.77,
+            "receipt": "14f6b7",
+            "xml": ".histdatacom/issue697-contractmath-310.rLeuzK/junit.xml",
+            "xml_sha256": "c6e8a657db36f5235bdf4fbd281fd1fc05b05f0a1cd27f2bb9218a9de0da6343"
+          }
+        ]
+      },
+      {
+        "module": "native_evidence",
+        "modules": [
+          "test_training_preprocessing_native.py",
+          "test_training_preprocessing_evidence.py"
+        ],
+        "runs": [
+          {
+            "python": "3.13.5",
+            "passed": 52,
+            "seconds": 271.44,
+            "receipt": "3387b3",
+            "xml": ".histdatacom/issues655697-final-native313.fFGloy/junit.xml",
+            "xml_sha256": "11a5e8d2075a773a0cd9fa78b299c87dbf687b517beee51ec9372d496b007c8f"
+          },
+          {
+            "python": "3.10.19",
+            "passed": 52,
+            "seconds": 329.68,
+            "receipt": "b5913f",
+            "xml": ".histdatacom/issues655697-final-native310.8x6eVu/junit.xml",
+            "xml_sha256": "3b32765f6129a2f9ffd556efc696fa8cfac5493841d80033dbf77cd24eb9aa5d"
+          }
+        ]
+      },
+      {
+        "module": "states_and_legacy_native_join",
+        "native_state_cases": 10,
+        "legacy_regression_cases": 154,
+        "source_scope": "These original gates began before later preprocessing projection/export changes. Accepted scope is the unchanged 154 native-join regressions and 10 native missingness/cancellation cases, not the entire final views module. No complete imported-source inventory was captured; donor/oracle component proofs and dedicated current-byte delta gates retain their separate qualifications.",
+        "runs": [
+          {
+            "python": "3.13.5",
+            "passed": 164,
+            "seconds": 1944,
+            "receipt": "0a02a9",
+            "xml": ".histdatacom/issue655-states-regression313.cWDyzb/junit.xml",
+            "xml_sha256": "fc420dc0bae4ca6d471cfbd26862a2bf66ac10b830a4d6e072acea7e8f4d594b"
+          },
+          {
+            "python": "3.10.19",
+            "passed": 164,
+            "seconds": 2593.29,
+            "receipt": "b805e4",
+            "xml": ".histdatacom/issue655-states-regression310.XmrPNm/junit.xml",
+            "xml_sha256": "2f4aa732c8bd5f0b356900c985966abe55274d8349cda1b8a69a620e4047c998"
+          }
+        ]
+      },
+      {
+        "module": "donor_scope",
+        "modules": [
+          "test_training_preprocessing_donor_scope.py"
+        ],
+        "import_scope": "Before input_schema-only metadata addition; exact frozen TRAIN donor-policy fix present.",
+        "runs": [
+          {
+            "python": "3.13.5",
+            "passed": 6,
+            "seconds": 1598.91,
+            "receipt": "34e60c",
+            "xml": ".histdatacom/issue697-donor-scope-313.KLFHNL/junit.xml",
+            "xml_sha256": "60222de1c09060aaf206927aa750f8781f0391cc27607a6f6db6cfdc618c48ff"
+          },
+          {
+            "python": "3.10.19",
+            "passed": 6,
+            "seconds": 1929.32,
+            "receipt": "d01d47",
+            "xml": ".histdatacom/issue697-donor-scope-310.0ZtFUp/junit.xml",
+            "xml_sha256": "cba95a02a5f1d68ca65c5e9e1903688ad0ed9b093c828fa628c7238dda1ac72e"
+          }
+        ],
+        "views_startup_sha256": "a5c7a6a0f4ca4344dbead17a6abf6467e8b5776ca78e006a29de6b2a4f31c6a0"
+      },
+      {
+        "module": "export_schema",
+        "modules": [
+          "test_training_preprocessing_export_schema.py"
+        ],
+        "scope": "Current input_schema record-metadata delta; terminal-only receipts, no retained XML or complete imported-source inventory.",
+        "runs": [
+          {
+            "python": "3.13.5",
+            "passed": 4,
+            "seconds": 164.7,
+            "receipt": "630d3f"
+          },
+          {
+            "python": "3.10.19",
+            "passed": 4,
+            "seconds": 198.02,
+            "receipt": "748c61"
+          }
+        ],
+        "test_sha256": "34ddb30c9c0441142cefc2af591d8bc6699ae986384a0f8e931d3221b61512fd",
+        "views_startup_sha256": "5b1b154248baad0cc27e8c800577fb2730d2ab67ebdbe8a84bb137cda5811130"
+      },
+      {
+        "module": "selector_canary",
+        "modules": [
+          "test_training_preprocessing_selector_canary.py"
+        ],
+        "runs": [
+          {
+            "python": "3.13.5",
+            "passed": 1,
+            "seconds": 117.78,
+            "receipt": "59bad0",
+            "xml": ".histdatacom/issues655697-selector-313.kPnwpJ/junit.xml",
+            "xml_sha256": "01d64a3e7c7aa030dcdf2552a3672339d60c5464a16e2b831f1eea2978225d55"
+          },
+          {
+            "python": "3.10.19",
+            "passed": 1,
+            "seconds": 143.59,
+            "receipt": "d2a78c",
+            "xml": ".histdatacom/issues655697-selector-310.wwX1AV/junit.xml",
+            "xml_sha256": "34bc443e00af551885e00c03a2bf65462e1dba6d56743f5b7e2472ede690a101"
+          }
+        ]
+      },
+      {
+        "module": "artifacts",
+        "modules": [
+          "test_training_preprocessing_artifacts.py"
+        ],
+        "source_guard": "Six preprocessing modules, artifact test and three native fixtures match retained before/after hashes.",
+        "runs": [
+          {
+            "python": "3.13.5",
+            "passed": 30,
+            "seconds": 565.81,
+            "receipt": "ac046c",
+            "xml": ".histdatacom/issue697-artifacts-final-313.kCILOc/junit.xml",
+            "xml_sha256": "f2ff3b1b01622049f3c1a4e2afbefe9ef5aa58982f1832fa0baba59b886deb7e"
+          },
+          {
+            "python": "3.10.19",
+            "passed": 30,
+            "seconds": 689.061,
+            "receipt": "8f455e",
+            "xml": ".histdatacom/issue697-artifacts-final-310.8ll1Df/junit.xml",
+            "xml_sha256": "1d6f12da6eed3c7fef3d2be740db1d673fcc667d0e20dc4d1952c5c6ae44d72b"
+          }
+        ]
+      },
+      {
+        "module": "adversarial",
+        "modules": [
+          "test_training_preprocessing_adversarial.py"
+        ],
+        "test_sha256": "164de44a3026d6891eed68a6b41705d78e7a2ca68593be3ddee0698578e5fb42",
+        "runs": [
+          {
+            "python": "3.13.5",
+            "passed": 60,
+            "seconds": 820.9,
+            "receipt": "691a1e",
+            "xml": ".histdatacom/issues655697-adversarial-final313.zSdy4G/junit.xml",
+            "xml_sha256": "745e6751a67a26960ce946b1068b0a0f384c4281bb97bbc179490231e90b5b2e"
+          },
+          {
+            "python": "3.10.19",
+            "passed": 60,
+            "seconds": 993.94,
+            "receipt": "7cbe5a",
+            "xml": ".histdatacom/issues655697-adversarial-final310.LwCwo4/junit.xml",
+            "xml_sha256": "b2ebd792217d63fc0208356f82ef2401e068d771b94e84ed1180054bd9c3fe87"
+          }
+        ]
+      },
+      {
+        "module": "oracle",
+        "modules": [
+          "test_training_preprocessing_oracle.py"
+        ],
+        "test_sha256": "e0afd7c9d192e8283de286e7bf8bad6000df90d0ca4548814ed71428188cfd4b",
+        "fixture_sha256": "55b0e3c38edb99c457fa090624c07767ea6ace4cead06ff9c1851a8687004135",
+        "source_scope": "Original processes imported all donor-policy, cutoff-prefix, imputation and lineage fixes, before the input_schema-only record metadata addition. Exact complete imported-source inventories were not captured. Current-byte export-schema, native/evidence, artifacts, selector and corrected adversarial gates separately qualify their stated scopes; these original carriers are not current-byte whole-module qualification.",
+        "runs": [
+          {
+            "python": "3.13.5",
+            "passed": 51,
+            "receipt": "dfea32",
+            "xml": ".histdatacom/issues655697-final-oracle-313.MHy24q/junit.xml",
+            "xml_sha256": "9a8f72fb58c53c7ca7c04a974219512ae5a360b70e8cc432bef5598064ab0476",
+            "carrier_exit_code": 1,
+            "carrier_passed": 110,
+            "carrier_failed": 1,
+            "carrier_seconds": 4617.38,
+            "accepted_scope": "Only the 51 unchanged oracle-module test cases; all have no failure/error/skip.",
+            "carrier_failure": "Loaded old adversarial source-mutation regex expected training rows or lineage differ from source replay; native admission correctly raised join spine differs from complete canonical source replay.",
+            "loaded_adversarial_sha256": "4def73c151a79c4dd5cba4ec2bd227785c004ea83c793ed95884db5767d9492b",
+            "warning": "One pytest xunit2/record_property compatibility warning; all four synthetic learner metric properties are present in the retained XML."
+          },
+          {
+            "python": "3.10.19",
+            "passed": 51,
+            "receipt": "8b05bd",
+            "xml": ".histdatacom/issues655697-final-oracle-310.lRFWL1/junit.xml",
+            "xml_sha256": "89cc18e1ed6dc800dd253afbc8b951021580b9346a527ac875f96e5106156be7",
+            "carrier_exit_code": 1,
+            "carrier_passed": 110,
+            "carrier_failed": 1,
+            "carrier_seconds": 5616.57,
+            "accepted_scope": "Only the 51 unchanged oracle-module test cases; all have no failure/error/skip.",
+            "carrier_failure": "Loaded old adversarial source-mutation regex expected training rows or lineage differ from source replay; native admission correctly raised join spine differs from complete canonical source replay.",
+            "loaded_adversarial_sha256": "4def73c151a79c4dd5cba4ec2bd227785c004ea83c793ed95884db5767d9492b",
+            "warning": "One pytest xunit2/record_property compatibility warning; all four synthetic learner metric properties are present in the retained XML."
+          }
+        ]
+      }
+    ],
+    "superseded_diagnostic_gate": {
+      "python": "3.13.5",
+      "xml": ".histdatacom/issues655697-adversarial-fast313.oo6CYV/junit.xml",
+      "receipt": "93b973",
+      "passed": 59,
+      "failed": 1,
+      "seconds": 810.53,
+      "scope": "Current source, older adversarial assertion; only the exact expected source-replay error regex was corrected. Both fresh final 60-case adversarial modules passed after correction. No production fix was required."
+    },
+    "reconciled_on": "2026-10-07",
+    "distinct_preprocessing_cases_per_runtime": 339
+  },
+  "scientific_qualification": "not_claimed",
+  "historical_availability_verification": "not_claimed",
+  "global_525_complete": false,
+  "global_691_complete": false,
+  "test_root": "tests/unit/",
+  "atoms": [
+    {
+      "id": "655.evidence_nullable_original",
+      "issue": 655,
+      "api": "materialize_training_evidence_view",
+      "test": "test_training_preprocessing_oracle.py::test_native_evidence_and_dense_layers_keep_originals",
+      "acceptance": "Preserve native nullable values, typed state/reason, units, origin and uncertainty before any fill.",
+      "state": "executed_pass",
+      "supporting_tests": [
+        "test_training_preprocessing_export_schema.py::test_all_selected_input_descriptors_survive_native_dense_export",
+        "test_training_preprocessing_export_schema.py::test_scalar_export_keeps_exact_native_units_dtype_and_meaning"
+      ]
+    },
+    {
+      "id": "655.dense_separate_identity",
+      "issue": 655,
+      "api": "apply_training_preprocessing",
+      "test": "test_training_preprocessing_oracle.py::test_native_evidence_and_dense_layers_keep_originals",
+      "acceptance": "Dense representation has its own identity and cannot become observed evidence.",
+      "state": "executed_pass"
+    },
+    {
+      "id": "655.public_consumer_layers",
+      "issue": 655,
+      "api": "materialize_training_evidence_view",
+      "test": "test_training_preprocessing_oracle.py::test_native_evidence_and_dense_layers_keep_originals",
+      "acceptance": "Actual public consumer obtains either replayed evidence or governed dense values.",
+      "state": "executed_pass",
+      "supporting_tests": [
+        "test_training_preprocessing_export_schema.py::test_all_selected_input_descriptors_survive_native_dense_export"
+      ]
+    },
+    {
+      "id": "655.all_missing_states",
+      "issue": 655,
+      "api": "apply_training_preprocessing",
+      "test": "test_training_preprocessing_oracle.py::test_native_evidence_and_dense_layers_keep_originals",
+      "acceptance": "Preserve observed, derived, unsupported, not-yet-available, warmup, closure, outage, not-applicable and refused semantics.",
+      "state": "executed_pass",
+      "supporting_tests": [
+        "test_training_preprocessing_states.py::test_native_absence_is_not_quiet_zero",
+        "test_training_preprocessing_states.py::test_indicator_warmup_stays_missing",
+        "test_training_preprocessing_states.py::test_delayed_release_never_backward_fills",
+        "test_training_preprocessing_oracle.py::test_unsupported_facts_never_become_quiet_zero"
+      ]
+    },
+    {
+      "id": "655.mask_age_method_support",
+      "issue": 655,
+      "api": "apply_training_preprocessing",
+      "test": "test_training_preprocessing_oracle.py::test_native_evidence_and_dense_layers_keep_originals",
+      "acceptance": "Each filled cell retains support mask, reason, age, method, original value and support/confidence.",
+      "state": "executed_pass"
+    },
+    {
+      "id": "655.cutoff_safe_persistent_state",
+      "issue": 655,
+      "api": "apply_training_preprocessing",
+      "test": "test_training_preprocessing_oracle.py::test_prior_state_fill_is_bounded_and_aged",
+      "acceptance": "Only explicitly persistent state may carry forward, with declared cutoff/age bounds.",
+      "state": "executed_pass",
+      "supporting_tests": [
+        "test_training_preprocessing_donor_scope.py::test_actual_grid_has_known_donor_outside_selected_train_unit",
+        "test_training_preprocessing_donor_scope.py::test_train_subset_preserves_fit_inputs_and_validation_own_donors",
+        "test_training_preprocessing_donor_scope.py::test_all_train_membership_admits_older_unit_donor",
+        "test_training_preprocessing_donor_scope.py::test_none_mode_preserves_all_causal_native_history",
+        "test_training_preprocessing_donor_scope.py::test_rolling_window_freezes_exact_row_donor_membership"
+      ]
+    },
+    {
+      "id": "655.train_only_simple_imputation",
+      "issue": 655,
+      "api": "fit_training_preprocessing",
+      "test": "test_training_preprocessing_oracle.py::test_native_evidence_and_dense_layers_keep_originals",
+      "acceptance": "Median/robust center derives from exact eligible TRAIN members.",
+      "state": "executed_pass",
+      "supporting_tests": [
+        "test_training_preprocessing_donor_scope.py::test_train_subset_preserves_fit_inputs_and_validation_own_donors"
+      ]
+    },
+    {
+      "id": "655.richer_imputation_comparison",
+      "issue": 655,
+      "api": "apply_training_preprocessing",
+      "test": "test_training_preprocessing_oracle.py::test_frozen_synthetic_imputation_and_mask_comparison",
+      "acceptance": "Frozen simple/richer deterministic imputation and masked/unmasked neutral learners execute; no empirical utility claim.",
+      "state": "executed_pass"
+    },
+    {
+      "id": "655.zero_is_confirmed_absence_only",
+      "issue": 655,
+      "api": "apply_training_preprocessing",
+      "test": "test_training_preprocessing_states.py::test_confirmed_zero_requires_native_known_cancellation",
+      "acceptance": "No unsupported/outage null is silently relabelled a zero observation.",
+      "state": "executed_pass"
+    },
+    {
+      "id": "655.future_backfill_canary",
+      "issue": 655,
+      "api": "replay_training_preprocessing_fit",
+      "test": "test_training_preprocessing_adversarial.py::test_future_backfill_canary_refuses",
+      "acceptance": "Future outcomes cannot backfill prior missing cells.",
+      "state": "executed_pass"
+    },
+    {
+      "id": "655.full_period_normalization_canary",
+      "issue": 655,
+      "api": "fit_training_preprocessing",
+      "test": "test_training_preprocessing_adversarial.py::test_train_plus_protected_fit_canary_refuses",
+      "acceptance": "Protected validation/test values cannot affect trained scaling.",
+      "state": "executed_pass"
+    },
+    {
+      "id": "655.revised_macro_prerelease_canary",
+      "issue": 655,
+      "api": "fit_training_preprocessing",
+      "test": "test_training_preprocessing_oracle.py::test_native_rolling_future_truncation",
+      "acceptance": "Native macro revisions only enter after their declared normalized availability.",
+      "state": "executed_pass"
+    },
+    {
+      "id": "655.partial_bar_future_close_canary",
+      "issue": 655,
+      "api": "fit_training_preprocessing",
+      "test": "test_training_preprocessing_states.py::test_closed_or_partial_bar_cannot_be_prior_filled",
+      "acceptance": "Later finalized candle does not fill an earlier partial bar.",
+      "state": "executed_pass"
+    },
+    {
+      "id": "655.outage_quiet_canary",
+      "issue": 655,
+      "api": "apply_training_preprocessing",
+      "test": "test_training_preprocessing_states.py::test_native_absence_is_not_quiet_zero",
+      "acceptance": "Source outage remains distinct from a confirmed quiet interval.",
+      "state": "executed_pass"
+    },
+    {
+      "id": "697.family_zscale",
+      "issue": 697,
+      "api": "fit_training_preprocessing",
+      "test": "test_training_preprocessing_oracle.py::test_native_all_stateful_families_fit_apply_with_exact_lineage",
+      "acceptance": "Actual weighted train-fitted z scaling and the literal protected-100 canary.",
+      "state": "executed_pass",
+      "supporting_tests": [
+        "test_training_preprocessing_oracle.py::test_reference_train_only_zscore_matches_literal_leakage_example"
+      ]
+    },
+    {
+      "id": "697.family_robust_scale",
+      "issue": 697,
+      "api": "fit_training_preprocessing",
+      "test": "test_training_preprocessing_oracle.py::test_native_all_stateful_families_fit_apply_with_exact_lineage",
+      "acceptance": "Weighted median/MAD scaling with explicit scale convention.",
+      "state": "executed_pass",
+      "supporting_tests": [
+        "test_training_preprocessing_oracle.py::test_reference_exact_scalar_families_independent_oracle"
+      ]
+    },
+    {
+      "id": "697.family_minmax",
+      "issue": 697,
+      "api": "fit_training_preprocessing",
+      "test": "test_training_preprocessing_oracle.py::test_native_all_stateful_families_fit_apply_with_exact_lineage",
+      "acceptance": "Actual learned extrema, no protected extrema.",
+      "state": "executed_pass",
+      "supporting_tests": [
+        "test_training_preprocessing_oracle.py::test_reference_exact_scalar_families_independent_oracle"
+      ]
+    },
+    {
+      "id": "697.family_winsor",
+      "issue": 697,
+      "api": "fit_training_preprocessing",
+      "test": "test_training_preprocessing_oracle.py::test_native_all_stateful_families_fit_apply_with_exact_lineage",
+      "acceptance": "Learned clipping thresholds from weighted TRAIN quantiles.",
+      "state": "executed_pass",
+      "supporting_tests": [
+        "test_training_preprocessing_oracle.py::test_reference_exact_scalar_families_independent_oracle"
+      ]
+    },
+    {
+      "id": "697.family_quantile_rank",
+      "issue": 697,
+      "api": "fit_training_preprocessing",
+      "test": "test_training_preprocessing_oracle.py::test_native_all_stateful_families_fit_apply_with_exact_lineage",
+      "acceptance": "Frozen weighted empirical CDF, not test-derived ranks.",
+      "state": "executed_pass",
+      "supporting_tests": [
+        "test_training_preprocessing_oracle.py::test_reference_exact_scalar_families_independent_oracle"
+      ]
+    },
+    {
+      "id": "697.family_pca_svd_whitening",
+      "issue": 697,
+      "api": "fit_training_preprocessing",
+      "test": "test_training_preprocessing_oracle.py::test_native_all_stateful_families_fit_apply_with_exact_lineage",
+      "acceptance": "Actual projection fitting and independent orthogonal covariance/whitening oracle.",
+      "state": "executed_pass",
+      "supporting_tests": [
+        "test_training_preprocessing_oracle.py::test_reference_projection_families_have_independent_axis_oracle"
+      ]
+    },
+    {
+      "id": "697.family_vocabulary",
+      "issue": 697,
+      "api": "fit_training_preprocessing",
+      "test": "test_training_preprocessing_oracle.py::test_native_all_stateful_families_fit_apply_with_exact_lineage",
+      "acceptance": "Train-only target-independent vocabulary with distinct unknown/missing slots.",
+      "state": "executed_pass",
+      "supporting_tests": [
+        "test_training_preprocessing_oracle.py::test_reference_categorical_unknown_and_missing_do_not_expand_vocabulary"
+      ]
+    },
+    {
+      "id": "697.family_learned_imputer",
+      "issue": 697,
+      "api": "fit_training_preprocessing",
+      "test": "test_training_preprocessing_oracle.py::test_native_all_stateful_families_fit_apply_with_exact_lineage",
+      "acceptance": "Actual train-fitted median imputation; all-missing remains unsupported.",
+      "state": "executed_pass",
+      "supporting_tests": [
+        "test_training_preprocessing_oracle.py::test_reference_exact_scalar_families_independent_oracle",
+        "test_training_preprocessing_oracle.py::test_native_train_imputer_then_scaler_replays_each_stage"
+      ]
+    },
+    {
+      "id": "697.family_feature_selection",
+      "issue": 697,
+      "api": "fit_training_preprocessing",
+      "test": "test_training_preprocessing_oracle.py::test_native_all_stateful_families_fit_apply_with_exact_lineage",
+      "acceptance": "Actual TRAIN variance/statistic selection, not protected targets.",
+      "state": "executed_pass",
+      "supporting_tests": [
+        "test_training_preprocessing_oracle.py::test_reference_selection_and_pruning_keep_declared_priority"
+      ]
+    },
+    {
+      "id": "697.family_variance_correlation",
+      "issue": 697,
+      "api": "fit_training_preprocessing",
+      "test": "test_training_preprocessing_oracle.py::test_native_all_stateful_families_fit_apply_with_exact_lineage",
+      "acceptance": "Weighted variance and pairwise-complete correlation pruning.",
+      "state": "executed_pass",
+      "supporting_tests": [
+        "test_training_preprocessing_oracle.py::test_reference_selection_and_pruning_keep_declared_priority"
+      ]
+    },
+    {
+      "id": "697.family_population_reduction",
+      "issue": 697,
+      "api": "fit_training_preprocessing",
+      "test": "test_training_preprocessing_oracle.py::test_native_all_stateful_families_fit_apply_with_exact_lineage",
+      "acceptance": "Transparent fitted linear reduction for declared population/strategy feature groups; no unavailable full catalog claim.",
+      "state": "executed_pass",
+      "supporting_tests": [
+        "test_training_preprocessing_oracle.py::test_reference_projection_families_have_independent_axis_oracle"
+      ]
+    },
+    {
+      "id": "697.family_embedding_compression",
+      "issue": 697,
+      "api": "fit_training_preprocessing",
+      "test": "test_training_preprocessing_oracle.py::test_native_all_stateful_families_fit_apply_with_exact_lineage",
+      "acceptance": "Actual transparent learned linear compression, not a neural/model-performance assertion.",
+      "state": "executed_pass",
+      "supporting_tests": [
+        "test_training_preprocessing_oracle.py::test_reference_projection_families_have_independent_axis_oracle"
+      ]
+    },
+    {
+      "id": "697.fixed_unit_conversion",
+      "issue": 697,
+      "api": "TrainingPreprocessingStepV1",
+      "test": "test_training_preprocessing_adversarial.py::test_unsupported_transform_does_not_silently_substitute_raw",
+      "acceptance": "The conditional no-fit exemption does not authorize an unsupported conversion: closed requests refuse unit conversion instead of silently substituting NONE/raw or a learned scale.",
+      "state": "executed_pass",
+      "scope": "conditional_family_not_implemented_no_conversion_execution_claim"
+    },
+    {
+      "id": "697.mode_train_fit",
+      "issue": 697,
+      "api": "fit_training_preprocessing",
+      "test": "test_training_preprocessing_oracle.py::test_native_train_membership_and_parameter_oracle",
+      "acceptance": "Exactly retained whole TRAIN units fit; no caller verification flag.",
+      "state": "executed_pass",
+      "supporting_tests": [
+        "test_training_preprocessing_donor_scope.py::test_train_subset_preserves_fit_inputs_and_validation_own_donors",
+        "test_training_preprocessing_donor_scope.py::test_all_train_membership_admits_older_unit_donor"
+      ]
+    },
+    {
+      "id": "697.mode_rolling_pti",
+      "issue": 697,
+      "api": "fit_training_preprocessing",
+      "test": "test_training_preprocessing_oracle.py::test_native_rolling_future_truncation",
+      "acceptance": "Native normalized-as-of decision geometry, frozen window, cutoff-safe selection and replay.",
+      "state": "executed_pass",
+      "supporting_tests": [
+        "test_training_preprocessing_oracle.py::test_rolling_application_does_not_numerically_touch_later_finite_extreme",
+        "test_training_preprocessing_donor_scope.py::test_rolling_window_freezes_exact_row_donor_membership"
+      ]
+    },
+    {
+      "id": "697.mode_fixed_external",
+      "issue": 697,
+      "api": "apply_training_preprocessing",
+      "test": "test_training_preprocessing_oracle.py::test_actual_external_calibration_fit_and_application",
+      "acceptance": "Real independent calibration inputs replay with disjoint source/fold/availability bindings.",
+      "state": "executed_pass"
+    },
+    {
+      "id": "697.mode_none",
+      "issue": 697,
+      "api": "materialize_training_evidence_view",
+      "test": "test_training_preprocessing_oracle.py::test_no_fit_mode_is_explicit_identity",
+      "acceptance": "Unfitted raw projection is explicitly not a learned fit.",
+      "state": "executed_pass",
+      "supporting_tests": [
+        "test_training_preprocessing_donor_scope.py::test_none_mode_preserves_all_causal_native_history"
+      ]
+    },
+    {
+      "id": "697.whole_unit_membership",
+      "issue": 697,
+      "api": "fit_training_preprocessing",
+      "test": "test_training_preprocessing_adversarial.py::test_partial_or_foreign_fit_unit_refuses",
+      "acceptance": "Exact admitted unit roster, split and fit subset; sibling rows cannot be relabelled independent.",
+      "state": "executed_pass"
+    },
+    {
+      "id": "697.weighted_siblings",
+      "issue": 697,
+      "api": "fit_training_preprocessing",
+      "test": "test_training_preprocessing_oracle.py::test_native_siblings_preserve_unit_mass",
+      "acceptance": "Weights derive from the complete native roster; filtering cannot restore full mass to retained siblings.",
+      "state": "executed_pass",
+      "supporting_tests": [
+        "test_training_preprocessing_oracle.py::test_native_sibling_fit_uses_exact_complete_roster_weights"
+      ]
+    },
+    {
+      "id": "697.exact_weighted_moments",
+      "issue": 697,
+      "api": "fit_reference_transform",
+      "test": "test_training_preprocessing_oracle.py::test_reference_independent_exact_weighted_moments_and_quantiles",
+      "acceptance": "Independent Fraction mean/population variance/weighted quantile with zero-weight controls.",
+      "state": "executed_pass",
+      "supporting_tests": [
+        "test_training_preprocessing_oracle.py::test_native_unequal_unit_counts_change_weighted_fit_not_unit_mass"
+      ]
+    },
+    {
+      "id": "697.ontology_closed_unknown",
+      "issue": 697,
+      "api": "apply_training_preprocessing",
+      "test": "test_training_preprocessing_oracle.py::test_native_state_ontology_unknown_is_not_expanded",
+      "acceptance": "Ontology identity derives from native states; protected categories do not extend TRAIN vocabulary.",
+      "state": "executed_pass",
+      "supporting_tests": [
+        "test_training_preprocessing_export_schema.py::test_state_category_export_retains_native_ontology_without_substitution"
+      ]
+    },
+    {
+      "id": "697.target_independent_features",
+      "issue": 697,
+      "api": "fit_training_preprocessing",
+      "test": "test_training_preprocessing_adversarial.py::test_protected_label_feature_canary_refuses",
+      "acceptance": "Protected target/label feature cannot enter target-independent fit.",
+      "state": "executed_pass"
+    },
+    {
+      "id": "697.fold_local_fits",
+      "issue": 697,
+      "api": "replay_training_preprocessing_fit",
+      "test": "test_training_preprocessing_oracle.py::test_fold_local_fit_cannot_be_reused_globally",
+      "acceptance": "Independent fold membership and identities; no global fitted object reused under a new fold label.",
+      "state": "executed_pass"
+    },
+    {
+      "id": "697.nested_fit_search",
+      "issue": 697,
+      "api": "fit_training_preprocessing",
+      "test": "test_training_preprocessing_oracle.py::test_nested_folds_retain_distinct_fit_membership",
+      "acceptance": "Inner fit selection retains its exact eligible TRAIN-unit subset and outer-fold identity.",
+      "state": "executed_pass",
+      "supporting_tests": [
+        "test_training_preprocessing_donor_scope.py::test_train_subset_preserves_fit_inputs_and_validation_own_donors"
+      ]
+    },
+    {
+      "id": "697.environment_and_parameters",
+      "issue": 697,
+      "api": "replay_training_preprocessing_fit",
+      "test": "test_training_preprocessing_adversarial.py::test_resealed_parameters_and_environment_refuse",
+      "acceptance": "Fit binds kernel version, options, parameters, numerical environment and exact inputs.",
+      "state": "executed_pass"
+    },
+    {
+      "id": "697.schema_units_registry",
+      "issue": 697,
+      "api": "apply_training_preprocessing",
+      "test": "test_training_preprocessing_oracle.py::test_native_evidence_and_dense_layers_keep_originals",
+      "acceptance": "Schema distinguishes raw/transformed/imputed inputs, native units, ontology and transform lineage.",
+      "state": "executed_pass",
+      "supporting_tests": [
+        "test_training_preprocessing_export_schema.py::test_all_selected_input_descriptors_survive_native_dense_export",
+        "test_training_preprocessing_export_schema.py::test_scalar_export_keeps_exact_native_units_dtype_and_meaning",
+        "test_training_preprocessing_export_schema.py::test_projection_export_resolves_both_native_input_definitions",
+        "test_training_preprocessing_export_schema.py::test_state_category_export_retains_native_ontology_without_substitution"
+      ]
+    },
+    {
+      "id": "697.transformed_lineage",
+      "issue": 697,
+      "api": "apply_training_preprocessing",
+      "test": "test_training_preprocessing_oracle.py::test_native_all_stateful_families_fit_apply_with_exact_lineage",
+      "acceptance": "Every transformed cell resolves to the native source and exact fit/membership/schema.",
+      "state": "executed_pass",
+      "supporting_tests": [
+        "test_training_preprocessing_oracle.py::test_native_scaling_to_projection_retains_both_input_paths"
+      ]
+    },
+    {
+      "id": "697.canary_train_validation_scaler",
+      "issue": 697,
+      "api": "fit_training_preprocessing",
+      "test": "test_training_preprocessing_adversarial.py::test_train_plus_protected_fit_canary_refuses",
+      "acceptance": "Train plus validation scaler refused at real native membership boundary.",
+      "state": "executed_pass"
+    },
+    {
+      "id": "697.canary_future_imputer",
+      "issue": 697,
+      "api": "fit_training_preprocessing",
+      "test": "test_training_preprocessing_adversarial.py::test_train_plus_protected_fit_canary_refuses",
+      "acceptance": "Future imputation fit cannot alter prior eligible parameters.",
+      "state": "executed_pass"
+    },
+    {
+      "id": "697.canary_full_corpus_pca",
+      "issue": 697,
+      "api": "fit_training_preprocessing",
+      "test": "test_training_preprocessing_adversarial.py::test_protected_fit_members_refuse_every_stateful_family",
+      "acceptance": "Full-corpus projection with protected members refuses.",
+      "state": "executed_pass"
+    },
+    {
+      "id": "697.canary_test_quantiles",
+      "issue": 697,
+      "api": "fit_training_preprocessing",
+      "test": "test_training_preprocessing_adversarial.py::test_protected_fit_members_refuse_every_stateful_family",
+      "acceptance": "Test-distribution quantile fitting refuses.",
+      "state": "executed_pass"
+    },
+    {
+      "id": "697.canary_validation_vocab",
+      "issue": 697,
+      "api": "apply_training_preprocessing",
+      "test": "test_training_preprocessing_oracle.py::test_native_state_ontology_unknown_is_not_expanded",
+      "acceptance": "Validation-only category maps unknown without refitting.",
+      "state": "executed_pass"
+    },
+    {
+      "id": "697.canary_full_weight_siblings",
+      "issue": 697,
+      "api": "fit_training_preprocessing",
+      "test": "test_training_preprocessing_oracle.py::test_native_siblings_preserve_unit_mass",
+      "acceptance": "Synthetic sibling multiplication cannot increase historical unit mass.",
+      "state": "executed_pass",
+      "supporting_tests": [
+        "test_training_preprocessing_oracle.py::test_native_sibling_fit_uses_exact_complete_roster_weights"
+      ]
+    },
+    {
+      "id": "697.canary_target_selector",
+      "issue": 697,
+      "api": "replay_training_preprocessing_fit",
+      "test": "test_training_preprocessing_selector_canary.py::test_label_tuned_selector_state_fails_fully_resealed_native_replay",
+      "acceptance": "A shape-valid, fully resealed selector state chosen using protected synthetic labels refuses at complete native refit under the unchanged declared target-independent policy.",
+      "state": "executed_pass",
+      "scope": "Exact declared-policy/TRAIN-state enforcement, not certification of hidden external hyperparameter-selection intent.",
+      "supporting_tests": [
+        "test_training_preprocessing_adversarial.py::test_protected_label_feature_canary_refuses"
+      ]
+    },
+    {
+      "id": "697.canary_global_fold_object",
+      "issue": 697,
+      "api": "replay_training_preprocessing_fit",
+      "test": "test_training_preprocessing_oracle.py::test_fold_local_fit_cannot_be_reused_globally",
+      "acceptance": "Rebound global fit cannot stand in for local fold fit.",
+      "state": "executed_pass"
+    },
+    {
+      "id": "697.canary_rolling_future_rows",
+      "issue": 697,
+      "api": "fit_training_preprocessing",
+      "test": "test_training_preprocessing_oracle.py::test_native_rolling_future_truncation",
+      "acceptance": "Future rows/counts/revisions cannot influence prior parameters or weights.",
+      "state": "executed_pass"
+    },
+    {
+      "id": "697.source_tamper_replay",
+      "issue": 697,
+      "api": "replay_training_preprocessing_fit",
+      "test": "test_training_preprocessing_adversarial.py::test_native_source_mutation_and_resealed_wide_values_refuse",
+      "acceptance": "Fresh real native source replay catches byte and logically resealed value tampering.",
+      "state": "executed_pass"
+    },
+    {
+      "id": "697.immutable_roundtrip",
+      "issue": 697,
+      "api": "replay_training_preprocessing_fit",
+      "test": "test_training_preprocessing_artifacts.py::test_actual_native_fit_roundtrip_and_idempotent_no_clobber",
+      "acceptance": "Durable fitted-parameter artifact roundtrip retains its independent expected subject and rejects tampering; process-local views require separate fresh replay and are not durable certificates.",
+      "supporting_tests": [
+        "test_training_preprocessing_adversarial.py::test_frozen_view_snapshot_tampering_refuses"
+      ],
+      "state": "executed_pass"
+    },
+    {
+      "id": "697.requirements_scope",
+      "issue": 697,
+      "api": "training_preprocessing_requirements_v1.json",
+      "test": "test_training_preprocessing_oracle.py::test_requirement_asset_maps_full_public_scope_without_global_claims",
+      "acceptance": "Public local issue mapping only, never global #525/#691 certification.",
+      "state": "executed_pass"
+    }
+  ],
+  "nonclaims": [
+    "no empirical model utility or calibrated scientific weighting",
+    "no real historical acquisition or campaign execution",
+    "no full unavailable 1000-strategy archive or wide-corpus qualification",
+    "no proprietary learner, live operation, certification promotion or release",
+    "normalized simulated availability is not historical source authenticity"
+  ]
+}

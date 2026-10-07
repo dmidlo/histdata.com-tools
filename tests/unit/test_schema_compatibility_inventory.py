@@ -8,6 +8,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 from histdatacom.schema_compatibility import (
     EvidenceKind,
     SupportStatus,
@@ -20,6 +22,109 @@ from histdatacom.schema_compatibility.inventory import (
 )
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def test_preprocessing_has_exact_versioned_codec_inventory() -> None:
+    registry = schema_compatibility_registry()
+    families = {item.family: item for item in registry.schemas}
+    implementations = {
+        item.implementation_id: item.qualified_name
+        for item in registry.implementations
+    }
+    prefix = "histdatacom.data_quality.training_preprocessing_"
+    expected = {
+        "contracts.TrainingPreprocessingStepV1": "histdatacom.training-preprocessing-step.v1",
+        "contracts.TrainingPreprocessingPlanV1": "histdatacom.training-preprocessing-plan.v1",
+        "contracts.TrainingPreprocessingFitStepV1": "histdatacom.training-preprocessing-fit-step.v1",
+        "contracts.TrainingPreprocessingFitV1": "histdatacom.training-preprocessing-fit.v1",
+        "math.ReferenceTransformFitV1": "reference-transform-fit",
+    }
+    for suffix, wire in expected.items():
+        family = prefix + suffix
+        schema = families[family]
+        assert schema.wire_schema == wire
+        assert schema.version == "1.0.0"
+        assert schema.status is SupportStatus.SUPPORTED
+        assert {implementations[key] for key in schema.readers} == {
+            family + ".from_dict",
+            family + ".from_json",
+        }
+        assert {implementations[key] for key in schema.writers} == {
+            family + ".to_dict",
+            family + ".to_json",
+        }
+        assert can_read(schema.schema_id)
+    assert prefix + "contracts._PreprocessingContract" not in families
+    assert prefix + "contracts._PreprocessingContract" in {
+        item.qualified_name for item in registry.exemptions
+    }
+    # Process-local result objects have no durable codec invented for them.
+    assert prefix + "views.TrainingEvidenceViewV1" not in families
+    assert prefix + "views.TrainingPreprocessingViewV1" not in families
+
+
+@pytest.mark.parametrize(
+    "writer",
+    [
+        "return {'kind': 'wrong-kind', 'version': VERSION}",
+        "return {'kind': 'reference-transform-fit', 'version': '2.0.0'}",
+        "metadata = {'kind': 'reference-transform-fit', 'version': VERSION}\n        return {}",
+        "return {'metadata': {'kind': 'reference-transform-fit', 'version': VERSION}}",
+        "VERSION = '2.0.0'\n        return {'kind': 'reference-transform-fit', 'version': VERSION}",
+        "return {'kind': 'reference-transform-fit', 'version': VERSION, 'version': '2.0.0'}",
+        "return {'kind': 'reference-transform-fit', 'version': VERSION, **{}}",
+    ],
+)
+def test_preprocessing_kind_version_inventory_rejects_writer_drift(
+    tmp_path: Path, writer: str
+) -> None:
+    package = tmp_path / "src/histdatacom"
+    quality = package / "data_quality"
+    quality.mkdir(parents=True)
+    (package / "__init__.py").write_text("__version__ = '3.0.0'\n")
+    (quality / "training_preprocessing_math.py").write_text(
+        "VERSION = '1.0.0'\n"
+        "class ReferenceTransformFitV1:\n"
+        "    def to_dict(self):\n"
+        f"        {writer}\n"
+    )
+    with pytest.raises(ValueError, match="reviewed kind/version envelope"):
+        build_registry(tmp_path)
+
+
+def test_preprocessing_kind_version_mapping_does_not_invent_other_wires(
+    tmp_path: Path,
+) -> None:
+    package = tmp_path / "src/histdatacom"
+    quality = package / "data_quality"
+    quality.mkdir(parents=True)
+    (package / "__init__.py").write_text("__version__ = '3.0.0'\n")
+    (quality / "training_preprocessing_math.py").write_text(
+        "VERSION = '1.0.0'\n"
+        "class ReferenceTransformFitV1:\n"
+        "    def to_dict(self):\n"
+        "        return {'kind': 'reference-transform-fit', 'version': VERSION}\n"
+        "class Unrelated:\n"
+        "    schema = 'not-a-native-wire.v4'\n"
+        "    def to_dict(self):\n"
+        "        return {'kind': 'unrelated', 'version': VERSION}\n"
+        "class Unversioned:\n"
+        "    def to_dict(self):\n"
+        "        return {'kind': 'unversioned', 'version': VERSION}\n"
+    )
+    schemas = {
+        item.family.rsplit(".", 1)[1]: item
+        for item in build_registry(tmp_path).schemas
+    }
+    assert (
+        schemas["ReferenceTransformFitV1"].wire_schema
+        == "reference-transform-fit"
+    )
+    assert schemas["ReferenceTransformFitV1"].version == "1.0.0"
+    # Existing schema-field handling is unchanged, while kind/version is not a
+    # new heuristic for unrelated classes.
+    assert schemas["Unrelated"].wire_schema == "not-a-native-wire.v4"
+    assert schemas["Unversioned"].version == "unversioned"
 
 
 def test_cross_feed_artifacts_have_native_versioned_codec_inventory() -> None:

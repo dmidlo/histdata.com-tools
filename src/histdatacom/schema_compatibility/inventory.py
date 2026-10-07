@@ -196,7 +196,18 @@ CLASS_SCHEMA_FIELDS = {
     "histdatacom.campaign_index_contracts._Record": "SCHEMA",
     "histdatacom.synthetic.traders.account_codec.AccountRecord": "SCHEMA",
 }
+# Exact reviewed envelopes using kind/version rather than schema_version.
+# The actual writer dictionary and module constant are checked below; this is
+# neither an exemption nor a heuristic applied to unrelated "version" fields.
+CLASS_KIND_VERSION = {
+    "histdatacom.data_quality.training_preprocessing_math.ReferenceTransformFitV1": (
+        "reference-transform-fit",
+        "VERSION",
+        "1.0.0",
+    ),
+}
 SERIALIZER_EXEMPTIONS = {
+    "histdatacom.data_quality.training_preprocessing_contracts._PreprocessingContract": "Abstract strict bounded preprocessing codec with no standalone payload. Concrete step/plan/fit-step/fit contracts retain inherited versioned reader/writer inventory. Constructors and retained hashes are not native fitting or protected-split authority.",
     "histdatacom.data_quality.training_scenario_contracts._ScenarioContract": "Abstract strict bounded scenario serializer with no standalone payload. Concrete additive scenario contracts retain inherited versioned readers/writers. Construction and decoding do not grant native replay, provider permission or empirical qualification authority.",
     "histdatacom.campaign_receipt_contracts.CampaignReceipt": "Abstract bounded content-addressed campaign-tree envelope with no standalone payload. Concrete control/product/shard/checkpoint/run/root/summary/journal/failure/sample records retain versioned codecs. Structural decoding never grants current native verification or resume bypass authority.",
     "histdatacom.cross_feed._wire.Artifact": "Abstract bounded cross-feed content-addressed envelope with no standalone payload; concrete clock, capture-projection and matching artifacts retain actual versioned reader/writer inventory. A decoded artifact is not native replay or provider authority.",
@@ -495,6 +506,7 @@ def build_registry(root: Path) -> CompatibilityRegistryV1:
         writers: tuple[str, ...],
         chain: list[tuple[_Module, ast.ClassDef]],
         note: str,
+        version_override: str | None = None,
     ) -> None:
         match = re.search(r"(?:[.-]v|V)([0-9]+)(?:\Z|[.-])", wire or "")
         schema_version = (
@@ -506,6 +518,8 @@ def build_registry(root: Path) -> CompatibilityRegistryV1:
                 else "unversioned"
             )
         )
+        if version_override is not None:
+            schema_version = version_override
         sources = tuple(
             sorted(
                 {source_evidence(item) for item, _ in chain}
@@ -616,10 +630,74 @@ def build_registry(root: Path) -> CompatibilityRegistryV1:
             reader_ids += (
                 implementation(module, module.name + "." + function),
             )
+        wire = wire_schema(chain)
+        version_override = None
+        if name in CLASS_KIND_VERSION:
+            kind, constant, expected_version = CLASS_KIND_VERSION[name]
+            actual_version = evaluate(module, ast.Name(id=constant))
+            writer = next(
+                (
+                    child
+                    for child in node.body
+                    if isinstance(child, ast.FunctionDef)
+                    and child.name == "to_dict"
+                ),
+                None,
+            )
+            # This exact reviewed writer returns one literal envelope. An
+            # unused/nested dictionary or a shadowed module constant cannot
+            # establish the wire identity. Changes require explicit review.
+            returns = (
+                []
+                if writer is None
+                else [
+                    item
+                    for item in ast.walk(writer)
+                    if isinstance(item, ast.Return)
+                ]
+            )
+            returned = returns[0] if len(returns) == 1 else None
+            envelope = (
+                returned.value
+                if writer is not None
+                and returned in writer.body
+                and returned is not None
+                and isinstance(returned.value, ast.Dict)
+                else None
+            )
+            fields = (
+                {}
+                if envelope is None
+                else {
+                    key.value: value
+                    for key, value in zip(envelope.keys, envelope.values)
+                    if isinstance(key, ast.Constant) and type(key.value) is str
+                }
+            )
+            shadowed = writer is not None and any(
+                isinstance(item, ast.arg)
+                and item.arg == constant
+                or isinstance(item, ast.Name)
+                and item.id == constant
+                and isinstance(item.ctx, ast.Store)
+                for item in ast.walk(writer)
+            )
+            if (
+                actual_version != expected_version
+                or envelope is None
+                or len(fields) != len(envelope.keys)
+                or shadowed
+                or evaluate(module, fields.get("kind")) != kind
+                or evaluate(module, fields.get("version")) != expected_version
+            ):
+                raise ValueError(
+                    "reviewed kind/version envelope changed: " + name
+                )
+            wire, version_override = kind, expected_version
         add_schema(
             module,
             name,
-            wire_schema(chain),
+            wire,
             reader_ids,
             writer_ids,
             chain,
@@ -628,6 +706,7 @@ def build_registry(root: Path) -> CompatibilityRegistryV1:
                 if readers
                 else "Current emitted representation; no class-owned direct reader is declared. No migration inferred."
             ),
+            version_override,
         )
 
     # Independent functional-emitter sweep, including builders outside the old

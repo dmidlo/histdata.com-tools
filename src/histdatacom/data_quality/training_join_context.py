@@ -32,6 +32,7 @@ from histdatacom.forecasting.feature_store import (
 )
 from histdatacom.market_context.contracts import MarketContextTimelineV1
 from histdatacom.market_context.economic_calendar import (
+    EconomicReleaseStatus,
     replay_economic_calendar_corpus,
 )
 from histdatacom.market_context.positioning import (
@@ -174,9 +175,20 @@ def _calendar(source: TrainingJoinSourceV1) -> _JoinAdapter:
                 )
             ):
                 continue
-            if column.field == "scheduled_for_ns":
+            confirmed_absence = (
+                column.field == "occurrence"
+                and release.status is EconomicReleaseStatus.CANCELLED
+                and release.released_at_ns is None
+            )
+            if confirmed_absence:
+                # A retained cancellation is evidence about this exact scheduled
+                # occurrence, not a zero economic value or blanket quiet period.
+                # Normalized selection still enforces publication availability.
+                time = release.scheduled_for_ns
+                value: float | int | None = None
+            elif column.field == "scheduled_for_ns":
                 time = release.available_at_ns
-                value: float | int | None = release.scheduled_for_ns
+                value = release.scheduled_for_ns
             else:
                 if release.released_at_ns is None:
                     continue
@@ -198,11 +210,19 @@ def _calendar(source: TrainingJoinSourceV1) -> _JoinAdapter:
                     "normalized_official_context_not_source_authenticity",
                     value,
                     (
-                        JoinState.AVAILABLE
-                        if value is not None
-                        else JoinState.UNAVAILABLE
+                        JoinState.CONFIRMED_ABSENCE
+                        if confirmed_absence
+                        else (
+                            JoinState.AVAILABLE
+                            if value is not None
+                            else JoinState.UNAVAILABLE
+                        )
                     ),
-                    "retained_calendar_release_or_schedule",
+                    (
+                        "retained_calendar_cancellation_at_scheduled_occurrence"
+                        if confirmed_absence
+                        else "retained_calendar_release_or_schedule"
+                    ),
                 )
             )
         return tuple(result)
