@@ -105,6 +105,14 @@ def _current_qualification(
     from .runtime_legacy import require_legacy_capture_health
 
     fingerprint = require_qualified_broker_fingerprint(fingerprint)
+    from histdatacom.broker_capture.fingerprint_v2 import (
+        BrokerDeliveryFingerprintV2,
+    )
+
+    if type(fingerprint) is not BrokerDeliveryFingerprintV2:
+        raise ValueError(
+            "legacy health qualification cannot represent SDK roots; V3 retains independently replayed native audits"
+        )
     require_provider_operation(fingerprint, BrokerPolicyOperation.MATERIAL_USE)
     if len(manifests) != len(requests) or len(manifests) != len(
         fingerprint.capture_evidence

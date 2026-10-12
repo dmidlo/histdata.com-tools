@@ -305,6 +305,9 @@ def resolve_derived_native(native: object) -> _ResolvedNative:
     from histdatacom.broker_capture.fingerprint_v2 import (
         BrokerDeliveryFingerprintV2,
     )
+    from histdatacom.broker_capture.fingerprint_v3 import (
+        BrokerDeliveryFingerprintV3,
+    )
     from histdatacom.synthetic.broker_transfer import (
         BrokerConditionedProposalV1,
         BrokerProfileSelectionV1,
@@ -321,7 +324,11 @@ def resolve_derived_native(native: object) -> _ResolvedNative:
     if type(native) is BrokerSyntheticOutputV1:
         fingerprint = _restore_native(
             native.fingerprint,
-            {BrokerDeliveryFingerprintV1, BrokerDeliveryFingerprintV2},
+            {
+                BrokerDeliveryFingerprintV1,
+                BrokerDeliveryFingerprintV2,
+                BrokerDeliveryFingerprintV3,
+            },
         )
         parent = _resolve_native(fingerprint).subject
         return _ResolvedNative(
@@ -373,7 +380,12 @@ def resolve_derived_native(native: object) -> _ResolvedNative:
     _preflight_native(native)
     fingerprints = tuple(
         _restore_native(
-            item, {BrokerDeliveryFingerprintV1, BrokerDeliveryFingerprintV2}
+            item,
+            {
+                BrokerDeliveryFingerprintV1,
+                BrokerDeliveryFingerprintV2,
+                BrokerDeliveryFingerprintV3,
+            },
         )
         for item in native.fingerprints
     )

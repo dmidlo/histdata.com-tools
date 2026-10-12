@@ -29,7 +29,6 @@ from histdatacom.broker_plugin_policy import (
     provider_policy_scope,
     require_provider_operation,
 )
-from histdatacom.broker_plugin_registry import discover_broker_plugins
 from histdatacom.broker_plugin_security import (
     BrokerSecurityError,
     BrokerSecurityMode,
@@ -48,7 +47,7 @@ from .catalog import (
     verify_plan,
 )
 from .contracts import BrokerConformancePlanV1, BrokerConformanceProfile
-from .drivers import inspect_broker_conformance_driver
+from .drivers import resolve_conformance_inventory
 from .evidence import BrokerConformanceEvidenceV1
 from .fixture_plugin import SECRET_CANARY
 from .probe import NEGATIVE_PROBES, ProbeProgress, probe_installed_candidate
@@ -79,8 +78,7 @@ def execute_conformance_case(
         if item.scenario_id == case.scenario_id
     )
     started = time.time_ns()
-    inventory = discover_broker_plugins()
-    inspect_broker_conformance_driver(inventory, plan.driver)
+    inventory = resolve_conformance_inventory(plan.driver)
     candidate = next(
         item
         for item in inventory.candidates
@@ -110,7 +108,9 @@ def execute_conformance_case(
     negotiated = negotiate_broker_capabilities(
         inventory, workflow, plugin_id=candidate.registration.plugin_id
     )
-    manifest = read_installed_broker_permissions(candidate)
+    manifest = read_installed_broker_permissions(
+        candidate, sdk_version=inventory.sdk_version
+    )
     if not negotiated.admitted:
         return BrokerConformanceEvidenceV1(
             plan.artifact_id,
@@ -144,7 +144,9 @@ def execute_conformance_case(
             allow_opaque_metadata=True,
         ),
     )
-    manifest = read_installed_broker_permissions(candidate)
+    manifest = read_installed_broker_permissions(
+        candidate, sdk_version=inventory.sdk_version
+    )
     omitted: tuple[str, ...] = ()
     if case_id == "permissions.required-denial":
         omitted = manifest.required_atoms

@@ -127,7 +127,7 @@ def _verify_binding(
         BrokerTrustedSecurityReceiptV1,
     )
     from histdatacom.broker_plugins import (
-        BROKER_PLUGIN_SDK_VERSION,
+        BROKER_PLUGIN_SUPPORTED_SDK_VERSIONS,
         BrokerEventKind,
     )
 
@@ -140,7 +140,7 @@ def _verify_binding(
         or manifest.distribution_name != registration.distribution_name
         or manifest.distribution_version != registration.distribution_version
         or manifest.provider_ids != registration.provider_ids
-        or manifest.sdk_version != BROKER_PLUGIN_SDK_VERSION
+        or manifest.sdk_version not in BROKER_PLUGIN_SUPPORTED_SDK_VERSIONS
         or not registration.supports_sdk(manifest.sdk_version)
         or binding.manifest_id != manifest.artifact_id
         or binding.sdk_version != manifest.sdk_version

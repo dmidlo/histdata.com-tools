@@ -20,6 +20,9 @@ import time
 from typing import Any, TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
+    from histdatacom.broker_plugin_compatibility.contracts import (
+        BrokerConformanceReferenceV1,
+    )
     from histdatacom.broker_plugin_policy.bindings import BrokerSDKInvocationV1
     from histdatacom.broker_plugin_health import (
         BrokerHostHealthAuditV1,
@@ -830,6 +833,7 @@ def run_broker_plugin_lifecycle(
     run_nonce: str | None = None,
     execution_hooks: BrokerLifecycleExecutionHooks | None = None,
     health_policy: BrokerHostHealthPolicyV1 | None = None,
+    conformance_reference: BrokerConformanceReferenceV1 | None = None,
 ) -> BrokerLifecycleResultV1:
     """Run one explicitly authorized finite capture; never activate implicitly.
 
@@ -855,6 +859,24 @@ def run_broker_plugin_lifecycle(
     )
 
     request = _provider_request(plan, provider_request)
+    if conformance_reference is not None:
+        from histdatacom.broker_plugin_compatibility.contracts import (
+            BrokerConformanceReferenceV1,
+        )
+
+        if type(conformance_reference) is not BrokerConformanceReferenceV1:
+            raise ValueError("exact capture conformance reference required")
+        conformance_reference = BrokerConformanceReferenceV1.from_json(
+            conformance_reference.to_json()
+        )
+        report = conformance_reference.retained_report
+        if (
+            report.plan.driver.candidate_id
+            != request.plan.candidate.artifact_id
+        ):
+            raise ValueError(
+                "capture conformance evidence belongs to another candidate"
+            )
     _provider_call(request, capture=False)
     authority = current_permission_authority()
     from histdatacom.broker_plugin_permissions.scope import (
@@ -1069,6 +1091,7 @@ def run_broker_plugin_lifecycle(
             permission_manifest=authority.manifest,
             permission_context=permission_context,
             permission_decision=permission_decision,
+            conformance_reference=conformance_reference,
         )
 
         def persist_observation(observation: Any) -> None:
@@ -1186,7 +1209,11 @@ def run_broker_plugin_lifecycle(
             health_header,
             recorder.observations,
             manifest,
-            replay_broker_lifecycle(output_directory, provider_request=request),
+            replay_broker_lifecycle(
+                output_directory,
+                provider_request=request,
+                expected_manifest=manifest,
+            ),
             request,
             authority.manifest,
             permission_context,

@@ -115,7 +115,7 @@ def require_native_permissions(
 ) -> BrokerPermissionAuthorityV1:
     """Compare actual SDK/provider/configuration identities, never caller labels."""
     from histdatacom.broker_plugin_policy.bindings import BrokerSDKInvocationV1
-    from histdatacom.broker_plugins import BROKER_PLUGIN_SDK_VERSION
+    from histdatacom.broker_plugins import BROKER_PLUGIN_SUPPORTED_SDK_VERSIONS
 
     if type(request) is not BrokerSDKInvocationV1:
         raise BrokerPermissionError("exact_native_sdk_invocation_required")
@@ -134,7 +134,8 @@ def require_native_permissions(
         or manifest.distribution_name != registration.distribution_name
         or manifest.distribution_version != registration.distribution_version
         or manifest.sdk_version != binding.sdk_version
-        or manifest.sdk_version != BROKER_PLUGIN_SDK_VERSION
+        or manifest.sdk_version not in BROKER_PLUGIN_SUPPORTED_SDK_VERSIONS
+        or not registration.supports_sdk(manifest.sdk_version)
         or profile.provider_id not in manifest.provider_ids
     ):
         raise BrokerPermissionError("native_permission_binding_mismatch")
@@ -145,7 +146,9 @@ def require_native_permissions(
     if installed:
         from .discovery import read_installed_broker_permissions
 
-        actual = read_installed_broker_permissions(candidate)
+        actual = read_installed_broker_permissions(
+            candidate, sdk_version=manifest.sdk_version
+        )
         if actual.to_json() != manifest.to_json():
             raise BrokerPermissionError(
                 "installed_permission_manifest_mismatch"

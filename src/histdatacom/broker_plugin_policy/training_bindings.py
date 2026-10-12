@@ -99,6 +99,9 @@ def resolve_training_native(
         BrokerDeliveryFingerprintV2,
         parse_broker_delivery_fingerprint,
     )
+    from histdatacom.broker_capture.fingerprint_v3 import (
+        BrokerDeliveryFingerprintV3,
+    )
     from histdatacom.data_quality.training_contracts import (
         TrainingBatchV1,
         training_json,
@@ -170,7 +173,12 @@ def resolve_training_native(
             raise ValueError("training product bytes differ from ownership")
     fingerprints = tuple(
         _restore_native(
-            item, {BrokerDeliveryFingerprintV1, BrokerDeliveryFingerprintV2}
+            item,
+            {
+                BrokerDeliveryFingerprintV1,
+                BrokerDeliveryFingerprintV2,
+                BrokerDeliveryFingerprintV3,
+            },
         )
         for item in native.fingerprints
     )

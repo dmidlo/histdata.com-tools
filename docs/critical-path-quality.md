@@ -61,7 +61,7 @@ python scripts/critical_path_quality.py properties \
   --output critical-property-invariants.json
 ```
 
-Mutation runs copy the installed source package to a temporary directory,
+Mutation runs copy the checked-out source package to a temporary directory,
 apply one exact replacement, put that copy first on `PYTHONPATH`, and run only
 the named killing tests. The repository worktree is never mutated. A test exit
 of 1 is a killed mutant; a pass, timeout, collection error, or internal pytest
@@ -69,6 +69,18 @@ error fails the report. The mutation set covers boundary changes, removed hash
 and contiguity checks, future timestamps, bid/ask-side swaps, disabled anchor
 comparison, changed quote age, ignored or unverified products, runtime refusal
 handling, and count reconciliation.
+
+Campaign witnesses distinguish three boundaries. Generated native products
+exercise coordinate uniqueness and verification before any index is emitted.
+The latter witness first builds a valid index, then changes an actual partition
+byte: the baseline must refuse before creating the new index directory. Bypassing
+the early native verifier must be detected even if later deep verification also
+refuses. Separate unit witnesses execute the production publication guard with
+controlled dependency results, isolating incomplete fresh verification, incomplete
+index status, and missing products. A complete-input control reaches the next
+artifact-binding stage. These unit guard checks are not native publication or
+historical reconstruction qualification. Both mutation definitions must match
+exactly one current source location; missing targets are failures, not exclusions.
 
 ```bash
 # Fast dev-to-main release-candidate subset

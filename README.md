@@ -3453,6 +3453,15 @@ Plugin execution also requires explicit [permission
 grants](docs/broker-plugin-permissions.md), distinct from provider-data rights.
 All current qualification fixtures are synthetic; no live provider is activated.
 
+The unreleased SDK-native path uses an explicit V3 fingerprint rather than
+inventing legacy session or account facts. It retains the original lifecycle
+manifest, SDK invocation, independently replayed health audit, provenance root,
+and sealed [SDK compatibility decision](docs/broker-plugin-compatibility.md).
+Material consumers revalidate actual retained source bytes and current provider
+rights, including after plugin removal. See
+[SDK-native scientific fingerprints](docs/broker-sdk-scientific-fingerprints.md)
+for the public API, offline CLI, supported measurements, and refusal boundaries.
+
 Profiles describe cadence, quote intensity, spread and spread changes,
 duplicate/stale/burst behavior, source timestamp and price precision, batching,
 outage/reconnect/clock behavior, and conditional behavior by symbol, session,

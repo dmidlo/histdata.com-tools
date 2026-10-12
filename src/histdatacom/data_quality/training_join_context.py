@@ -613,6 +613,24 @@ def _broker(source: TrainingJoinSourceV1) -> _JoinAdapter:
             "broker source requires root/session paths and one native fingerprint"
         )
     retained = parse_broker_delivery_fingerprint(source.evidence_json[0])
+    from histdatacom.broker_capture.fingerprint_v3 import (
+        BrokerDeliveryFingerprintV3,
+    )
+
+    if type(retained) is BrokerDeliveryFingerprintV3:
+        raise ValueError(
+            "SDK-native physical training join is unsupported by the legacy root/session source layout; native fingerprint metadata alone is not a qualified join"
+        )
+    from histdatacom.broker_capture.fingerprint_contracts import (
+        BrokerDeliveryFingerprintV1,
+    )
+    from histdatacom.broker_capture.fingerprint_v2 import (
+        BrokerDeliveryFingerprintV2,
+    )
+
+    assert isinstance(
+        retained, (BrokerDeliveryFingerprintV1, BrokerDeliveryFingerprintV2)
+    )
     if training_json(retained.to_dict()) != source.evidence_json[0]:
         raise ValueError("noncanonical broker fingerprint")
     from histdatacom.broker_plugin_policy import (

@@ -154,7 +154,9 @@ class BrokerConformanceCatalogV1(Artifact):
 
     def _validate(self) -> None:
         ordered(tuple(item.case_id for item in self.cases))
-        if not self.cases or self.version != BROKER_CONFORMANCE_VERSION:
+        # This historical reader retains the kit generation it implements;
+        # advancing the current kit constant must not invalidate old catalogs.
+        if not self.cases or self.version not in ("2.0.0",):
             raise ValueError("invalid conformance catalog")
 
 

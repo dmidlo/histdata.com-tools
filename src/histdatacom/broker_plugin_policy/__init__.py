@@ -68,11 +68,13 @@ from .storage import (
 
 from .scientific_storage import (
     BrokerScientificLineageV1,
+    BrokerScientificLineageV2,
     read_broker_scientific_lineage,
 )
 
 __all__ = [
     "BrokerScientificLineageV1",
+    "BrokerScientificLineageV2",
     "read_broker_scientific_lineage",
     "POLICY_NONCLAIM",
     "BrokerDerivedArtifactV1",

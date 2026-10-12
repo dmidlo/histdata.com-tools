@@ -103,6 +103,8 @@ class Evidence:
                 or identity.binding.candidate_id != plan.candidate.artifact_id
                 or identity.binding.module_sha256
                 != plan.candidate.implementation_sha256
+                or identity.metadata.metadata.sdk_version
+                != self.header.inventory.sdk_version
                 or validate_broker_metadata(plan, identity.metadata.metadata)
                 != identity.metadata
             ):

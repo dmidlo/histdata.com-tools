@@ -445,6 +445,22 @@ def test_trusted_security_embedded_metadata_keeps_opaque_class():
     )
 
 
+@pytest.mark.parametrize("isolated", [False, True])
+def test_supported_sdk_generation_cannot_relabel_exact_security_evidence(
+    isolated,
+):
+    wrapper = security_roots(isolated=isolated)
+    assert resolve_provider_subject(wrapper).bindings
+    # Both generations are implemented. Support membership is not equality to
+    # the actual native inventory/runtime metadata retained by this receipt.
+    with pytest.raises(ValueError):
+        changed = replace(
+            wrapper.receipt,
+            software=replace(wrapper.receipt.software, sdk_version="1.1.0"),
+        )
+        resolve_provider_subject(replace(wrapper, receipt=changed))
+
+
 @pytest.mark.parametrize("expected_only", ["legacy", "sdk"])
 def test_expected_only_request_is_not_persistable_native_output(expected_only):
     request = (

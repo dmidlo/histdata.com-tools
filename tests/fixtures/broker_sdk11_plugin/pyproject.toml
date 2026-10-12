@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "histdatacom-generated-sdk11"
+version = "0.1.0"
+description = "Independent generated SDK 1.1 acceptance fixture, not a provider"
+requires-python = ">=3.10"
+dependencies = ["histdatacom"]
+
+[project.entry-points."histdatacom.broker_plugins.v1"]
+"org.example.sdk11" = "histdatacom_generated_sdk11.plugin:factory"
+"org.example.sdk11-missing" = "histdatacom_generated_sdk11.plugin:missing_factory"
+"org.example.sdk11-wrong" = "histdatacom_generated_sdk11.plugin:wrong_factory"
+"org.example.sdk11-mismatch" = "histdatacom_generated_sdk11.plugin:mismatch_factory"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+histdatacom_generated_sdk11 = ["_histdatacom_broker_plugins/*.json", "_histdatacom_broker_permissions/*.json"]

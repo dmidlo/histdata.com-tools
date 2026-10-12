@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
     from histdatacom.broker_capture.fingerprint_v2 import (
-        BrokerDeliveryFingerprintV2,
+        BrokerQualifiedDeliveryFingerprint,
     )
 
 from histdatacom.runtime_contracts import ArtifactRef, JSONScalar, JSONValue
@@ -2438,8 +2438,8 @@ def evaluate_modern_reference_reconstruction_certification(
 def _require_native_broker_certification(
     policy: ReconstructionCertificationPolicyV1,
     artifacts: Sequence[CertificationArtifactV1],
-) -> BrokerDeliveryFingerprintV2:
-    """A positive new broker claim requires the actual retained V2 parent.
+) -> BrokerQualifiedDeliveryFingerprint:
+    """A positive new broker claim requires an actual retained native parent.
 
     Historical constructors/parsers remain pure. Descriptor labels or a stored
     ``verified`` Boolean cannot admit a new scientific/release operation.

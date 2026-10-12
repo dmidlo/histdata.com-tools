@@ -72,9 +72,7 @@ def test_unknown_capture_family_cannot_be_projected_to_legacy_science(
                 "unsupported family must refuse before reading or adapting it"
             )
 
-    with pytest.raises(
-        ValueError, match="SDK-native scientific fitting is unavailable"
-    ):
+    with pytest.raises(ValueError, match="exact legacy inputs"):
         fit_broker_delivery_fingerprint(tmp_path, (NotLegacy(),))
     assert list(tmp_path.iterdir()) == []
 

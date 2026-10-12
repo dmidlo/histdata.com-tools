@@ -15,6 +15,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from histdatacom.broker_plugin_compatibility.contracts import (
+        BrokerConformanceReferenceV1,
+    )
     from histdatacom.broker_plugin_health import BrokerHostHealthPolicyV1
     from histdatacom.broker_plugin_permissions import (
         BrokerPermissionExecutionV1,
@@ -188,7 +191,9 @@ def _private_inputs(
         if attestation is not None:
             guard.check(attestation.decode("utf-8", errors="replace"))
         software = installed_software_provenance(
-            plan.candidate, attestation=attestation
+            plan.candidate,
+            attestation=attestation,
+            sdk_version=inventory.sdk_version,
         )
         guard.check(software.to_json())
         return configuration, guard, software, public_json
@@ -243,7 +248,9 @@ def _verify_configuration_classification(
     started: set[int] = set()
     verified: set[int] = set()
     for record in replay_broker_lifecycle(
-        native.directory, provider_request=provider_request
+        native.directory,
+        provider_request=provider_request,
+        expected_manifest=native.manifest,
     ):
         if record.kind == "transition":
             transition = BrokerLifecycleTransitionV1.from_json(
@@ -294,6 +301,7 @@ def run_secure_broker_plugin(
     clock: Clock = _clock,
     attestation: bytes | None = None,
     health_policy: BrokerHostHealthPolicyV1 | None = None,
+    conformance_reference: BrokerConformanceReferenceV1 | None = None,
 ) -> BrokerSecureLifecycleResultV1:
     """Kernel-isolated native capture, with known-private-material refusal.
 
@@ -345,6 +353,7 @@ def run_secure_broker_plugin(
                 provider_request=request,
                 policy=lifecycle_policy,
                 health_policy=health_policy,
+                conformance_reference=conformance_reference,
                 worker_python=worker_python,
                 run_nonce=run_nonce,
                 cancellation=cancellation,

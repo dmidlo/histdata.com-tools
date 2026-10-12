@@ -6,6 +6,10 @@ import argparse
 from pathlib import Path
 
 from histdatacom.broker_plugin_registry import discover_broker_plugins
+from histdatacom.broker_plugins import (
+    BROKER_PLUGIN_SDK_VERSION,
+    BROKER_PLUGIN_SUPPORTED_SDK_VERSIONS,
+)
 
 from .catalog import broker_conformance_catalog
 from .contracts import (
@@ -31,6 +35,11 @@ def main(argv: list[str] | None = None) -> int:
     fixture.add_argument("--fault", choices=FIXTURE_FAULTS, default="none")
     plan = commands.add_parser("plan")
     plan.add_argument("--driver", required=True, type=Path)
+    plan.add_argument(
+        "--sdk-version",
+        choices=BROKER_PLUGIN_SUPPORTED_SDK_VERSIONS,
+        default=BROKER_PLUGIN_SDK_VERSION,
+    )
     plan.add_argument(
         "--profile",
         required=True,
@@ -62,7 +71,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "plan":
         result = plan_broker_conformance(
-            discover_broker_plugins(),
+            discover_broker_plugins(sdk_version=args.sdk_version),
             BrokerConformanceDriverV1.from_json(read_text(args.driver)),
             profile=BrokerConformanceProfile(args.profile),
             capabilities=tuple(sorted(set(args.capability))),

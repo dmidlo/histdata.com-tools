@@ -34,6 +34,13 @@ the capture that supplied its evidence. Versioned status fields distinguish
 unavailable evidence from a candidate qualification; a successful hash replay
 does not manufacture the latter.
 
+New SDK captures additionally bind [compatibility governance](broker-plugin-compatibility.md)
+inside `environment.v2`, whose complete hash is already in this V1 header.
+An explicitly supplied exact conformance reference is retained there with
+`retained_report_not_independently_requalified` status, not retroactive
+certification in the old header fields. Original `environment.v1` replay remains
+unchanged and has no inferred compatibility decision or protocol declaration.
+
 Each entry carries a contiguous host chain sequence, explicit connection epoch,
 closed kind and exact canonical payload. The journal interleaves:
 
@@ -127,12 +134,14 @@ locations for downstream replay. It grants no rights and supplies no trusted
 verification boolean. Each source must occur below exactly one declared root;
 missing or ambiguous locations refuse. Every material boundary replays the
 actual sources against the retained expected seals and current provider rights.
-New retained products carry their complete V2 fingerprint parents, so reopening
-them cannot rely solely on an earlier process-local scope.
+Retained scientific outputs carry their complete qualified fingerprint parents,
+so reopening them cannot rely solely on an earlier process-local scope. Legacy
+V2 parents retain scientific-lineage V1. SDK-native V3 parents use the explicit
+scientific-lineage V2 companion without relabeling the historical wire format.
 
 New native publications retain their provider-policy receipt and complete
 scientific-parent companion. Material readers require the applicable companions;
-deleting both is not a way to downgrade a V2 artifact to historical metadata.
+deleting both is not a way to downgrade a V2/V3 artifact to historical metadata.
 If authority expires before native publication, already-authorized companions
 may remain without a native output. Such an incomplete publication is not
 repaired or accepted as an idempotent success. Pure historical metadata parsing
@@ -143,16 +152,18 @@ from histdatacom.broker_capture import broker_fingerprint_sources
 
 with provider_policy_scope(current_reviewed_policy_source):
     with broker_fingerprint_sources(explicit_capture_root):
-        # Invoke the desired scientific consumer with its retained V2 parent.
-        consume_qualified_fingerprint(retained_v2_fingerprint)
+        # Invoke a supported consumer with its exact qualified V2/V3 parent.
+        consume_qualified_fingerprint(retained_fingerprint)
 ```
 
 Successful fitting also requires replayed host-health qualification. A valid
 chain cannot turn degraded/insufficient health into qualified observations.
-SDK lifecycle captures support provenance verification but remain explicitly
-unavailable for scientific fingerprint fitting: no conversion invents legacy
-session metadata, clock roles or price representations. That separate
-same-interface fitter obligation remains in parent #614.
+SDK lifecycle captures now have a distinct
+[V3 scientific fitter](broker-sdk-scientific-fingerprints.md), retaining their
+native roots instead of inventing legacy sessions, clock roles or account
+facts. Nonzero proposal conditioning uses supported measurements. Full rendering
+and physical training joins refuse unavailable native source semantics rather
+than silently substituting legacy defaults.
 
 Validation uses generated captures and deliberate failures only. It does not
 establish provider representativeness or authorize an empirical campaign.

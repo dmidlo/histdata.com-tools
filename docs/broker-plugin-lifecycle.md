@@ -209,7 +209,10 @@ false. Even successful local finite completion is **not** a provider-feed
 completeness, source authenticity, market-data permission or production-readiness
 certificate. Reviewed public configuration and actual retained authority are
 bound by the separate provenance header; opaque credentials are not retained or
-hashed into reproducibility evidence. SDK scientific fitting remains unavailable.
+hashed into reproducibility evidence. The separate
+[SDK-native V3 fitter](broker-sdk-scientific-fingerprints.md) additionally
+requires independently qualified health and exact anchored source replay;
+successful lifecycle completion alone does not qualify a fingerprint.
 
 `inspect_broker_lifecycle(...).complete` is only the manifest's claimed local
 completion plus directory shape. It does **not** hash or authenticate partition

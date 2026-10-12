@@ -216,6 +216,9 @@ where = ["src"]
 "histdatacom.broker_plugin_conformance" = [
     "py.typed",
 ]
+"histdatacom.broker_plugin_compatibility" = [
+    "py.typed",
+]
 "histdatacom.cross_feed" = [
     "py.typed",
 ]

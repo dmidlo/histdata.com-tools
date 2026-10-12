@@ -3759,18 +3759,21 @@ def _verify_broker_product_receipt(
 ) -> None:
     if type(manifest) is not ReconstructionProductManifestV1:
         return
+    from histdatacom.broker_capture.fingerprint_v2 import (
+        BrokerDeliveryFingerprintV2,
+    )
+    from histdatacom.broker_capture.fingerprint_v3 import (
+        BrokerDeliveryFingerprintV3,
+    )
     from histdatacom.broker_plugin_policy import (
         fingerprint_for,
         read_broker_policy_receipt,
         verify_broker_policy_receipt,
     )
-    from histdatacom.broker_capture.fingerprint_v2 import (
-        BrokerDeliveryFingerprintV2,
-    )
 
-    if (
-        type(fingerprint_for(manifest.broker_profile_id))
-        is BrokerDeliveryFingerprintV2
+    if type(fingerprint_for(manifest.broker_profile_id)) in (
+        BrokerDeliveryFingerprintV2,
+        BrokerDeliveryFingerprintV3,
     ):
         required = True
 

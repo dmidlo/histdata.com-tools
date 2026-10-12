@@ -27,6 +27,7 @@ from typing import (
 )
 
 BROKER_PLUGIN_SDK_VERSION = "1.0.0"
+BROKER_PLUGIN_SUPPORTED_SDK_VERSIONS = ("1.0.0", "1.1.0")
 MAX_SDK_ARTIFACT_BYTES = 65_536
 MAX_EXTENSION_BYTES = 8_192
 MAX_SDK_COLLECTION_ITEMS = 128
@@ -381,7 +382,7 @@ class BrokerPluginMetadataV1(_Artifact):
             raise ValueError("plugin_id requires a namespaced identifier")
         _semver(self.plugin_version)
         _text(self.display_name, "display_name")
-        if self.sdk_version != BROKER_PLUGIN_SDK_VERSION:
+        if self.sdk_version not in BROKER_PLUGIN_SUPPORTED_SDK_VERSIONS:
             raise ValueError("unsupported broker SDK version")
         _extensions(self.extensions)
 

@@ -35,6 +35,16 @@ native reader modules and shared contract modules are source-pinned; changing
 those bytes requires review and a deliberate new pin. Pins are not silently
 regenerated to make qualification pass.
 
+The #622 SDK extension retains the metadata/event V1 wire envelopes and the
+SDK 1.0 default. Its reviewed metadata reader also accepts the implemented
+SDK 1.1 contract. A pinned pre-change 1.0 metadata fixture remains byte-exact;
+independent projections distinguish SDK-version changes from plugin-version
+changes. JSON-formatting transformations qualify only when their exact
+executions preserve those fields. Replacing an encoding transformation's
+output with valid 1.1 successor metadata refuses: successful parsing is not
+semantic equivalence. These bounded broker witnesses do not complete #635's
+all-family historical corpus or declare a production migration edge.
+
 The actual native reader verifies identities and its normal contract rules.
 The raw tree must then match its complete writer tree exactly, recursively and
 with scalar types distinguished. Consequently an unknown nested field, missing

@@ -6,6 +6,11 @@ does not copy augmented tick rows, assert market-wide truth, reconstruct history
 select a model winner, or apply broker style to a synthetic stream. Application
 belongs to #445.
 
+This page describes the historical capture family's V1/V2 fitting semantics.
+SDK lifecycle captures use the same public entry point with a distinct
+[native V3 contract](broker-sdk-scientific-fingerprints.md), without inventing
+legacy session, account, timing or source-batch facts.
+
 ## Streaming and storage boundary
 
 Statistical aggregation uses two bounded streaming passes over capture JSONL:
@@ -55,7 +60,7 @@ logical event-content SHA-256.
 Unreleased v3 additionally requires independently replayed, measured
 [host-health evidence](broker-host-health.md) meeting its declared SLOs. Missing,
 degraded or insufficient evidence refuses a new fit; historical V1 inspection is
-still available. Successful fitting writes a separate immutable health
+still available. Successful legacy fitting writes a separate immutable health
 qualification under the explicit capture root, so that root must be writable.
 The proof links the fingerprint bytes to the complete native capture, audit and
 health-policy inventory. New fitting returns `BrokerDeliveryFingerprintV2`,
@@ -64,7 +69,7 @@ output contract, provenance header and final seal. Its outer identity binds the
 entire root inventory. Pure numerical comparison is not health certification,
 and deserializing a proof does not reauthorize material use.
 
-New broker-conditioned consumers require V2 and independently replay the actual
+New legacy-profile consumers require V2 and independently replay the actual
 retained captures against those expected roots at material boundaries. Supply
 explicit source locations with `broker_fingerprint_sources(*roots)` and current
 provider rights separately. Missing, ambiguous, partial or tampered sources

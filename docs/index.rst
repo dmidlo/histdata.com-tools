@@ -87,7 +87,9 @@ Empirical reconstruction pipeline
    broker-plugin-provenance
    cross-feed-diagnostics
    broker-plugin-conformance
+   broker-plugin-compatibility
    broker-delivery-fingerprint-contracts
+   broker-sdk-scientific-fingerprints
    broker-delivery-transfer-contracts
 
 Persistence, projections, and validation

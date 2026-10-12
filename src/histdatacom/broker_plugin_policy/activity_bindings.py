@@ -74,6 +74,9 @@ def _resolve_activity_native(
     from histdatacom.broker_capture.fingerprint_v2 import (
         BrokerDeliveryFingerprintV2,
     )
+    from histdatacom.broker_capture.fingerprint_v3 import (
+        BrokerDeliveryFingerprintV3,
+    )
     from histdatacom.synthetic.activity import ReconstructionActivityManifestV1
 
     from .derived import BrokerDerivedArtifactV1
@@ -95,7 +98,12 @@ def _resolve_activity_native(
     )
     fingerprints = tuple(
         _restore_native(
-            item, {BrokerDeliveryFingerprintV1, BrokerDeliveryFingerprintV2}
+            item,
+            {
+                BrokerDeliveryFingerprintV1,
+                BrokerDeliveryFingerprintV2,
+                BrokerDeliveryFingerprintV3,
+            },
         )
         for item in native.fingerprints
     )

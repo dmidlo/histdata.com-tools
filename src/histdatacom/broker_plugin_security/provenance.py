@@ -66,6 +66,7 @@ def installed_software_provenance(
     candidate: BrokerPluginCandidateV1,
     *,
     attestation: bytes | None = None,
+    sdk_version: str = BROKER_PLUGIN_SDK_VERSION,
 ) -> BrokerSoftwareProvenanceV1:
     """Fresh selected-package association; never serialize paths/raw URLs.
 
@@ -74,7 +75,7 @@ def installed_software_provenance(
     No URL/query/path or digest of raw direct_url.json enters this artifact.
     """
     try:
-        fresh = discover_broker_plugins()
+        fresh = discover_broker_plugins(sdk_version=sdk_version)
         if fresh.diagnostics or candidate not in fresh.candidates:
             refuse(Reason.IDENTITY)
         registration = candidate.registration
@@ -145,7 +146,7 @@ def installed_software_provenance(
             candidate.artifact_id,
             registration.distribution_name,
             registration.distribution_version,
-            BROKER_PLUGIN_SDK_VERSION,
+            sdk_version,
             candidate.registration_sha256,
             candidate.implementation_sha256,
             installer,

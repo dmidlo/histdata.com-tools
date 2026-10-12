@@ -1719,6 +1719,9 @@ def _verify_bar_policy_receipt(
     from histdatacom.broker_capture.fingerprint_v2 import (
         BrokerDeliveryFingerprintV2,
     )
+    from histdatacom.broker_capture.fingerprint_v3 import (
+        BrokerDeliveryFingerprintV3,
+    )
     from histdatacom.broker_plugin_policy.native_inputs import fingerprint_for
     from histdatacom.broker_plugin_policy.storage import (
         read_broker_policy_receipt,
@@ -1726,9 +1729,9 @@ def _verify_bar_policy_receipt(
     )
 
     profile = _bar_provider_profile(manifest)
-    if (
-        profile is not None
-        and type(fingerprint_for(profile)) is BrokerDeliveryFingerprintV2
+    if profile is not None and type(fingerprint_for(profile)) in (
+        BrokerDeliveryFingerprintV2,
+        BrokerDeliveryFingerprintV3,
     ):
         required = True
     receipt = path.with_name(path.name + ".provider-policy.json")

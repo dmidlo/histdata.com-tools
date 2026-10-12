@@ -36,7 +36,9 @@ CAPABILITIES = tuple(
 )
 
 
-def build_lifecycle_wheel(output: Path, *, block_import: bool = False) -> Path:
+def build_lifecycle_wheel(
+    output: Path, *, block_import: bool = False, scientific: bool = False
+) -> Path:
     registration = BrokerPluginRegistrationV1(
         "org.example.lifecycle",
         "1.0.0",
@@ -47,11 +49,29 @@ def build_lifecycle_wheel(output: Path, *, block_import: bool = False) -> Path:
         "1.0.0",
         "2.0.0",
         ("offline",),
-        CAPABILITIES,
+        (
+            tuple(
+                sorted(
+                    (
+                        *CAPABILITIES,
+                        "timestamps.broker-event.v1",
+                        "timestamps.adapter-receive.v1",
+                    )
+                )
+            )
+            if scientific
+            else CAPABILITIES
+        ),
     )
     dist = "histdatacom_lifecycle_fixture-1.0.0.dist-info"
     source = (
-        Path(__file__).with_name("broker_lifecycle_external.py").read_bytes()
+        Path(__file__)
+        .with_name(
+            "broker_science_external.py"
+            if scientific
+            else "broker_lifecycle_external.py"
+        )
+        .read_bytes()
     )
     if block_import:
         source += b"\nimport time\ntime.sleep(60)\n"

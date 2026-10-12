@@ -2,6 +2,7 @@
 
 from .contracts import (
     BROKER_PLUGIN_SDK_VERSION,
+    BROKER_PLUGIN_SUPPORTED_SDK_VERSIONS,
     MAX_EXTENSION_BYTES,
     MAX_SDK_ARTIFACT_BYTES,
     MAX_SDK_COLLECTION_ITEMS,
@@ -37,9 +38,22 @@ from .protocols import (
     validate_broker_event_stream,
 )
 from .resources import BrokerHostHTTPResponseV1, BrokerHostResourcesV1
+from .generations import (
+    BROKER_PROVIDER_PROTOCOL_CAPABILITY,
+    BROKER_PROVIDER_PROTOCOL_NAMESPACE,
+    BrokerProviderProtocolPluginV1_1,
+    BrokerProviderProtocolV1,
+    declared_provider_protocol,
+)
 
 __all__ = [
     "BROKER_PLUGIN_SDK_VERSION",
+    "BROKER_PLUGIN_SUPPORTED_SDK_VERSIONS",
+    "BROKER_PROVIDER_PROTOCOL_CAPABILITY",
+    "BROKER_PROVIDER_PROTOCOL_NAMESPACE",
+    "BrokerProviderProtocolPluginV1_1",
+    "BrokerProviderProtocolV1",
+    "declared_provider_protocol",
     "MAX_EXTENSION_BYTES",
     "MAX_SDK_ARTIFACT_BYTES",
     "MAX_SDK_COLLECTION_ITEMS",

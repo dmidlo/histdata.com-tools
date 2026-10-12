@@ -142,6 +142,23 @@ def validate_broker_metadata(
             or not registration.supports_sdk(metadata.sdk_version)
         ):
             raise BrokerCapabilityError(BrokerCapabilityReason.RUNTIME_IDENTITY)
+        from histdatacom.broker_plugins import (
+            BROKER_PROVIDER_PROTOCOL_CAPABILITY,
+            declared_provider_protocol,
+        )
+
+        protocol = declared_provider_protocol(metadata)
+        enabled_protocol = (
+            metadata.sdk_version == "1.1.0"
+            and BROKER_PROVIDER_PROTOCOL_CAPABILITY in registration.capabilities
+        )
+        if (protocol is not None) != enabled_protocol or (
+            protocol is not None
+            and protocol.provider_id not in registration.provider_ids
+        ):
+            raise BrokerCapabilityError(
+                BrokerCapabilityReason.CAPABILITY_VIOLATION
+            )
         context: dict[str, object] = {}
         for extension in metadata.extensions:
             if extension.namespace == PUBLIC_CONTEXT_NAMESPACE:

@@ -1139,7 +1139,7 @@ def _sdk_security_subject(native: BrokerSDKSecurityV1) -> _ResolvedNative:
         BrokerTrustedSecurityReceiptV1,
     )
     from histdatacom.broker_plugins.contracts import (
-        BROKER_PLUGIN_SDK_VERSION,
+        BROKER_PLUGIN_SUPPORTED_SDK_VERSIONS,
         BrokerSessionV1,
     )
 
@@ -1167,7 +1167,8 @@ def _sdk_security_subject(native: BrokerSDKSecurityV1) -> _ResolvedNative:
         != candidate.registration.distribution_name
         or receipt.software.distribution_version
         != candidate.registration.distribution_version
-        or receipt.software.sdk_version != BROKER_PLUGIN_SDK_VERSION
+        or receipt.software.sdk_version
+        not in BROKER_PLUGIN_SUPPORTED_SDK_VERSIONS
     ):
         raise ValueError(
             "security software provenance differs from selected candidate"
@@ -1191,6 +1192,10 @@ def _sdk_security_subject(native: BrokerSDKSecurityV1) -> _ResolvedNative:
         if receipt.plan_json != invocation.plan.to_json():
             raise ValueError("trusted security receipt native plan differs")
         metadata = BrokerAdmittedMetadataV1.from_json(receipt.metadata_json)
+        if receipt.software.sdk_version != metadata.metadata.sdk_version:
+            raise ValueError(
+                "trusted security SDK generation differs from exact runtime metadata"
+            )
         session = BrokerSessionV1.from_json(receipt.session_json)
         classes |= _sdk_record_classes(metadata, invocation, None)
         classes |= _sdk_record_classes(
@@ -1221,6 +1226,8 @@ def _sdk_security_subject(native: BrokerSDKSecurityV1) -> _ResolvedNative:
         if (
             manifest.artifact_id != receipt.native_manifest_id
             or manifest.header.plan.to_json() != invocation.plan.to_json()
+            or receipt.software.sdk_version
+            != manifest.header.inventory.sdk_version
         ):
             raise ValueError(
                 "isolated security receipt native manifest differs"
@@ -1254,13 +1261,13 @@ def _resolve_native(native_subject: object) -> _ResolvedNative:
 
     if type(native_subject) is CrossFeedDerivationV1:
         return resolve_cross_feed_native(native_subject)
-    from .provenance_bindings import (
-        BrokerProvenanceEvidenceV1,
-        resolve_provenance_native,
-    )
     from .health_bindings import (
         BrokerHostHealthEvidenceV1,
         resolve_host_health_native,
+    )
+    from .provenance_bindings import (
+        BrokerProvenanceEvidenceV1,
+        resolve_provenance_native,
     )
 
     if type(native_subject) is BrokerProvenanceEvidenceV1:
@@ -1277,6 +1284,20 @@ def _resolve_native(native_subject: object) -> _ResolvedNative:
         return _sdk_lifecycle_subject(native_subject)
     if type(native_subject) is BrokerSDKSecurityV1:
         return _sdk_security_subject(native_subject)
+    from histdatacom.broker_capture.fingerprint_v3 import (
+        BrokerDeliveryFingerprintV3,
+    )
+
+    from .native_fingerprint_bindings import (
+        BrokerLifecycleFingerprintFitV1,
+        resolve_lifecycle_fingerprint,
+    )
+
+    if type(native_subject) in {
+        BrokerDeliveryFingerprintV3,
+        BrokerLifecycleFingerprintFitV1,
+    }:
+        return resolve_lifecycle_fingerprint(cast(Any, native_subject))
     from histdatacom.broker_capture.fingerprint_contracts import (
         BrokerDeliveryFingerprintV1,
     )

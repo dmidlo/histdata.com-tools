@@ -126,9 +126,12 @@ not this metadata-only discovery command or internal fixture authority helpers.
 Use the companion third-party guide's complete operator example, choose
 `{"mode":"finite"}`, retain native/health/permission/provenance artifacts, and
 pin the returned seal when reopening. A constructed seal or conformance report
-does not authorize capture, replay or scientific material use. SDK-native
-scientific fitting remains unavailable until the separate supported interface
-exists; never relabel this capture as a legacy capture.
+does not authorize capture, replay or scientific material use. Eligible
+SDK-native captures can use the host's explicit
+[V3 scientific fingerprint interface](https://github.com/dmidlo/histdata.com-tools/blob/dev/docs/broker-sdk-scientific-fingerprints.md),
+which requires independently qualified native health and current rights without
+inventing legacy adapter/session metadata. Its availability does not
+scientifically qualify this finite example or establish empirical provider quality.
 
 The operator commands and protected external anchor requirements are in
 [OPERATOR.md](OPERATOR.md). Keep that anchor separately from the capture tree;

@@ -16,6 +16,9 @@ if TYPE_CHECKING:
 
 
 _CLASSES = {
+    "histdatacom.broker_capture.fingerprint_v3": (
+        "BrokerDeliveryFingerprintV3",
+    ),
     "histdatacom.broker_capture.fingerprint_contracts": (
         "BrokerDeliveryFingerprintV1",
     ),
@@ -68,6 +71,9 @@ def scientific_fingerprints(
     from histdatacom.broker_capture.fingerprint_v2 import (
         BrokerDeliveryFingerprintV2,
     )
+    from histdatacom.broker_capture.fingerprint_v3 import (
+        BrokerDeliveryFingerprintV3,
+    )
     from histdatacom.synthetic.activity import ReconstructionActivityManifestV1
     from histdatacom.synthetic.bars import (
         DerivedBarProductManifestV1,
@@ -95,6 +101,7 @@ def scientific_fingerprints(
     if type(native) in {
         BrokerDeliveryFingerprintV1,
         BrokerDeliveryFingerprintV2,
+        BrokerDeliveryFingerprintV3,
     }:
         return (cast("BrokerDeliveryFingerprint", native),)
     if type(native) is BrokerSyntheticOutputV1:

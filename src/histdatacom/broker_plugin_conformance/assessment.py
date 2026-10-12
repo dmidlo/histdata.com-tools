@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from .catalog import required_cases, verify_plan
+from .catalog import _required_cases, _verify_plan
 from .contracts import (
     BrokerConformanceCapabilityV1,
+    BrokerConformanceCatalogV1,
     BrokerConformanceCaseResultV1,
     BrokerConformancePlanV1,
     BrokerConformanceReportV1,
@@ -18,7 +19,17 @@ def assess_capabilities(
     plan: BrokerConformancePlanV1,
     results: tuple[BrokerConformanceCaseResultV1, ...],
 ) -> tuple[BrokerConformanceCapabilityV1, ...]:
-    verify_plan(plan)
+    from .catalog import broker_conformance_catalog
+
+    return _assess_capabilities(plan, results, broker_conformance_catalog())
+
+
+def _assess_capabilities(
+    plan: BrokerConformancePlanV1,
+    results: tuple[BrokerConformanceCaseResultV1, ...],
+    catalog: BrokerConformanceCatalogV1,
+) -> tuple[BrokerConformanceCapabilityV1, ...]:
+    _verify_plan(plan, catalog)
     if tuple(item.case_id for item in results) != plan.case_ids or any(
         item.subject is not plan.subject for item in results
     ):
@@ -26,7 +37,7 @@ def assess_capabilities(
     by_id = {item.case_id: item for item in results}
     values = []
     for capability in plan.capabilities:
-        required = required_cases(plan.profile, capability)
+        required = _required_cases(catalog, plan.profile, capability)
         passed = tuple(
             case_id
             for case_id in required

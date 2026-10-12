@@ -27,6 +27,11 @@ from histdatacom.broker_capture.fingerprint_contracts import (
 )
 from histdatacom.runtime_contracts import JSONValue
 
+from .fingerprint_v3 import (
+    BROKER_DELIVERY_FINGERPRINT_V3_SCHEMA_VERSION,
+    BrokerDeliveryFingerprintV3,
+)
+
 if TYPE_CHECKING:
     from histdatacom.broker_plugin_policy.bindings import (
         BrokerProviderOutputContractV1,
@@ -384,7 +389,12 @@ class BrokerDeliveryFingerprintV2:
 
 
 BrokerDeliveryFingerprint: TypeAlias = (
-    BrokerDeliveryFingerprintV1 | BrokerDeliveryFingerprintV2
+    BrokerDeliveryFingerprintV1
+    | BrokerDeliveryFingerprintV2
+    | BrokerDeliveryFingerprintV3
+)
+BrokerQualifiedDeliveryFingerprint: TypeAlias = (
+    BrokerDeliveryFingerprintV2 | BrokerDeliveryFingerprintV3
 )
 
 
@@ -401,6 +411,12 @@ def parse_broker_delivery_fingerprint(
     else:
         data = _object(value)
     schema = data.get("schema_version")
+    if schema == BROKER_DELIVERY_FINGERPRINT_V3_SCHEMA_VERSION:
+        if type(value) is str:
+            return BrokerDeliveryFingerprintV3.from_json(
+                value.removesuffix("\n")
+            )
+        return BrokerDeliveryFingerprintV3.from_dict(data)
     if schema == BROKER_DELIVERY_FINGERPRINT_SCHEMA_VERSION:
         # Preserve historical reader whitespace and V1 normalization behavior.
         return BrokerDeliveryFingerprintV1.from_dict(data)
@@ -417,10 +433,15 @@ def parse_broker_delivery_fingerprint(
 
 def require_qualified_broker_fingerprint(
     value: object,
-) -> BrokerDeliveryFingerprintV2:
+) -> BrokerQualifiedDeliveryFingerprint:
     """Restore exact retained roots; actual IO replay is a separate mandatory gate."""
+    if type(value) is BrokerDeliveryFingerprintV3:
+        from histdatacom.broker_plugin_policy.bindings import _preflight_native
+
+        _preflight_native(value)
+        return BrokerDeliveryFingerprintV3.from_json(value.to_json())
     if type(value) is not BrokerDeliveryFingerprintV2:
         raise ValueError(
-            "new broker science requires a V2 fingerprint with complete verified roots"
+            "new broker science requires a V2 fingerprint or native V3 fingerprint with complete verified roots"
         )
     return BrokerDeliveryFingerprintV2.from_json(value.to_json())

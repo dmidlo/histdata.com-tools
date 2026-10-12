@@ -127,7 +127,14 @@ def broker_conformance_catalog() -> BrokerConformanceCatalogV1:
 def required_cases(
     profile: BrokerConformanceProfile, capability: str
 ) -> tuple[str, ...]:
-    catalog = broker_conformance_catalog()
+    return _required_cases(broker_conformance_catalog(), profile, capability)
+
+
+def _required_cases(
+    catalog: BrokerConformanceCatalogV1,
+    profile: BrokerConformanceProfile,
+    capability: str,
+) -> tuple[str, ...]:
     own = [
         case
         for case in catalog.cases
@@ -146,7 +153,12 @@ def required_cases(
 
 
 def verify_plan(plan: BrokerConformancePlanV1) -> None:
-    catalog = broker_conformance_catalog()
+    _verify_plan(plan, broker_conformance_catalog())
+
+
+def _verify_plan(
+    plan: BrokerConformancePlanV1, catalog: BrokerConformanceCatalogV1
+) -> None:
     expected = {
         case.case_id
         for case in catalog.cases
@@ -154,7 +166,7 @@ def verify_plan(plan: BrokerConformancePlanV1) -> None:
     } | {
         case
         for capability in plan.capabilities
-        for case in required_cases(plan.profile, capability)
+        for case in _required_cases(catalog, plan.profile, capability)
     }
     if plan.catalog_id != catalog.artifact_id or plan.case_ids != tuple(
         sorted(expected)

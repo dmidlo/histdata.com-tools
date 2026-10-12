@@ -7,11 +7,6 @@ changes immutable observations or supplies historical price-path content.
 
 from __future__ import annotations
 
-from histdatacom.broker_capture.fingerprint_v2 import (
-    BROKER_DELIVERY_FINGERPRINT_V2_SCHEMA_VERSION,
-    BrokerDeliveryFingerprint,
-)
-
 import hashlib
 import json
 import math
@@ -26,6 +21,13 @@ from histdatacom.broker_capture.fingerprint_contracts import (
     BrokerDeliveryCellV1,
     BrokerDeliveryFingerprintComparisonV1,
     BrokerDeliverySupportStatus,
+)
+from histdatacom.broker_capture.fingerprint_v2 import (
+    BROKER_DELIVERY_FINGERPRINT_V2_SCHEMA_VERSION,
+    BrokerDeliveryFingerprint,
+)
+from histdatacom.broker_capture.fingerprint_v3 import (
+    BROKER_DELIVERY_FINGERPRINT_V3_SCHEMA_VERSION,
 )
 from histdatacom.data_quality.contracts import QualityStatus
 from histdatacom.runtime_contracts import JSONValue
@@ -275,6 +277,7 @@ class BrokerProfileSelectionV1:
         if self.fingerprint_schema_version not in {
             BROKER_DELIVERY_FINGERPRINT_SCHEMA_VERSION,
             BROKER_DELIVERY_FINGERPRINT_V2_SCHEMA_VERSION,
+            BROKER_DELIVERY_FINGERPRINT_V3_SCHEMA_VERSION,
         }:
             raise ValueError("selection fingerprint schema is unsupported")
         object.__setattr__(
@@ -1619,6 +1622,44 @@ def _render_broker_delivery(
     comparison_ids = tuple(
         sorted(item.comparison_id for item in benchmark_comparisons)
     )
+    if (
+        fingerprint.schema_version
+        == BROKER_DELIVERY_FINGERPRINT_V3_SCHEMA_VERSION
+    ):
+        # A statistical quote projection does not supply source batching or
+        # timestamp semantics. The legacy renderer's fallback 1ns/one-quote
+        # values must not become invented SDK-native facts. Proposal
+        # conditioning remains available for the actually supported metrics.
+        missing = tuple(
+            sorted(
+                {
+                    name
+                    for selection in selections
+                    for name in (
+                        "source_timestamp_precision_ns",
+                        "source_batch_quote_count",
+                    )
+                    if name not in selection.metrics
+                }
+            )
+        )
+        if missing:
+            return _refused_render(
+                run,
+                window,
+                group,
+                fingerprint,
+                policy,
+                selections,
+                input_hash,
+                observed_count,
+                synthetic_count,
+                tuple(
+                    "native_render_semantics_unavailable:" + name
+                    for name in missing
+                ),
+                comparison_ids,
+            )
     if group.status is not CrossCurrencyGroupStatus.RECONCILED:
         return _refused_render(
             run,

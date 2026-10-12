@@ -564,7 +564,11 @@ def read_lifecycle_capture_provenance(
     audit = read_lifecycle_host_health(
         health_directory,
         manifest,
-        replay_broker_lifecycle(directory, provider_request=provider_request),
+        replay_broker_lifecycle(
+            directory,
+            provider_request=provider_request,
+            expected_manifest=manifest,
+        ),
         provider_request,
     )
     execution = BrokerPermissionExecutionV1.from_json(
@@ -576,7 +580,11 @@ def read_lifecycle_capture_provenance(
         manifest,
         provider_request,
         audit,
-        replay_broker_lifecycle(directory, provider_request=provider_request),
+        replay_broker_lifecycle(
+            directory,
+            provider_request=provider_request,
+            expected_manifest=manifest,
+        ),
         _observations(health_directory, audit.header.policy.max_observations),
         expected_root=expected_root,
         permission_execution=execution,

@@ -8,6 +8,11 @@ import json
 import sys
 from typing import NoReturn
 
+from histdatacom.broker_plugins import (
+    BROKER_PLUGIN_SDK_VERSION,
+    BROKER_PLUGIN_SUPPORTED_SDK_VERSIONS,
+)
+
 from .contracts import (
     BrokerPluginInventoryV1,
     BrokerPluginRegistryError,
@@ -35,9 +40,20 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--snapshot", help="Create an immutable local inventory artifact."
     )
+    parser.add_argument(
+        "--sdk-version",
+        choices=BROKER_PLUGIN_SUPPORTED_SDK_VERSIONS,
+        default=BROKER_PLUGIN_SDK_VERSION,
+        help="Select an implemented SDK contract; installation is not admission.",
+    )
     commands = parser.add_subparsers(dest="command", required=True)
     listing = commands.add_parser(
         "list", help="List installed declarations without importing plugins."
+    )
+    listing.add_argument(
+        "--sdk-version",
+        choices=BROKER_PLUGIN_SUPPORTED_SDK_VERSIONS,
+        default=argparse.SUPPRESS,
     )
     for option in ("--json", "--snapshot"):
         if option == "--json":
@@ -54,6 +70,11 @@ def build_parser() -> argparse.ArgumentParser:
             "--json", action="store_true", default=argparse.SUPPRESS
         )
         command.add_argument("--snapshot", default=argparse.SUPPRESS)
+        command.add_argument(
+            "--sdk-version",
+            choices=BROKER_PLUGIN_SUPPORTED_SDK_VERSIONS,
+            default=argparse.SUPPRESS,
+        )
         command.add_argument("--plugin-id")
         command.add_argument("--provider")
         command.add_argument(
@@ -70,7 +91,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     inventory: BrokerPluginInventoryV1 | None = None
     try:
         args = parser.parse_args(argv)
-        inventory = discover_broker_plugins()
+        inventory = discover_broker_plugins(sdk_version=args.sdk_version)
         payload: dict[str, object] = {
             "inventory": inventory.to_dict(),
             "compatible_candidate_ids": [
@@ -107,7 +128,9 @@ def main(argv: Sequence[str] | None = None) -> int:
 
                 try:
                     payload["permission_manifest"] = (
-                        read_installed_broker_permissions(selected).to_dict()
+                        read_installed_broker_permissions(
+                            selected, sdk_version=inventory.sdk_version
+                        ).to_dict()
                     )
                     payload["operator_grants_applied"] = False
                 except BrokerPermissionError as error:

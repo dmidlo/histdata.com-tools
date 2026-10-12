@@ -5,12 +5,18 @@ from __future__ import annotations
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 import json
+import os
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 import histdatacom.orchestration.supervisor as supervisor_module
+from histdatacom.managed_artifact_boundary import (
+    MANAGED_ARTIFACT_MARKER,
+    ManagedArtifactBoundaryError,
+)
 from histdatacom.orchestration.supervisor import (
     ORCHESTRATION_STATE_SCHEMA_VERSION,
     OrchestrationPaths,
@@ -582,6 +588,8 @@ def test_launch_component_uses_windows_process_group(
 ) -> None:
     """Windows runtime components should launch in a separate process group."""
     captured_kwargs: dict[str, object] = {}
+    host_os_name = os.name
+    native_path_type = type(tmp_path)
 
     def process_factory(command: list[str], **kwargs: object) -> _FakeProcess:
         captured_kwargs.update(kwargs)
@@ -589,7 +597,8 @@ def test_launch_component_uses_windows_process_group(
 
     supervisor = _supervisor(process_factory=process_factory)
 
-    monkeypatch.setattr(supervisor_module.os, "name", "nt")
+    # Keep pathlib and the real mutation boundary on the actual host platform.
+    monkeypatch.setattr(supervisor_module, "os", SimpleNamespace(name="nt"))
     monkeypatch.setattr(
         supervisor_module.subprocess,
         "CREATE_NEW_PROCESS_GROUP",
@@ -597,12 +606,68 @@ def test_launch_component_uses_windows_process_group(
         raising=False,
     )
 
-    supervisor._launch_component(
-        ["temporal", "server"], tmp_path / "server.log"
-    )
+    log_path = tmp_path / "server.log"
+    supervisor._launch_component(["temporal", "server"], log_path)
 
     assert captured_kwargs["start_new_session"] is False
     assert captured_kwargs["creationflags"] == 512
+    assert log_path.is_file()
+    assert log_path.read_bytes() == b""
+    assert os.name == host_os_name
+    assert type(Path(str(log_path))) is native_path_type
+
+
+@pytest.mark.parametrize("existing_log", (False, True))
+def test_windows_launch_refuses_managed_log_before_mutation(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    existing_log: bool,
+) -> None:
+    """Windows branch simulation must preserve the actual managed-log guard."""
+    host_os_name = os.name
+    native_path_type = type(tmp_path)
+    managed = tmp_path / "managed"
+    managed.mkdir()
+    marker = managed / MANAGED_ARTIFACT_MARKER
+    marker.write_bytes(b"synthetic managed-marker presence\n")
+    log_path = (
+        managed / "server.log"
+        if existing_log
+        else managed / "missing-child" / "server.log"
+    )
+    if existing_log:
+        log_path.write_bytes(b"protected existing log\n")
+    before = {
+        path: (path.read_bytes(), path.stat().st_mtime_ns)
+        for path in managed.iterdir()
+    }
+    directory_mtime = managed.stat().st_mtime_ns
+    calls: list[list[str]] = []
+
+    def process_factory(command: list[str], **kwargs: object) -> _FakeProcess:
+        calls.append(command)
+        return _FakeProcess(1234)
+
+    supervisor = _supervisor(process_factory=process_factory)
+    monkeypatch.setattr(supervisor_module, "os", SimpleNamespace(name="nt"))
+
+    with pytest.raises(
+        ManagedArtifactBoundaryError,
+        match="^legacy mutation refused for managed artifact namespace$",
+    ):
+        supervisor._launch_component(["temporal", "server"], log_path)
+
+    assert calls == []
+    assert set(managed.iterdir()) == set(before)
+    assert managed.stat().st_mtime_ns == directory_mtime
+    assert {
+        path: (path.read_bytes(), path.stat().st_mtime_ns)
+        for path in managed.iterdir()
+    } == before
+    if not existing_log:
+        assert not log_path.parent.exists()
+    assert os.name == host_os_name
+    assert type(Path(str(log_path))) is native_path_type
 
 
 def test_terminate_process_uses_windows_termination_helper(
@@ -610,11 +675,13 @@ def test_terminate_process_uses_windows_termination_helper(
 ) -> None:
     """Windows stop should terminate PIDs without console-control signals."""
     calls: list[tuple[int, int]] = []
+    host_os_name = os.name
+    native_path_type = type(Path())
 
     def terminate_windows_process(pid: int, *, exit_code: int) -> None:
         calls.append((pid, exit_code))
 
-    monkeypatch.setattr(supervisor_module.os, "name", "nt")
+    monkeypatch.setattr(supervisor_module, "os", SimpleNamespace(name="nt"))
     monkeypatch.setattr(
         supervisor_module,
         "_terminate_windows_process",
@@ -624,6 +691,8 @@ def test_terminate_process_uses_windows_termination_helper(
     supervisor_module._terminate_process(1234)
 
     assert calls == [(1234, int(supervisor_module.signal.SIGTERM))]
+    assert os.name == host_os_name
+    assert type(Path()) is native_path_type
 
 
 def test_kill_process_uses_windows_termination_helper(
@@ -631,11 +700,13 @@ def test_kill_process_uses_windows_termination_helper(
 ) -> None:
     """Windows kill should use the same non-console termination primitive."""
     calls: list[tuple[int, int]] = []
+    host_os_name = os.name
+    native_path_type = type(Path())
 
     def terminate_windows_process(pid: int, *, exit_code: int) -> None:
         calls.append((pid, exit_code))
 
-    monkeypatch.setattr(supervisor_module.os, "name", "nt")
+    monkeypatch.setattr(supervisor_module, "os", SimpleNamespace(name="nt"))
     monkeypatch.setattr(
         supervisor_module,
         "_terminate_windows_process",
@@ -650,6 +721,8 @@ def test_kill_process_uses_windows_termination_helper(
         supervisor_module.signal.SIGTERM,
     )
     assert calls == [(1234, int(expected_signal))]
+    assert os.name == host_os_name
+    assert type(Path()) is native_path_type
 
 
 def test_start_preserves_launch_error_when_cleanup_is_denied(
@@ -1087,7 +1160,9 @@ def test_worker_launch_retry_delay_accepts_signed_windows_native_exit(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Windows native exit codes may be observed as signed process codes."""
-    monkeypatch.setattr(supervisor_module.os, "name", "nt")
+    host_os_name = os.name
+    native_path_type = type(Path())
+    monkeypatch.setattr(supervisor_module, "os", SimpleNamespace(name="nt"))
     signed_returncode = (
         supervisor_module.WINDOWS_NATIVE_WORKER_STARTUP_EXIT_CODE - (1 << 32)
     )
@@ -1096,6 +1171,8 @@ def test_worker_launch_retry_delay_accepts_signed_windows_native_exit(
         supervisor_module._worker_launch_retry_delay_seconds(signed_returncode)
         == supervisor_module.DEFAULT_WINDOWS_WORKER_LAUNCH_RETRY_DELAY_SECONDS
     )
+    assert os.name == host_os_name
+    assert type(Path()) is native_path_type
 
 
 def test_start_repairs_stale_pid_and_lock_files(tmp_path: Path) -> None:
@@ -1556,9 +1633,9 @@ def test_process_exists_treats_reaped_child_pid_as_dead(
         lambda pid: pid == 700,
     )
     monkeypatch.setattr(
-        supervisor_module.os,
-        "kill",
-        lambda pid, sig: kill_calls.append((pid, sig)),
+        supervisor_module,
+        "os",
+        SimpleNamespace(kill=lambda pid, sig: kill_calls.append((pid, sig))),
     )
 
     assert not supervisor_module._process_exists(700)
@@ -1569,6 +1646,9 @@ def test_process_exists_treats_windows_invalid_parameter_as_dead(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Windows may report a dead PID probe as WinError 87."""
+    host_os_name = os.name
+    host_kill = os.kill
+    native_path_type = type(Path())
 
     def raise_invalid_parameter(_pid: int, _signal: int) -> None:
         raise OSError(
@@ -1576,15 +1656,20 @@ def test_process_exists_treats_windows_invalid_parameter_as_dead(
             "The parameter is incorrect",
         )
 
-    monkeypatch.setattr(supervisor_module.os, "name", "nt")
+    monkeypatch.setattr(
+        supervisor_module,
+        "os",
+        SimpleNamespace(name="nt", kill=raise_invalid_parameter),
+    )
     monkeypatch.setattr(
         supervisor_module,
         "_reap_child_process",
         lambda _pid: False,
     )
-    monkeypatch.setattr(supervisor_module.os, "kill", raise_invalid_parameter)
-
     assert not supervisor_module._process_exists(700)
+    assert os.name == host_os_name
+    assert os.kill is host_kill
+    assert type(Path()) is native_path_type
 
 
 def test_restart_stops_existing_fleet_and_starts_new_fleet(

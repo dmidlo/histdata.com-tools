@@ -304,8 +304,12 @@ its independently held anchor, not broker truth or upstream completeness.
 Neither grants data rights, measures production throughput, qualifies a provider
 account, supplies historical availability, or proves representative market data.
 
-SDK-native scientific fitting remains unavailable here; do not convert an SDK
-capture into a legacy fit by inventing adapter/session metadata. Real provider
+Eligible SDK-native captures can use the host's explicit
+[V3 scientific fingerprint interface](https://github.com/dmidlo/histdata.com-tools/blob/dev/docs/broker-sdk-scientific-fingerprints.md)
+under independently qualified native health and current provider rights; never
+convert them into legacy fits by inventing adapter/session metadata. Interface
+availability or a conformance pass does not establish this example's scientific
+qualification. Real provider
 deployment and empirical qualification remain separately gated by issue #488
 and the applicable source-rights/study work. This task performs generated tests
 only and does not authorize a release, publishing or a workflow dispatch.

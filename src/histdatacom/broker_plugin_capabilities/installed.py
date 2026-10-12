@@ -231,7 +231,7 @@ def invoke_authorized_installed_broker_plugin(
     _provider_call(request, capture=False)
     _authorize(inventory, plan, authorize)
     try:
-        fresh = discover_broker_plugins()
+        fresh = discover_broker_plugins(sdk_version=inventory.sdk_version)
         verify_broker_capability_plan(plan, fresh)
         module_name, attribute = plan.candidate.registration.entry_point.split(
             ":", 1
@@ -245,7 +245,9 @@ def invoke_authorized_installed_broker_plugin(
         ):
             _refuse()
         # Recheck metadata after all path reads, before any parent execution.
-        verify_broker_capability_plan(plan, discover_broker_plugins())
+        verify_broker_capability_plan(
+            plan, discover_broker_plugins(sdk_version=inventory.sdk_version)
+        )
         authority = require_native_permissions(request, installed=True)
         for (name, path), source in zip(expected, sources):
             if name == module_name or name not in sys.modules:
@@ -276,5 +278,6 @@ def invoke_authorized_installed_broker_plugin(
         association=BrokerInvocationAssociation.INSTALLED_ENTRYPOINT,
         provider_request=request,
         module_sha256=plan.candidate.implementation_sha256,
+        sdk_version=inventory.sdk_version,
         _key=_CONSTRUCTION_KEY,
     )

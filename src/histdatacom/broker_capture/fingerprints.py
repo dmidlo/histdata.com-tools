@@ -14,11 +14,16 @@ import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast, overload
 
 if TYPE_CHECKING:
-    from histdatacom.broker_plugin_policy.bindings import BrokerLegacyCaptureV1
-
+    from histdatacom.broker_plugin_lifecycle.contracts import (
+        BrokerLifecycleManifestV1,
+    )
+    from histdatacom.broker_plugin_policy.bindings import (
+        BrokerLegacyCaptureV1,
+        BrokerSDKInvocationV1,
+    )
 from histdatacom.broker_capture.contracts import (
     BrokerCaptureEventKind,
     BrokerCaptureEventV1,
@@ -59,6 +64,11 @@ from .fingerprint_v2 import (
     BrokerDeliveryFingerprintV2,
     BrokerFingerprintCaptureRootV1,
     parse_broker_delivery_fingerprint,
+)
+from .fingerprint_v3 import (
+    BrokerDeliveryFingerprintV3,
+    BrokerLifecycleFingerprintEligibilityV1,
+    BrokerLifecycleFingerprintFitConfigV1,
 )
 
 _TAG_RE = re.compile(r"[^A-Za-z0-9._:-]+")
@@ -151,7 +161,77 @@ class _HealthConsumer:
             )
 
 
+@overload
 def assess_broker_capture_eligibility(
+    root: str | Path,
+    manifest: BrokerCaptureSessionManifestV1,
+    *,
+    config: BrokerDeliveryFitConfigV1 | None = None,
+    provider_request: BrokerLegacyCaptureV1 | None = None,
+) -> BrokerCaptureEligibilityV1: ...
+
+
+@overload
+def assess_broker_capture_eligibility(
+    root: str | Path,
+    manifest: BrokerLifecycleManifestV1,
+    *,
+    config: BrokerLifecycleFingerprintFitConfigV1 | None = None,
+    provider_request: BrokerSDKInvocationV1,
+) -> BrokerLifecycleFingerprintEligibilityV1: ...
+
+
+def assess_broker_capture_eligibility(
+    root: str | Path,
+    manifest: BrokerCaptureSessionManifestV1 | BrokerLifecycleManifestV1,
+    *,
+    config: (
+        BrokerDeliveryFitConfigV1 | BrokerLifecycleFingerprintFitConfigV1 | None
+    ) = None,
+    provider_request: (
+        BrokerLegacyCaptureV1 | BrokerSDKInvocationV1 | None
+    ) = None,
+) -> BrokerCaptureEligibilityV1 | BrokerLifecycleFingerprintEligibilityV1:
+    from histdatacom.broker_plugin_lifecycle.contracts import (
+        BrokerLifecycleManifestV1,
+    )
+    from histdatacom.broker_plugin_policy.bindings import (
+        BrokerLegacyCaptureV1,
+        BrokerSDKInvocationV1,
+    )
+
+    if type(manifest) is BrokerLifecycleManifestV1:
+        from .lifecycle_fingerprints import (
+            assess_lifecycle_fingerprint_eligibility,
+        )
+
+        if type(provider_request) is not BrokerSDKInvocationV1 or (
+            config is not None
+            and type(config) is not BrokerLifecycleFingerprintFitConfigV1
+        ):
+            raise ValueError(
+                "native eligibility requires exact SDK request and native configuration"
+            )
+        return assess_lifecycle_fingerprint_eligibility(
+            root, manifest, config=config, provider_request=provider_request
+        )
+    if (
+        type(manifest) is not BrokerCaptureSessionManifestV1
+        or (
+            config is not None and type(config) is not BrokerDeliveryFitConfigV1
+        )
+        or (
+            provider_request is not None
+            and type(provider_request) is not BrokerLegacyCaptureV1
+        )
+    ):
+        raise ValueError("legacy eligibility requires exact legacy inputs")
+    return _assess_legacy_capture_eligibility(
+        root, manifest, config=config, provider_request=provider_request
+    )
+
+
+def _assess_legacy_capture_eligibility(
     root: str | Path,
     manifest: BrokerCaptureSessionManifestV1,
     *,
@@ -831,7 +911,139 @@ class _FingerprintConsumer:
         self._batch_run_count = 0
 
 
+@overload
 def fit_broker_delivery_fingerprint(
+    root: str | Path,
+    manifests: Sequence[BrokerCaptureSessionManifestV1],
+    *,
+    config: BrokerDeliveryFitConfigV1 | None = None,
+    calendar_profile: HistDataCalendarProfile | None = None,
+    market_context_timeline: MarketContextTimelineV1 | None = None,
+    supersedes: BrokerDeliveryFingerprint | None = None,
+    effective_start_utc_ns: int | None = None,
+    effective_end_utc_ns: int | None = None,
+    provider_requests: Sequence[BrokerLegacyCaptureV1] | None = None,
+) -> BrokerDeliveryFingerprintV2: ...
+
+
+@overload
+def fit_broker_delivery_fingerprint(
+    root: str | Path,
+    manifests: Sequence[BrokerLifecycleManifestV1],
+    *,
+    config: BrokerLifecycleFingerprintFitConfigV1 | None = None,
+    calendar_profile: None = None,
+    market_context_timeline: None = None,
+    supersedes: BrokerDeliveryFingerprintV3 | None = None,
+    effective_start_utc_ns: int | None = None,
+    effective_end_utc_ns: int | None = None,
+    provider_requests: Sequence[BrokerSDKInvocationV1],
+) -> BrokerDeliveryFingerprintV3: ...
+
+
+def fit_broker_delivery_fingerprint(
+    root: str | Path,
+    manifests: (
+        Sequence[BrokerCaptureSessionManifestV1]
+        | Sequence[BrokerLifecycleManifestV1]
+    ),
+    *,
+    config: (
+        BrokerDeliveryFitConfigV1 | BrokerLifecycleFingerprintFitConfigV1 | None
+    ) = None,
+    calendar_profile: HistDataCalendarProfile | None = None,
+    market_context_timeline: MarketContextTimelineV1 | None = None,
+    supersedes: BrokerDeliveryFingerprint | None = None,
+    effective_start_utc_ns: int | None = None,
+    effective_end_utc_ns: int | None = None,
+    provider_requests: (
+        Sequence[BrokerLegacyCaptureV1] | Sequence[BrokerSDKInvocationV1] | None
+    ) = None,
+) -> BrokerDeliveryFingerprintV2 | BrokerDeliveryFingerprintV3:
+    """Dispatch exact native families without translating their identities."""
+    from histdatacom.broker_plugin_lifecycle.contracts import (
+        BrokerLifecycleManifestV1,
+    )
+    from histdatacom.broker_plugin_policy.bindings import (
+        BrokerLegacyCaptureV1,
+        BrokerSDKInvocationV1,
+    )
+
+    if manifests and type(manifests[0]) is BrokerLifecycleManifestV1:
+        from .lifecycle_fingerprints import fit_lifecycle_delivery_fingerprint
+
+        if provider_requests is None or (
+            config is not None
+            and type(config) is not BrokerLifecycleFingerprintFitConfigV1
+        ):
+            raise ValueError(
+                "native fitting requires exact SDK inputs; legacy calendar/market-context translation is unsupported"
+            )
+        if len(manifests) != len(provider_requests):
+            raise ValueError(
+                "native source/request inventories differ or repeat"
+            )
+        native_policy = config or BrokerLifecycleFingerprintFitConfigV1()
+        if len(manifests) > native_policy.max_capture_manifests:
+            raise BrokerDeliveryResourceLimitError(
+                "capture manifests exceed max_capture_manifests"
+            )
+        if (
+            calendar_profile is not None
+            or market_context_timeline is not None
+            or any(
+                type(x) is not BrokerSDKInvocationV1 for x in provider_requests
+            )
+            or any(type(x) is not BrokerLifecycleManifestV1 for x in manifests)
+            or (
+                supersedes is not None
+                and type(supersedes) is not BrokerDeliveryFingerprintV3
+            )
+        ):
+            raise ValueError(
+                "native fitting requires exact SDK inputs; legacy calendar/market-context translation is unsupported"
+            )
+        return fit_lifecycle_delivery_fingerprint(
+            root,
+            cast("Sequence[BrokerLifecycleManifestV1]", manifests),
+            config=config,
+            provider_requests=cast(
+                "Sequence[BrokerSDKInvocationV1]", provider_requests
+            ),
+            supersedes=supersedes,
+            effective_start_utc_ns=effective_start_utc_ns,
+            effective_end_utc_ns=effective_end_utc_ns,
+        )
+    if (
+        any(type(x) is not BrokerCaptureSessionManifestV1 for x in manifests)
+        or (
+            config is not None and type(config) is not BrokerDeliveryFitConfigV1
+        )
+        or (
+            provider_requests is not None
+            and any(
+                type(x) is not BrokerLegacyCaptureV1 for x in provider_requests
+            )
+        )
+        or type(supersedes) is BrokerDeliveryFingerprintV3
+    ):
+        raise ValueError("legacy fitting requires exact legacy inputs")
+    return _fit_legacy_delivery_fingerprint(
+        root,
+        cast("Sequence[BrokerCaptureSessionManifestV1]", manifests),
+        config=config,
+        calendar_profile=calendar_profile,
+        market_context_timeline=market_context_timeline,
+        supersedes=supersedes,
+        effective_start_utc_ns=effective_start_utc_ns,
+        effective_end_utc_ns=effective_end_utc_ns,
+        provider_requests=cast(
+            "Sequence[BrokerLegacyCaptureV1] | None", provider_requests
+        ),
+    )
+
+
+def _fit_legacy_delivery_fingerprint(
     root: str | Path,
     manifests: Sequence[BrokerCaptureSessionManifestV1],
     *,
@@ -863,8 +1075,7 @@ def fit_broker_delivery_fingerprint(
         type(item) is not BrokerCaptureSessionManifestV1 for item in manifests
     ):
         raise ValueError(
-            "fingerprint fitting requires exact legacy capture manifests; "
-            "SDK-native scientific fitting is unavailable"
+            "legacy fitting requires exact legacy capture manifests"
         )
     ordered = tuple(sorted(manifests, key=lambda item: item.session.session_id))
     if not ordered:

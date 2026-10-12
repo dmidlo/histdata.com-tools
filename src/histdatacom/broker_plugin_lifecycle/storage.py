@@ -425,16 +425,19 @@ def replay_broker_lifecycle(
     directory: Path,
     *,
     provider_request: BrokerSDKInvocationV1,
+    expected_manifest: BrokerLifecycleManifestV1 | None = None,
 ) -> Iterator[BrokerLifecycleRecordV1]:
     """Verify the entire hash-bound retained run before yielding any record.
 
+    An expected manifest pins the exact receipt inventory across both passes;
+    it does not confer authority or replace current provider-rights checks.
     OPEN interrupted tails are intentionally not admitted. They remain visible
     through inspect_broker_lifecycle, without fabricating a trusted prefix.
     """
     from histdatacom.broker_plugin_policy.scope import BrokerPolicyError
 
     try:
-        yield from _replay(directory, provider_request)
+        yield from _replay(directory, provider_request, expected_manifest)
     except BrokerPolicyError:
         raise
     except Exception:
@@ -444,6 +447,7 @@ def replay_broker_lifecycle(
 def _replay(
     directory: Path,
     provider_request: BrokerSDKInvocationV1,
+    expected_manifest: BrokerLifecycleManifestV1 | None,
 ) -> Iterator[BrokerLifecycleRecordV1]:
     from histdatacom.broker_plugin_capabilities.execution import (
         _provider_request,
@@ -458,8 +462,21 @@ def _replay(
         verify_broker_policy_receipt,
     )
 
+    if expected_manifest is not None:
+        if type(expected_manifest) is not BrokerLifecycleManifestV1:
+            raise ValueError("exact expected lifecycle manifest required")
+        expected_manifest = BrokerLifecycleManifestV1.from_json(
+            expected_manifest.to_json()
+        )
     inspection = inspect_broker_lifecycle(directory)
     manifest = inspection.manifest
+    if (
+        expected_manifest is not None
+        and manifest.to_json() != expected_manifest.to_json()
+    ):
+        raise ValueError(
+            "actual lifecycle manifest differs from expected source"
+        )
     request = _provider_request(manifest.header.plan, provider_request)
     require_provider_operation(request, BrokerPolicyOperation.MATERIAL_USE)
     # Match the writer's canonical parent without following either file leaf.

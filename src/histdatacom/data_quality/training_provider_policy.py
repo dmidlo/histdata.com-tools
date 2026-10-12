@@ -11,6 +11,9 @@ from histdatacom.broker_capture.fingerprint_v2 import (
     BrokerDeliveryFingerprintV2,
     parse_broker_delivery_fingerprint,
 )
+from histdatacom.broker_capture.fingerprint_v3 import (
+    BrokerDeliveryFingerprintV3,
+)
 from histdatacom.broker_plugin_policy import (
     BrokerPolicyOperation,
     BrokerTrainingArtifactV1,
@@ -140,7 +143,7 @@ def verify_training_policy_receipt(
     if subject is None:
         return
     required = required or any(
-        type(item) is BrokerDeliveryFingerprintV2
+        type(item) in (BrokerDeliveryFingerprintV2, BrokerDeliveryFingerprintV3)
         for item in subject.fingerprints
     )
     # Preserve the native writer's path spelling while policy storage binds a

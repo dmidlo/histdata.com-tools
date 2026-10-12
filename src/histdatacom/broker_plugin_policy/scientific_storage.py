@@ -24,11 +24,13 @@ from ._wire import MAX_BYTES, canonical_json, load_json
 if TYPE_CHECKING:
     from histdatacom.broker_capture.fingerprint_v2 import (
         BrokerDeliveryFingerprintV2,
+        BrokerQualifiedDeliveryFingerprint,
     )
 
 
 SCIENTIFIC_LINEAGE_SUFFIX = ".broker-provenance.json"
 _SCHEMA = "histdatacom.broker-scientific-lineage.v1"
+_SCHEMA_V2 = "histdatacom.broker-scientific-lineage.v2"
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,6 +63,14 @@ class BrokerScientificLineageV1:
             require_qualified_broker_fingerprint(item)
             for item in self.fingerprints
         )
+        from histdatacom.broker_capture.fingerprint_v2 import (
+            BrokerDeliveryFingerprintV2,
+        )
+
+        if any(type(item) is not BrokerDeliveryFingerprintV2 for item in roots):
+            raise ValueError(
+                "scientific lineage V1 preserves legacy V2 parent semantics"
+            )
         identities = tuple(item.fingerprint_id for item in roots)
         if identities != tuple(sorted(set(identities))):
             raise ValueError(
@@ -119,9 +129,108 @@ class BrokerScientificLineageV1:
         return result
 
 
+@dataclass(frozen=True, slots=True)
+class BrokerScientificLineageV2:
+    """Explicit mixed/native parent generation; historical V1 is unchanged."""
+
+    native_id: str
+    native_sha256: str
+    native_byte_length: int
+    fingerprints: tuple[BrokerQualifiedDeliveryFingerprint, ...]
+    schema_version: str = _SCHEMA_V2
+
+    def __post_init__(self) -> None:
+        from histdatacom.broker_capture.fingerprint_v2 import (
+            require_qualified_broker_fingerprint,
+        )
+        from histdatacom.broker_capture.fingerprint_v3 import (
+            BrokerDeliveryFingerprintV3,
+        )
+
+        if (
+            type(self.native_id) is not str
+            or not 1 <= len(self.native_id) <= 512
+            or not re.fullmatch(r"[a-zA-Z0-9_.:-]+", self.native_id)
+            or type(self.native_sha256) is not str
+            or not re.fullmatch(r"[a-f0-9]{64}", self.native_sha256)
+            or type(self.native_byte_length) is not int
+            or not 1 <= self.native_byte_length <= MAX_BYTES
+            or type(self.fingerprints) is not tuple
+            or not 1 <= len(self.fingerprints) <= 16
+            or self.schema_version != _SCHEMA_V2
+            or not any(
+                type(x) is BrokerDeliveryFingerprintV3
+                for x in self.fingerprints
+            )
+        ):
+            raise ValueError("invalid native scientific lineage inventory")
+        roots = tuple(
+            require_qualified_broker_fingerprint(x) for x in self.fingerprints
+        )
+        ids = tuple(x.fingerprint_id for x in roots)
+        if ids != tuple(sorted(set(ids))):
+            raise ValueError(
+                "scientific fingerprints must be unique and sorted"
+            )
+        object.__setattr__(self, "fingerprints", roots)
+        canonical_json(self.to_dict())
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": self.schema_version,
+            "native_id": self.native_id,
+            "native_sha256": self.native_sha256,
+            "native_byte_length": self.native_byte_length,
+            "fingerprints": [x.to_dict() for x in self.fingerprints],
+        }
+
+    def to_json(self) -> str:
+        return canonical_json(self.to_dict())
+
+    @classmethod
+    def from_json(cls, text: str) -> BrokerScientificLineageV2:
+        from histdatacom.broker_capture.fingerprint_v2 import (
+            parse_broker_delivery_fingerprint,
+            require_qualified_broker_fingerprint,
+        )
+
+        value = load_json(text)
+        if (
+            type(value) is not dict
+            or set(value)
+            != {
+                "schema_version",
+                "native_id",
+                "native_sha256",
+                "native_byte_length",
+                "fingerprints",
+            }
+            or type(value["fingerprints"]) is not list
+        ):
+            raise ValueError("unknown or missing scientific lineage fields")
+        data = cast(dict[str, Any], value)
+        result = cls(
+            data["native_id"],
+            data["native_sha256"],
+            data["native_byte_length"],
+            tuple(
+                require_qualified_broker_fingerprint(
+                    parse_broker_delivery_fingerprint(x)
+                )
+                for x in data["fingerprints"]
+            ),
+            data["schema_version"],
+        )
+        if result.to_json() != text:
+            raise ValueError(
+                "scientific lineage requires canonical exact bytes"
+            )
+        return result
+
+
 def _expected(
     native_subject: object, data: bytes
-) -> BrokerScientificLineageV1 | None:
+) -> BrokerScientificLineageV1 | BrokerScientificLineageV2 | None:
     from .scientific import scientific_fingerprints
 
     values = scientific_fingerprints(native_subject)
@@ -134,6 +243,9 @@ def _expected(
         BrokerDeliveryFingerprintV2,
         require_qualified_broker_fingerprint,
     )
+    from histdatacom.broker_capture.fingerprint_v3 import (
+        BrokerDeliveryFingerprintV3,
+    )
 
     from .storage import _file_reference
 
@@ -141,6 +253,7 @@ def _expected(
     if type(native_subject) in {
         BrokerDeliveryFingerprintV1,
         BrokerDeliveryFingerprintV2,
+        BrokerDeliveryFingerprintV3,
     }:
         return None
     if all(type(item) is BrokerDeliveryFingerprintV1 for item in values):
@@ -152,22 +265,35 @@ def _expected(
         )
     )
     reference = _file_reference(native_subject, data)
+    if any(type(item) is BrokerDeliveryFingerprintV3 for item in roots):
+        return BrokerScientificLineageV2(
+            reference.native_id, reference.sha256, reference.byte_length, roots
+        )
     return BrokerScientificLineageV1(
-        reference.native_id, reference.sha256, reference.byte_length, roots
+        reference.native_id,
+        reference.sha256,
+        reference.byte_length,
+        cast("tuple[BrokerDeliveryFingerprintV2, ...]", roots),
     )
 
 
 def read_broker_scientific_lineage(
     native_path: Path,
-) -> BrokerScientificLineageV1:
+) -> BrokerScientificLineageV1 | BrokerScientificLineageV2:
     """Read retained parents for explicit native-input setup, not admission."""
     from .storage import _path, _read
 
     native_path = _path(native_path)
-    result = BrokerScientificLineageV1.from_json(
-        _read(
-            native_path.with_name(native_path.name + SCIENTIFIC_LINEAGE_SUFFIX)
-        ).decode("ascii")
+    text = _read(
+        native_path.with_name(native_path.name + SCIENTIFIC_LINEAGE_SUFFIX)
+    ).decode("ascii")
+    value = load_json(text)
+    if type(value) is not dict:
+        raise ValueError("scientific lineage must be an object")
+    result: BrokerScientificLineageV1 | BrokerScientificLineageV2 = (
+        BrokerScientificLineageV2.from_json(text)
+        if value.get("schema_version") == _SCHEMA_V2
+        else BrokerScientificLineageV1.from_json(text)
     )
     data = _read(native_path)
     if (

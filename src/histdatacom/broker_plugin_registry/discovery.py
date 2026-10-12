@@ -7,6 +7,11 @@ import hashlib
 from importlib import metadata
 from pathlib import Path, PurePosixPath
 
+from histdatacom.broker_plugins import (
+    BROKER_PLUGIN_SDK_VERSION,
+    BROKER_PLUGIN_SUPPORTED_SDK_VERSIONS,
+)
+
 from .contracts import (
     BROKER_PLUGIN_ENTRY_POINT_GROUP,
     MAX_PLUGIN_REGISTRATIONS,
@@ -150,13 +155,19 @@ def _candidate(
     )
 
 
-def discover_broker_plugins() -> BrokerPluginInventoryV1:
+def discover_broker_plugins(
+    *, sdk_version: str = BROKER_PLUGIN_SDK_VERSION
+) -> BrokerPluginInventoryV1:
     """Fresh installed inventory; malformed relevant distributions fail closed.
 
     The standard importlib metadata provider is trusted host infrastructure.
     Only ordinary unpacked wheel PathDistributions/RECORD resources qualify;
     this function never resolves/imports an entry point or reads configuration.
     """
+    if sdk_version not in BROKER_PLUGIN_SUPPORTED_SDK_VERSIONS:
+        raise BrokerPluginRegistryError(
+            BrokerPluginRegistryReason.INCOMPATIBLE_SDK
+        )
     candidates: list[BrokerPluginCandidateV1] = []
     diagnostics: list[BrokerPluginDiscoveryDiagnosticV1] = []
     entries: list[
@@ -242,4 +253,6 @@ def discover_broker_plugins() -> BrokerPluginInventoryV1:
                     plugin_id,
                 )
             )
-    return BrokerPluginInventoryV1(tuple(candidates), tuple(diagnostics))
+    return BrokerPluginInventoryV1(
+        tuple(candidates), tuple(diagnostics), sdk_version
+    )

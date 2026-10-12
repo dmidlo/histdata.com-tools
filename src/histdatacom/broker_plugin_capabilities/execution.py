@@ -16,11 +16,17 @@ if TYPE_CHECKING:
 
 from histdatacom.broker_plugin_registry import BrokerPluginInventoryV1
 from histdatacom.broker_plugins import (
+    BROKER_PLUGIN_SDK_VERSION,
+    BROKER_PLUGIN_SUPPORTED_SDK_VERSIONS,
+    BROKER_PROVIDER_PROTOCOL_CAPABILITY,
     BrokerConfigurationSchemaV1,
     BrokerEventV1,
     BrokerPluginV1,
+    BrokerProviderProtocolPluginV1_1,
+    BrokerProviderProtocolV1,
     BrokerSessionV1,
     normalize_broker_instrument,
+    declared_provider_protocol,
 )
 
 from .contracts import (
@@ -65,6 +71,37 @@ def _authorize(
 ) -> None:
     verify_broker_capability_plan(plan, inventory)
     plan.require_admitted()
+    from histdatacom.broker_plugin_permissions.scope import (
+        current_permission_authority,
+    )
+
+    if (
+        inventory.sdk_version not in BROKER_PLUGIN_SUPPORTED_SDK_VERSIONS
+        or current_permission_authority().manifest.sdk_version
+        != inventory.sdk_version
+    ):
+        raise BrokerCapabilityError(BrokerCapabilityReason.RUNTIME_IDENTITY)
+    # The live boundary evaluates today's host policy. Retained replay never
+    # calls this boundary and reconstructs its capture-time policy instead.
+    from importlib.metadata import PackageNotFoundError, version
+    import time
+    from histdatacom.broker_plugin_compatibility.contracts import (
+        BrokerSDKUse,
+        negotiate_broker_sdk,
+    )
+
+    try:
+        negotiate_broker_sdk(
+            plan.candidate,
+            host_version=version("histdatacom"),
+            use=BrokerSDKUse.LIVE,
+            evaluated_at_utc_ns=time.time_ns(),
+            requested_sdk_version=inventory.sdk_version,
+        ).require_admitted()
+    except (ValueError, PackageNotFoundError):
+        raise BrokerCapabilityError(
+            BrokerCapabilityReason.RUNTIME_IDENTITY
+        ) from None
     try:
         if authorize(plan) is not True:
             raise ValueError
@@ -160,6 +197,7 @@ class GatedBrokerPluginV1:
         "_provider_request",
         "_thread",
         "_metadata",
+        "_provider_protocol",
         "_binding",
         "_session",
         "_instruments",
@@ -179,6 +217,7 @@ class GatedBrokerPluginV1:
         association: BrokerInvocationAssociation,
         provider_request: BrokerSDKInvocationV1,
         module_sha256: str | None = None,
+        sdk_version: str = BROKER_PLUGIN_SDK_VERSION,
         _key: object = None,
     ) -> None:
         if _key is not _CONSTRUCTION_KEY:
@@ -193,7 +232,37 @@ class GatedBrokerPluginV1:
         self._metadata = validate_broker_metadata(
             plan, _call(lambda: plugin.metadata)
         )
+        if self._metadata.metadata.sdk_version != sdk_version:
+            raise BrokerCapabilityError(BrokerCapabilityReason.RUNTIME_IDENTITY)
         _provider_record(self._provider_request, self._metadata)
+        self._provider_protocol: BrokerProviderProtocolV1 | None = None
+        if (
+            sdk_version == "1.1.0"
+            and BROKER_PROVIDER_PROTOCOL_CAPABILITY
+            in plan.candidate.registration.capabilities
+        ):
+            declared = declared_provider_protocol(self._metadata.metadata)
+            if not isinstance(plugin, BrokerProviderProtocolPluginV1_1):
+                raise BrokerCapabilityError(
+                    BrokerCapabilityReason.UNSUPPORTED_OPERATION
+                )
+            _provider_call(self._provider_request, capture=False)
+            observed = _call(plugin.provider_protocol)
+            if (
+                type(observed) is not BrokerProviderProtocolV1
+                or observed != declared
+                or observed.provider_id
+                != self._provider_request.configuration_profile.provider_id
+            ):
+                raise BrokerCapabilityError(
+                    BrokerCapabilityReason.CAPABILITY_VIOLATION
+                )
+            self._provider_protocol = BrokerProviderProtocolV1.from_json(
+                observed.to_json()
+            )
+            # Recheck rights after the callback; a plugin cannot retain output
+            # using authority it revoked during the optional method.
+            _provider_record(self._provider_request, self._metadata)
         self._binding = BrokerInvocationBindingV1(
             plan.artifact_id,
             plan.candidate.artifact_id,
@@ -242,7 +311,20 @@ class GatedBrokerPluginV1:
     @property
     def metadata(self) -> BrokerAdmittedMetadataV1:
         self._guard("metadata")
+        _provider_record(self._provider_request, self._metadata)
         return self._metadata
+
+    def provider_protocol(self) -> BrokerProviderProtocolV1:
+        """Return the actually checked SDK1.1 declaration, or refuse explicitly."""
+        self._guard("metadata")
+        if self._provider_protocol is None:
+            raise BrokerCapabilityError(
+                BrokerCapabilityReason.UNSUPPORTED_OPERATION
+            )
+        # This cached declaration is also an opaque metadata output. Recheck
+        # current resource/data rights without executing the plugin again.
+        _provider_record(self._provider_request, self._metadata)
+        return self._provider_protocol
 
     def _schema(self) -> BrokerConfigurationSchemaV1:
         _provider_call(self._provider_request, capture=False)
@@ -535,5 +617,6 @@ def invoke_authorized_broker_factory(
         plan,
         association=BrokerInvocationAssociation.CALLER_FACTORY,
         provider_request=request,
+        sdk_version=inventory.sdk_version,
         _key=_CONSTRUCTION_KEY,
     )

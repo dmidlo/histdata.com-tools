@@ -5,6 +5,8 @@ from __future__ import annotations
 from importlib import metadata
 from pathlib import PurePosixPath
 
+from histdatacom.broker_plugins import BROKER_PLUGIN_SDK_VERSION
+
 from histdatacom.broker_plugin_registry import (
     BROKER_PLUGIN_ENTRY_POINT_GROUP,
     BrokerPluginCandidateV1,
@@ -39,8 +41,10 @@ def permission_resource_path(plugin_id: str, entry_point: str) -> str:
         ) from None
 
 
-def _fresh_candidate(candidate: BrokerPluginCandidateV1) -> str:
-    inventory = discover_broker_plugins()
+def _fresh_candidate(
+    candidate: BrokerPluginCandidateV1, sdk_version: str
+) -> str:
+    inventory = discover_broker_plugins(sdk_version=sdk_version)
     if (
         inventory.diagnostics
         or sum(item == candidate for item in inventory.candidates) != 1
@@ -54,6 +58,8 @@ def _fresh_candidate(candidate: BrokerPluginCandidateV1) -> str:
 
 def read_installed_broker_permissions(
     candidate: BrokerPluginCandidateV1,
+    *,
+    sdk_version: str = BROKER_PLUGIN_SDK_VERSION,
 ) -> BrokerPermissionManifestV1:
     """Read the exact declaration for one freshly verified installed candidate.
 
@@ -67,7 +73,7 @@ def read_installed_broker_permissions(
         raise BrokerPermissionError("invalid_permission_candidate")
     try:
         candidate = BrokerPluginCandidateV1.from_json(candidate.to_json())
-        sdk_version = _fresh_candidate(candidate)
+        sdk_version = _fresh_candidate(candidate, sdk_version)
         registration = candidate.registration
         matches: list[tuple[metadata.PathDistribution, metadata.EntryPoint]] = (
             []
@@ -121,7 +127,7 @@ def read_installed_broker_permissions(
             )
         if (
             _candidate(distribution, entry) != candidate
-            or _fresh_candidate(candidate) != sdk_version
+            or _fresh_candidate(candidate, sdk_version) != sdk_version
         ):
             raise BrokerPermissionError(
                 "permission_installed_selection_changed"

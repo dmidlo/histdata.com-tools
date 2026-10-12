@@ -20,7 +20,10 @@ _SOURCES = {
     # #766 reuses one fresh serialization payload, never cross-call state.
     # Full-module AST review and retained canonical byte/ID parity preserve
     # the complete reader/writer/validator domain for these four source pins.
-    "broker_plugins/contracts.py": "1d8278397b0163a9a282821cbfdb8f0a387f0d190391cc4c18eff24702a66712",
+    # #622 also admits the implemented SDK 1.1 metadata value, preserving
+    # V1 writer fields/defaults and event validators. SDK/plugin versions
+    # remain distinct semantic fields, not an equivalent migration.
+    "broker_plugins/contracts.py": "c159d4c8a2b4729f28f27b895d91e7016d872b81bb8347b4a27d7270a5fcb30b",
     "broker_plugin_lifecycle/contracts.py": "ed011613d6a99a7cccc1fdb0ef01ae0d97e23c59c576269d82abd55b83c2b1d6",
     "broker_plugin_registry/contracts.py": "46f892e0792c69c1b2c690956a0126a04ce146446e35be1f9c35fb261dc5a9a0",
     # #620 adds closed exception metadata only; the complete artifact

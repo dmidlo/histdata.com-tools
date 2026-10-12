@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from histdatacom.broker_plugin_compatibility.contracts import (
+        BrokerConformanceReferenceV1,
+    )
 
 from .native_common import (
     host_environment_json,
@@ -67,16 +72,45 @@ def make_native_provenance_header(
         "byteorder",
         "scope",
     }
+    compatibility = None
+    if (
+        environment.get("schema_version")
+        == "histdatacom.broker-provenance-environment.v2"
+    ):
+        from histdatacom.broker_plugin_compatibility.provenance import (
+            BrokerCaptureCompatibilityDeclarationV1,
+            verify_capture_compatibility_declaration,
+        )
+
+        expected_environment_keys.add("sdk_compatibility")
+        if type(invocation) is not BrokerSDKInvocationV1:
+            raise ValueError(
+                "SDK compatibility cannot relabel a legacy capture"
+            )
+        compatibility = BrokerCaptureCompatibilityDeclarationV1.from_dict(
+            environment["sdk_compatibility"]
+        )
+        verify_capture_compatibility_declaration(
+            compatibility,
+            invocation,
+            native_header,
+            host_version=environment["host_version"],
+            started_at_utc_ns=health_header.started_at_utc_ns,
+        )
     if (
         set(environment) != expected_environment_keys
         or environment["schema_version"]
-        != "histdatacom.broker-provenance-environment.v1"
+        not in (
+            "histdatacom.broker-provenance-environment.v1",
+            "histdatacom.broker-provenance-environment.v2",
+        )
         or environment["host_distribution"] != "histdatacom"
         or environment["scope"]
         != "public_recording_runtime_not_full_dependency_sbom"
         or any(
             value is not None and (type(value) is not str or len(value) > 512)
-            for value in environment.values()
+            for name, value in environment.items()
+            if name != "sdk_compatibility"
         )
     ):
         raise ValueError("invalid retained public host environment")
@@ -205,6 +239,7 @@ class NativeProvenanceRecorder:
         permission_manifest: Any = None,
         permission_context: Any = None,
         permission_decision: Any = None,
+        conformance_reference: BrokerConformanceReferenceV1 | None = None,
     ) -> None:
         from histdatacom.broker_plugin_policy.bindings import (
             BrokerSDKInvocationV1,
@@ -219,7 +254,31 @@ class NativeProvenanceRecorder:
         self.session: Any = None
         self._guard_text = guard_text
         self.sdk = type(invocation) is BrokerSDKInvocationV1
+        if conformance_reference is not None and not self.sdk:
+            raise ValueError(
+                "SDK conformance cannot be attached to a legacy capture"
+            )
         environment = host_environment_json()
+        if self.sdk:
+            from histdatacom.broker_plugin_compatibility.provenance import (
+                make_capture_compatibility_declaration,
+            )
+            from .native_common import canonical_native_json
+
+            environment_fields = parse_native_json(environment)
+            environment_fields["schema_version"] = (
+                "histdatacom.broker-provenance-environment.v2"
+            )
+            environment_fields["sdk_compatibility"] = (
+                make_capture_compatibility_declaration(
+                    invocation,
+                    native_header,
+                    host_version=environment_fields["host_version"],
+                    started_at_utc_ns=health_header.started_at_utc_ns,
+                    conformance_reference=conformance_reference,
+                ).to_dict()
+            )
+            environment = canonical_native_json(environment_fields)
         self.header = make_native_provenance_header(
             invocation,
             native_header,

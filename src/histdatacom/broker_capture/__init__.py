@@ -79,7 +79,18 @@ from histdatacom.broker_capture.fingerprint_v2 import (
     BrokerDeliveryFingerprint,
     BrokerDeliveryFingerprintV2,
     BrokerFingerprintCaptureRootV1,
+    BrokerQualifiedDeliveryFingerprint,
     parse_broker_delivery_fingerprint,
+)
+from histdatacom.broker_capture.fingerprint_v3 import (
+    BROKER_DELIVERY_FINGERPRINT_V3_SCHEMA_VERSION,
+    BROKER_FINGERPRINT_LIFECYCLE_ROOT_SCHEMA_VERSION,
+    BROKER_LIFECYCLE_ELIGIBILITY_SCHEMA_VERSION,
+    BROKER_LIFECYCLE_FINGERPRINT_FIT_CONFIG_SCHEMA_VERSION,
+    BrokerDeliveryFingerprintV3,
+    BrokerFingerprintLifecycleRootV1,
+    BrokerLifecycleFingerprintEligibilityV1,
+    BrokerLifecycleFingerprintFitConfigV1,
 )
 from histdatacom.broker_capture.fingerprints import (
     BrokerDeliveryFingerprintArtifactError,
@@ -111,6 +122,15 @@ from histdatacom.broker_capture.storage import (
 )
 
 __all__ = [
+    "BROKER_DELIVERY_FINGERPRINT_V3_SCHEMA_VERSION",
+    "BROKER_FINGERPRINT_LIFECYCLE_ROOT_SCHEMA_VERSION",
+    "BROKER_LIFECYCLE_FINGERPRINT_FIT_CONFIG_SCHEMA_VERSION",
+    "BROKER_LIFECYCLE_ELIGIBILITY_SCHEMA_VERSION",
+    "BrokerQualifiedDeliveryFingerprint",
+    "BrokerDeliveryFingerprintV3",
+    "BrokerFingerprintLifecycleRootV1",
+    "BrokerLifecycleFingerprintEligibilityV1",
+    "BrokerLifecycleFingerprintFitConfigV1",
     "BROKER_ADAPTER_MESSAGE_SCHEMA_VERSION",
     "BROKER_CAPTURE_COLLECTOR_ID",
     "BROKER_CAPTURE_COLLECTOR_VERSION",

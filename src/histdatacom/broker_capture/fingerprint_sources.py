@@ -15,6 +15,7 @@ from pathlib import Path
 
 from .fingerprint_v2 import (
     BrokerDeliveryFingerprintV2,
+    BrokerQualifiedDeliveryFingerprint,
     require_qualified_broker_fingerprint,
 )
 
@@ -67,7 +68,7 @@ def broker_fingerprint_sources(*roots: str | Path) -> Iterator[None]:
 
 def verify_broker_fingerprint_sources(
     value: object,
-) -> BrokerDeliveryFingerprintV2:
+) -> BrokerQualifiedDeliveryFingerprint:
     """Replay complete exact sources and current rights against retained seals."""
     from histdatacom.broker_plugin_policy.bindings import BrokerLegacyCaptureV1
     from histdatacom.broker_plugin_provenance.native import (
@@ -75,6 +76,14 @@ def verify_broker_fingerprint_sources(
     )
 
     fingerprint = require_qualified_broker_fingerprint(value)
+    from .fingerprint_v3 import BrokerDeliveryFingerprintV3
+
+    if type(fingerprint) is BrokerDeliveryFingerprintV3:
+        from .lifecycle_fingerprints import verify_lifecycle_fingerprint_sources
+
+        verify_lifecycle_fingerprint_sources(fingerprint)
+        return fingerprint
+    assert isinstance(fingerprint, BrokerDeliveryFingerprintV2)
     state = _CURRENT.get()
     if state is None or state.process_id != os.getpid():
         raise ValueError(
@@ -110,6 +119,35 @@ def verify_broker_fingerprint_sources(
                 "actual fingerprint source differs from retained anchored provenance"
             )
     return fingerprint
+
+
+def _lifecycle_directory(header_id: str) -> Path:
+    """Resolve exact declared SDK root or one canonical ID child, never search."""
+    from histdatacom.broker_plugin_lifecycle.storage import (
+        inspect_broker_lifecycle,
+    )
+
+    state = _CURRENT.get()
+    if state is None or state.process_id != os.getpid():
+        raise ValueError(
+            "current-process broker fingerprint source locators required"
+        )
+    candidates: set[Path] = set()
+    for root in state.roots:
+        for candidate in (root, root / header_id):
+            if (candidate / "manifest.json").exists():
+                if candidate.is_symlink():
+                    raise ValueError(
+                        "native source locator may not be a symlink"
+                    )
+                manifest = inspect_broker_lifecycle(candidate).manifest
+                if manifest.header.artifact_id == header_id:
+                    candidates.add(candidate)
+    if len(candidates) != 1:
+        raise ValueError(
+            "native fingerprint source locator is absent or ambiguous"
+        )
+    return candidates.pop()
 
 
 def _fit_source_scope(root: str | Path) -> AbstractContextManager[None]:

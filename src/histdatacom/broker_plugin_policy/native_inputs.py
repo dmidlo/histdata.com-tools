@@ -57,6 +57,9 @@ def provider_native_inputs(*native_roots: object) -> Iterator[None]:
         BrokerDeliveryFingerprintV2,
         parse_broker_delivery_fingerprint,
     )
+    from histdatacom.broker_capture.fingerprint_v3 import (
+        BrokerDeliveryFingerprintV3,
+    )
     from histdatacom.synthetic.persistence import (
         ReconstructionProductManifestV1,
     )
@@ -87,6 +90,7 @@ def provider_native_inputs(*native_roots: object) -> Iterator[None]:
         elif type(root) in {
             BrokerDeliveryFingerprintV1,
             BrokerDeliveryFingerprintV2,
+            BrokerDeliveryFingerprintV3,
         }:
             resolve_provider_subject(root)
             fingerprint = parse_broker_delivery_fingerprint(

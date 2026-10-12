@@ -41,7 +41,11 @@ requires a new schema, never an altered interpretation of a v1 field.
 
 `BrokerPluginMetadataV1` declares a namespaced plugin ID, plugin SemVer version,
 public display name, and the exact SDK version it implements. This release
-admits `sdk_version="1.0.0"`; unknown versions fail explicitly. Future SDK
+admits `sdk_version="1.0.0"` and the additive `"1.1.0"` generation; unknown
+versions fail explicitly. The default and canonical event ABI remain 1.0/V1.
+SDK 1.1 adds the optional typed provider-protocol method, with actual native
+generation/permission handshake and sealed capture compatibility evidence; see
+[ecosystem compatibility](broker-plugin-compatibility.md). Future SDK
 compatibility policy must admit new versions deliberately. Metadata and
 configuration declarations contain no credentials or live connection handles.
 

@@ -2,12 +2,18 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from urllib.parse import urlsplit
 
 from histdatacom.broker_plugin_permissions import (
+    BrokerPermissionError,
     read_installed_broker_permissions,
 )
-from histdatacom.broker_plugin_registry import BrokerPluginInventoryV1
+from histdatacom.broker_plugin_registry import (
+    BrokerPluginInventoryV1,
+    discover_broker_plugins,
+)
+from histdatacom.broker_plugins import BROKER_PLUGIN_SUPPORTED_SDK_VERSIONS
 
 from .catalog import broker_conformance_catalog, required_cases, verify_plan
 from .contracts import (
@@ -36,7 +42,9 @@ def inspect_broker_conformance_driver(
     if len(matches) != 1:
         raise ValueError("conformance candidate missing or ambiguous")
     candidate = matches[0]
-    permissions = read_installed_broker_permissions(candidate)
+    permissions = read_installed_broker_permissions(
+        candidate, sdk_version=inventory.sdk_version
+    )
     if (
         permissions.artifact_id != driver.permission_manifest_id
         or driver.provider_id not in candidate.registration.provider_ids
@@ -53,6 +61,43 @@ def inspect_broker_conformance_driver(
     if {item.scenario_id for item in driver.scenarios} - known:
         raise ValueError("unknown conformance fixture scenario")
     return BrokerConformanceDriverV1.from_json(driver.to_json())
+
+
+def resolve_conformance_inventory(
+    driver: BrokerConformanceDriverV1,
+) -> BrokerPluginInventoryV1:
+    """Recover the chosen SDK from the exact retained permission declaration.
+
+    A V1 driver already content-addresses its permission manifest, whose SDK
+    field is exact. Discovery is metadata-only; no alternate plugin is run.
+    """
+    inventory = discover_broker_plugins()
+    candidates = tuple(
+        item
+        for item in inventory.candidates
+        if item.artifact_id == driver.candidate_id
+    )
+    if inventory.diagnostics or len(candidates) != 1:
+        raise ValueError("conformance candidate missing or ambiguous")
+    selected: list[str] = []
+    for sdk_version in BROKER_PLUGIN_SUPPORTED_SDK_VERSIONS:
+        if not candidates[0].registration.supports_sdk(sdk_version):
+            continue
+        try:
+            manifest = read_installed_broker_permissions(
+                candidates[0], sdk_version=sdk_version
+            )
+        except BrokerPermissionError:
+            continue
+        if manifest.artifact_id == driver.permission_manifest_id:
+            selected.append(sdk_version)
+    if len(selected) != 1:
+        raise ValueError(
+            "conformance SDK lacks an exact installed permission match"
+        )
+    result = replace(inventory, sdk_version=selected[0])
+    inspect_broker_conformance_driver(result, driver)
+    return result
 
 
 def plan_broker_conformance(

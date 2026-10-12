@@ -207,6 +207,7 @@ CLASS_KIND_VERSION = {
     ),
 }
 SERIALIZER_EXEMPTIONS = {
+    "histdatacom.broker_plugins.generations.BrokerProviderProtocolPluginV1_1": "Process-local structural SDK protocol; its inherited abstract metadata property does not serialize a plugin instance. BrokerPluginMetadataV1 and BrokerProviderProtocolV1 own the concrete versioned wire formats.",
     "histdatacom.data_quality.training_preprocessing_contracts._PreprocessingContract": "Abstract strict bounded preprocessing codec with no standalone payload. Concrete step/plan/fit-step/fit contracts retain inherited versioned reader/writer inventory. Constructors and retained hashes are not native fitting or protected-split authority.",
     "histdatacom.data_quality.training_scenario_contracts._ScenarioContract": "Abstract strict bounded scenario serializer with no standalone payload. Concrete additive scenario contracts retain inherited versioned readers/writers. Construction and decoding do not grant native replay, provider permission or empirical qualification authority.",
     "histdatacom.campaign_receipt_contracts.CampaignReceipt": "Abstract bounded content-addressed campaign-tree envelope with no standalone payload. Concrete control/product/shard/checkpoint/run/root/summary/journal/failure/sample records retain versioned codecs. Structural decoding never grants current native verification or resume bypass authority.",
@@ -223,6 +224,7 @@ SERIALIZER_EXEMPTIONS = {
     "histdatacom.experiments._wire.Record": "Abstract frozen-dataclass serializer template; it has no standalone fields or payload. Concrete embedded records and versioned artifact subclasses are inventoried separately.",
 }
 FUNCTION_EXEMPTIONS = {
+    "histdatacom.broker_plugin_conformance.retained.read_retained_conformance_report": "Retained-input reader whose internal dictionary only revalidates canonical report bytes and identity against the retained catalog. Its RetainedConformanceReport NamedTuple is process-local, not a durable writer or a current-kit certification result. The ordinary BrokerConformanceReportV1 codec remains independently inventoried.",
     "histdatacom.synthetic.traders.account_codec._record_wire": "Closed shared account encoder dispatching only concrete AccountRecord types; their actual inherited readers/writers and explicit SCHEMA values are inventoried separately. This helper is not another durable family or replay verifier.",
     "histdatacom.broker_plugin_provenance._wire.Artifact.artifact_id": "Derived digest property for the abstract provenance envelope, not an independent serialized family. Concrete provenance artifacts retain their own reader/writer inventory.",
     "histdatacom.broker_plugin_conformance._wire.Artifact.artifact_id": "Derived digest property for the abstract conformance envelope, not an independent serialized family. Concrete conformance contracts retain their own reader/writer inventory.",

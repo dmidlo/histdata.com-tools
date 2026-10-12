@@ -521,6 +521,60 @@ def test_capture_provenance_and_conformance_are_versioned_native_families():
     assert not schema_compatibility_registry().migrations
 
 
+def test_native_sdk_science_and_compatibility_are_distinct_versioned_families():
+    registry = schema_compatibility_registry()
+    families = {item.family for item in registry.schemas}
+    assert {
+        "histdatacom.broker_capture.fingerprint_v3.BrokerDeliveryFingerprintV3",
+        "histdatacom.broker_capture.fingerprint_v3.BrokerFingerprintLifecycleRootV1",
+        "histdatacom.broker_capture.fingerprint_v3.BrokerLifecycleFingerprintFitConfigV1",
+        "histdatacom.broker_capture.fingerprint_v3.BrokerLifecycleFingerprintEligibilityV1",
+        "histdatacom.broker_plugin_policy.scientific_storage.BrokerScientificLineageV1",
+        "histdatacom.broker_plugin_policy.scientific_storage.BrokerScientificLineageV2",
+        "histdatacom.broker_plugins.generations.BrokerProviderProtocolV1",
+        "histdatacom.broker_plugin_compatibility.contracts.BrokerConformanceReferenceV1",
+        "histdatacom.broker_plugin_compatibility.contracts.BrokerSDKCompatibilityPolicyV1",
+        "histdatacom.broker_plugin_compatibility.contracts.BrokerSDKCompatibilityDecisionV1",
+        "histdatacom.broker_plugin_compatibility.provenance.BrokerCaptureCompatibilityV1",
+    } <= families
+    protocol = "histdatacom.broker_plugins.generations.BrokerProviderProtocolPluginV1_1"
+    assert protocol not in families
+    assert protocol in {item.qualified_name for item in registry.exemptions}
+    assert not registry.migrations
+
+
+def test_retained_conformance_reader_does_not_invent_durable_writer() -> None:
+    registry = schema_compatibility_registry()
+    families = {item.family: item for item in registry.schemas}
+    implementations = {
+        item.implementation_id: item.qualified_name
+        for item in registry.implementations
+    }
+    module = "histdatacom.broker_plugin_conformance.retained"
+    reader = module + ".read_retained_conformance_report"
+    assert reader not in families
+    assert module + ".RetainedConformanceReport" not in families
+    assert reader in {item.qualified_name for item in registry.exemptions}
+    assert reader not in implementations.values()
+    family = (
+        "histdatacom.broker_plugin_conformance.contracts."
+        "BrokerConformanceReportV1"
+    )
+    schema = families[family]
+    assert schema.wire_schema == "histdatacom.broker-conformance.report.v1"
+    assert schema.version == "1.0.0"
+    assert schema.status is SupportStatus.SUPPORTED
+    assert {implementations[key] for key in schema.readers} == {
+        family + ".from_dict",
+        family + ".from_json",
+    }
+    assert {implementations[key] for key in schema.writers} == {
+        family + ".to_dict",
+        family + ".to_json",
+    }
+    assert can_read(schema.schema_id)
+
+
 def test_new_training_and_old_synthetic_physical_formats_are_registered() -> (
     None
 ):

@@ -216,13 +216,22 @@ PROPERTY_INVARIANTS = (
     PropertyInvariant(
         "campaign_coordinate_has_one_product",
         (
-            "tests/unit/test_reconstruction_plan.py::test_public_plan_spec_supports_exact_paired_window_bounds",
+            "tests/unit/test_campaign_verification_oracle.py::test_duplicate_member_coordinate_is_not_extra_support",
+        ),
+    ),
+    PropertyInvariant(
+        "native_products_verified_before_index_emission",
+        (
+            "tests/unit/test_campaign_mutation_native.py::test_native_products_are_verified_before_index_emission",
         ),
     ),
     PropertyInvariant(
         "incomplete_product_index_cannot_publish",
         (
-            "tests/unit/test_reconstruction_plan.py::test_public_plan_spec_supports_exact_paired_window_bounds",
+            "tests/unit/test_campaign_mutation_guards.py::test_publication_refuses_incomplete_fresh_verification",
+            "tests/unit/test_campaign_mutation_guards.py::test_publication_refuses_incomplete_index",
+            "tests/unit/test_campaign_mutation_guards.py::test_publication_refuses_missing_retained_product",
+            "tests/unit/test_campaign_mutation_guards.py::test_complete_publication_inputs_reach_artifact_binding",
         ),
     ),
     PropertyInvariant(
@@ -326,21 +335,24 @@ MUTATIONS = (
         "ignored_missing_campaign_product",
         "incomplete_product_index_cannot_publish",
         "src/histdatacom/reconstruction.py",
-        'if index.status != "complete" or index.missing_product_count:',
-        'if False and (index.status != "complete" or index.missing_product_count):',
+        'if (\n        verification.status != "complete"\n        or index.status != "complete"\n        or index.missing_product_count\n    ):',
+        'if False and (\n        verification.status != "complete"\n        or index.status != "complete"\n        or index.missing_product_count\n    ):',
         (
-            "tests/unit/test_reconstruction_plan.py::test_public_plan_spec_supports_exact_paired_window_bounds",
+            "tests/unit/test_campaign_mutation_guards.py::test_publication_refuses_incomplete_fresh_verification",
+            "tests/unit/test_campaign_mutation_guards.py::test_publication_refuses_incomplete_index",
+            "tests/unit/test_campaign_mutation_guards.py::test_publication_refuses_missing_retained_product",
+            "tests/unit/test_campaign_mutation_guards.py::test_complete_publication_inputs_reach_artifact_binding",
         ),
         True,
     ),
     MutationSpec(
         "bypassed_product_verification",
-        "campaign_coordinate_has_one_product",
+        "native_products_verified_before_index_emission",
         "src/histdatacom/reconstruction.py",
-        "verify_reconstruction_publication(path)\n                if verify_products\n                else load_reconstruction_manifest(path)",
-        "load_reconstruction_manifest(path)\n                if verify_products\n                else load_reconstruction_manifest(path)",
+        "for path in iter_campaign_manifest_paths(output_root):\n            manifest = verify_reconstruction_publication(path)",
+        "for path in iter_campaign_manifest_paths(output_root):\n            manifest = load_reconstruction_manifest(path)",
         (
-            "tests/unit/test_reconstruction_plan.py::test_public_plan_spec_supports_exact_paired_window_bounds",
+            "tests/unit/test_campaign_mutation_native.py::test_native_products_are_verified_before_index_emission",
         ),
     ),
     MutationSpec(
@@ -380,7 +392,9 @@ def _git_commit_sha(explicit: str | None) -> str:
     return result.stdout.strip().lower()
 
 
-def _coverage_file(files: dict[str, Any], expected: str) -> tuple[str, dict[str, Any]]:
+def _coverage_file(
+    files: dict[str, Any], expected: str
+) -> tuple[str, dict[str, Any]]:
     normalized = expected.replace("\\", "/")
     matches = [
         (name, value)
@@ -505,7 +519,9 @@ def _property_report(args: argparse.Namespace) -> int:
     return 0 if passed else 1
 
 
-def _mutated_test(spec: MutationSpec, timeout: int) -> tuple[str, int, float, str]:
+def _mutated_test(
+    spec: MutationSpec, timeout: int
+) -> tuple[str, int, float, str]:
     source = ROOT / spec.source_path
     text = source.read_text(encoding="utf-8")
     occurrence_count = text.count(spec.original)
@@ -538,7 +554,9 @@ def _mutated_test(spec: MutationSpec, timeout: int) -> tuple[str, int, float, st
                 check=False,
             )
             duration = round(time.monotonic() - started, 3)
-            output = (result.stdout + result.stderr).encode("utf-8", errors="replace")
+            output = (result.stdout + result.stderr).encode(
+                "utf-8", errors="replace"
+            )
             status = (
                 "killed"
                 if result.returncode == 1
