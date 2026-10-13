@@ -6,6 +6,14 @@ downloading, assessing, modeling, and reconstructing historical foreign
 exchange data. This documentation collects the maintained operational guides
 and versioned contract references for the project.
 
+Development and delivery
+------------------------
+
+.. toctree::
+   :maxdepth: 1
+
+   development-delivery
+
 Data and reconstruction foundations
 -----------------------------------
 
